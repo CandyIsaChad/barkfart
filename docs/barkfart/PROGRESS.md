@@ -24,6 +24,9 @@
 - 2026-11-16: Started the headless half of M4 while M3 is still open (M3c
   .stknds blocked on a newer, undocumented format version and on user files;
   M4 UI blocked on screenshots). Recorded here so the order change is visible.
+- 2026-11-17: The timeline UI is a dope sheet (user decision), replacing
+  the frame strip in the same top position. Frame-by-frame remains as
+  behaviour (posing at the playhead), not as a strip of snapshots.
 - 2026-11-16: Golden comparison against the original uses the preview frames
   inside its movieclips (local only); metric and tolerances in NOTES.md.
 

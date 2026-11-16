@@ -38,20 +38,31 @@ opens as an overlay (later).
 
 Auto-key is always on: every edit keys the current frame. There is no toggle.
 
-## Frame strip
-- Cells 96 x 54 pt (16:9, ready for thumbnails), 4 pt gap, 0 pt corner
-  radius. Number top-left, 11 pt tabular. A frame with its own keys is a
-  normal cell; an in-between frame is dimmed with a tween-arrow badge along
-  the bottom. Current frame: 2 pt accent outline.
-- Tap = go to frame. Tap the current frame again, or long-press (400 ms,
-  8 pt slop, haptic) = frame menu: Insert after, Duplicate, Delete, Hold /
-  Tween to next. Horizontal drag scrolls with momentum; no reordering in v1.
-- Last cell "+": adds a frame after the last, repeating its pose.
-- 3 pt scroll indicator under the cells.
-- Play 56 x 56 pt at the top-right, inside the right safe inset; turns into
-  Stop. Play loops; handles hidden and panel disabled while playing; the strip
-  keeps the playing frame in view. Stop or a tap on the stage returns to the
-  frame where playback started.
+## Dope sheet (replaces the frame strip; user decision 2026-11-17)
+The timeline is a dope sheet, not a strip of per-frame snapshots. It sits
+where the original's strip sits (top, right of the sidebar), Play stays at
+the top-right.
+- **Collapsed (default, 72 pt):** time ruler (18 pt: frame numbers every
+  5 / 10 frames by zoom, ticks per frame) and a summary row (all keys of the
+  shown figures as diamonds). Playhead: accent 2 pt line with a grab tab on
+  the ruler; drag to scrub (snaps to frames), tap the ruler to jump.
+- **Expanded:** drag the sheet's bottom edge (a 4 pt grip, 44 pt hit) down,
+  up to 60% of the screen height. Rows: per figure (header row, tap to
+  collapse), then one row per joint (rotation and length keys share it),
+  plus Move (layer position) and Camera rows. Filtered to the selected
+  figure by default; a Selected | All filter sits at the left of the ruler.
+  Row labels in a 72 pt column on the left of the sheet.
+- **Keys:** 9 pt diamonds; key-on-frame filled, selected = accent. Tap a key
+  = select it (tap empty = clear). Drag a selected key = retime all selected
+  keys, snapped to frames (one undo step). Long-press empty space then drag
+  = box select. Drag empty space = scroll time; pinch = zoom time.
+- **Sidebar with keys selected:** title "N keys"; Copy | Paste (at the
+  playhead); Delete; easing Hold | Linear | Ease (in-out) | Ease in |
+  Ease out; Offset along chain - / + frames (stagger), Scale time 50% | 200%.
+- **Length:** the symbol's duration end is a handle at the end of the ruler;
+  drag to change it. Play loops over it.
+- Frame-by-frame survives as behaviour, not layout: posing at the playhead
+  keys the dragged joint (auto-key); "Paste pose" keys the whole figure.
 
 ## Stage
 - Surround #17191c; stage rectangle white, no border.
