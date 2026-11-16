@@ -31,9 +31,21 @@
   60 s without crashing (visual output not captured).
 - UI.md: inventory of the original's tools with keep / fix / replace verdicts.
 
+- Private repo github.com/balsamiqvine/barkfart. CI (macos-latest) is green:
+  core tests pass, `ios:createIPA` builds an unsigned 16.7 MB Barkfart.ipa in
+  about 1 minute. Checked locally: arm64 Mach-O, bundle id
+  app.barkfart.animator, landscape only, no ad/analytics strings.
+- CI note: the `macos-14` label was cancelled before a runner started; switched
+  to `macos-latest`. `gh run watch` exits early because the token cannot read
+  check annotations (HTTP 403); poll `gh run view` instead.
+
 ## In progress
-- M0 exit: the iOS path has never run. Needs a private GitHub repo, a green CI
-  build and a LiveContainer launch of the placeholder before any UI work.
+- M0 exit: waiting on the user to launch the CI IPA in LiveContainer (expect
+  a grey screen with a black stick figure, landscape).
+
+## Known issues
+- `ios/data/.gitkeep` is copied into the app bundle. Harmless; remove when
+  real assets land.
 
 ## Next
 - Get the user's screenshots and pain points for UI.md.
