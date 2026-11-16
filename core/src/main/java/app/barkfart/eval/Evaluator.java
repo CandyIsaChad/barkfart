@@ -227,13 +227,21 @@ public final class Evaluator {
             String src = layer.id + "/" + node.id;
             float ax = (float) xf.mapX(px[pi], py[pi]), ay = (float) xf.mapY(px[pi], py[pi]);
             float bx = (float) xf.mapX(px[i], py[i]), by = (float) xf.mapY(px[i], py[i]);
-            if (node.shape == Node.Shape.LINE) {
-                float w = (float) (Math.abs(r.f(node.thickness, t)) * sf);
-                g.children.add(new Shape.Line(ax, ay, bx, by, w, c, src));
-            } else {
-                float cx = (ax + bx) / 2, cy = (ay + by) / 2;
-                float rad2 = (float) (Math.hypot(bx - ax, by - ay) / 2);
-                g.children.add(new Shape.Circle(cx, cy, rad2, c, src));
+            float w = (float) (Math.abs(r.f(node.thickness, t)) * sf);
+            switch (node.shape) {
+                case LINE:
+                    g.children.add(new Shape.Line(ax, ay, bx, by, w, c, src));
+                    break;
+                case CIRCLE: {
+                    float cx = (ax + bx) / 2, cy = (ay + by) / 2;
+                    float rad2 = (float) (Math.hypot(bx - ax, by - ay) / 2);
+                    g.children.add(new Shape.Circle(cx, cy, rad2, c, src));
+                    break;
+                }
+                default: {
+                    float[] pts = Outline.of(node.shape, ax, ay, bx, by, w);
+                    if (pts != null) g.children.add(new Shape.Polygon(pts, c, src));
+                }
             }
         }
     }

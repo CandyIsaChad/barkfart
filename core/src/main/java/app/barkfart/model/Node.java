@@ -5,7 +5,19 @@ import java.util.Map;
 
 /** One node of a figure: a joint plus the shape drawn from its parent to it. */
 public final class Node {
-    public enum Shape { NONE, LINE, CIRCLE }
+    public enum Shape {
+        NONE,
+        /** Segment with round ends. */
+        LINE,
+        /** Filled circle spanning the segment (diameter = segment length). */
+        CIRCLE,
+        /** Segment with square ends. */
+        SQUARE_LINE,
+        /** Ellipse spanning the segment; width = thickness. */
+        ELLIPSE,
+        /** Isosceles triangle: base of width = thickness at the parent, apex at the node. */
+        TRIANGLE
+    }
 
     public final String id;
     /** Parent node id, or null for the root. Parents precede children in Figure.nodes. */

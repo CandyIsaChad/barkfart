@@ -71,9 +71,11 @@ public final class FigureMapper {
             case 0: return Node.Shape.LINE;
             case 2:
             case 4: return Node.Shape.CIRCLE;
+            case 1: return Node.Shape.SQUARE_LINE;
+            case 3: return Node.Shape.TRIANGLE;
+            case 5: return Node.Shape.ELLIPSE;
             default:
-                String what = type == 1 ? "square-ended segment" : type == 3 ? "triangle" : type == 5 ? "ellipse"
-                        : type == 6 ? "trapezoid" : type == 7 ? "polygon" : "unknown type " + type;
+                String what = type == 6 ? "trapezoid" : type == 7 ? "polygon" : "unknown type " + type;
                 if (report != null && !report.approximations.contains(what)) report.approximations.add(what);
                 return Node.Shape.LINE;
         }
@@ -195,7 +197,10 @@ public final class FigureMapper {
     private static int legacyType(Node n, int previous) {
         switch (n.shape) {
             case CIRCLE: return previous == 2 || previous == 4 ? previous : 2;
-            case LINE: return previous == 2 || previous == 4 || previous < 0 ? 0 : previous;
+            case SQUARE_LINE: return 1;
+            case TRIANGLE: return 3;
+            case ELLIPSE: return 5;
+            case LINE: return previous == 0 || previous == 6 || previous == 7 ? previous : 0;
             default: return previous;
         }
     }

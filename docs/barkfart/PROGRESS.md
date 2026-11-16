@@ -131,11 +131,16 @@ What works
   local clips): parse to EOF, body re-serializes byte for byte.
 - MovieclipMapper: clip to Symbol (layer per figure instance, full pose keys
   per frame, position/scale/opacity keys, hold keys on shown).
-- **First golden test against the original renderer** (local only): clip
-  frames rendered our way vs the original's own preview frames. Fire matches
-  at silhouette IoU 0.94-0.95 (asserted >= 0.85). Clips using triangles,
-  ellipses, square ends, polyfills or gradients score 0.0-0.79 and are not
-  asserted until those shapes are drawn.
+- **Golden test against the original renderer** (local only): clip frames
+  rendered our way vs the original's own preview frames (preview k = frame
+  k x floor(frames / previews)). Metric: F1 with 1-pixel tolerance, drawn =
+  more than half the clip's contrast from the stage colour; asserted >= 0.9
+  for clips using only shapes we draw, on frames with >= 500 drawn pixels.
+  Passing: Fire, Sparks, Hit, Speed Zoom, Ground Dust (F1 0.97-1.00).
+  Reported only: Forcefield 0.99, SSJ Aura 0.77-0.80, SSJB Aura 0.49-0.51,
+  Electricity 0 (gradients and polyfills not drawn yet).
+- Shapes now drawn natively: round segment, square segment, circle, ellipse,
+  isosceles triangle. Trapezoid and polygon still approximate.
 Not done (time box reached; recorded in NOTES.md)
 - Frames with several figures (3 clips). Other movieclip versions.
 

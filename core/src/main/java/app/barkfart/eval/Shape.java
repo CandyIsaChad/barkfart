@@ -39,6 +39,16 @@ public abstract class Shape {
         }
     }
 
+    /** A filled convex polygon, points as x0,y0,x1,y1,... counter-clockwise or clockwise. */
+    public static final class Polygon extends Shape {
+        public final float[] points;
+
+        public Polygon(float[] points, Color color, String source) {
+            super(color, source);
+            this.points = points;
+        }
+    }
+
     /** A textured quad (sprites). Corners in order: bottom-left, bottom-right, top-right, top-left. */
     public static final class Quad extends Shape {
         public final String asset;

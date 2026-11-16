@@ -89,3 +89,14 @@ which matters for import scale (DESIGN Q4).
   2943 bytes apart and the last one is 2947, so a frame likely ends with a
   4-byte trailer that the one-figure model folds into the instance. Time box
   reached; next attempt should start there.
+
+## Shape semantics confirmed against the original's previews (2026-11-16)
+- Ellipse (type 5): centred on the segment midpoint, major axis = segment
+  length, minor = thickness. (Centred-on-node with semi-major = length
+  scored worse: Sparks 0.38 vs 0.42 IoU before the frame mapping fix.)
+- Triangle (3, right-triangle direction 0): base of width = thickness at the
+  parent, apex at the node. Right-triangle and upside-down variants are not
+  drawn yet.
+- Square segment (1): rectangle of width = thickness, no caps.
+- Movieclip previews are frames k x floor(frames / previews), stored
+  bottom-up, rendered on an opaque #f0f0f0 stage.

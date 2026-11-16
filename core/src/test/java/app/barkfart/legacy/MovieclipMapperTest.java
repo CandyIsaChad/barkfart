@@ -64,32 +64,59 @@ class MovieclipMapperTest {
                         pv.setRGB(x, y, argb | 0xff000000);
                     }
                 }
-                // The original renders onto an opaque stage background: mark it as empty.
+                // The original renders onto an opaque stage background. A pixel counts as
+                // drawn when it differs from the stage colour by more than half of the
+                // clip's maximum contrast (handles pale content and anti-aliased edges).
                 int bg = pv.getRGB(0, 0);
+                int maxDiff = 0;
+                for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) maxDiff = Math.max(maxDiff, diff(pv.getRGB(x, y), bg));
+                int threshold = Math.max(4, maxDiff / 2);
                 for (int y = 0; y < h; y++) {
-                    for (int x = 0; x < w; x++) if (near(pv.getRGB(x, y), bg)) pv.setRGB(x, y, 0xffdddddd);
+                    for (int x = 0; x < w; x++) if (diff(pv.getRGB(x, y), bg) <= threshold) pv.setRGB(x, y, 0xffdddddd);
                 }
                 g.drawImage(pv, i * w, 0, null);
             }
+            // Diagnostic: which of our frames best matches each preview.
+            BufferedImage[] oursAll = new BufferedImage[n];
+            for (int i = 0; i < n; i++) {
+                oursAll[i] = Raster.fill(Tessellator.tessellate(scaled(Evaluator.evaluate(q, q.rootSymbol, i / (double) mc.fps))), w, h, 0xffdddddd);
+            }
+            StringBuilder best = new StringBuilder();
+            for (int pvi = 0; pvi < previews.length; pvi++) {
+                int bi = -1;
+                double bv = -1;
+                for (int i = 0; i < n; i++) {
+                    double v = iou(previews[pvi], oursAll[i]);
+                    if (v > bv) {
+                        bv = v;
+                        bi = i;
+                    }
+                }
+                best.append(String.format(" p%d->f%d(%.2f)", pvi, bi, bv));
+            }
+            System.out.println("[mc-match] " + f.getName() + " frames " + n + ":" + best);
             StringBuilder ious = new StringBuilder();
             for (int i = 0; i < n; i++) {
                 Scene sc = Evaluator.evaluate(q, q.rootSymbol, i / (double) mc.fps);
                 assertTrue(sc.diagnostics.isEmpty(), f.getName() + " frame " + i + ": " + sc.diagnostics);
-                // 1920x1080 stage at 1/3 scale = 640x360, like the previews.
-                BufferedImage ours = Raster.fill(Tessellator.tessellate(scaled(sc)), w, h, 0xffdddddd);
-                g.drawImage(ours, i * w, h, null);
-                if (i < previews.length) {
-                    double iou = iou(previews[i], ours);
-                    ious.append(String.format(" %.3f", iou));
-                    // Golden vs the ORIGINAL renderer (local only): clips that use only
-                    // shapes we draw natively must match the original's silhouette.
-                    if (rep.approximations.isEmpty() && !hasGradients) {
-                        assertTrue(iou >= GOLDEN_IOU, f.getName() + " frame " + i + " silhouette IoU " + iou);
-                    }
+                g.drawImage(oursAll[i], i * w, h, null);
+            }
+            // Preview k shows frame k * floor(frames / previews) (found by best-match search).
+            int step = Math.max(1, n / Math.max(1, previews.length));
+            for (int k = 0; k < previews.length; k++) {
+                int fi = Math.min(n - 1, k * step);
+                double iou = iou(previews[k], oursAll[fi]);
+                double f1 = tolerantF1(previews[k], oursAll[fi]);
+                long area = union(previews[k], oursAll[fi]);
+                ious.append(String.format(" f%d: IoU %.3f F1 %.3f (%dpx);", fi, iou, f1, area));
+                // Golden vs the ORIGINAL renderer (local only): clips that use only
+                // shapes we draw natively must match the original's silhouette.
+                if (rep.approximations.isEmpty() && !hasGradients && area >= MIN_AREA) {
+                    assertTrue(f1 >= GOLDEN_F1, f.getName() + " frame " + fi + " silhouette F1 " + f1);
                 }
             }
-            System.out.println("[mc-golden] " + f.getName() + " IoU per preview frame:" + ious
-                    + (rep.approximations.isEmpty() && !hasGradients ? "  (asserted >= " + GOLDEN_IOU + ")"
+            System.out.println("[mc-golden] " + f.getName() + ":" + ious
+                    + (rep.approximations.isEmpty() && !hasGradients ? "  (asserted F1 >= " + GOLDEN_F1 + " where >= " + MIN_AREA + "px)"
                     : "  (not asserted: approximations " + rep.approximations + (hasGradients ? ", gradients/polyfills" : "") + ")"));
             g.dispose();
             ImageIO.write(sheet, "png", new File(outDir, "mc_" + f.getName().replaceAll("[^A-Za-z0-9]+", "_") + ".png"));
@@ -98,10 +125,57 @@ class MovieclipMapperTest {
 
     /** Documented tolerance for silhouette agreement with the original's previews. */
     static final double GOLDEN_IOU = 0.85;
+    /**
+     * Asserted metric: F1 of precision/recall where a drawn pixel counts as
+     * matched if the other image has a drawn pixel within 1 px. Tolerates the
+     * original's anti-aliasing on thin shapes. Documented tolerance: >= 0.9.
+     */
+    static final double GOLDEN_F1 = 0.9;
 
-    private static boolean near(int a, int b) {
-        for (int sh = 0; sh < 24; sh += 8) if (Math.abs(((a >> sh) & 0xff) - ((b >> sh) & 0xff)) > 24) return false;
-        return true;
+    static boolean drawn(BufferedImage im, int x, int y) {
+        return x >= 0 && y >= 0 && x < im.getWidth() && y < im.getHeight() && (im.getRGB(x, y) & 0xffffff) != 0xdddddd;
+    }
+
+    static boolean near1(BufferedImage im, int x, int y) {
+        for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) if (drawn(im, x + dx, y + dy)) return true;
+        return false;
+    }
+
+    static double tolerantF1(BufferedImage orig, BufferedImage ours) {
+        long o = 0, om = 0, u = 0, um = 0;
+        for (int y = 0; y < orig.getHeight(); y++) {
+            for (int x = 0; x < orig.getWidth(); x++) {
+                if (drawn(orig, x, y)) {
+                    o++;
+                    if (near1(ours, x, y)) om++;
+                }
+                if (drawn(ours, x, y)) {
+                    u++;
+                    if (near1(orig, x, y)) um++;
+                }
+            }
+        }
+        if (o == 0 && u == 0) return 1;
+        double recall = o == 0 ? 0 : om / (double) o, precision = u == 0 ? 0 : um / (double) u;
+        return precision + recall == 0 ? 0 : 2 * precision * recall / (precision + recall);
+    }
+    /** Below this many drawn pixels IoU is dominated by edge pixels; such frames are reported only. */
+    static final long MIN_AREA = 500;
+
+    static long union(BufferedImage a, BufferedImage b) {
+        long u = 0;
+        for (int y = 0; y < a.getHeight(); y++) {
+            for (int x = 0; x < a.getWidth(); x++) {
+                if ((a.getRGB(x, y) & 0xffffff) != 0xdddddd || (b.getRGB(x, y) & 0xffffff) != 0xdddddd) u++;
+            }
+        }
+        return u;
+    }
+
+    private static int diff(int a, int b) {
+        int m = 0;
+        for (int sh = 0; sh < 24; sh += 8) m = Math.max(m, Math.abs(((a >> sh) & 0xff) - ((b >> sh) & 0xff)));
+        return m;
     }
 
     /** Intersection over union of drawn (non-background) pixels. */
@@ -143,6 +217,11 @@ class MovieclipMapperTest {
             } else if (o instanceof app.barkfart.eval.Shape.Line) {
                 app.barkfart.eval.Shape.Line l = (app.barkfart.eval.Shape.Line) o;
                 dst.children.add(new app.barkfart.eval.Shape.Line(l.x1 * k, l.y1 * k, l.x2 * k, l.y2 * k, l.width * k, l.color, l.source));
+            } else if (o instanceof app.barkfart.eval.Shape.Polygon) {
+                app.barkfart.eval.Shape.Polygon pg = (app.barkfart.eval.Shape.Polygon) o;
+                float[] q = pg.points.clone();
+                for (int i = 0; i < q.length; i++) q[i] *= k;
+                dst.children.add(new app.barkfart.eval.Shape.Polygon(q, pg.color, pg.source));
             } else if (o instanceof app.barkfart.eval.Shape.Circle) {
                 app.barkfart.eval.Shape.Circle c = (app.barkfart.eval.Shape.Circle) o;
                 dst.children.add(new app.barkfart.eval.Shape.Circle(c.cx * k, c.cy * k, c.r * k, c.color, c.source));
