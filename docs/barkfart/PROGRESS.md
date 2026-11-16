@@ -192,8 +192,6 @@ M3 is split (recorded per the brief's rule; nothing cut):
   Sparks is a known gap (IoU 0.82). Gradients, trapezoids, polygons, curves,
   right/upside-down triangles, node scale and smart-stretch/angle/drag locks
   are not applied in rendering.
-- The evaluator fuzz test does not yet generate polyfills or the new shapes
-  (EarClip has its own hostile-input test).
 - Effects resolve but do not render (M6). Text layers draw nothing (M5).
   Group opacity is per-shape alpha until M6.
 - No touch UI exists yet, so the only manual checklist is the device check

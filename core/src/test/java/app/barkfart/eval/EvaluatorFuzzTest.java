@@ -47,9 +47,22 @@ class EvaluatorFuzzTest {
                 Layer l;
                 switch (r.nextInt(4)) {
                     case 0:
-                    case 1:
-                        l = Fixtures.stickman(p, "m");
+                    case 1: {
+                        Layer.FigureLayer fl = Fixtures.stickman(p, "m");
+                        List<Node> ns = fl.figure.nodes();
+                        for (Node nd : ns) if (nd.parent != null) nd.shape = Node.Shape.values()[1 + r.nextInt(Node.Shape.values().length - 1)];
+                        int fills = r.nextInt(3);
+                        for (int q = 0; q < fills; q++) {
+                            app.barkfart.model.Polyfill pf = new app.barkfart.model.Polyfill(fl.id, "pf" + q);
+                            pf.anchor = ns.get(r.nextInt(ns.size())).id;
+                            int m = r.nextInt(8);
+                            for (int z = 0; z < m; z++) pf.nodes.add(r.nextInt(10) == 0 ? "missing" : ns.get(r.nextInt(ns.size())).id);
+                            pf.useOwnColor = r.nextBoolean();
+                            fl.figure.polyfills.add(pf);
+                        }
+                        l = fl;
                         break;
+                    }
                     case 2: {
                         Layer.SymbolLayer sl = new Layer.SymbolLayer(p.newId("L"), "i",
                                 r.nextInt(8) == 0 ? "missing" : syms.get(r.nextInt(syms.size())).id);
