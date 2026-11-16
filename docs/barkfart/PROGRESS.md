@@ -203,6 +203,10 @@ M3 is split (recorded per the brief's rule; nothing cut):
   on the phone, and chose to make the repo public (free macOS runners).
   Before publishing, commit authorship was rewritten to the GitHub noreply
   address and old Actions runs (which linked the old commits) were deleted.
+- **GitHub-side (16:00 UTC):** after the user lifted the $0 Actions budget,
+  the run page says "Internal server error ... The job was not acquired by
+  Runner of type hosted even after multiple attempts". macos-15 and
+  macos-26 both fail the same way. Not fixable from our side; retry later.
 - **Still blocked after going public (15:00-15:30 UTC):** macos-latest and
   macos-15 jobs stay queued with no runner (one cancelled after 15 min);
   Linux jobs start instantly; githubstatus shows no Actions incident. Points
