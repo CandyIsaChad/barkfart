@@ -203,6 +203,11 @@ M3 is split (recorded per the brief's rule; nothing cut):
   on the phone, and chose to make the repo public (free macOS runners).
   Before publishing, commit authorship was rewritten to the GitHub noreply
   address and old Actions runs (which linked the old commits) were deleted.
+- **Resolved (2026-11-16 22:05 UTC):** a label probe (mac-probe.yml) showed
+  only macos-15-intel gets a hosted runner on this account; every Apple
+  Silicon label stays queued. ios.yml now builds on macos-15-intel (MobiVM
+  cross-compiles arm64). IPA at the current commit built in ~7 min and was
+  sent to the user.
 - **GitHub-side (16:00 UTC):** after the user lifted the $0 Actions budget,
   the run page says "Internal server error ... The job was not acquired by
   Runner of type hosted even after multiple attempts". macos-15 and
