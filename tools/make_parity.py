@@ -89,6 +89,7 @@ STATUS = {
     "Delete files": ("x", "soft delete with Undo"),
     "Open with / file association": ("~", "the Files picker imports; Open-in from other apps not wired yet"),
     "Multi-select import": ("x", "the Files picker allows several files"),
+    "Partial project open": ("~", ".stknds: figure library imports; animation not yet"),
     "Send files": ("x", "share sheet for projects and exported figures"),
     "Save reminder": ("-", "replaced by autosave every 30 s and on backgrounding"),
     # Settings

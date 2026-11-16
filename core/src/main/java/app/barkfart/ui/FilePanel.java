@@ -218,7 +218,7 @@ public final class FilePanel extends WidgetGroup {
         }
         for (final ProjectStore.Entry e : is) {
             String kind = e.kind == ProjectStore.Kind.FIGURE ? "Stickfigure" : e.kind == ProjectStore.Kind.MOVIECLIP ? "Movieclip"
-                    : e.kind == ProjectStore.Kind.LEGACY_PROJECT ? "Stick Nodes project (not yet)" : "Pivot figure (not yet)";
+                    : e.kind == ProjectStore.Kind.LEGACY_PROJECT ? "Stick Nodes project: figures only for now" : "Pivot figure (not yet)";
             imports.add(new Row(e.name, kind, false, new Runnable() {
                 public void run() {
                     importFile(e.file);

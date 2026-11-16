@@ -176,6 +176,13 @@ Not done
   panel): waits for the user's screenshots so the layout matches the
   original. Markers exist in the model but have no edit commands yet.
 
+### .stknds import, partial (2026-11-17)
+- Header + stickfigure library reader (spec-based, corrected ID maps);
+  import brings a project's figures in as layers; animation not yet.
+- Figures from Stick Nodes 4.3.x (version 431) now load (cap lifted after
+  byte-exact round trips of 9 embedded figures).
+- Frame layout partly decoded (NOTES.md); time box reached.
+
 ### Files (parity phase 1, 2026-11-17)
 - Barkfart folder = the app's Documents (iOS; visible in the Files app via
   UIFileSharingEnabled), ~/Barkfart on desktop (-Dbarkfart.docs overrides).
@@ -275,9 +282,7 @@ M3 is split (recorded per the brief's rule; nothing cut):
 - No undo commands yet for modifiers, markers, layer flags (visible, lock,
   solo), layer/node structure (add, remove, reorder) or polyfills. Needed
   before the M4/M5 UI exposes those edits.
-- Figures saved by Stick Nodes 4.3.4 are probably rejected
-  (NodesFormat.MAX_VERSION = 423) until a real 4.3.4 file confirms the layout.
-- .stknds import not started (M3c).
+- .stknds import brings figures only; frames not decoded yet (NOTES.md).
 - Movieclips: Snow and Action Lines render figures in the wrong place;
   Sparks is a known gap (IoU 0.82). Gradients, trapezoids, polygons, curves,
   right/upside-down triangles, node scale and smart-stretch/angle/drag locks

@@ -80,11 +80,31 @@ class FilesTest {
 
     @Test
     void unsupportedFilesGiveAClearMessage() throws Exception {
-        File f = new File(dir, "Old.stknds");
+        File f = new File(dir, "Old.stk");
         write(f, new byte[] {1, 2, 3});
         Document d = new Document(Fixtures.empty());
         Importer.Unsupported e = assertThrows(Importer.Unsupported.class, () -> Importer.importFile(d, f));
         assertTrue(e.getMessage().contains("cannot be imported yet"));
+    }
+
+    /** Local-only: every sample project's figure library imports (animation not yet). */
+    @Test
+    void legacyProjectFiguresImport() throws Exception {
+        File dirRef = new File(System.getProperty("barkfart.reference", "missing"), "sample_projects");
+        assumeTrue(dirRef.isDirectory(), "reference bundle not present");
+        int[] expected = {3, 6, 15};
+        for (int i = 1; i <= 3; i++) {
+            File f = new File(dirRef, "sample" + i + ".stknds");
+            app.barkfart.legacy.StkndsFormat.Header h = app.barkfart.legacy.StkndsFormat.readHeader(Files.readAllBytes(f.toPath()));
+            assertEquals(431, h.version);
+            assertEquals(expected[i - 1], h.figures.size(), f.getName());
+            Document d = new Document(Fixtures.empty());
+            Importer.Result r = Importer.importFile(d, f);
+            assertEquals(expected[i - 1], d.project.root().layers.size());
+            assertTrue(r.message.contains("animation cannot be imported yet"));
+            assertTrue(d.undo());
+            assertEquals(0, d.project.root().layers.size());
+        }
     }
 
     /** Local-only: a real movieclip imports as a symbol plus a looping instance layer. */

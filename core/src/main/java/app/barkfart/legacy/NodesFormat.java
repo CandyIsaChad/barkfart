@@ -17,8 +17,13 @@ import java.util.zip.InflaterInputStream;
  * kept by name so write(read(x)) reproduces the body byte for byte.
  */
 public final class NodesFormat {
-    /** Newest version/build this reader has been checked against. */
-    public static final int MAX_VERSION = 423;
+    /**
+     * Newest version this reader has been checked against: 431 build 117 (the
+     * figures embedded in the 4.3.x sample projects re-serialize byte for byte).
+     */
+    public static final int MAX_VERSION = 431;
+    /** For format exploration only: accept versions above MAX_VERSION. */
+    static boolean allowNewer;
 
     enum Kind { I8, U8, I16, I32, F32 }
 
@@ -208,7 +213,7 @@ public final class NodesFormat {
         LegacyFigure fig = new LegacyFigure();
         fig.littleEndian = in.little;
         fig.version = in.i32();
-        if (fig.version < 0 || fig.version > MAX_VERSION) throw new IOException("unsupported .nodes version " + fig.version);
+        if (fig.version < 0 || (fig.version > MAX_VERSION && !allowNewer)) throw new IOException("unsupported .nodes version " + fig.version);
         if (fig.version >= 403) fig.build = in.i32();
         fig.scale = Float.intBitsToFloat(in.i32());
         fig.color = in.i32();

@@ -90,8 +90,33 @@ public final class Importer {
                     doc.commit();
                 }
             }
-            case LEGACY_PROJECT:
-                throw new Unsupported("Stick Nodes projects (.stknds) cannot be imported yet");
+            case LEGACY_PROJECT: {
+                // Partial: the project's figure library comes in; its animation does not yet.
+                app.barkfart.legacy.StkndsFormat.Header h;
+                try {
+                    h = app.barkfart.legacy.StkndsFormat.readHeader(bytes);
+                } catch (MovieclipFormat.UnsupportedLayoutException e) {
+                    throw new Unsupported(name + ": " + e.getMessage());
+                }
+                if (h.figures.isEmpty()) throw new Unsupported(name + " has no figures to import");
+                FigureMapper.Report rep = new FigureMapper.Report();
+                Layer last = null;
+                doc.begin("Import figures from " + name);
+                try {
+                    int i = 0;
+                    for (MovieclipFormat.NamedFigure nf : h.figures) {
+                        Layer.FigureLayer l = FigureMapper.toLayer(p, nf.figure, nf.name, rep);
+                        l.transform.x.setValue((i - (h.figures.size() - 1) / 2f) * 160f);   // side by side
+                        doc.apply(StructureEdits.addLayer(root, l, root.layers.size()));
+                        last = l;
+                        i++;
+                    }
+                } finally {
+                    doc.commit();
+                }
+                return new Result(last, "Imported " + h.figures.size() + " figures from " + name
+                        + " (its animation cannot be imported yet)", rep.approximations);
+            }
             case PIVOT:
                 throw new Unsupported("Pivot figures (.stk) cannot be imported yet");
             default:

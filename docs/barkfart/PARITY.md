@@ -5,7 +5,7 @@ Built by tools/make_parity.py from research/stick-nodes-features-raw.md (64 upda
 Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without UI, **[ ]** not yet, **(won't)** with the reason.
 
 
-**Totals (382 features):** 51 usable now, 22 partial or core-only, 278 not yet, 31 won't.
+**Totals (382 features):** 51 usable now, 23 partial or core-only, 277 not yet, 31 won't.
 
 
 ## Order of work (parity first, then our own additions)
@@ -359,7 +359,7 @@ Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without U
 - [ ] **Android download auto-scan** (since 1.7.9): Auto-collects downloaded files; **REMOVED 3.2.0**
 - [ ] **Open ZIP packs** (since 2.0.1): Extract figure packs into the library
 - [ ] **Open mixed ZIPs** (since 4.0.0): ZIP containing any Stick Nodes file types
-- [ ] **Partial project open** (since 2.2.2 / 2.3.6): Open fewer frames, or a percentage from first/last frame
+- [~] **Partial project open** (since 2.2.2 / 2.3.6): Open fewer frames, or a percentage from first/last frame *Barkfart: .stknds: figure library imports; animation not yet.*
 - [ ] **Out-of-memory warning** (since 2.5.7): Warns instead of crashing on oversized projects
 - [ ] **Save view state** (since 2.5.1): Project saves zoom, position, current frame, guides
 - [x] **Local project backup** (since 4.3.0): Overwritten saves kept temporarily, restorable *Barkfart: one rolling .bak per save; deleted projects go to a hidden trash with Undo.*

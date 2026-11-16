@@ -120,3 +120,20 @@ Forcefield 0.93, Electricity 0.93 (an earlier "wrong outline" was a test
 helper that dropped the concave flag), SSJ Aura 0.79 (gradients, area 1.26),
 Sparks 0.82 (known gap: our area 87-98% of the original; open).
 Colour difference is 0 on every clip without gradients.
+
+## Project (.stknds) format, version 431 build 117 (2026-11-17)
+- Header and libraries follow the public spec up to the stickfigure
+  library, with one correction: in the ID conversion maps each level is
+  (container UID, count), not (count, UID). Verified on all 3 samples.
+- Figures embedded at 431/117 parse with the 423-era node schema and
+  re-serialize byte for byte (9 figures across samples 1-2), so
+  NodesFormat.MAX_VERSION is now 431.
+- Frames (decoded so far, sample 1, 89 frames of 3728 bytes): each figure
+  instance is libraryId i32 + a 127-byte header + one 83-byte record per
+  library node + 1 byte. Node records keep the v330 offsets for scale @7,
+  length @11, thickness @15, angles @19/@23/@27, colour @31 (newer fields
+  follow the colour). About 925 bytes per frame of frame-level data are not
+  decoded yet (two textfields with strings, camera, sounds, asset-type ints
+  for >= 400). Next attempt starts there.
+- Import today: the project's figure library comes in as layers, side by
+  side, with an honest status message; the animation does not yet.
