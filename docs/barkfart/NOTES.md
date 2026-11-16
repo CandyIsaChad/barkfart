@@ -23,6 +23,7 @@ HD/SD texture sets, a dark UI skin, node style textures, 7 GLSL shaders
 | Ext | Wrapper | Body |
 |---|---|---|
 | `.nodes` stickfigure | raw zlib | little-endian. int32 version (105 seen), then node records: RGBA color bytes, type byte, ids, float32 x/y, scale 1.0, widths (e.g. 90), ints, rotation (degrees) |
+| `.nodes` (newer) | none | big-endian, int32 version (163, 334 seen), then float 1.0, colors. Seen in `_Sasuke`, `_Creeper`, the SNMC rigs |
 | `.nodemc` movieclip | 9-byte magic `01..09` + gzip | big-endian (Java DataOutputStream). int32 version (330 seen), length-prefixed UTF-8 title, small ints, then a 640x360 ARGB thumbnail, then frames |
 | `.stknds` project | same as .nodemc | big-endian, int32 version (431 seen), title, settings, then frames |
 
