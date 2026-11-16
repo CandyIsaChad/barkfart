@@ -15,6 +15,9 @@ Allowed
 - Using the bundled sample files as local-only test fixtures, read from
   `main/` at test time and skipped when absent. Never copied into the repo.
 
+- Public, openly licensed documentation of the formats, such as the MIT
+  sticknodes-rs spec, credited in NOTES.md.
+
 Not allowed
 - Disassembling or decompiling the `IOSLauncher` binary, or reading its code,
   strings or symbol names to copy implementation.

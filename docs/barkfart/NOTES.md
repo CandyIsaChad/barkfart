@@ -34,3 +34,24 @@ full-snapshot frames" model.
 ## Still unknown (needs device observation or more format work)
 Exact node record layout per version, tween curve shapes, how sounds and
 filters attach to frames, export pipeline details, undo depth.
+
+## Public format spec (found 2026-11-16)
+github.com/vinceTheProgrammer/sticknodes-rs (MIT, commit 3ea03d6) documents
+`.nodes` fully (versions up to 423) and `.stknds`/`.nodemc` partly (frame
+layout blank). Barkfart's importers follow that spec; it is public
+documentation, not the original's code. Key facts:
+- Big-endian (Java DataOutputStream). Colour ints are ABGR byte order.
+- `.nodes`: version, build (>=403), scale, colour, then the node tree
+  depth-first, each node followed by its child count; then polyfills (>=230)
+  and connector connections (>=403 build 38). Node fields are versioned.
+- Node types: -1 main, 0 rounded segment, 1 segment, 2 circle, 3 triangle,
+  4 filled circle, 5 ellipse, 6 trapezoid, 7 polygon.
+- The node's own id is its draw-order index.
+
+Our own check: the old zlib-compressed `.nodes` files (version 105) are the
+same structure in **little-endian**, and parse to exact EOF with the v105
+field set (type, draw index, static, stretchy, use-segment-colour,
+use-segment-scale, local x/y, scale, default length, length, default
+thickness, thickness, local angle, colour, child count). In Classic
+Stickfigure the local offset's magnitude is half the length field (45 vs 90),
+which matters for import scale (DESIGN Q4).
