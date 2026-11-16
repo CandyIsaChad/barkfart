@@ -197,6 +197,14 @@ M3 is split (recorded per the brief's rule; nothing cut):
 - No touch UI exists yet, so the only manual checklist is the device check
   below.
 
+- **IPA builds are blocked (2026-11-16 ~14:20 UTC):** two dispatches of
+  ios.yml (commits 4e12277, d31e87b) waited 15 min without a macOS runner
+  and were cancelled; Linux CI keeps passing. Most likely the private repo's
+  Actions macOS minutes/spending limit. The token cannot read billing. The
+  newest IPA the user has is from commit 1139106 (M3a self-test, 9 checks);
+  everything after it (shapes, polyfills, legacy import, edit package) has
+  not run under MobiVM yet.
+
 ## Device checklist (manual; I cannot automate these)
 1. Install the latest Barkfart.ipa in LiveContainer; launch it.
 2. Home-screen icon is the fox sketch; launch screen is orange "Barkfart";
