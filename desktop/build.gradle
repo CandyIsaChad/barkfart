@@ -4,6 +4,10 @@ dependencies {
     implementation project(':core')
     implementation "com.badlogicgames.gdx:gdx-backend-lwjgl3:$gdxVersion"
     implementation "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
+    implementation "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-desktop"
 }
 
 application { mainClass = 'app.barkfart.desktop.DesktopLauncher' }
+
+// Shared assets (fonts) live in /assets; run from there so relative paths resolve.
+tasks.named('run') { workingDir = rootProject.file('assets') }

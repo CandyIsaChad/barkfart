@@ -8,6 +8,9 @@
     <resource>
       <directory>data</directory>
     </resource>
+    <resource>
+      <directory>../assets</directory>
+    </resource>
   </resources>
   <forceLinkClasses>
     <pattern>com.badlogic.gdx.scenes.scene2d.ui.*</pattern>

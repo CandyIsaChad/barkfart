@@ -29,3 +29,15 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Inter typeface
+
+assets/fonts/Inter-Regular.ttf and Inter-SemiBold.ttf are from Inter 4.1 by
+Rasmus Andersson (https://github.com/rsms/inter), used under the SIL Open
+Font License 1.1; the full licence is in assets/fonts/Inter-LICENSE.txt.
+
+## gdx-freetype (dependency)
+
+LibGDX's FreeType extension (Apache 2.0, same project as LibGDX) renders the
+TTF fonts at the device's pixel density. Added because LibGDX's bundled
+bitmap font blurs when scaled on high-density screens.

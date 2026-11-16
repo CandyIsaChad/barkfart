@@ -2,6 +2,8 @@ apply plugin: 'java-library'
 
 dependencies {
     api "com.badlogicgames.gdx:gdx:$gdxVersion"
+    // Crisp text at any screen density (bitmap fonts blur when scaled). See THIRD_PARTY.md.
+    api "com.badlogicgames.gdx:gdx-freetype:$gdxVersion"
     testImplementation "org.junit.jupiter:junit-jupiter:$junitVersion"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
 }
