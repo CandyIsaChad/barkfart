@@ -1,0 +1,14 @@
+apply plugin: 'java-library'
+
+dependencies {
+    api "com.badlogicgames.gdx:gdx:$gdxVersion"
+    testImplementation "org.junit.jupiter:junit-jupiter:$junitVersion"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+test {
+    useJUnitPlatform()
+    // Lets tests find the local-only reference bundle (see docs/barkfart/CLEANROOM.md).
+    systemProperty 'barkfart.reference', rootProject.file('main/Payload/IOSLauncher.app').absolutePath
+    testLogging { events 'passed', 'skipped', 'failed'; exceptionFormat 'full' }
+}

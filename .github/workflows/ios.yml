@@ -1,0 +1,36 @@
+name: iOS IPA (unsigned)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Core tests
+        run: gradle core:test --no-daemon
+      - name: Build unsigned IPA
+        run: gradle ios:createIPA --no-daemon
+      - name: Collect IPA
+        run: |
+          mkdir -p out
+          find ios/build -name '*.ipa' -exec cp {} out/ \;
+          ls -l out
+          test -n "$(ls out)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Barkfart-ipa
+          path: out/*.ipa
+          if-no-files-found: error

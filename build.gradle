@@ -1,0 +1,20 @@
+buildscript {
+    repositories { mavenCentral(); gradlePluginPortal() }
+    dependencies {
+        classpath "com.mobidevelop.robovm:robovm-gradle-plugin:$robovmVersion"
+    }
+}
+
+allprojects {
+    version = '0.0.1'
+    repositories { mavenCentral() }
+}
+
+subprojects {
+    apply plugin: 'java'
+    java {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+    tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
+}
