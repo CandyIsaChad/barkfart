@@ -70,3 +70,22 @@ which matters for import scale (DESIGN Q4).
 - Shapes approximated as plain segments until drawn natively: square-ended
   segment (type 1), triangle (3), ellipse (5), trapezoid (6), polygon (7);
   polyfills are preserved for export but not drawn yet.
+
+## Movieclip (.nodemc) frame layout (decoded locally, version 330)
+- Header and library match the public spec. The preview block is
+  previewCount frames of W x H RGBA, renders made by the original app,
+  apparently stored bottom-up (GL readback). Local-only visual references.
+- Frame: soundVolume f32, soundPan f32, soundPitch f32, soundId i32 (-1 =
+  none), figure count i32, then per figure: libraryId i32, a 101-byte header
+  (instance id i32 @0, scale f32 @4, opacity f32 @8, blur f32 @12, stage x
+  f32 @67, stage y f32 @71 on a 1920x1080 stage, a colour @75), then one
+  58-byte record per library node in hierarchy order (scale f32 @3, length
+  f32 @7, thickness i32 @11, default local angle @15, local angle @19,
+  default world angle @23, colour @27, gradient colour @31, outline colour
+  @35; the rest unknown and kept raw).
+- Verified: 9 of 12 bundled clips (all frames with one figure) parse to EOF
+  and re-serialize their body byte for byte.
+- Open: frames with several figures (Action Lines, Rain, Snow). Instances are
+  2943 bytes apart and the last one is 2947, so a frame likely ends with a
+  4-byte trailer that the one-figure model folds into the instance. Time box
+  reached; next attempt should start there.
