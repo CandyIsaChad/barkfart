@@ -125,11 +125,29 @@ Known issues
   polyfills render as approximations (listed per import). Node "scale" and
   the smart-stretch/angle-lock/drag-lock options are preserved, not applied.
 
+### M3d Legacy .nodemc import (partial, 2026-11-16)
+What works
+- Reader/writer for version 330 clips whose frames hold one figure (9 of 12
+  local clips): parse to EOF, body re-serializes byte for byte.
+- MovieclipMapper: clip to Symbol (layer per figure instance, full pose keys
+  per frame, position/scale/opacity keys, hold keys on shown).
+- **First golden test against the original renderer** (local only): clip
+  frames rendered our way vs the original's own preview frames. Fire matches
+  at silhouette IoU 0.94-0.95 (asserted >= 0.85). Clips using triangles,
+  ellipses, square ends, polyfills or gradients score 0.0-0.79 and are not
+  asserted until those shapes are drawn.
+Not done (time box reached; recorded in NOTES.md)
+- Frames with several figures (3 clips). Other movieclip versions.
+
 ## In progress
 M3 is split (recorded per the brief's rule; nothing cut):
 - M3a done, M3b done (above).
-- M3c Legacy .stknds import (time-boxed; check public docs first).
-- M3d Legacy .nodemc import.
+- M3c Legacy .stknds import: not started. The samples are version 431,
+  newer than any public spec (<= 423). Depends on the multi-figure frame
+  layout (same frame structure as movieclips, presumably).
+- M3d partial (above).
+- M3 stays open until: shapes beyond segment/circle are drawn so more clips
+  pass the original-renderer golden; .stknds imports; figures from 4.3.4 load.
 
 ## Known issues
 - `ios/data/.gitkeep` is copied into the app bundle. Harmless; remove when
@@ -142,4 +160,7 @@ M3 is split (recorded per the brief's rule; nothing cut):
   2. Tiny projects made in the real app (one figure, two frames; tween on and
      off) with screenshots of each frame and a mid-tween frame. These become
      the true golden references and settle the tween curve and angle wrapping.
-  3. Check on the phone: new icon, full-screen launch.
+  3. Check on the phone: new icon, full-screen launch, self-test PASS line.
+  4. A stickfigure and a small project saved from your Stick Nodes 4.3.4
+     (the bundled figures are version <= 420; the reader rejects > 423 until
+     a real 4.3.4 file confirms the layout).

@@ -263,11 +263,13 @@ interpolating its neighbours reproduces it within ε (default 0.01 deg /
 | Q1 | Legacy angle tweening: numeric or shortest arc? | Numeric on stored unwrapped relative angles |
 | Q2 | Legacy tween curve shape and per-frame easing options | Linear |
 | Q3 | Colour interpolation space | Straight sRGB |
-| Q4 | Legacy coordinate units and y direction | Units 1:1, y-up (the parsed figures put legs at negative y) |
+| Q4 | Legacy coordinate units and y direction | **Settled for movieclips (2026-11-16):** `length` is 1:1 in stage pixels, y up, stage 1920x1080 with centre (960,540). Evidence: our render of the Fire clip matches the original app's own preview frames at 0.94-0.95 silhouette IoU |
 | Q5 | Legacy fields not yet understood (ints like 21/21, header block) | Preserved in `legacyExtras`; ignored by the evaluator |
 | Q6 | Recursion and primitive budgets | depth 8 per instance, 64 global, 250k primitives |
 | Q7 | Default fps for new projects | 30 |
 | Q8 | Polyfills and textured segments in the legacy format | Import as POLYGON / SPRITE shapes once the format is decoded; until then, report them as skipped |
 
-Q1, Q2 and Q4 are settled by the user's requested capture projects
+| Q9 | Symbol instance time with an animated speed: local = offset + t x speed(t) plays backwards when speed ramps down | Before M5: integrate speed over time (or offer a keyed time-remap track instead of speed) |
+
+Q1 and Q2 are settled by the user's requested capture projects
 (PROGRESS.md, "Waiting on the user").
