@@ -19,6 +19,8 @@
 - 2026-11-16: The brief's rule "reuse existing UI widgets" cannot apply, since
   there is no original source. We build our own widgets on LibGDX scene2d.
 - 2026-11-16: IPA is built unsigned on GitHub Actions for LiveContainer.
+- 2026-11-16: Repo made public (user's choice) so macOS builds are free.
+  Commits use the GitHub noreply address; never commit a personal email.
 - 2026-11-16: Started the headless half of M4 while M3 is still open (M3c
   .stknds blocked on a newer, undocumented format version and on user files;
   M4 UI blocked on screenshots). Recorded here so the order change is visible.
@@ -197,7 +199,11 @@ M3 is split (recorded per the brief's rule; nothing cut):
 - No touch UI exists yet, so the only manual checklist is the device check
   below.
 
-- **IPA builds are blocked (2026-11-16 ~14:20 UTC):** two dispatches of
+- Resolved 2026-11-16: the user confirmed the M3a IPA self-test passes 9/9
+  on the phone, and chose to make the repo public (free macOS runners).
+  Before publishing, commit authorship was rewritten to the GitHub noreply
+  address and old Actions runs (which linked the old commits) were deleted.
+- (Was) **IPA builds blocked (2026-11-16 ~14:20 UTC):** two dispatches of
   ios.yml (commits 4e12277, d31e87b) waited 15 min without a macOS runner
   and were cancelled; Linux CI keeps passing. Most likely the private repo's
   Actions macOS minutes/spending limit. The token cannot read billing. The
