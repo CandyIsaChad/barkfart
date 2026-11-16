@@ -127,6 +127,7 @@ public final class ProjectCodec {
         m.put("visible", l.visible);
         m.put("locked", l.locked);
         m.put("solo", l.solo);
+        m.put("onion", l.onion);
         m.put("blend", l.blend.name());
         m.put("parent", l.parent);
         m.put("shown", prop(l.shown, false));
@@ -541,6 +542,7 @@ public final class ProjectCodec {
         l.visible = b(m, "visible");
         l.locked = b(m, "locked");
         l.solo = b(m, "solo");
+        if (m.containsKey("onion")) l.onion = b(m, "onion");
         l.blend = Layer.Blend.valueOf(req(m, "blend"));
         l.parent = str(m, "parent");
         readProp(m, "shown", l.shown);

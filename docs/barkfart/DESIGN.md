@@ -152,7 +152,7 @@ project fps.
    editor enforce it. World angle = parent world angle + rotation. Position =
    parent position + length × scale × (cos, sin) of world angle. Each shaped
    node emits a primitive (line capsule, circle, ...).
-4. **Symbol instances**: local time = timeOffset(t) + (t − 0) × speed(t),
+4. **Symbol instances**: local time = timeOffset(t) + ∫₀ᵗ speed(τ) dτ,
    then ONCE (clamp to [0, duration]), LOOP (mod) or PING_PONG. Nesting is
    processed with an **explicit work stack** of `(symbol, time, transform,
    depth, path)` frames, never Java recursion. An instance stops expanding
@@ -269,7 +269,7 @@ interpolating its neighbours reproduces it within ε (default 0.01 deg /
 | Q7 | Default fps for new projects | 30 |
 | Q8 | Polyfills and textured segments in the legacy format | Import as POLYGON / SPRITE shapes once the format is decoded; until then, report them as skipped |
 
-| Q9 | Symbol instance time with an animated speed: local = offset + t x speed(t) plays backwards when speed ramps down | Before M5: integrate speed over time (or offer a keyed time-remap track instead of speed) |
+| Q9 | Symbol instance time with an animated speed | **Done:** local = offset(t) + integral of speed from 0 to t; exact for HOLD/LINEAR keys, numeric (1/240 s steps, capped) for eased keys or modifiers |
 
 Q1 and Q2 are settled by the user's requested capture projects
 (PROGRESS.md, "Waiting on the user").

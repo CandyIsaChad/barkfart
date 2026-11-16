@@ -12,6 +12,8 @@ public abstract class Layer {
     public final String id;
     public String name;
     public boolean visible = true, locked = false, solo = false;
+    /** Drawn in onion skin (turn off for backgrounds that hide the ghosts). */
+    public boolean onion = true;
     public final Property shown;
     public final Property opacity;
     public Blend blend = Blend.NORMAL;

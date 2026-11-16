@@ -77,7 +77,7 @@ public final class StructureEdits {
         };
     }
 
-    public enum Flag { VISIBLE, LOCKED, SOLO }
+    public enum Flag { VISIBLE, LOCKED, SOLO, ONION }
 
     public static Command setFlag(final Layer l, final Flag f, final boolean on) {
         final boolean before = get(l, f);
@@ -93,13 +93,14 @@ public final class StructureEdits {
     }
 
     private static boolean get(Layer l, Flag f) {
-        return f == Flag.VISIBLE ? l.visible : f == Flag.LOCKED ? l.locked : l.solo;
+        return f == Flag.VISIBLE ? l.visible : f == Flag.LOCKED ? l.locked : f == Flag.SOLO ? l.solo : l.onion;
     }
 
     private static void set(Layer l, Flag f, boolean v) {
         if (f == Flag.VISIBLE) l.visible = v;
         else if (f == Flag.LOCKED) l.locked = v;
-        else l.solo = v;
+        else if (f == Flag.SOLO) l.solo = v;
+        else l.onion = v;
     }
 
     public static Command setBlend(final Layer l, final Layer.Blend blend) {

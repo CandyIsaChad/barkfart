@@ -62,6 +62,11 @@ public final class Evaluator {
     }
 
     public static Scene evaluate(Project project, String symbolId, double t) {
+        return evaluate(project, symbolId, t, false);
+    }
+
+    /** onionOnly: skip top-level layers whose onion flag is off (for onion-skin ghosts). */
+    public static Scene evaluate(Project project, String symbolId, double t, boolean onionOnly) {
         Symbol sym = project.library.get(symbolId);
         Group root = new Group(symbolId);
         Scene scene = new Scene(root, t);
@@ -75,7 +80,7 @@ public final class Evaluator {
         stack.push(new Work(sym, t, view, root, new Path(sym.id, null)));
         while (!stack.isEmpty()) {
             Work w = stack.pop();
-            evalSymbol(project, w, r, scene, stack);
+            evalSymbol(project, w, r, scene, stack, onionOnly && w.path.up == null);
         }
         return scene;
     }
@@ -94,13 +99,14 @@ public final class Evaluator {
         return Affine.IDENTITY;
     }
 
-    private static void evalSymbol(Project project, Work w, PropertyResolver r, Scene scene, ArrayDeque<Work> stack) {
+    private static void evalSymbol(Project project, Work w, PropertyResolver r, Scene scene, ArrayDeque<Work> stack,
+            boolean onionOnly) {
         Symbol sym = w.symbol;
         double t = w.time;
         boolean anySolo = false;
         for (Layer l : sym.layers) anySolo |= l.solo;
         for (Layer l : sym.layers) {
-            if (!l.visible) continue;
+            if (!l.visible || (onionOnly && !l.onion)) continue;
             Layer.Type type = l.type();
             if (type == Layer.Type.CAMERA || type == Layer.Type.AUDIO) continue;
             if (anySolo && !l.solo && type != Layer.Type.ADJUSTMENT) continue;
@@ -312,7 +318,7 @@ public final class Evaluator {
             scene.diagnostics.add(new Diagnostic(Diagnostic.Kind.RECURSION_LIMIT, l.id));
             return;
         }
-        double local = localTime(r.d(l.timeOffset, t) + t * r.d(l.speed, t), target.duration, l.loop);
+        double local = localTime(r.d(l.timeOffset, t) + SpeedIntegral.elapsed(l.speed, t, r), target.duration, l.loop);
         stack.push(new Work(target, local, xf, g, new Path(target.id, path)));
     }
 
