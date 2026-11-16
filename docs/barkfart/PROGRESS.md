@@ -87,13 +87,47 @@ Build hygiene added with M1
   budget guards, render pipeline, .bark format, legacy import mapping,
   undo/caching, and open questions Q1-Q8 with the defaults chosen.
 
+### M3a Core (done 2026-11-16)
+What works
+- Model (DESIGN §2), pure evaluator with FK, layer parenting, solo, camera,
+  symbol instances, modifiers (wiggle, sine, loop, delay-follow, link),
+  explicit work stack, recursion limit, depth cap 64, 250k object budget,
+  cycle detection for links/delays/parents.
+- Tessellation into a DrawList; GL renderer fills it; test rasterizer fills
+  it for goldens (4 self-regression goldens, synthetic).
+- .bark save/load: deterministic JSON, ZIP with fixed times, atomic save with
+  .bak, migrations hook, newer formats refused.
+- Key reduction; evaluator fuzz (400 random hostile projects).
+- In-app self-test (9 checks) shown at launch; demo scene; desktop
+  `--screenshot` flag.
+How it was tested
+- core:test locally and on CI (ubuntu): all pass. Desktop screenshot checked
+  by eye. IPA built on CI (run for commit with the self-test) and sent to the
+  user.
+Not tested
+- The self-test on a real device (needs the user's LiveContainer run).
+- Effects are resolved in the scene but not rendered (M6). Text layers render
+  nothing yet (M5). Group opacity is per-shape alpha (overlaps show) until M6.
+
+### M3b Legacy .nodes import and export (done 2026-11-16)
+What works
+- Schema-driven reader/writer for every field the public spec lists, versions
+  105 to 423, both endiannesses, zlib wrapper; iterative, bounded parsing.
+- FigureMapper: legacy figure to figure layer and back; unedited figures
+  export byte for byte, edits (angle, length, thickness, colour) are written.
+How it was tested
+- Local-only: all 30 reference figures round-trip byte for byte through
+  read/write, and through import, .bark save/load and export.
+- Committed: synthetic figures at 6 version/build combinations; truncated and
+  garbage files fail with IOException; edit export test.
+Known issues
+- Triangles, ellipses, trapezoids, polygons, square-ended segments and
+  polyfills render as approximations (listed per import). Node "scale" and
+  the smart-stretch/angle-lock/drag-lock options are preserved, not applied.
+
 ## In progress
 M3 is split (recorded per the brief's rule; nothing cut):
-- M3a Core: model, interpolation, modifiers, evaluator (FK, symbols, guards),
-  DrawList tessellation, test rasterizer with self-regression goldens on
-  synthetic fixtures, .bark save/load round trip, key reduction, fuzz tests,
-  and an on-device evaluator self-test shown at launch (the only iOS check).
-- M3b Legacy .nodes import, plus byte-identical re-export (stickfigure export).
+- M3a done, M3b done (above).
 - M3c Legacy .stknds import (time-boxed; check public docs first).
 - M3d Legacy .nodemc import.
 

@@ -194,29 +194,34 @@ public final class Evaluator {
         return true;
     }
 
-    /** Forward kinematics in draw order (parents precede children), emitting shapes. */
+    /** Forward kinematics in hierarchy order, then shapes emitted in draw order. */
     static void emitFigure(Layer.FigureLayer layer, Affine xf, double t, PropertyResolver r, Scene scene, Group g) {
         Figure f = layer.figure;
         List<Node> nodes = f.nodes();
         int n = nodes.size();
         double[] px = new double[n], py = new double[n], ang = new double[n];
-        double sf = xf.scaleFactor();
+        int[] parent = new int[n];
         for (int i = 0; i < n; i++) {
             Node node = nodes.get(i);
             double rot = r.f(node.rotation, t);
             if (node.parent == null) {
-                px[i] = 0;
-                py[i] = 0;
+                parent[i] = -1;
                 ang[i] = rot;
                 continue;
             }
             int pi = f.indexOf(node.parent);
+            parent[i] = pi;
             ang[i] = ang[pi] + rot;
             double len = r.f(node.length, t) * r.f(node.scale, t);
             double rad = Math.toRadians(ang[i]);
             px[i] = px[pi] + len * Math.cos(rad);
             py[i] = py[pi] + len * Math.sin(rad);
-            if (node.shape == Node.Shape.NONE || !r.b(node.shown, t)) continue;
+        }
+        double sf = xf.scaleFactor();
+        for (int i : f.drawSequence()) {
+            Node node = nodes.get(i);
+            int pi = parent[i];
+            if (pi < 0 || node.shape == Node.Shape.NONE || !r.b(node.shown, t)) continue;
             if (!spend(scene, layer.id)) return;
             Color c = (Color) r.resolve(node.color, t);
             String src = layer.id + "/" + node.id;

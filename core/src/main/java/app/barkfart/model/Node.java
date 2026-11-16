@@ -11,6 +11,8 @@ public final class Node {
     /** Parent node id, or null for the root. Parents precede children in Figure.nodes. */
     public final String parent;
     public Shape shape;
+    /** Draw order within the figure: lower draws behind. Independent of hierarchy. */
+    public int drawOrder;
     public final Property rotation, length, thickness, scale, color, shown;
     /** Legacy fields not yet understood, kept for faithful re-export. */
     public final Map<String, Object> legacyExtras = new LinkedHashMap<String, Object>();

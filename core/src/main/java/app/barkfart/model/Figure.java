@@ -6,7 +6,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** A node hierarchy. nodes is draw order; a parent always comes before its children. */
+/**
+ * A node hierarchy. nodes is hierarchy order (a parent always comes before its
+ * children); each node's drawOrder sets layering. add() gives new nodes the
+ * next draw order (in front) unless one was set.
+ */
 public final class Figure {
     private final ArrayList<Node> nodes = new ArrayList<Node>();
     private final HashMap<String, Integer> index = new HashMap<String, Integer>();
@@ -37,8 +41,31 @@ public final class Figure {
         } else if (n.parent == null || !index.containsKey(n.parent)) {
             throw new IllegalArgumentException("parent " + n.parent + " must be added before " + n.id);
         }
+        if (n.drawOrder == 0 && !nodes.isEmpty()) n.drawOrder = maxDrawOrder() + 1;
         index.put(n.id, nodes.size());
         nodes.add(n);
+    }
+
+    private int maxDrawOrder() {
+        int m = Integer.MIN_VALUE;
+        for (Node x : nodes) m = Math.max(m, x.drawOrder);
+        return m;
+    }
+
+    /** Node indices sorted by drawOrder (stable, back to front). */
+    public int[] drawSequence() {
+        int n = nodes.size();
+        Integer[] idx = new Integer[n];
+        for (int i = 0; i < n; i++) idx[i] = i;
+        java.util.Arrays.sort(idx, new java.util.Comparator<Integer>() {
+            public int compare(Integer a, Integer b) {
+                int da = nodes.get(a).drawOrder, db = nodes.get(b).drawOrder;
+                return da < db ? -1 : (da > db ? 1 : a.compareTo(b));
+            }
+        });
+        int[] out = new int[n];
+        for (int i = 0; i < n; i++) out[i] = idx[i];
+        return out;
     }
 
     public Map<String, Integer> indexView() {
