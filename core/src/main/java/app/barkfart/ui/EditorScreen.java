@@ -3,34 +3,77 @@ package app.barkfart.ui;
 import app.barkfart.model.Project;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.InputMultiplexer;
+import com.badlogic.gdx.Preferences;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.g2d.Batch;
-import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 
-/** The editor screen: sidebar, frame strip, play button, stage, frame menu (UI-SPEC v2). */
+/**
+ * The editor screen: sidebar, dope sheet, play button, stage (UI-SPEC v2).
+ * The UI layer is rebuilt when the UI size changes; the editor state persists.
+ */
 public final class EditorScreen implements Disposable {
-    public final EditorState state;
-    private final Theme theme;
-    private final Stage stage;
-    private final Sidebar sidebar;
-    private final DopeSheet sheet;
-    private final StageView view;
-    private final UiButton play;
-    private final float uiScale;
-    private float insetL, insetR, insetB, insetT;
+    public static final float MIN_USER = 0.8f, MAX_USER = 1.8f;
 
-    /** @param uiScale logical screen units per UI point (1 on iOS; 2 for the desktop phone preview). */
-    public EditorScreen(Project p, float uiScale) {
-        this.uiScale = uiScale;
-        float backbuffer = Gdx.graphics.getBackBufferWidth() / (float) Math.max(1, Gdx.graphics.getWidth());
-        theme = new Theme(uiScale * backbuffer);
+    public final EditorState state;
+    /** Logical screen units per point from the platform (1 on iOS; the desktop preview passes its own). */
+    private final float base;
+    private Theme theme;
+    private Stage stage;
+    private Sidebar sidebar;
+    private DopeSheet sheet;
+    private StageView view;
+    private UiButton play;
+    private float scale;
+    private float insetL, insetR, insetB, insetT;
+    private final Preferences prefs;
+
+    public EditorScreen(Project p, float base) {
+        this.base = base;
         state = new EditorState(p);
+        prefs = Gdx.app.getPreferences("barkfart.ui");
+        state.uiUserScale = clampUser(prefs.getFloat("uiSize", 1f));
+        state.onUiScaleChanged = new Runnable() {
+            public void run() {
+                state.uiUserScale = clampUser(state.uiUserScale);
+                prefs.putFloat("uiSize", state.uiUserScale);
+                prefs.flush();
+                build();
+                resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            }
+        };
+        build();
+    }
+
+    private static float clampUser(float v) {
+        return Math.max(MIN_USER, Math.min(MAX_USER, Math.round(v * 20) / 20f));
+    }
+
+    /**
+     * Automatic size from the screen height in points: phones 1.0; tablets
+     * scale with height (iPad mini ~1.13, Air/11-inch ~1.25, 12.9-inch 1.5).
+     */
+    public static float autoScale(float heightPt) {
+        if (heightPt <= 500) return 1f;
+        return Math.max(1f, Math.min(1.5f, heightPt / 656f));
+    }
+
+    private void build() {
+        if (stage != null) {
+            stage.dispose();
+            view.dispose();
+            theme.dispose();
+        }
+        state.clearListeners();
+        float heightPt = Gdx.graphics.getHeight() / base;
+        scale = base * autoScale(heightPt) * state.uiUserScale;
+        float backbuffer = Gdx.graphics.getBackBufferWidth() / (float) Math.max(1, Gdx.graphics.getWidth());
+        theme = new Theme(scale * backbuffer);
         ScreenViewport vp = new ScreenViewport();
-        vp.setUnitsPerPixel(1f / uiScale);
+        vp.setUnitsPerPixel(1f / scale);
         stage = new Stage(vp);
         view = new StageView(theme, state);
         sidebar = new Sidebar(theme, state);
@@ -39,26 +82,24 @@ public final class EditorScreen implements Disposable {
                 layout();
             }
         });
-        play = new UiButton(theme, "Play", UiButton.Style.NORMAL, new Runnable() {
+        final Theme th = theme;
+        play = new UiButton(theme, "", UiButton.Style.NORMAL, new Runnable() {
             public void run() {
                 if (state.playing) state.stop();
                 else state.play();
             }
         }) {
-            private final GlyphLayout g = new GlyphLayout();
-
             @Override
             public void draw(Batch batch, float a) {
-                setText("");
                 super.draw(batch, a);
-                // play triangle or stop square, drawn (icons only for play/stop, per spec)
+                // play triangle or stop square (icons only for play/stop, per spec)
                 float cx = getX() + getWidth() / 2, cy = getY() + getHeight() / 2;
                 Color old = batch.getColor().cpy();
                 batch.setColor(Theme.TEXT);
                 if (state.playing) {
-                    batch.draw(theme.white(), cx - 7, cy - 7, 14, 14);
+                    batch.draw(th.white(), cx - 7, cy - 7, 14, 14);
                 } else {
-                    for (int i = 0; i < 16; i++) batch.draw(theme.white(), cx - 6 + i, cy - 8 + i * 0.5f, 1, 16 - i);
+                    for (int i = 0; i < 16; i++) batch.draw(th.white(), cx - 6 + i, cy - 8 + i * 0.5f, 1, 16 - i);
                 }
                 batch.setColor(old);
             }
@@ -75,18 +116,18 @@ public final class EditorScreen implements Disposable {
             }
         });
         Gdx.input.setInputProcessor(new InputMultiplexer(stage));
+        state.fire();
     }
 
     public void resize(int width, int height) {
         stage.getViewport().update(width, height, true);
-        float k = 1f / uiScale;
+        float k = 1f / scale;
         insetL = Gdx.graphics.getSafeInsetLeft() * k;
         insetR = Gdx.graphics.getSafeInsetRight() * k;
         insetB = Gdx.graphics.getSafeInsetBottom() * k;
         insetT = Gdx.graphics.getSafeInsetTop() * k;
         layout();
     }
-
     private void layout() {
         float w = stage.getWidth(), h = stage.getHeight();
         // Panels run under the safe insets; controls stay inside them.

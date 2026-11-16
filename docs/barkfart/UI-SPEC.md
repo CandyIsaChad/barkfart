@@ -6,7 +6,11 @@ Undo/Redo top-left, frame strip top, Play top-right, stage centre, floating
 tool windows. Units are points. Reference device: iPhone landscape 844 x 390
 pt; safe insets apply on BOTH sides (47 pt, 59 on Pro) plus 21 pt at the
 bottom. Panel colours run under the insets; controls never sit inside them.
-iPad and windows >= 700 pt wide use the "large" metrics.
+**Scaling (2026-11-17):** every size here is multiplied by an automatic
+scale from the screen height in points (phones 1.0; tablets height/656,
+capped 1.0-1.5: iPad mini ~1.13, Air/11-inch ~1.25, 12.9-inch 1.5) and by
+the user's "UI size" (80-180%, saved on the device, in the sidebar when
+nothing is selected). Fonts are re-rasterized at the resulting pixel size.
 
 ## Regions
 | Region | Phone | Large (iPad) |

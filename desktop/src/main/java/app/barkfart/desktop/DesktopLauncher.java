@@ -11,16 +11,18 @@ public class DesktopLauncher {
     /**
      * Args (any order):
      *   --phone                 iPhone landscape preview: 844 x 390 pt at 2x
+     *   --ipad                  iPad Air landscape preview: 1180 x 820 pt at 1x
      *   --screenshot out.png N  render N frames (default 45), save, exit
      *   --script steps          (with --screenshot) comma list of actions run before capture
      */
     public static void main(String[] args) {
-        boolean phone = false;
+        boolean phone = false, ipad = false;
         String shot = null;
         int frames = 45;
         String script = null;
         for (int i = 0; i < args.length; i++) {
             if ("--phone".equals(args[i])) phone = true;
+            else if ("--ipad".equals(args[i])) ipad = true;
             else if ("--screenshot".equals(args[i])) {
                 shot = args[++i];
                 if (i + 1 < args.length && args[i + 1].matches("\\d+")) frames = Integer.parseInt(args[++i]);
@@ -28,10 +30,10 @@ public class DesktopLauncher {
         }
         Lwjgl3ApplicationConfiguration config = new Lwjgl3ApplicationConfiguration();
         config.setTitle("Barkfart");
-        config.setWindowedMode(phone ? 1688 : 1280, phone ? 780 : 720);
+        config.setWindowedMode(phone ? 1688 : (ipad ? 1180 : 1280), phone ? 780 : (ipad ? 820 : 720));
         config.useVsync(true);
         config.setBackBufferConfig(8, 8, 8, 8, 16, 0, 4);
-        float scale = phone ? 2f : 1.5f;
+        float scale = phone ? 2f : (ipad ? 1f : 1.5f);
         if (shot == null) {
             new Lwjgl3Application(new BarkfartApp(scale), config);
             return;

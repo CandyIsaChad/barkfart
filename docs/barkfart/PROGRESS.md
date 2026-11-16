@@ -176,6 +176,14 @@ Not done
   panel): waits for the user's screenshots so the layout matches the
   original. Markers exist in the model but have no edit commands yet.
 
+### UI scaling for iPad (2026-11-17; the user tests on an iPad)
+Automatic UI scale from the screen height (iPad Air ~1.25x, 12.9-inch
+1.5x) times a user "UI size" setting (Smaller / Larger, 80-180%, saved per
+device). Changing it rebuilds the UI layer with re-rasterized fonts and keeps
+the project, selection and undo history. Desktop `--ipad` preview (1180 x
+820 pt). Tested: autoScale unit test; iPad preview screenshot. Not tested:
+on the user's iPad.
+
 ### M4 Timeline: dope sheet (2026-11-17)
 The frame strip was replaced by a dope sheet (user decision): ruler with
 tabular frame numbers and a draggable playhead, summary row, per-figure

@@ -73,6 +73,15 @@ public final class EditorState {
         listeners.add(r);
     }
 
+    /** Drops UI listeners (the UI is being rebuilt, e.g. at a new size). */
+    public void clearListeners() {
+        listeners.clear();
+    }
+
+    /** User UI size multiplier on top of the automatic size (0.8 .. 1.8), and how to apply a change. */
+    public float uiUserScale = 1f;
+    public Runnable onUiScaleChanged;
+
     public void fire() {
         for (Runnable r : listeners) r.run();
     }

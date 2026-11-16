@@ -342,6 +342,16 @@ public final class Sidebar extends WidgetGroup {
         };
     }
 
+    private Runnable uiSize(final float d) {
+        return new Runnable() {
+            public void run() {
+                st.uiUserScale += d;
+                // Rebuild after this event finishes (the button belongs to the UI being replaced).
+                com.badlogic.gdx.Gdx.app.postRunnable(st.onUiScaleChanged);
+            }
+        };
+    }
+
     private Runnable cycle(final int d) {
         return new Runnable() {
             public void run() {
