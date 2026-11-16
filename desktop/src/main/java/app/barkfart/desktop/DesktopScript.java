@@ -2,6 +2,7 @@ package app.barkfart.desktop;
 
 import app.barkfart.BarkfartApp;
 import app.barkfart.edit.DopeRows;
+import app.barkfart.files.Importer;
 import app.barkfart.edit.StructureEdits;
 import app.barkfart.model.Layer;
 import app.barkfart.model.Node;
@@ -41,6 +42,20 @@ final class DesktopScript {
             else if (step.equals("easing")) {
                 EasingMenu.Preset cur = EasingMenu.PRESETS[2];
                 st.easingOpener.open(200, 300, cur, null);
+            } else if (step.equals("importall")) {
+                java.io.File docs = new java.io.File(System.getProperty("barkfart.docs"));
+                for (java.io.File fl : docs.listFiles()) {
+                    try {
+                        if (fl.getName().endsWith(".nodes") || fl.getName().endsWith(".nodemc")) {
+                            Importer.importFile(st.doc, fl);
+                        }
+                    } catch (Exception e) {
+                        System.out.println("[script] " + e);
+                    }
+                }
+                st.fire();
+            } else if (step.equals("files")) {
+                st.fileOpener.run();
             } else if (step.equals("preview")) {
                 st.previewCamera = true;
                 st.fire();

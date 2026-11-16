@@ -74,18 +74,23 @@ STATUS = {
     "Stay in camera mode on frame tap": ("x", ""),
     # Movieclips
     "Movieclips": ("~", "symbols with nesting, offset, speed, loop in the core; no UI"),
-    ".nodemc files": ("~", "import of all 12 sample clips works in the core; no import UI"),
+    ".nodemc files": ("x", "import from the File panel (all 12 sample clips parse)"),
     "Once / Loop playback": ("~", "symbol loop modes in the core"),
     "Default movieclips": ("-", "cannot ship the original's bundled content; ours later"),
     "Scaled/opacity MCs": ("~", "layer scale/opacity apply to symbol layers in the core"),
     # Filters
     "Transparency": ("~", "layer opacity in the core; no slider"),
     # Files
-    "Save/open projects": ("~", ".bark save/load with atomic saves in the core; no file UI"),
-    "Save/import stickfigures": ("~", ".nodes import/export byte-exact in the core; no file UI"),
+    "Save/open projects": ("x", "File panel: new, open, save, rename, duplicate, delete with undo; autosave"),
+    "Save/import stickfigures": ("x", "import from the folder or the Files picker; export .nodes byte-exact + share"),
     "Default stickfigures": ("-", "cannot ship the original's figures; ours later"),
     "Sample projects": (" ", "our own samples later"),
-    "Local project backup": ("~", "one rolling .bak per save in the core"),
+    "Local project backup": ("x", "one rolling .bak per save; deleted projects go to a hidden trash with Undo"),
+    "Delete files": ("x", "soft delete with Undo"),
+    "Open with / file association": ("~", "the Files picker imports; Open-in from other apps not wired yet"),
+    "Multi-select import": ("x", "the Files picker allows several files"),
+    "Send files": ("x", "share sheet for projects and exported figures"),
+    "Save reminder": ("-", "replaced by autosave every 30 s and on backgrounding"),
     # Settings
     "Screen padding": ("x", "safe areas handled automatically"),
     "Haptics": ("~", "long-press vibrates; no setting"),

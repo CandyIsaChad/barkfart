@@ -14,14 +14,12 @@ public class BarkfartApp extends ApplicationAdapter {
     public static final String VERSION = "0.1.0-m4ui";
 
     private final float uiScale;
+    private final app.barkfart.platform.Platform platform;
     private EditorScreen editor;
 
-    public BarkfartApp() {
-        this(1f);
-    }
-
     /** @param uiScale logical screen units per UI point (1 on iOS). */
-    public BarkfartApp(float uiScale) {
+    public BarkfartApp(app.barkfart.platform.Platform platform, float uiScale) {
+        this.platform = platform;
         this.uiScale = uiScale;
     }
 
@@ -41,7 +39,7 @@ public class BarkfartApp extends ApplicationAdapter {
 
     @Override
     public void create() {
-        editor = new EditorScreen(newProject(), uiScale);
+        editor = new EditorScreen(platform, uiScale);
         Thread st = new Thread(new Runnable() {
             public void run() {
                 final SelfTest.Result r = SelfTest.run();
@@ -75,7 +73,13 @@ public class BarkfartApp extends ApplicationAdapter {
     }
 
     @Override
+    public void pause() {
+        editor.pause();
+    }
+
+    @Override
     public void dispose() {
+        editor.pause();
         editor.dispose();
     }
 }

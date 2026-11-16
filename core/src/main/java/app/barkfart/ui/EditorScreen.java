@@ -18,7 +18,12 @@ import com.badlogic.gdx.utils.viewport.ScreenViewport;
 public final class EditorScreen implements Disposable {
     public static final float MIN_USER = 0.8f, MAX_USER = 1.8f;
 
-    public final EditorState state;
+    public EditorState state;
+    private final app.barkfart.platform.Platform platform;
+    private final app.barkfart.files.Session session;
+    private FilePanel filePanel;
+    private float autosaveTimer;
+    public static final float AUTOSAVE_SECONDS = 30;
     /** Logical screen units per point from the platform (1 on iOS; the desktop preview passes its own). */
     private final float base;
     private Theme theme;
@@ -31,16 +36,44 @@ public final class EditorScreen implements Disposable {
     private float insetL, insetR, insetB, insetT;
     private final Preferences prefs;
 
-    public EditorScreen(Project p, float base) {
+    public EditorScreen(app.barkfart.platform.Platform platform, float base) {
         this.base = base;
-        state = new EditorState(p);
+        this.platform = platform;
         prefs = Gdx.app.getPreferences("barkfart.ui");
-        state.uiUserScale = clampUser(prefs.getFloat("uiSize", 1f));
+        session = new app.barkfart.files.Session(new app.barkfart.files.ProjectStore(platform.documents()));
+        float user = clampUser(prefs.getFloat("uiSize", 1f));
+        app.barkfart.canvas.CanvasTools.KeyScope scope = app.barkfart.canvas.CanvasTools.KeyScope.JOINT;
         try {
-            state.tools.keyScope = app.barkfart.canvas.CanvasTools.KeyScope.valueOf(prefs.getString("keyScope", "JOINT"));
+            scope = app.barkfart.canvas.CanvasTools.KeyScope.valueOf(prefs.getString("keyScope", "JOINT"));
         } catch (IllegalArgumentException ignored) {
             // unknown value from a newer build: keep the default
         }
+        // Reopen the last project, or start a new one.
+        java.io.File last = new java.io.File(prefs.getString("lastProject", ""));
+        Project p = null;
+        if (last.isFile()) {
+            try {
+                p = session.open(last);
+            } catch (Exception e) {
+                Gdx.app.error("Barkfart", "could not reopen " + last, e);
+                last = null;
+            }
+        } else {
+            last = null;
+        }
+        attach(p != null ? p : app.barkfart.BarkfartApp.newProject(), p != null ? last : null, p != null ? nameOf(last) : "Untitled", user, scope);
+        build();
+    }
+
+    private static String nameOf(java.io.File f) {
+        String n = f.getName();
+        return n.endsWith(app.barkfart.files.ProjectStore.EXT) ? n.substring(0, n.length() - app.barkfart.files.ProjectStore.EXT.length()) : n;
+    }
+
+    private void attach(Project p, java.io.File file, String name, float user, app.barkfart.canvas.CanvasTools.KeyScope scope) {
+        state = new EditorState(p);
+        state.uiUserScale = user;
+        state.tools.keyScope = scope;
         state.onUiScaleChanged = new Runnable() {
             public void run() {
                 state.uiUserScale = clampUser(state.uiUserScale);
@@ -50,7 +83,46 @@ public final class EditorScreen implements Disposable {
                 resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
             }
         };
+        session.attach(state.doc, file, name);
+        prefs.putString("lastProject", file == null ? "" : file.getAbsolutePath()).flush();
+    }
+
+    /** Saves the current project if it changed; returns false (and reports) on failure. */
+    public boolean saveNow() {
+        try {
+            boolean saved = session.saveIfDirty();
+            if (saved) prefs.putString("lastProject", session.file().getAbsolutePath()).flush();
+            return true;
+        } catch (Exception e) {
+            if (state != null) state.flash("Could not save: " + e.getMessage(), null);
+            return false;
+        }
+    }
+
+    private void switchTo(Project p, java.io.File f, String name) {
+        if (!saveNow()) return;
+        attach(p, f, name, state.uiUserScale, state.tools.keyScope);
         build();
+        resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+    }
+
+    public void openFile(java.io.File f) {
+        try {
+            switchTo(session.open(f), f, nameOf(f));
+            state.flash("Opened " + nameOf(f), null);
+        } catch (Exception e) {
+            state.flash("Could not open " + f.getName() + ": " + e.getMessage(), null);
+        }
+    }
+
+    public void newProject() {
+        switchTo(app.barkfart.BarkfartApp.newProject(), null, "Untitled");
+        state.flash("New project", null);
+    }
+
+    /** Called when the app goes to the background: never lose work. */
+    public void pause() {
+        saveNow();
     }
 
     private static float clampUser(float v) {
@@ -73,6 +145,12 @@ public final class EditorScreen implements Disposable {
             theme.dispose();
         }
         state.clearListeners();
+        state.fileOpener = new Runnable() {
+            public void run() {
+                filePanel.setBounds(0, 0, stage.getWidth(), stage.getHeight());
+                filePanel.open();
+            }
+        };
         float heightPt = Gdx.graphics.getHeight() / base;
         scale = base * autoScale(heightPt) * state.uiUserScale;
         float backbuffer = Gdx.graphics.getBackBufferWidth() / (float) Math.max(1, Gdx.graphics.getWidth());
@@ -115,6 +193,35 @@ public final class EditorScreen implements Disposable {
         stage.addActor(sidebar);
         final EasingMenu easing = new EasingMenu(theme);
         stage.addActor(easing);
+        filePanel = new FilePanel(theme, new FilePanel.Host() {
+            public EditorState state() {
+                return state;
+            }
+
+            public app.barkfart.files.Session session() {
+                return session;
+            }
+
+            public app.barkfart.platform.Platform platform() {
+                return platform;
+            }
+
+            public void openFile(java.io.File f) {
+                EditorScreen.this.openFile(f);
+            }
+
+            public void newProject() {
+                EditorScreen.this.newProject();
+            }
+
+            public void afterDelete() {
+                // the open project's file is gone: continue in a fresh project
+                attach(app.barkfart.BarkfartApp.newProject(), null, "Untitled", state.uiUserScale, state.tools.keyScope);
+                build();
+                resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            }
+        });
+        stage.addActor(filePanel);
         state.easingOpener = new EditorState.EasingOpener() {
             public void open(float sx, float sy, EasingMenu.Preset cur, EasingMenu.Chosen chosen) {
                 easing.setBounds(0, 0, stage.getWidth(), stage.getHeight());
@@ -158,6 +265,11 @@ public final class EditorScreen implements Disposable {
 
     public void render(float dt) {
         state.update(dt);
+        autosaveTimer += dt;
+        if (autosaveTimer >= AUTOSAVE_SECONDS && !state.playing && !state.doc.inTransaction()) {
+            autosaveTimer = 0;
+            saveNow();
+        }
         Gdx.gl.glClearColor(Theme.PANEL.r, Theme.PANEL.g, Theme.PANEL.b, 1);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
         stage.act(dt);

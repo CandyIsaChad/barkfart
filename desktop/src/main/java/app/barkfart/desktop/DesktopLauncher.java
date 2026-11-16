@@ -34,14 +34,16 @@ public class DesktopLauncher {
         config.useVsync(true);
         config.setBackBufferConfig(8, 8, 8, 8, 16, 0, 4);
         float scale = phone ? 2f : (ipad ? 1f : 1.5f);
+        String docs = System.getProperty("barkfart.docs", System.getProperty("user.home") + "/Barkfart");
+        final app.barkfart.platform.Platform platform = new app.barkfart.platform.Platform.Basic(new java.io.File(docs));
         if (shot == null) {
-            new Lwjgl3Application(new BarkfartApp(scale), config);
+            new Lwjgl3Application(new BarkfartApp(platform, scale), config);
             return;
         }
         final String out = shot;
         final int n = frames;
         final String steps = script;
-        new Lwjgl3Application(new BarkfartApp(scale) {
+        new Lwjgl3Application(new BarkfartApp(platform, scale) {
             int k;
 
             @Override

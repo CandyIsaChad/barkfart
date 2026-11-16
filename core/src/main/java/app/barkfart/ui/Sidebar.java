@@ -28,7 +28,7 @@ import java.util.Map;
 public final class Sidebar extends WidgetGroup {
     private final Theme theme;
     private final EditorState st;
-    private final UiButton undo, redo, modeFigure, modeAll, modeCamera;
+    private final UiButton file, undo, redo, modeFigure, modeAll, modeCamera;
     private final Label readout, status;
     private final Table panel = new Table();
     private final ScrollPane scroll;
@@ -45,6 +45,11 @@ public final class Sidebar extends WidgetGroup {
     public Sidebar(Theme theme, EditorState st) {
         this.theme = theme;
         this.st = st;
+        file = new UiButton(theme, "File", UiButton.Style.NORMAL, new Runnable() {
+            public void run() {
+                if (st.fileOpener != null) st.fileOpener.run();
+            }
+        });
         undo = new UiButton(theme, "Undo", UiButton.Style.NORMAL, new Runnable() {
             public void run() {
                 st.doc.undo();
@@ -74,7 +79,7 @@ public final class Sidebar extends WidgetGroup {
         scroll.setScrollingDisabled(true, false);
         scroll.setFadeScrollBars(true);
         scroll.setOverscroll(false, true);
-        for (Actor a : new Actor[] {undo, redo, modeFigure, modeAll, modeCamera, readout, scroll, status}) addActor(a);
+        for (Actor a : new Actor[] {file, undo, redo, modeFigure, modeAll, modeCamera, readout, scroll, status}) addActor(a);
         st.addListener(new Runnable() {
             public void run() {
                 refresh();
@@ -98,8 +103,10 @@ public final class Sidebar extends WidgetGroup {
         float inner = w - 2 * Theme.PAD;
         float bw = (inner - g) / 2;
         float y = h - p - Theme.CONTROL_H;
-        undo.setBounds(p, y, bw, Theme.CONTROL_H);
-        redo.setBounds(p + bw + g, y, bw, Theme.CONTROL_H);
+        float tw = (inner - 2 * 2) / 3;
+        file.setBounds(p, y, tw, Theme.CONTROL_H);
+        undo.setBounds(p + tw + 2, y, tw, Theme.CONTROL_H);
+        redo.setBounds(p + 2 * (tw + 2), y, tw, Theme.CONTROL_H);
         y -= 20;
         readout.setBounds(p, y, inner, 16);
         y -= 4 + Theme.CONTROL_H;

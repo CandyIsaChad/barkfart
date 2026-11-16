@@ -100,4 +100,25 @@ class FilesTest {
         assertEquals(1, d.project.library.size());
         assertEquals(0, d.project.root().layers.size());
     }
+
+    @Test
+    void sessionSavesOnlyWhenDirtyAndNamesNewProjects() throws Exception {
+        ProjectStore st = new ProjectStore(dir);
+        Session s = new Session(st);
+        Project p = Fixtures.empty();
+        p.root().layers.add(Fixtures.stickman(p, "man"));
+        Document d = new Document(p);
+        s.attach(d, null, "Untitled");
+        assertFalse(s.dirty(), "an untouched new project is not saved");
+        assertFalse(s.saveIfDirty());
+        d.apply(app.barkfart.edit.StructureEdits.setFps(p, 12));
+        assertTrue(s.dirty());
+        assertTrue(s.saveIfDirty());
+        assertEquals("Untitled.bark", s.file().getName());
+        assertFalse(s.dirty());
+        assertFalse(s.saveIfDirty());
+        assertEquals(12f, st.open(s.file()).settings.fps);
+        d.undo();
+        assertTrue(s.dirty(), "undo is a change too");
+    }
 }

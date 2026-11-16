@@ -36,6 +36,8 @@ public final class EditorState {
     public app.barkfart.edit.Editor.Clip keyClipboard;
     /** Multi-select mode in the dope sheet (double-tap toggles): taps add/remove keys. */
     public boolean multiSelect;
+    /** Opens the File panel (set by the screen). */
+    public Runnable fileOpener;
     /** Opens the easing dropdown at a stage position (set by the screen). */
     public EasingOpener easingOpener;
 

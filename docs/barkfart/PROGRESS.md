@@ -176,6 +176,25 @@ Not done
   panel): waits for the user's screenshots so the layout matches the
   original. Markers exist in the model but have no edit commands yet.
 
+### Files (parity phase 1, 2026-11-17)
+- Barkfart folder = the app's Documents (iOS; visible in the Files app via
+  UIFileSharingEnabled), ~/Barkfart on desktop (-Dbarkfart.docs overrides).
+- File panel (sidebar "File"): projects list (newest first, current marked;
+  tap to open, saving the current one first), New, Save, Rename (system text
+  prompt), Duplicate, Delete (soft: .trash, Undo in the status line);
+  import list of every .nodes/.nodemc in the folder (tap = import into the
+  open project, one undo step); From Files... (iOS document picker, copies
+  into the folder then imports/opens); Export figure (.nodes, then the iOS
+  share sheet); Share project.
+- Autosave every 30 s when changed and whenever the app is backgrounded or
+  closed; the last project reopens at launch; a new project gets a file
+  ("Untitled.bark") on its first save.
+- Tested: FilesTest (store lifecycle, sanitizing, import as one undo step,
+  byte-exact figure export, unsupported messages, local movieclip import,
+  session dirty tracking). Desktop: relaunch reopened the saved project;
+  File panel and in-app imports checked by screenshot. Not tested: the iOS
+  picker and share sheet on a device (they compile against the iOS SDK).
+
 ### Fixes from the user's first iPad test (2026-11-17)
 - Auto-key scope (figure panel): Joint = the dragged joint's angle AND
   length are keyed (stretch is never left unkeyed); Figure = every joint's

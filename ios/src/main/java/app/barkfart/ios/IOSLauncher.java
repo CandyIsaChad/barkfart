@@ -16,7 +16,7 @@ public class IOSLauncher extends IOSApplication.Delegate {
         config.screenEdgesDeferringSystemGestures = org.robovm.apple.uikit.UIRectEdge.with(
                 org.robovm.apple.uikit.UIRectEdge.Top, org.robovm.apple.uikit.UIRectEdge.Bottom);
         config.hideHomeIndicator = true;
-        return new IOSApplication(new BarkfartApp(), config);
+        return new IOSApplication(new BarkfartApp(new IOSPlatform(), 1f), config);
     }
 
     public static void main(String[] argv) {

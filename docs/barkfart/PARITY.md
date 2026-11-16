@@ -5,7 +5,7 @@ Built by tools/make_parity.py from research/stick-nodes-features-raw.md (64 upda
 Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without UI, **[ ]** not yet, **(won't)** with the reason.
 
 
-**Totals (382 features):** 44 usable now, 25 partial or core-only, 283 not yet, 30 won't.
+**Totals (382 features):** 51 usable now, 22 partial or core-only, 278 not yet, 31 won't.
 
 
 ## Order of work (parity first, then our own additions)
@@ -235,7 +235,7 @@ Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without U
 - [ ] **Cache MC** (since 3.1.9): Rasterize single-frame MCs for faster rendering
 - (won't) **Default movieclips** (since 3.3.0): Bundled sample movieclips *Barkfart: cannot ship the original's bundled content; ours later.*
 - [ ] **MC limits** (since 4.0.0 / 4.0.2): Up to 256,000 nodes and 200 frames per MC
-- [~] **.nodemc files** (since 3.0.0 / send 3.1.0): Movieclip file format, sendable *Barkfart: import of all 12 sample clips works in the core; no import UI.*
+- [x] **.nodemc files** (since 3.0.0 / send 3.1.0): Movieclip file format, sendable *Barkfart: import from the File panel (all 12 sample clips parse).*
 - [~] **Scaled/opacity MCs** (since ≤3.0.2): Movieclips support scale and opacity like figures *Barkfart: layer scale/opacity apply to symbol layers in the core.*
 - [ ] **Submission type prompt** (since ≤4.1.5): Asks whether a stickfigure submission should be a movieclip instead
 
@@ -337,32 +337,32 @@ Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without U
 - [ ] **Non-blocking export** (since 1.6.0): Exporting no longer freezes the device
 - [ ] **Exports to gallery** (since 1.2.3): iOS camera roll; Android Pictures/Movies (3.3.0)
 - [ ] **Free watermark** (since 1.0): Free version stamps exports
-- [ ] **Send files** (since 2.1.0): Email/share projects, figures, sounds, MCs
+- [x] **Send files** (since 2.1.0): Email/share projects, figures, sounds, MCs *Barkfart: share sheet for projects and exported figures.*
 - [ ] **Auto-ZIP send** (since 4.0.0): Sending >5 files bundles a ZIP
 
 ## Files, projects & import
 
-- [~] **Save/open projects** (since 1.0): Project files (.stknds) *Barkfart: .bark save/load with atomic saves in the core; no file UI.*
-- [~] **Save/import stickfigures** (since 1.0): Figure files (.nodes) into a project library *Barkfart: .nodes import/export byte-exact in the core; no file UI.*
+- [x] **Save/open projects** (since 1.0): Project files (.stknds) *Barkfart: File panel: new, open, save, rename, duplicate, delete with undo; autosave.*
+- [x] **Save/import stickfigures** (since 1.0): Figure files (.nodes) into a project library *Barkfart: import from the folder or the Files picker; export .nodes byte-exact + share.*
 - [ ] **Pivot STK import** (since 1.0): Import Pivot 2.x stickfigures
 - (won't) **Default stickfigures** (since 1.0): Bundled starter figures (refreshed 2.0.0) *Barkfart: cannot ship the original's figures; ours later.*
-- [ ] **Delete files** (since 1.6.0): Permanently delete projects/figures/sounds in-app
+- [x] **Delete files** (since 1.6.0): Permanently delete projects/figures/sounds in-app *Barkfart: soft delete with Undo.*
 - [ ] **Alphabetical lists** (since 1.6.0): Open/import lists sorted A–Z
 - [ ] **Natural sort** (since 3.1.0): Numbers in names sorted numerically
 - [ ] **Sort new/old** (since 2.3.0): Sort file lists by date
 - [ ] **List filter** (since 2.0.0): Text filter on open/import lists
 - [ ] **Library dropdown filter** (since 3.3.2): Filter in imported figure/MC/sound dropdowns
 - [ ] **Figure preview** (since 2.3.7 / 4.1.2): Preview figures before importing; nodes on/off in preview
-- [ ] **Multi-select import** (since 2.3.7): Import several figures at once
+- [x] **Multi-select import** (since 2.3.7): Import several figures at once *Barkfart: the Files picker allows several files.*
 - [ ] **Edit imported library** (since 3.0.0): Rename, hide, delete imported figures (search added 4.1.6)
-- [ ] **Open with / file association** (since 1.7.9): Open NODES/STK/STKNDS from other apps
+- [~] **Open with / file association** (since 1.7.9): Open NODES/STK/STKNDS from other apps *Barkfart: the Files picker imports; Open-in from other apps not wired yet.*
 - [ ] **Android download auto-scan** (since 1.7.9): Auto-collects downloaded files; **REMOVED 3.2.0**
 - [ ] **Open ZIP packs** (since 2.0.1): Extract figure packs into the library
 - [ ] **Open mixed ZIPs** (since 4.0.0): ZIP containing any Stick Nodes file types
 - [ ] **Partial project open** (since 2.2.2 / 2.3.6): Open fewer frames, or a percentage from first/last frame
 - [ ] **Out-of-memory warning** (since 2.5.7): Warns instead of crashing on oversized projects
 - [ ] **Save view state** (since 2.5.1): Project saves zoom, position, current frame, guides
-- [~] **Local project backup** (since 4.3.0): Overwritten saves kept temporarily, restorable *Barkfart: one rolling .bak per save in the core.*
+- [x] **Local project backup** (since 4.3.0): Overwritten saves kept temporarily, restorable *Barkfart: one rolling .bak per save; deleted projects go to a hidden trash with Undo.*
 - [ ] **Library tools** (since 1.2.4): Submit figures to and download figures from the website library in-app (submission form existed earlier)
 - [ ] **Pack submission** (since 2.3.7 / 2.5.9): Multi-figure submit with auto-ZIP and file renaming
 - [ ] **Submission rules dialog** (since 2.5.9): Guidelines shown before submitting
@@ -388,7 +388,7 @@ Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without U
 - [ ] **Filipino** (since 2.3.5): Added language
 - [ ] **Japanese** (since 2.6.1): Added language
 - [ ] **Russian** (since 3.1.0): Added language
-- [ ] **Save reminder** (since 2.1.0): Prompt after X minutes unsaved; shows time since save (4.2.4)
+- (won't) **Save reminder** (since 2.1.0): Prompt after X minutes unsaved; shows time since save (4.2.4) *Barkfart: replaced by autosave every 30 s and on backgrounding.*
 - [ ] **Lag options** (since 2.4.4): Performance options under undo/redo
 - (won't) **Memory display** (since 2.3.6): Memory use shown on open, in settings, near add-frame *Barkfart: replaced by performance work (M9).*
 - (won't) **Memory Use dialog** (since 4.0.0): Breakdown dialog from the memory indicator *Barkfart: replaced by performance work (M9).*
