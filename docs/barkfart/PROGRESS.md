@@ -203,6 +203,11 @@ M3 is split (recorded per the brief's rule; nothing cut):
   on the phone, and chose to make the repo public (free macOS runners).
   Before publishing, commit authorship was rewritten to the GitHub noreply
   address and old Actions runs (which linked the old commits) were deleted.
+- **Still blocked after going public (15:00-15:30 UTC):** macos-latest and
+  macos-15 jobs stay queued with no runner (one cancelled after 15 min);
+  Linux jobs start instantly; githubstatus shows no Actions incident. Points
+  to an account-level hold on macOS runners. Needs the user to look at
+  github.com/settings/billing and Actions settings.
 - (Was) **IPA builds blocked (2026-11-16 ~14:20 UTC):** two dispatches of
   ios.yml (commits 4e12277, d31e87b) waited 15 min without a macOS runner
   and were cancelled; Linux CI keeps passing. Most likely the private repo's
