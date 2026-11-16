@@ -18,7 +18,9 @@ public final class MovieclipFormat {
     static final byte[] MAGIC = {1, 2, 3, 4, 5, 6, 7, 8, 9};
     /** Versions whose frame layout has been verified against real files. */
     static final int VERIFIED_VERSION = 330;
-    static final int FIGURE_HEADER_BYTES = 101;
+    static final int FIGURE_HEADER_BYTES = 97;
+    /** Bytes after the last figure of each frame (meaning unknown, kept raw). */
+    static final int FRAME_TRAILER_BYTES = 4;
     static final int NODE_RECORD_BYTES = 58;
 
     public static final class NamedFigure {
@@ -29,7 +31,7 @@ public final class MovieclipFormat {
     /** One figure instance inside a frame. */
     public static final class FrameFigure {
         public int libraryId;
-        /** Raw per-instance header; decoded fields below. */
+        /** Raw 97-byte per-instance header; decoded fields below. */
         public byte[] header;
         /** Per node in hierarchy order: raw 58-byte records. */
         public final List<byte[]> nodes = new ArrayList<byte[]>();
@@ -56,23 +58,23 @@ public final class MovieclipFormat {
         }
 
         public static float nodeScale(byte[] r) {
-            return Float.intBitsToFloat(be32(r, 3));
+            return Float.intBitsToFloat(be32(r, 7));  // scale
         }
 
         public static float nodeLength(byte[] r) {
-            return Float.intBitsToFloat(be32(r, 7));
+            return Float.intBitsToFloat(be32(r, 11));
         }
 
         public static int nodeThickness(byte[] r) {
-            return be32(r, 11);
+            return be32(r, 15);
         }
 
         public static float nodeLocalAngle(byte[] r) {
-            return Float.intBitsToFloat(be32(r, 19));
+            return Float.intBitsToFloat(be32(r, 23));
         }
 
         public static int nodeColor(byte[] r) {
-            return be32(r, 27);
+            return be32(r, 31);
         }
     }
 
@@ -80,6 +82,8 @@ public final class MovieclipFormat {
         public float soundVolume, soundPan, soundPitch;
         public int soundId;
         public final List<FrameFigure> figures = new ArrayList<FrameFigure>();
+        /** Raw 4 bytes after the figures (meaning unknown). */
+        public byte[] trailer = new byte[FRAME_TRAILER_BYTES];
     }
 
     public static final class LegacyMovieclip {
@@ -172,10 +176,6 @@ public final class MovieclipFormat {
             fr.soundPitch = Float.intBitsToFloat(in.i32());
             fr.soundId = in.i32();
             int assets = in.count(4 + FIGURE_HEADER_BYTES);
-            if (assets > 1) {
-                // Multi-figure frames differ by 4 bytes per frame from this model; see NOTES.md.
-                throw new UnsupportedLayoutException("frames with several figures are not supported yet (frame " + f + ")");
-            }
             for (int a = 0; a < assets; a++) {
                 FrameFigure ff = new FrameFigure();
                 ff.libraryId = in.i32();
@@ -185,6 +185,7 @@ public final class MovieclipFormat {
                 for (int k = 0; k < nodes; k++) ff.nodes.add(take(in, NODE_RECORD_BYTES));
                 fr.figures.add(ff);
             }
+            fr.trailer = take(in, FRAME_TRAILER_BYTES);
             mc.frames.add(fr);
         }
         return mc;
@@ -238,6 +239,7 @@ public final class MovieclipFormat {
                 out.o.write(ff.header);
                 for (byte[] r : ff.nodes) out.o.write(r);
             }
+            out.o.write(fr.trailer);
         }
         return out.bytes();
     }

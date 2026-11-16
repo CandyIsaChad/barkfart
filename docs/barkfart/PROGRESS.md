@@ -127,8 +127,8 @@ Known issues
 
 ### M3d Legacy .nodemc import (partial, 2026-11-16)
 What works
-- Reader/writer for version 330 clips whose frames hold one figure (9 of 12
-  local clips): parse to EOF, body re-serializes byte for byte.
+- Reader/writer for version 330 clips: all 12 local clips parse to EOF and
+  re-serialize their body byte for byte (multi-figure frames included).
 - MovieclipMapper: clip to Symbol (layer per figure instance, full pose keys
   per frame, position/scale/opacity keys, hold keys on shown).
 - **Golden test against the original renderer** (local only): clip frames
@@ -143,8 +143,9 @@ What works
 - Shapes now drawn natively: round segment, square segment, circle, ellipse,
   isosceles triangle, polyfills (concave, ear-clipped, drawn just before the
   anchor). Trapezoid, polygon, gradients and curves still approximate.
-Not done (time box reached; recorded in NOTES.md)
-- Frames with several figures (3 clips). Other movieclip versions.
+Not done (recorded in NOTES.md)
+- Snow and Action Lines render figures in the wrong place (parse is exact).
+- Movieclip versions other than 330.
 
 ### M4 Timeline: headless half (done 2026-11-16; UI waits for screenshots)
 What works

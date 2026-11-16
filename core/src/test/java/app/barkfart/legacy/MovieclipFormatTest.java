@@ -43,6 +43,6 @@ class MovieclipFormatTest {
             System.out.printf("[nodemc] %s: %d frames @ %d fps, %d library figures, %d figure instances, tween %d%n",
                     f.getName(), mc.frames.size(), mc.fps, mc.library.size(), instances, mc.tweening);
         }
-        assertTrue(supported >= 9, "regression: only " + supported + " clips parse");
+        assertEquals(files.size(), supported, "every local clip must parse");
     }
 }

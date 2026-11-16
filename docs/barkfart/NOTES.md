@@ -85,10 +85,15 @@ which matters for import scale (DESIGN Q4).
   @35; the rest unknown and kept raw).
 - Verified: 9 of 12 bundled clips (all frames with one figure) parse to EOF
   and re-serialize their body byte for byte.
-- Open: frames with several figures (Action Lines, Rain, Snow). Instances are
-  2943 bytes apart and the last one is 2947, so a frame likely ends with a
-  4-byte trailer that the one-figure model folds into the instance. Time box
-  reached; next attempt should start there.
+- Resolved: each figure is libraryId i32 + a 97-byte header + 58-byte node
+  records, and every frame ends with a 4-byte trailer (kept raw). Node
+  record fields: scale @7, length @11, thickness @15, default local angle
+  @19, local angle @23, default world angle @27, colour @31, gradient @35,
+  outline @39. All 12 local clips parse to EOF and round-trip byte for byte
+  (Rain has 466 figure instances).
+- Open: Snow and Action Lines (several figures per frame) render with
+  figures in the wrong place (Snow: correct pattern shifted vertically).
+  Suspect a per-instance position or rotation field, or tweened timing.
 
 ## Shape semantics: current best fit against the original's previews (2026-11-16)
 - Ellipse (type 5): centred on the segment midpoint, major axis = segment
