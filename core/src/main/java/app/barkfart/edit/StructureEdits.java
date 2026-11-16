@@ -346,6 +346,19 @@ public final class StructureEdits {
         };
     }
 
+    public static Command setFps(final Project p, final float fps) {
+        final float before = p.settings.fps;
+        return new Named("Frame rate") {
+            public void apply() {
+                p.settings.fps = fps;
+            }
+
+            public void revert() {
+                p.settings.fps = before;
+            }
+        };
+    }
+
     public static Command setDuration(final Symbol s, final double seconds) {
         final double before = s.duration;
         return new Named("Duration") {

@@ -24,7 +24,7 @@ public final class CanvasTools {
         public final Node node;
         public final float x, y;
 
-        Hit(Layer.FigureLayer layer, Node node, float x, float y) {
+        public Hit(Layer.FigureLayer layer, Node node, float x, float y) {
             this.layer = layer;
             this.node = node;
             this.x = x;

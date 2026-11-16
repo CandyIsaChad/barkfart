@@ -173,6 +173,37 @@ Not done
   panel): waits for the user's screenshots so the layout matches the
   original. Markers exist in the model but have no edit commands yet.
 
+### M4 Timeline: first interactive editor (2026-11-17, prototype)
+What works (UI-SPEC v2, after an independent design review)
+- Layout like the original: sidebar (Undo/Redo, Figure | All | Camera,
+  context panel, status line), frame strip on top (16:9 cells, key vs
+  in-between with tween badge, current outline, "+" cell, momentum scroll,
+  scroll bar), Play/Stop top-right, white stage on a dark surround.
+- Posing: drag any joint (after 8 pt) to rotate, or stretch mode; drag the
+  main node to move the figure; always-on auto-key keys the current frame;
+  one undo step per drag. Pan/pinch/double-tap the view; two-finger tap
+  undo, three-finger tap redo. Camera mode pans/zooms a camera layer
+  (created on first use, undoable).
+- Frame menu (tap current frame or long-press): insert, duplicate, delete
+  (undo from the status line), hold/tween to next.
+- Figure panel: previous/next figure, copy/paste pose, rotate/stretch,
+  angle scrub with -/+, delete figure. Nothing selected: add figure, onion
+  skin, frame rate.
+- Onion skin from the evaluator (2 back red, 1 forward blue).
+- Inter font via gdx-freetype at device resolution, tabular digits.
+- iOS: system edge gestures deferred top/bottom, home indicator hidden.
+- Structural undo for layers, nodes, polyfills, modifiers, markers, fps.
+How it was tested
+- 92 core tests (canvas picking/dragging through a rotated, zoomed camera,
+  frame ops, structural undo, speed integral, onion skin).
+- Desktop phone preview (844 x 390 pt at 2x) screenshots by eye: new
+  project, posed frames with onion skin and selection, camera mode.
+Not tested
+- Touch on a real device (see the checklist below). Thumbnails in the
+  strip, the status-line "jump to frame", the nudge pad and magnifier, iPad
+  metrics and the collapsed rail are not built yet. The panel rebuilds on
+  every change (fine now; revisit in M9).
+
 ## In progress
 M3 is split (recorded per the brief's rule; nothing cut):
 - M3a done, M3b done (above).
@@ -224,6 +255,19 @@ M3 is split (recorded per the brief's rule; nothing cut):
   newest IPA the user has is from commit 1139106 (M3a self-test, 9 checks);
   everything after it (shapes, polyfills, legacy import, edit package) has
   not run under MobiVM yet.
+
+## Touch checklist for the editor (manual)
+1. Drag a joint: it rotates around its parent and follows the finger; a
+   short tap selects without moving. Toggle Stretch and drag: length changes.
+2. Drag the orange square: the whole figure moves.
+3. One-finger drag on empty stage pans; pinch zooms; double-tap fits.
+4. Two-finger tap undoes; three-finger tap redoes; Undo/Redo buttons too.
+5. "+" adds a frame; pose differently; tap Play: it loops; Stop returns.
+6. Tap the current frame (or long-press any frame): the menu works;
+   Delete frame shows "Deleted frame N · Undo" and tapping it restores.
+7. Camera: drag pans and pinch zooms the shot; the blue border shows.
+8. Swiping down from the very top edge or up from the bottom edge does not
+   open Notification Centre / go home on the first swipe.
 
 ## Device checklist (manual; I cannot automate these)
 1. Install the latest Barkfart.ipa in LiveContainer; launch it.

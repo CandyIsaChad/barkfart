@@ -18,22 +18,25 @@ import com.badlogic.gdx.utils.Disposable;
 public final class Theme implements Disposable {
     // Colours
     public static final Color PANEL = rgb(0x1e2024), CONTROL = rgb(0x2b2e33), CONTROL_DOWN = rgb(0x363a40),
-            TEXT = rgb(0xe6e6e6), TEXT_DIM = rgb(0x9aa0a6), ACCENT = rgb(0x3d8bfd), DANGER = rgb(0xe5484d),
-            SURROUND = rgb(0x2b2e33), STAGE = rgb(0xffffff), ROOT_HANDLE = rgb(0xf29a38);
+            SEGMENT_ON = rgb(0x40454c), SEGMENT_EDGE = rgb(0x5a6068), SURROUND = rgb(0x17191c),
+            TEXT = rgb(0xe6e6e6), TEXT_DIM = rgb(0x9aa0a6), ACCENT = rgb(0x0a84ff), DANGER = rgb(0xff453a),
+            STAGE = rgb(0xffffff), ROOT_HANDLE = rgb(0xff9f0a), CELL = rgb(0x26292e), CELL_TWEEN = rgb(0x1f2226);
 
-    // Metrics (points)
-    public static final float GRID = 8, PAD = 12, CONTROL_H = 40, TOUCH = 44, RADIUS = 6;
-    public static final float SIDEBAR_W = 168, STRIP_H = 72, CELL_W = 64, CELL_H = 56, CELL_GAP = 4;
+    // Metrics (points), phone; see UI-SPEC.md for the iPad set.
+    public static final float GRID = 4, PAD = 12, GAP = 8, CONTROL_H = 40, TOUCH = 44, RADIUS = 4;
+    public static final float SIDEBAR_W = 168, STRIP_H = 72, CELL_W = 96, CELL_H = 54, CELL_GAP = 4, PLAY = 56;
     public static final float TEXT_S = 11, TEXT_M = 13, TEXT_L = 15;
+    public static final float DRAG_SLOP = 8, HANDLE_HIT = 22, JOINT_R = 3.5f, ROOT_HALF = 4.5f;
 
-    /** Points to pixels. */
+    /** Pixels per point for rasterizing fonts and shapes. */
     public final float px;
     public final BitmapFont small, body, title;
     private final Texture roundTex;
     private final Texture whiteTex;
 
-    public Theme() {
-        px = Math.max(1f, Gdx.graphics.getDensity());
+    /** @param pixelsPerPoint backbuffer pixels per UI point (3 on recent iPhones). */
+    public Theme(float pixelsPerPoint) {
+        px = Math.max(1f, pixelsPerPoint);
         FreeTypeFontGenerator reg = new FreeTypeFontGenerator(Gdx.files.internal("fonts/Inter-Regular.ttf"));
         FreeTypeFontGenerator semi = new FreeTypeFontGenerator(Gdx.files.internal("fonts/Inter-SemiBold.ttf"));
         small = font(reg, TEXT_S);
@@ -55,10 +58,28 @@ public final class Theme implements Disposable {
         p.minFilter = Texture.TextureFilter.Linear;
         p.magFilter = Texture.TextureFilter.Linear;
         p.hinting = FreeTypeFontGenerator.Hinting.AutoMedium;
+        p.characters = FreeTypeFontGenerator.DEFAULT_CHARS + "\u00b7\u2026\u2013\u2014\u00b0\u2212";
         BitmapFont f = gen.generateFont(p);
         f.getData().setScale(1f / px);   // draw in points, rasterized in pixels
         f.setUseIntegerPositions(false);
+        tabularDigits(f);
         return f;
+    }
+
+    /** Gives every digit the widest digit's advance so numbers do not jitter. */
+    private static void tabularDigits(BitmapFont f) {
+        int max = 0;
+        for (char c = '0'; c <= '9'; c++) {
+            BitmapFont.Glyph g = f.getData().getGlyph(c);
+            if (g != null) max = Math.max(max, g.xadvance);
+        }
+        for (char c = '0'; c <= '9'; c++) {
+            BitmapFont.Glyph g = f.getData().getGlyph(c);
+            if (g == null) continue;
+            int extra = max - g.xadvance;
+            g.xoffset += extra / 2;
+            g.xadvance = max;
+        }
     }
 
     /** White rounded-rect texture for tinted nine-patches, corner radius r px. */
