@@ -19,6 +19,11 @@
 - 2026-11-16: The brief's rule "reuse existing UI widgets" cannot apply, since
   there is no original source. We build our own widgets on LibGDX scene2d.
 - 2026-11-16: IPA is built unsigned on GitHub Actions for LiveContainer.
+- 2026-11-16: Started the headless half of M4 while M3 is still open (M3c
+  .stknds blocked on a newer, undocumented format version and on user files;
+  M4 UI blocked on screenshots). Recorded here so the order change is visible.
+- 2026-11-16: Golden comparison against the original uses the preview frames
+  inside its movieclips (local only); metric and tolerances in NOTES.md.
 
 ## Done
 
@@ -176,9 +181,31 @@ M3 is split (recorded per the brief's rule; nothing cut):
 - M3 stays open until: shapes beyond segment/circle are drawn so more clips
   pass the original-renderer golden; .stknds imports; figures from 4.3.4 load.
 
-## Known issues
-- `ios/data/.gitkeep` is copied into the app bundle. Harmless; remove when
-  real assets land.
+## Known issues and not done (nothing here is cut; each is tracked)
+- No undo commands yet for modifiers, markers, layer flags (visible, lock,
+  solo), layer/node structure (add, remove, reorder) or polyfills. Needed
+  before the M4/M5 UI exposes those edits.
+- Figures saved by Stick Nodes 4.3.4 are probably rejected
+  (NodesFormat.MAX_VERSION = 423) until a real 4.3.4 file confirms the layout.
+- .stknds import not started (M3c).
+- Movieclips: Snow and Action Lines render figures in the wrong place;
+  Sparks is a known gap (IoU 0.82). Gradients, trapezoids, polygons, curves,
+  right/upside-down triangles, node scale and smart-stretch/angle/drag locks
+  are not applied in rendering.
+- The evaluator fuzz test does not yet generate polyfills or the new shapes
+  (EarClip has its own hostile-input test).
+- Effects resolve but do not render (M6). Text layers draw nothing (M5).
+  Group opacity is per-shape alpha until M6.
+- No touch UI exists yet, so the only manual checklist is the device check
+  below.
+
+## Device checklist (manual; I cannot automate these)
+1. Install the latest Barkfart.ipa in LiveContainer; launch it.
+2. Home-screen icon is the fox sketch; launch screen is orange "Barkfart";
+   the app fills the screen (no letterbox bars).
+3. Top line turns green "core self-test PASS 12/12" within ~10 s. If it is
+   red, screenshot the lines below it.
+4. The demo animates smoothly (fps shown under the self-test line).
 
 ## Next
 - Waiting on the user (not blocking):
