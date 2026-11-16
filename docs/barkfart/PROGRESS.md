@@ -146,6 +146,25 @@ What works
 Not done (time box reached; recorded in NOTES.md)
 - Frames with several figures (3 clips). Other movieclip versions.
 
+### M4 Timeline: headless half (done 2026-11-16; UI waits for screenshots)
+What works
+- Document with command history: every edit is a Command; gestures group
+  into one undo step (begin/commit), cancel reverts; redo cleared by new
+  edits; history capped (500).
+- Editor: auto-key (keys only the changed property; off = edit static value
+  or refuse), frame-strip posing (keys rotation and length of every node at
+  the snapped frame; modifiers never baked in), retime with collision
+  replacement, scale time around a pivot, offset/stagger along a node chain
+  by N frames, delete, copy/paste (with remapping onto another figure; type
+  mismatches skipped), easing presets / per-key bezier on a selection.
+How it was tested
+- EditorTest (12 tests) including 50 random edit sequences that undo back
+  to the exact starting state (compared as saved-file text).
+Not done
+- All M4 UI (dope sheet, curve editor, modifier UI, onion skin, markers
+  panel): waits for the user's screenshots so the layout matches the
+  original. Markers exist in the model but have no edit commands yet.
+
 ## In progress
 M3 is split (recorded per the brief's rule; nothing cut):
 - M3a done, M3b done (above).
