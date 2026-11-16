@@ -21,33 +21,47 @@
 - 2026-11-16: IPA is built unsigned on GitHub Actions for LiveContainer.
 
 ## Done
-- Inspected the reference bundle, wrote NOTES.md and CLEANROOM.md.
 
-- JDK 17 installed. `LegacyFormat` (unwraps .nodes/.nodemc/.stknds) compiled
-  with javac and unwrapped all 45 reference files.
+### M0 Explore and baseline (closed 2026-11-16)
+What works
+- Reference bundle inspected (Info.plist, layout, data files, UI atlases and
+  strings; no disassembly). NOTES.md, CLEANROOM.md, UI.md written.
+- Gradle project: core, desktop (LWJGL3), ios (MobiVM 2.3.21). Wrapper 8.10.2.
+- `LegacyFormat` unwraps all three legacy wrappers (zlib .nodes, raw
+  big-endian .nodes, magic+gzip .nodemc/.stknds).
+- Private repo github.com/balsamiqvine/barkfart; CI (macos-latest) runs core
+  tests and builds an unsigned IPA (about 16.7 MB, about 1 minute).
 
-- Gradle 8.10.2 in ~/.local/gradle, wrapper committed. `core:test` passes
-  (5 tests, the reference-bundle test included). `desktop:run` launched and ran
-  60 s without crashing (visual output not captured).
-- UI.md: inventory of the original's tools with keep / fix / replace verdicts.
+How it was tested
+- `./gradlew core:test`: 5 tests pass locally and on CI, including one that
+  unwraps all 45 local reference files.
+- `desktop:run` launched and ran 60 s without crashing.
+- IPA inspected: arm64 Mach-O, bundle id app.barkfart.animator, landscape,
+  no ad/analytics strings.
+- User launched the CI IPA in LiveContainer: it starts (2026-11-16).
 
-- Private repo github.com/balsamiqvine/barkfart. CI (macos-latest) is green:
-  core tests pass, `ios:createIPA` builds an unsigned 16.7 MB Barkfart.ipa in
-  about 1 minute. Checked locally: arm64 Mach-O, bundle id
-  app.barkfart.animator, landscape only, no ad/analytics strings.
-- CI note: the `macos-14` label was cancelled before a runner started; switched
-  to `macos-latest`. `gh run watch` exits early because the token cannot read
+Not tested
+- Desktop and iOS visual output were not captured.
+
+Deviations from the brief (clean room)
+- No original source, so there was nothing to "build" and no original renderer
+  to capture golden frames from. Golden references move to M3 and will come
+  from user screen captures of the original plus our own renders.
+
+CI notes
+- The `macos-14` label was cancelled before a runner started, so CI uses
+  `macos-latest`. `gh run watch` exits early because the token cannot read
   check annotations (HTTP 403); poll `gh run view` instead.
 
 ## In progress
-- M0 exit: waiting on the user to launch the CI IPA in LiveContainer (expect
-  a grey screen with a black stick figure, landscape).
+- M1 Rebrand and clean: placeholder icon and launch screen, dependency and
+  network audit, zero-network runtime check.
 
 ## Known issues
 - `ios/data/.gitkeep` is copied into the app bundle. Harmless; remove when
   real assets land.
 
 ## Next
-- Get the user's screenshots and pain points for UI.md.
-- Push to a private GitHub repo and confirm the CI IPA builds and launches in
-  LiveContainer. Then M1, M2 (DESIGN.md).
+- M2 DESIGN.md.
+- Waiting on the user: screenshots of the original's main screens and their
+  worst pain points (for UI.md).
