@@ -155,6 +155,27 @@ public final class Evaluator {
     }
 
     /** Local transform of a layer composed with its parent chain (parents applied outermost). */
+    /**
+     * View transform of a top-level layer of the given symbol: camera view times
+     * the layer's parent chain. Used by the canvas for picking and dragging.
+     */
+    public static Affine layerView(Project project, Symbol sym, Layer l, double t) {
+        Scene scratch = new Scene(new Group("scratch"), t);
+        PropertyResolver r = new PropertyResolver(project, scratch.diagnostics);
+        return cameraView(sym, t, r).mul(layerChain(sym, l, t, r, scratch));
+    }
+
+    /** The layer's parent-chain transform without the camera (stage space). */
+    public static Affine layerStage(Project project, Symbol sym, Layer l, double t) {
+        Scene scratch = new Scene(new Group("scratch"), t);
+        return layerChain(sym, l, t, new PropertyResolver(project, scratch.diagnostics), scratch);
+    }
+
+    /** The camera's view transform for the symbol at t. */
+    public static Affine cameraView(Project project, Symbol sym, double t) {
+        return cameraView(sym, t, new PropertyResolver(project, new java.util.ArrayList<Diagnostic>()));
+    }
+
     private static Affine layerChain(Symbol sym, Layer l, double t, PropertyResolver r, Scene scene) {
         Affine acc = local(l, t, r);
         HashSet<String> seen = new HashSet<String>();
@@ -198,25 +219,9 @@ public final class Evaluator {
     static void emitFigure(Layer.FigureLayer layer, Affine xf, double t, PropertyResolver r, Scene scene, Group g) {
         Figure f = layer.figure;
         List<Node> nodes = f.nodes();
-        int n = nodes.size();
-        double[] px = new double[n], py = new double[n], ang = new double[n];
-        int[] parent = new int[n];
-        for (int i = 0; i < n; i++) {
-            Node node = nodes.get(i);
-            double rot = r.f(node.rotation, t);
-            if (node.parent == null) {
-                parent[i] = -1;
-                ang[i] = rot;
-                continue;
-            }
-            int pi = f.indexOf(node.parent);
-            parent[i] = pi;
-            ang[i] = ang[pi] + rot;
-            double len = r.f(node.length, t) * r.f(node.scale, t);
-            double rad = Math.toRadians(ang[i]);
-            px[i] = px[pi] + len * Math.cos(rad);
-            py[i] = py[pi] + len * Math.sin(rad);
-        }
+        FigurePose pose = FigurePose.compute(layer, t, r);
+        double[] px = pose.x, py = pose.y;
+        int[] parent = pose.parent;
         double sf = xf.scaleFactor();
         java.util.Map<String, java.util.List<app.barkfart.model.Polyfill>> fills = null;
         if (!f.polyfills.isEmpty()) {
