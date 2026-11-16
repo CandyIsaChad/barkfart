@@ -1,0 +1,9 @@
+# The original app bundle is reference material only. Never commit it.
+/main/
+/reference/
+*.ipa
+build/
+.gradle/
+local.properties
+*.iml
+.idea/

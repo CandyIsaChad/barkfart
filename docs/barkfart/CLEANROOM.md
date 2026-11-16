@@ -1,0 +1,25 @@
+# Clean-room rules
+
+Barkfart Edition is an original app in the same genre as Stick Nodes. It is not
+a fork. The original app bundle in `main/` (decrypted App Store IPA, v4.3.4) is
+reference material kept outside version control.
+
+Allowed
+- Using the original app on a device and recording how it behaves (screens,
+  gestures, workflow). Re-implementing that behaviour in our own code.
+- Reading the original's *data files* (.nodes, .nodemc, .stknds) to learn the
+  file formats, so users can import their own work (interoperability).
+- Using the bundled sample files as local-only test fixtures, read from
+  `main/` at test time and skipped when absent. Never copied into the repo.
+
+Not allowed
+- Disassembling or decompiling the `IOSLauncher` binary, or reading its code,
+  strings or symbol names to copy implementation.
+- Committing or shipping any original asset: sprites, skins (`darkskin2`),
+  node styles, fonts, shaders, i18n text, icons, splash, bundled stickfigures,
+  movieclips or sample projects.
+- The Stick Nodes name, logo or look-alike branding.
+
+Golden references for import tests come from screen captures of the original
+app (made by the user) plus our own renders, not from running the original
+renderer's code.
