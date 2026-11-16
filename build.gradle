@@ -12,9 +12,9 @@ allprojects {
 
 subprojects {
     apply plugin: 'java'
-    java {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+        // Java 8 API only: MobiVM's runtime lacks many newer classes.
+        options.release = 8
     }
-    tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
 }

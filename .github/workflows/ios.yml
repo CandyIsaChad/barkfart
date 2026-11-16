@@ -1,9 +1,10 @@
 name: iOS IPA (unsigned)
 
+# macOS minutes cost more on private repos: build the IPA on demand or for
+# milestone tags (m0, m1, ...) only. Core tests run on Linux in ci.yml.
 on:
   push:
-    branches: [main]
-  pull_request:
+    tags: ['m*']
   workflow_dispatch:
 
 jobs:
