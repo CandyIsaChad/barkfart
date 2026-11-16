@@ -8,7 +8,6 @@ Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without U
 **Totals (382 features):** 44 usable now, 25 partial or core-only, 283 not yet, 30 won't.
 
 
-
 ## Order of work (parity first, then our own additions)
 1. **Files and content:** project save/open/new with a file list; import
    the user's .nodes / .nodemc / .stknds and Pivot .stk; stickfigure export;
@@ -29,6 +28,7 @@ Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without U
 7. **Sound** (M7), **filters/effects** (M6), **export** GIF/MP4/PNG (M8).
 8. **Settings:** languages, left-hand mode, haptics, node style, zoom
    buttons, save reminder, auto-save.
+
 
 ## Canvas & posing
 

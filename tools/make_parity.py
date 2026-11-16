@@ -106,6 +106,29 @@ STATUS = {
     "Easter egg": ("-", "not planned"),
 }
 
+ROADMAP = """
+## Order of work (parity first, then our own additions)
+1. **Files and content:** project save/open/new with a file list; import
+   the user's .nodes / .nodemc / .stknds and Pivot .stk; stickfigure export;
+   our own default figures and samples.
+2. **Figure tools in animation mode:** add/delete/duplicate/lock figures,
+   push back/bring forward, flip X/Y, figure scale/rotation/colour/opacity,
+   per-segment colour and scale, copy/paste all properties, joining
+   (attach to a node), panning all figures, pinch-rotate, nudge pad,
+   magnifier, colour picker with recent colours.
+3. **Creation mode:** build figures from segments (all shape types, curves,
+   gradients, outlines), polyfill creation, split segments, connectors,
+   smart-stretch, angle/drag locks, static/stretchy nodes, trace frame.
+4. **Timeline extras:** onion settings (count, in front, per-layer
+   toggle), playback range, frame repeat / loop, thumbnails, slow motion.
+5. **Movieclips UI:** library, create from selection, edit in place,
+   once/loop, break apart.
+6. **Text, sprites, background images, GIF/image import.**
+7. **Sound** (M7), **filters/effects** (M6), **export** GIF/MP4/PNG (M8).
+8. **Settings:** languages, left-hand mode, haptics, node style, zoom
+   buttons, save reminder, auto-save.
+"""
+
 WONT_CATEGORIES = {"Website/community features": "won't: Barkfart makes no network requests (NETWORK.md); files from the site import normally"}
 
 
@@ -150,7 +173,7 @@ def main(root):
     total = sum(counts.values())
     summary = ["", "**Totals (%d features):** %d usable now, %d partial or core-only, %d not yet, %d won't." % (
         total, counts.get("x", 0), counts.get("~", 0), counts.get(" ", 0), counts.get("-", 0)), ""]
-    out[6:6] = summary
+    out[6:6] = summary + ROADMAP.split("\n")
     open(os.path.join(root, "docs/barkfart/PARITY.md"), "w", encoding="utf-8").write("\n".join(out) + "\n")
     print(summary[1])
     missing = [n for n in STATUS if n not in open(src, encoding="utf-8").read()]
