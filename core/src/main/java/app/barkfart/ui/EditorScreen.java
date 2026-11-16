@@ -36,6 +36,11 @@ public final class EditorScreen implements Disposable {
         state = new EditorState(p);
         prefs = Gdx.app.getPreferences("barkfart.ui");
         state.uiUserScale = clampUser(prefs.getFloat("uiSize", 1f));
+        try {
+            state.tools.keyScope = app.barkfart.canvas.CanvasTools.KeyScope.valueOf(prefs.getString("keyScope", "JOINT"));
+        } catch (IllegalArgumentException ignored) {
+            // unknown value from a newer build: keep the default
+        }
         state.onUiScaleChanged = new Runnable() {
             public void run() {
                 state.uiUserScale = clampUser(state.uiUserScale);
@@ -108,6 +113,14 @@ public final class EditorScreen implements Disposable {
         stage.addActor(sheet);
         stage.addActor(play);
         stage.addActor(sidebar);
+        final EasingMenu easing = new EasingMenu(theme);
+        stage.addActor(easing);
+        state.easingOpener = new EditorState.EasingOpener() {
+            public void open(float sx, float sy, EasingMenu.Preset cur, EasingMenu.Chosen chosen) {
+                easing.setBounds(0, 0, stage.getWidth(), stage.getHeight());
+                easing.open(sx, sy, cur, chosen);
+            }
+        };
         state.addListener(new Runnable() {
             public void run() {
                 if (Math.abs(sheet.getHeight() - Math.max(DopeSheet.COLLAPSED, Math.min(state.sheetHeight, stage.getHeight() * 0.6f))) > 0.5f) {

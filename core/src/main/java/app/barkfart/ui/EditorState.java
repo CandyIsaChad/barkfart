@@ -24,6 +24,8 @@ public final class EditorState {
     public Layer.FigureLayer selectedLayer;
     public Node selectedNode;
     public boolean onion = true;
+    /** Look through the camera while editing (handles hidden). */
+    public boolean previewCamera;
 
     // Dope sheet
     public final java.util.LinkedHashSet<app.barkfart.edit.KeyRef> selectedKeys = new java.util.LinkedHashSet<app.barkfart.edit.KeyRef>();
@@ -32,6 +34,14 @@ public final class EditorState {
     /** Sheet height in points (72 = collapsed). */
     public float sheetHeight = 72;
     public app.barkfart.edit.Editor.Clip keyClipboard;
+    /** Multi-select mode in the dope sheet (double-tap toggles): taps add/remove keys. */
+    public boolean multiSelect;
+    /** Opens the easing dropdown at a stage position (set by the screen). */
+    public EasingOpener easingOpener;
+
+    public interface EasingOpener {
+        void open(float stageX, float stageY, EasingMenu.Preset current, EasingMenu.Chosen chosen);
+    }
 
     public boolean playing;
     public double playTime;

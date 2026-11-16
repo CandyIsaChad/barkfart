@@ -29,6 +29,7 @@ class CanvasToolsTest {
         p.invalidateIndex();
         d = new Document(p);
         tools = new CanvasTools(new Editor(d));
+        tools.throughCamera = true;   // these tests exercise the camera math path
     }
 
     private CanvasTools.Handle handle(String id) {
@@ -104,6 +105,46 @@ class CanvasToolsTest {
             prev = now;
         }
         tools.end();
+    }
+
+    @Test
+    void jointScopeKeysLengthWhenRotatingSoStretchIsNeverUnkeyed() {
+        setUp(1, 0);
+        CanvasTools.Handle arm = handle("armR2");
+        tools.begin(tools.pick(arm.x, arm.y, 5, 0), arm.x, arm.y, 0.5);
+        tools.move(arm.x, arm.y + 10, 0.5);
+        tools.end();
+        Node n = man.figure.node("armR2");
+        assertEquals(1, n.rotation.track().size());
+        assertEquals(1, n.length.track().size(), "length pinned at the playhead");
+        assertEquals(0, man.figure.node("armL2").rotation.track().size(), "other joints untouched");
+    }
+
+    @Test
+    void figureScopeKeysTheWholePoseInOneUndoStep() {
+        setUp(1, 0);
+        tools.keyScope = CanvasTools.KeyScope.FIGURE;
+        CanvasTools.Handle arm = handle("armR2");
+        tools.begin(tools.pick(arm.x, arm.y, 5, 0), arm.x, arm.y, 0.5);
+        tools.move(arm.x, arm.y + 10, 0.5);
+        tools.end();
+        for (Node n : man.figure.nodes()) {
+            if (n.parent == null) continue;
+            assertEquals(1, n.rotation.track().size(), n.id);
+            assertEquals(1, n.length.track().size(), n.id);
+        }
+        assertEquals(1, man.transform.x.track().size());
+        assertTrue(d.undo());
+        assertEquals(0, man.figure.node("armL2").rotation.track().size());
+    }
+
+    @Test
+    void editingViewIgnoresTheCameraByDefault() {
+        setUp(2, 30);
+        tools.throughCamera = false;
+        CanvasTools.Handle hip = handle("hip");
+        assertEquals(30, hip.x, 1e-4, "stage space: the hip sits at the layer's x, camera not applied");
+        assertEquals(0, hip.y, 1e-4);
     }
 
     @Test

@@ -67,6 +67,14 @@ public final class Evaluator {
 
     /** onionOnly: skip top-level layers whose onion flag is off (for onion-skin ghosts). */
     public static Scene evaluate(Project project, String symbolId, double t, boolean onionOnly) {
+        return evaluate(project, symbolId, t, onionOnly, true);
+    }
+
+    /**
+     * applyCamera false: the scene in stage (world) space, for editing; the
+     * camera layer is shown as a frame by the editor and applied on play/export.
+     */
+    public static Scene evaluate(Project project, String symbolId, double t, boolean onionOnly, boolean applyCamera) {
         Symbol sym = project.library.get(symbolId);
         Group root = new Group(symbolId);
         Scene scene = new Scene(root, t);
@@ -75,7 +83,7 @@ public final class Evaluator {
             return scene;
         }
         PropertyResolver r = new PropertyResolver(project, scene.diagnostics);
-        Affine view = cameraView(sym, t, r);
+        Affine view = applyCamera ? cameraView(sym, t, r) : Affine.IDENTITY;
         ArrayDeque<Work> stack = new ArrayDeque<Work>();
         stack.push(new Work(sym, t, view, root, new Path(sym.id, null)));
         while (!stack.isEmpty()) {

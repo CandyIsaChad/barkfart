@@ -44,7 +44,6 @@ public final class StageView extends Actor {
     private Vector2 pinchMid = new Vector2();
     private float lastTapTime = -10;
     private Layer.CameraLayer camDrag;
-    private float camStartX, camStartY, camStartZoom;
     private float clock;
 
     public StageView(Theme theme, EditorState st) {
@@ -63,7 +62,9 @@ public final class StageView extends Actor {
                     gestureTime = 0;
                     moved = 0;
                     start.set(x, y);
-                    pending = st.playing ? null : pick(x, y);
+                    boolean shot = st.playing || st.previewCamera;
+                    pending = shot ? null : pick(x, y);
+                    camOp = shot || st.mode != EditorState.Mode.CAMERA ? null : pickCamera(x, y);
                 } else {
                     maxPointers = Math.max(maxPointers, n);
                     endSingle(true);
@@ -82,11 +83,14 @@ public final class StageView extends Actor {
                     return;
                 }
                 if (pointer != 0 || st.playing) return;
-                if (!dragging && !panning && start.dst(x, y) > Theme.DRAG_SLOP) {
-                    if (pending != null) beginDrag();
+                if (!dragging && !panning && !camming && start.dst(x, y) > Theme.DRAG_SLOP) {
+                    if (camOp != null) beginCamera();
+                    else if (pending != null) beginDrag();
                     else beginPan();
                 }
-                if (dragging) {
+                if (camming) {
+                    updateCamera(x, y);
+                } else if (dragging) {
                     Vector2 v = toView(x, y);
                     st.tools.move(v.x, v.y, editTime());
                 } else if (panning) {
@@ -100,7 +104,7 @@ public final class StageView extends Actor {
                 down[pointer] = false;
                 int n = count();
                 if (n == 0) {
-                    boolean tap = gestureTime < 0.3f && !dragging && !panning && !pinching
+                    boolean tap = gestureTime < 0.3f && !dragging && !panning && !pinching && !camming
                             && start.dst(x, y) <= Theme.DRAG_SLOP;
                     endSingle(false);
                     endPinch();
@@ -198,27 +202,12 @@ public final class StageView extends Actor {
 
     private void beginPan() {
         panning = true;
-        if (st.mode == EditorState.Mode.CAMERA) {
-            st.doc.begin("Move camera");
-            camDrag = camera(true);
-            camStartX = (Float) camDrag.x.keyValue(editTime());
-            camStartY = (Float) camDrag.y.keyValue(editTime());
-        }
     }
 
     private void updatePan(float x, float y) {
-        if (st.mode == EditorState.Mode.CAMERA && camDrag != null) {
-            float s = scale(), z = (Float) camDrag.zoom.keyValue(editTime());
-            double rot = Math.toRadians((Float) camDrag.rotation.keyValue(editTime()));
-            float dx = (x - start.x) / s / z, dy = (y - start.y) / s / z;
-            float wx = (float) (dx * Math.cos(rot) - dy * Math.sin(rot)), wy = (float) (dx * Math.sin(rot) + dy * Math.cos(rot));
-            st.editor.change(camDrag.x, camStartX - wx, editTime());
-            st.editor.change(camDrag.y, camStartY - wy, editTime());
-        } else {
-            st.panX = panBaseX + (x - start.x);
-            st.panY = panBaseY + (y - start.y);
-            st.fire();
-        }
+        st.panX = panBaseX + (x - start.x);
+        st.panY = panBaseY + (y - start.y);
+        st.fire();
     }
 
     private float panBaseX, panBaseY;
@@ -228,8 +217,12 @@ public final class StageView extends Actor {
             if (cancelled) st.tools.cancel();
             else st.tools.end();
         }
-        if (panning && st.mode == EditorState.Mode.CAMERA && camDrag != null) st.doc.commit();
+        if (camming) {
+            st.doc.commit();
+            camming = false;
+        }
         dragging = panning = false;
+        camOp = null;
         pending = null;
         camDrag = null;
         panBaseX = st.panX;
@@ -245,19 +238,10 @@ public final class StageView extends Actor {
         pinchZoom = st.zoom;
         panBaseX = st.panX;
         panBaseY = st.panY;
-        if (st.mode == EditorState.Mode.CAMERA) {
-            st.doc.begin("Zoom camera");
-            camDrag = camera(true);
-            camStartZoom = (Float) camDrag.zoom.keyValue(editTime());
-        }
     }
 
     private void updatePinch() {
         float k = pts[0].dst(pts[1]) / pinchDist;
-        if (st.mode == EditorState.Mode.CAMERA && camDrag != null) {
-            st.editor.change(camDrag.zoom, Math.max(0.05f, Math.min(20f, camStartZoom * k)), editTime());
-            return;
-        }
         float newZoom = Math.max(0.25f, Math.min(8f, pinchZoom * k));
         // keep the point under the fingers' midpoint fixed
         float cx = pinchMid.x - getWidth() / 2, cy = pinchMid.y - getHeight() / 2;
@@ -271,12 +255,93 @@ public final class StageView extends Actor {
     private void endPinch() {
         if (!pinching) return;
         pinching = false;
-        if (st.mode == EditorState.Mode.CAMERA && camDrag != null) {
-            st.doc.commit();
-            camDrag = null;
-        }
         panBaseX = st.panX;
         panBaseY = st.panY;
+    }
+
+    // ---- camera stand-in: a frame on the stage (applied only when playing / exporting) ----
+
+    private enum CamOp { MOVE, ZOOM, ROTATE }
+
+    private CamOp camOp;
+    private boolean camming;
+    private float camX0, camY0, camZoom0, camRot0;
+    private Vector2 fingerW0 = new Vector2();
+
+    /** Camera frame corners in stage space (BL, BR, TR, TL), from the current camera or identity. */
+    private float[] cameraFrame() {
+        Project p = st.project();
+        app.barkfart.eval.Affine inv = Evaluator.cameraView(p, p.root(), editTime()).inverse();
+        float w = p.settings.width / 2f, h = p.settings.height / 2f;
+        float[][] c = {{-w, -h}, {w, -h}, {w, h}, {-w, h}};
+        float[] out = new float[8];
+        for (int i = 0; i < 4; i++) {
+            out[i * 2] = (float) inv.mapX(c[i][0], c[i][1]);
+            out[i * 2 + 1] = (float) inv.mapY(c[i][0], c[i][1]);
+        }
+        return out;
+    }
+
+    /** Rotation knob: above the top edge's midpoint, 24 pt out. */
+    private Vector2 knob(float[] f) {
+        float mx = (f[4] + f[6]) / 2, my = (f[5] + f[7]) / 2;
+        float cx = (f[0] + f[4]) / 2, cy = (f[1] + f[5]) / 2;
+        float dx = mx - cx, dy = my - cy, len = (float) Math.max(1e-3, Math.hypot(dx, dy));
+        float out = 24 / scale();
+        return new Vector2(mx + dx / len * out, my + dy / len * out);
+    }
+
+    private CamOp pickCamera(float lx, float ly) {
+        float[] f = cameraFrame();
+        Vector2 v = toView(lx, ly);
+        float r = Theme.HANDLE_HIT / scale();
+        if (knob(f).dst(v) <= r) return CamOp.ROTATE;
+        for (int i = 0; i < 4; i++) if (Math.hypot(f[i * 2] - v.x, f[i * 2 + 1] - v.y) <= r) return CamOp.ZOOM;
+        return inside(f, v.x, v.y) ? CamOp.MOVE : null;
+    }
+
+    private static boolean inside(float[] f, float x, float y) {
+        boolean in = false;
+        for (int i = 0, j = 3; i < 4; j = i++) {
+            float xi = f[i * 2], yi = f[i * 2 + 1], xj = f[j * 2], yj = f[j * 2 + 1];
+            if ((yi > y) != (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) in = !in;
+        }
+        return in;
+    }
+
+    private void beginCamera() {
+        camming = true;
+        st.doc.begin("Camera");
+        camDrag = camera(true);
+        double t = editTime();
+        camX0 = (Float) camDrag.x.keyValue(t);
+        camY0 = (Float) camDrag.y.keyValue(t);
+        camZoom0 = (Float) camDrag.zoom.keyValue(t);
+        camRot0 = (Float) camDrag.rotation.keyValue(t);
+        fingerW0.set(toView(start.x, start.y));
+    }
+
+    private void updateCamera(float lx, float ly) {
+        Vector2 w = toView(lx, ly);
+        double t = editTime();
+        switch (camOp) {
+            case MOVE:
+                st.editor.change(camDrag.x, camX0 + (w.x - fingerW0.x), t);
+                st.editor.change(camDrag.y, camY0 + (w.y - fingerW0.y), t);
+                break;
+            case ZOOM: {
+                double d0 = Math.max(1e-3, Math.hypot(fingerW0.x - camX0, fingerW0.y - camY0));
+                double d1 = Math.max(1e-3, Math.hypot(w.x - camX0, w.y - camY0));
+                st.editor.change(camDrag.zoom, (float) Math.max(0.05, Math.min(20, camZoom0 * d0 / d1)), t);
+                break;
+            }
+            default: {
+                double a0 = Math.atan2(fingerW0.y - camY0, fingerW0.x - camX0), a1 = Math.atan2(w.y - camY0, w.x - camX0);
+                double delta = Math.toDegrees(a1 - a0);
+                delta -= 360 * Math.round(delta / 360);
+                st.editor.change(camDrag.rotation, (float) (camRot0 + delta), t);
+            }
+        }
     }
 
     /** Topmost camera layer, created (undoably, inside the open gesture) if missing. */
@@ -319,11 +384,22 @@ public final class StageView extends Actor {
 
         Matrix4 m = new Matrix4(batch.getProjectionMatrix()).translate(o.x + getWidth() / 2 + st.panX, o.y + getHeight() / 2 + st.panY, 0).scale(s, s, 1);
         double t = st.time();
-        if (st.onion && !st.playing) renderer.draw(onion.build(p, p.rootSymbol, t), m);
-        Scene scene = Evaluator.evaluate(p, p.rootSymbol, t);
+        if (st.onion && !st.playing && !st.previewCamera) renderer.draw(onion.build(p, p.rootSymbol, t), m);
+        // Editing shows the stage; the camera is a frame on it. Play shows the camera's shot.
+        boolean shot = st.playing || st.previewCamera;
+        Scene scene = Evaluator.evaluate(p, p.rootSymbol, t, false, shot);
+        boolean shotClip = false;
+        if (shot) {   // the shot is what export sees: clip to the stage rectangle
+            Rectangle sc = new Rectangle();
+            ScissorStack.calculateScissors(getStage().getCamera(), batch.getTransformMatrix(), new Rectangle(sx, sy, sw, sh), sc);
+            shotClip = ScissorStack.pushScissors(sc);
+        }
         renderer.draw(Tessellator.tessellate(scene), m);
-        if (!st.playing && st.mode != EditorState.Mode.CAMERA) drawHandles(o);
-        if (st.mode == EditorState.Mode.CAMERA) drawCameraBorder(o);
+        if (shotClip) ScissorStack.popScissors();
+        if (!shot) {
+            drawCameraFrame(o);
+            if (st.mode != EditorState.Mode.CAMERA) drawHandles(o);
+        }
 
         if (pushed) ScissorStack.popScissors();
         batch.begin();
@@ -374,20 +450,64 @@ public final class StageView extends Actor {
         }
     }
 
-    private void drawCameraBorder(Vector2 o) {
+    /** The camera stand-in: outline always (only when a camera exists), handles in Camera mode. */
+    private void drawCameraFrame(Vector2 o) {
+        boolean edit = st.mode == EditorState.Mode.CAMERA;
+        if (camera(false) == null && !edit) return;
+        float[] f = cameraFrame();
+        float[] q = new float[8];
+        for (int i = 0; i < 4; i++) {
+            q[i * 2] = o.x + toLocalX(f[i * 2]);
+            q[i * 2 + 1] = o.y + toLocalY(f[i * 2 + 1]);
+        }
         shapes.setProjectionMatrix(getStage().getCamera().combined);
+        Gdx.gl.glEnable(GL20.GL_BLEND);
         shapes.begin(ShapeRenderer.ShapeType.Filled);
-        shapes.setColor(Theme.ACCENT);
-        float t = 2, w = getWidth(), h = getHeight(), in = 2;
-        shapes.rect(o.x + in, o.y + in, w - 2 * in, t);
-        shapes.rect(o.x + in, o.y + h - in - t, w - 2 * in, t);
-        shapes.rect(o.x + in, o.y + in, t, h - 2 * in);
-        shapes.rect(o.x + w - in - t, o.y + in, t, h - 2 * in);
+        Color c = edit ? Theme.ACCENT : Theme.TEXT_DIM;
+        shapes.setColor(c.r, c.g, c.b, edit ? 1f : 0.7f);
+        float lw = edit ? 2 : 1.5f;
+        for (int i = 0; i < 4; i++) {
+            int j = (i + 1) % 4;
+            shapes.rectLine(q[i * 2], q[i * 2 + 1], q[j * 2], q[j * 2 + 1], lw);
+        }
+        if (edit) {
+            for (int i = 0; i < 4; i++) {
+                shapes.setColor(Color.WHITE);
+                shapes.rect(q[i * 2] - 5, q[i * 2 + 1] - 5, 10, 10);
+                shapes.setColor(Theme.ACCENT);
+                shapes.rect(q[i * 2] - 3.5f, q[i * 2 + 1] - 3.5f, 7, 7);
+            }
+            Vector2 k = knob(f);
+            float kx = o.x + toLocalX(k.x), ky = o.y + toLocalY(k.y);
+            float mx = (q[4] + q[6]) / 2, my = (q[5] + q[7]) / 2;
+            shapes.setColor(Theme.ACCENT);
+            shapes.rectLine(mx, my, kx, ky, 1.5f);
+            shapes.circle(kx, ky, 6, 20);
+            shapes.setColor(Color.WHITE);
+            shapes.circle(kx, ky, 3, 16);
+        }
         shapes.end();
+        if (edit || camera(false) != null) {
+            // label above the top-left corner
+            com.badlogic.gdx.graphics.g2d.SpriteBatch b = labelBatch();
+            b.setProjectionMatrix(getStage().getCamera().combined);
+            b.begin();
+            theme.small.setColor(c);
+            theme.small.draw(b, "Camera", q[6] + 2, q[7] + 14);
+            b.end();
+        }
+    }
+
+    private com.badlogic.gdx.graphics.g2d.SpriteBatch labels;
+
+    private com.badlogic.gdx.graphics.g2d.SpriteBatch labelBatch() {
+        if (labels == null) labels = new com.badlogic.gdx.graphics.g2d.SpriteBatch(64);
+        return labels;
     }
 
     public void dispose() {
         renderer.dispose();
         shapes.dispose();
+        if (labels != null) labels.dispose();
     }
 }

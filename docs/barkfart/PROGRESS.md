@@ -176,6 +176,20 @@ Not done
   panel): waits for the user's screenshots so the layout matches the
   original. Markers exist in the model but have no edit commands yet.
 
+### Fixes from the user's first iPad test (2026-11-17)
+- Auto-key scope (figure panel): Joint = the dragged joint's angle AND
+  length are keyed (stretch is never left unkeyed); Figure = every joint's
+  angle and length plus position (a full pose, like the original). Saved.
+- Camera is a stand-in frame on the stage (move inside, corners zoom, knob
+  rotates), not the whole screen; it applies only when playing / exporting
+  or with "Preview shot". Editing happens in stage space.
+- Easing is a dropdown with a curve preview per preset: Hold, Linear, Ease
+  in-out, in, out, Sine, Strong, Anticipate, Overshoot, Anticipate +
+  overshoot.
+- Dope sheet: double-tap empty space toggles multi-select (taps add/remove
+  keys; also a Multi-select button in the key panel); calmer grid.
+- Tests: canvas key-scope tests (3 new). Screens checked in the iPad preview.
+
 ### UI scaling for iPad (2026-11-17; the user tests on an iPad)
 Automatic UI scale from the screen height (iPad Air ~1.25x, 12.9-inch
 1.5x) times a user "UI size" setting (Smaller / Larger, 80-180%, saved per

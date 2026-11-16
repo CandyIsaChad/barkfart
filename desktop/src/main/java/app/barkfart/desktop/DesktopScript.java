@@ -5,6 +5,7 @@ import app.barkfart.edit.DopeRows;
 import app.barkfart.edit.StructureEdits;
 import app.barkfart.model.Layer;
 import app.barkfart.model.Node;
+import app.barkfart.ui.EasingMenu;
 import app.barkfart.ui.EditorState;
 import java.util.HashMap;
 import java.util.Map;
@@ -29,9 +30,21 @@ final class DesktopScript {
                 st.setFrame(9);
             } else if (step.equals("camera")) {
                 st.mode = EditorState.Mode.CAMERA;
+                Layer.CameraLayer cam = new Layer.CameraLayer(st.project().newId("L"), "Camera");
+                cam.zoom.setValue(1.6f);
+                cam.rotation.setValue(8f);
+                cam.x.setValue(60f);
+                cam.y.setValue(40f);
+                st.doc.apply(StructureEdits.addLayer(st.project().root(), cam, st.project().root().layers.size()));
                 st.fire();
             } else if (step.equals("deselect")) st.select(null, null);
-            else if (step.equals("expand")) {
+            else if (step.equals("easing")) {
+                EasingMenu.Preset cur = EasingMenu.PRESETS[2];
+                st.easingOpener.open(200, 300, cur, null);
+            } else if (step.equals("preview")) {
+                st.previewCamera = true;
+                st.fire();
+            } else if (step.equals("expand")) {
                 st.sheetHeight = 200;
                 st.fire();
             } else if (step.equals("keys") && f != null) {

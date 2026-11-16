@@ -52,6 +52,18 @@ public final class CanvasTools {
     /** When on, dragging a joint changes length as well as angle. */
     public boolean stretch;
 
+    /** What a drag keys at the playhead besides the value being changed. */
+    public enum KeyScope {
+        /** The dragged joint's angle and length (so stretching is never left unkeyed). */
+        JOINT,
+        /** Every joint's angle and length plus the figure's position: a full pose, like the original. */
+        FIGURE
+    }
+
+    public KeyScope keyScope = KeyScope.JOINT;
+    /** Editing view through the camera (old behaviour); the editor now edits in stage space. */
+    public boolean throughCamera;
+
     private Hit drag;
     private Affine dragView;
     private float grabDx, grabDy;
@@ -73,7 +85,7 @@ public final class CanvasTools {
         for (Layer l : s.layers) {
             if (!(l instanceof Layer.FigureLayer) || !l.visible || l.locked || !r.b(l.shown, t)) continue;
             Layer.FigureLayer fl = (Layer.FigureLayer) l;
-            Affine v = Evaluator.layerView(editor.doc.project, s, l, t);
+            Affine v = view(s, l, t);
             FigurePose pose = FigurePose.compute(fl, t, r);
             List<Node> nodes = fl.figure.nodes();
             for (int i = 0; i < nodes.size(); i++) {
@@ -108,7 +120,7 @@ public final class CanvasTools {
     /** Starts a drag on a picked handle; opens one undo step. */
     public void begin(Hit hit, float x, float y, double t) {
         drag = hit;
-        dragView = Evaluator.layerView(editor.doc.project, symbol(), hit.layer, t);
+        dragView = view(symbol(), hit.layer, t);
         grabDx = hit.x - x;
         grabDy = hit.y - y;
         startLayerX = hit.layer.transform.x.floatValue();
@@ -116,6 +128,36 @@ public final class CanvasTools {
         if (!hit.layer.transform.x.track().isEmpty()) startLayerX = (Float) hit.layer.transform.x.keyValue(t);
         if (!hit.layer.transform.y.track().isEmpty()) startLayerY = (Float) hit.layer.transform.y.keyValue(t);
         editor.doc.begin(hit.node.parent == null ? "Move figure" : "Pose node");
+        pinKeys(hit, t);
+    }
+
+    private Affine view(Symbol s, Layer l, double t) {
+        return throughCamera ? Evaluator.layerView(editor.doc.project, s, l, t) : Evaluator.layerStage(editor.doc.project, s, l, t);
+    }
+
+    /** Keys the scope's properties at t with their current values (only where no key exists yet). */
+    private void pinKeys(Hit hit, double t) {
+        java.util.List<app.barkfart.model.Property> ps = new java.util.ArrayList<app.barkfart.model.Property>();
+        if (keyScope == KeyScope.FIGURE) {
+            for (Node n : hit.layer.figure.nodes()) {
+                if (n.parent == null) continue;
+                ps.add(n.rotation);
+                ps.add(n.length);
+            }
+            ps.add(hit.layer.transform.x);
+            ps.add(hit.layer.transform.y);
+        } else if (hit.node.parent != null) {
+            ps.add(hit.node.rotation);
+            ps.add(hit.node.length);
+        } else {
+            ps.add(hit.layer.transform.x);
+            ps.add(hit.layer.transform.y);
+        }
+        for (app.barkfart.model.Property p : ps) {
+            if (p.track().indexOf(t) >= 0) continue;
+            app.barkfart.model.Interp in = p.track().isEmpty() ? editor.defaultInterp : p.track().get(Math.max(0, -p.track().indexOf(t) - 2)).interp;
+            editor.doc.apply(app.barkfart.edit.Edits.putKey(p, new app.barkfart.model.Key(t, p.keyValue(t), in)));
+        }
     }
 
     /** Moves the dragged joint toward the finger (view space). */

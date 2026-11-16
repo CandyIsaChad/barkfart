@@ -48,6 +48,7 @@ public final class DopeSheet extends Actor {
     private DopeRows.Row pressRow;
     private double pressTime;
     private final Rectangle marquee = new Rectangle();
+    private float clock, lastEmptyTap = -10;
 
     public DopeSheet(Theme theme, EditorState st, Resized onResize) {
         this.theme = theme;
@@ -136,8 +137,15 @@ public final class DopeSheet extends Actor {
                     case MARQUEE: endMarquee(); break;
                     case LABEL: if (!moved) tapLabel(x, y); break;
                     case NONE:
-                        if (!moved) {   // tap empty key area: clear key selection, move the playhead
-                            st.selectedKeys.clear();
+                        if (!moved) {
+                            if (clock - lastEmptyTap < 0.3f) {      // double-tap: toggle multi-select mode
+                                st.multiSelect = !st.multiSelect;
+                                lastEmptyTap = -10;
+                                st.flash(st.multiSelect ? "Multi-select: tap keys to add or remove" : "Multi-select off", null);
+                                break;
+                            }
+                            lastEmptyTap = clock;
+                            if (!st.multiSelect) st.selectedKeys.clear();   // tap empty: clear, move the playhead
                             scrubTo(x);
                         }
                         break;
@@ -247,7 +255,17 @@ public final class DopeSheet extends Actor {
     }
 
     private void tapKey() {
-        st.selectKeys(pressKeys(), false);
+        List<KeyRef> ks = pressKeys();
+        if (st.multiSelect) {
+            if (st.selectedKeys.containsAll(ks)) {
+                st.selectedKeys.removeAll(ks);
+                st.fire();
+            } else {
+                st.selectKeys(ks, true);
+            }
+            return;
+        }
+        st.selectKeys(ks, false);
         st.setFrame(st.frames.frameAt(pressTime));
     }
 
@@ -275,7 +293,7 @@ public final class DopeSheet extends Actor {
         if (r1 < 0) r1 = rows.size() - 1;
         double fps = st.editor.fps();
         double t0 = Math.ceil(frameAtX(marquee.x) - 0.5) / fps, t1 = Math.floor(frameAtX(marquee.x + marquee.width) + 0.5) / fps;
-        st.selectKeys(DopeRows.keysIn(rows.subList(Math.min(r0, r1), Math.max(r0, r1) + 1), t0, t1), false);
+        st.selectKeys(DopeRows.keysIn(rows.subList(Math.min(r0, r1), Math.max(r0, r1) + 1), t0, t1), st.multiSelect);
     }
 
     private void tapLabel(float x, float y) {
@@ -298,6 +316,7 @@ public final class DopeSheet extends Actor {
     @Override
     public void act(float delta) {
         super.act(delta);
+        clock += delta;
         if (Gdx.input.isTouched(0) && mode == Mode.NONE && !moved) {
             held += delta;
             if (held > 0.4f && !longArmed) {
@@ -356,12 +375,12 @@ public final class DopeSheet extends Actor {
             float fx = x0 + xOfFrame(f);
             if (fx < x0 + LABEL_W) continue;
             boolean major = f % step == 0;
-            if (ppf >= 6 || major) {
-                batch.setColor(major ? Theme.SEGMENT_EDGE : Theme.CONTROL);
+            if (major) {
+                batch.setColor(Theme.CONTROL);
                 batch.draw(theme.white(), fx - 0.5f, keyBottom, 1, keyTop - keyBottom);
             }
-            batch.setColor(Theme.TEXT_DIM);
-            batch.draw(theme.white(), fx - 0.5f, keyTop, 1, major ? 6 : 3);
+            batch.setColor(major ? Theme.TEXT_DIM : Theme.SEGMENT_EDGE);
+            batch.draw(theme.white(), fx - 0.5f, keyTop, 1, major ? 5 : 2);
             if (major) {
                 theme.small.setColor(Theme.TEXT_DIM);
                 gl.setText(theme.small, Integer.toString(f + 1));
@@ -389,7 +408,7 @@ public final class DopeSheet extends Actor {
                     com.badlogic.gdx.utils.Align.left, false);
         }
         // keys
-        float d = 9;
+        float d = 8;
         for (int i = 0; i < rows.size(); i++) {
             float top = y0 + rowTop(i);
             if (top < keyBottom || top - ROW > keyTop) continue;

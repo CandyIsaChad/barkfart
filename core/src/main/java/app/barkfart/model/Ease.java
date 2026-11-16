@@ -10,6 +10,13 @@ public final class Ease {
     public static final Ease EASE_IN_OUT = new Ease(0.42f, 0f, 0.58f, 1f);
     public static final Ease EASE_IN = new Ease(0.42f, 0f, 1f, 1f);
     public static final Ease EASE_OUT = new Ease(0f, 0f, 0.58f, 1f);
+    public static final Ease SINE_IN_OUT = new Ease(0.37f, 0f, 0.63f, 1f);
+    public static final Ease STRONG_IN_OUT = new Ease(0.87f, 0f, 0.13f, 1f);
+    /** Pulls back before moving (y dips below 0). */
+    public static final Ease ANTICIPATE = new Ease(0.36f, 0f, 0.66f, -0.56f);
+    /** Goes past the target and settles back (y rises above 1). */
+    public static final Ease OVERSHOOT = new Ease(0.34f, 1.56f, 0.64f, 1f);
+    public static final Ease ANTICIPATE_OVERSHOOT = new Ease(0.68f, -0.6f, 0.32f, 1.6f);
 
     public final float x1, y1, x2, y2;
 

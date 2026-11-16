@@ -185,6 +185,10 @@ public final class Sidebar extends WidgetGroup {
             keyPanel(innerW);
             return;
         }
+        if (st.mode == EditorState.Mode.CAMERA) {
+            cameraPanel(innerW);
+            return;
+        }
         if (st.selectedLayer == null) {
             panel.add(title("Nothing selected")).colspan(2).width(innerW).padBottom(Theme.GAP).row();
             full(new UiButton(theme, "Add figure", UiButton.Style.ACCENT_OUTLINE, new Runnable() {
@@ -214,6 +218,12 @@ public final class Sidebar extends WidgetGroup {
                 copyPose();
             }
         }), pasteButton());
+        UiButton kJoint = new UiButton(theme, "Joint", UiButton.Style.SEGMENT, keyScope(app.barkfart.canvas.CanvasTools.KeyScope.JOINT));
+        UiButton kFigure = new UiButton(theme, "Figure", UiButton.Style.SEGMENT, keyScope(app.barkfart.canvas.CanvasTools.KeyScope.FIGURE));
+        kJoint.selected = st.tools.keyScope == app.barkfart.canvas.CanvasTools.KeyScope.JOINT;
+        kFigure.selected = !kJoint.selected;
+        panel.add(note("Auto-key")).colspan(2).width(innerW).padBottom(4).row();
+        row(kJoint, kFigure);
         UiButton rotate = new UiButton(theme, "Rotate", UiButton.Style.SEGMENT, stretch(false));
         UiButton stretch = new UiButton(theme, "Stretch", UiButton.Style.SEGMENT, stretch(true));
         rotate.selected = !st.tools.stretch;
@@ -232,6 +242,34 @@ public final class Sidebar extends WidgetGroup {
         }));
     }
 
+    private void cameraPanel(float innerW) {
+        panel.add(title("Camera")).colspan(2).width(innerW).padBottom(Theme.GAP).row();
+        panel.add(note("Drag inside the frame to move it, a corner to zoom, the knob to rotate. "
+                + "The camera applies when you play or export.")).colspan(2).width(innerW).padBottom(Theme.GAP).row();
+        UiButton preview = new UiButton(theme, "Preview shot", UiButton.Style.SEGMENT, new Runnable() {
+            public void run() {
+                st.previewCamera = !st.previewCamera;
+                st.fire();
+            }
+        });
+        preview.selected = st.previewCamera;
+        full(preview);
+        full(new UiButton(theme, "Reset camera", UiButton.Style.NORMAL, new Runnable() {
+            public void run() {
+                Layer.CameraLayer cam = null;
+                for (Layer l : st.project().root().layers) if (l instanceof Layer.CameraLayer) cam = (Layer.CameraLayer) l;
+                if (cam == null) return;
+                double t = st.frames.time(st.frame);
+                st.doc.begin("Reset camera");
+                st.editor.change(cam.x, 0f, t);
+                st.editor.change(cam.y, 0f, t);
+                st.editor.change(cam.zoom, 1f, t);
+                st.editor.change(cam.rotation, 0f, t);
+                st.doc.commit();
+            }
+        }));
+    }
+
     private List<KeyRef> sel() {
         return new ArrayList<KeyRef>(st.selectedKeys);
     }
@@ -246,15 +284,14 @@ public final class Sidebar extends WidgetGroup {
             }
         }), pasteKeysButton());
         panel.add(note("Easing")).colspan(2).width(innerW).padBottom(4).row();
-        row(ease("Hold", app.barkfart.model.Interp.HOLD, null), ease("Linear", app.barkfart.model.Interp.LINEAR, null));
-        row(ease("Ease", app.barkfart.model.Interp.BEZIER, app.barkfart.model.Ease.EASE_IN_OUT),
-                ease("In", app.barkfart.model.Interp.BEZIER, app.barkfart.model.Ease.EASE_IN));
-        row(ease("Out", app.barkfart.model.Interp.BEZIER, app.barkfart.model.Ease.EASE_OUT), new UiButton(theme, "Clear", UiButton.Style.NORMAL, new Runnable() {
+        panel.add(easingButton()).colspan(2).width(innerW).height(Theme.CONTROL_H + 8).padBottom(Theme.GAP).row();
+        row(new UiButton(theme, "Clear", UiButton.Style.NORMAL, new Runnable() {
             public void run() {
                 st.selectedKeys.clear();
+                st.multiSelect = false;
                 st.fire();
             }
-        }));
+        }), multiButton());
         panel.add(note("Offset along chain (frames)")).colspan(2).width(innerW).padBottom(4).row();
         row(new UiButton(theme, "− 1", UiButton.Style.NORMAL, offset(-1)), new UiButton(theme, "+ 1", UiButton.Style.NORMAL, offset(1)));
         panel.add(note("Scale time")).colspan(2).width(innerW).padBottom(4).row();
@@ -284,12 +321,65 @@ public final class Sidebar extends WidgetGroup {
         return b;
     }
 
-    private UiButton ease(String label, final app.barkfart.model.Interp interp, final app.barkfart.model.Ease e) {
-        return new UiButton(theme, label, UiButton.Style.NORMAL, new Runnable() {
+    private UiButton multiButton() {
+        UiButton b = new UiButton(theme, "Multi-select", UiButton.Style.SEGMENT, new Runnable() {
             public void run() {
-                st.editor.setInterp(sel(), interp, e == null ? app.barkfart.model.Ease.LINEAR : e);
+                st.multiSelect = !st.multiSelect;
+                st.fire();
             }
         });
+        b.selected = st.multiSelect;
+        return b;
+    }
+
+    /** The easing of the selection, or null when the selected keys differ. */
+    private EasingMenu.Preset currentEasing() {
+        EasingMenu.Preset found = null;
+        boolean first = true;
+        for (KeyRef k : st.selectedKeys) {
+            int i = k.property.track().indexOf(k.time);
+            if (i < 0) continue;
+            Key key = k.property.track().get(i);
+            EasingMenu.Preset p = EasingMenu.match(key.interp, key.ease);
+            if (first) {
+                found = p;
+                first = false;
+            } else if (p != found) {
+                return null;
+            }
+        }
+        return found;
+    }
+
+    /** "Easing" dropdown button: curve preview + name; opens the easing menu. */
+    private Actor easingButton() {
+        final EasingMenu.Preset cur = currentEasing();
+        return new UiButton(theme, "", UiButton.Style.NORMAL, null) {
+            {
+                setAction(new Runnable() {
+                    public void run() {
+                        if (st.easingOpener == null) return;
+                        com.badlogic.gdx.math.Vector2 v = localToStageCoordinates(new com.badlogic.gdx.math.Vector2(getWidth(), getHeight() / 2));
+                        st.easingOpener.open(v.x + 8, v.y, cur, new EasingMenu.Chosen() {
+                            public void chosen(EasingMenu.Preset p) {
+                                st.editor.setInterp(sel(), p.interp, p.ease);
+                            }
+                        });
+                    }
+                });
+            }
+
+            @Override
+            public void draw(Batch batch, float a) {
+                super.draw(batch, a);
+                if (cur != null) EasingMenu.drawCurve(batch, theme, cur, getX() + 8, getY() + 6, 36, getHeight() - 12, Theme.TEXT);
+                theme.body.setColor(Theme.TEXT);
+                theme.body.draw(batch, cur == null ? "Mixed" : cur.name, getX() + 52, getY() + getHeight() / 2 + 6,
+                        getWidth() - 72, com.badlogic.gdx.utils.Align.left, false);
+                theme.body.setColor(Theme.TEXT_DIM);
+                theme.body.draw(batch, "\u2026", getX() + getWidth() - 18, getY() + getHeight() / 2 + 6);
+            }
+        };
     }
 
     /** Stagger: each joint's selected keys shift by (its index along the hierarchy) x frames. */
@@ -356,6 +446,18 @@ public final class Sidebar extends WidgetGroup {
         return new Runnable() {
             public void run() {
                 st.cycleFigure(d);
+            }
+        };
+    }
+
+    private Runnable keyScope(final app.barkfart.canvas.CanvasTools.KeyScope k) {
+        return new Runnable() {
+            public void run() {
+                st.tools.keyScope = k;
+                com.badlogic.gdx.Gdx.app.getPreferences("barkfart.ui").putString("keyScope", k.name()).flush();
+                st.flash(k == app.barkfart.canvas.CanvasTools.KeyScope.JOINT
+                        ? "Auto-key: the dragged joint's angle and length"
+                        : "Auto-key: the whole figure's pose", null);
             }
         };
     }

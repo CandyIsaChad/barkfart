@@ -12,6 +12,8 @@ public final class OnionSkin {
     /** Ghost colours (RGB, alpha from opacity) for past and future frames. */
     public int pastRgb = 0xd04040, futureRgb = 0x3070d0;
     public float opacity = 0.35f, falloff = 0.6f;
+    /** Ghosts in stage space (editing view) unless set. */
+    public boolean applyCamera;
 
     /** Ghost draw list for time t at the project fps, farthest ghosts first. */
     public DrawList build(Project p, String symbolId, double t) {
@@ -19,8 +21,8 @@ public final class OnionSkin {
         double fps = p.settings.fps > 0 ? p.settings.fps : 30;
         for (int k = Math.max(before, after); k >= 1; k--) {
             float a = opacity * (float) Math.pow(falloff, k - 1);
-            if (k <= before) tint(Tessellator.tessellate(Evaluator.evaluate(p, symbolId, t - k / fps, true)), pastRgb, a, out);
-            if (k <= after) tint(Tessellator.tessellate(Evaluator.evaluate(p, symbolId, t + k / fps, true)), futureRgb, a, out);
+            if (k <= before) tint(Tessellator.tessellate(Evaluator.evaluate(p, symbolId, t - k / fps, true, applyCamera)), pastRgb, a, out);
+            if (k <= after) tint(Tessellator.tessellate(Evaluator.evaluate(p, symbolId, t + k / fps, true, applyCamera)), futureRgb, a, out);
         }
         return out;
     }
