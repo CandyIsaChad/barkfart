@@ -9,6 +9,6 @@ class SelfTestTest {
     void inAppSelfTestPassesOnTheJvm() {
         SelfTest.Result r = SelfTest.run();
         assertTrue(r.ok(), r.summary() + " " + r.failures);
-        assertTrue(r.passed >= 9);
+        assertTrue(r.passed >= 12);
     }
 }

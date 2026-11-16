@@ -155,6 +155,52 @@ public final class SelfTest {
                 }
             }
         });
+        check(r, "legacy figure round trip", new Check() {
+            public void run() throws Exception {
+                Project p = single();
+                Layer.FigureLayer l = Demo.stickman(p, "m");
+                byte[] a = app.barkfart.legacy.NodesFormat.write(app.barkfart.legacy.FigureMapper.toLegacy(l));
+                Layer.FigureLayer back = app.barkfart.legacy.FigureMapper.toLayer(p,
+                        app.barkfart.legacy.NodesFormat.read(a), "back", null);
+                byte[] b = app.barkfart.legacy.NodesFormat.write(app.barkfart.legacy.FigureMapper.toLegacy(back));
+                if (!java.util.Arrays.equals(a, b)) throw new AssertionError("bytes differ");
+                if (back.figure.nodes().size() != l.figure.nodes().size()) throw new AssertionError("node count");
+            }
+        });
+        check(r, "polyfill ear clipping", new Check() {
+            public void run() {
+                Project p = single();
+                Layer.FigureLayer l = Demo.stickman(p, "m");
+                app.barkfart.model.Polyfill pf = new app.barkfart.model.Polyfill(l.id, "pf");
+                pf.anchor = "hip";
+                pf.nodes.add("legL2");
+                pf.nodes.add("legL1");
+                pf.nodes.add("legR1");
+                pf.nodes.add("legR2");
+                l.figure.polyfills.add(pf);
+                p.root().layers.add(l);
+                Scene s = Evaluator.evaluate(p, p.rootSymbol, 0);
+                if (!s.diagnostics.isEmpty()) throw new AssertionError(s.diagnostics.toString());
+                int tris = Tessellator.tessellate(s).triangleCount();
+                if (tris < 10) throw new AssertionError("triangles " + tris);
+            }
+        });
+        check(r, "edit, pose and undo", new Check() {
+            public void run() {
+                Project p = single();
+                Layer.FigureLayer l = Demo.stickman(p, "m");
+                p.root().layers.add(l);
+                p.invalidateIndex();
+                String before = ProjectCodec.encode(p);
+                app.barkfart.edit.Document d = new app.barkfart.edit.Document(p);
+                app.barkfart.edit.Editor e = new app.barkfart.edit.Editor(d);
+                e.change(l.figure.node("armR1").rotation, 45f, 0.5);
+                e.pose(l, null, null, 1.0);
+                if (l.figure.node("legL1").rotation.track().size() != 1) throw new AssertionError("pose did not key");
+                while (d.undo()) { }
+                if (!before.equals(ProjectCodec.encode(p))) throw new AssertionError("undo did not restore");
+            }
+        });
         r.millis = System.currentTimeMillis() - t0;
         return r;
     }

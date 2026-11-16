@@ -22,7 +22,7 @@ import com.badlogic.gdx.utils.viewport.ScreenViewport;
  * evaluator, tessellator and GL renderer, and shows the core self-test result.
  */
 public class BarkfartApp extends ApplicationAdapter {
-    public static final String VERSION = "0.0.1-m3a";
+    public static final String VERSION = "0.0.2-m4h";
 
     private ExtendViewport stage;
     private ScreenViewport hud;
