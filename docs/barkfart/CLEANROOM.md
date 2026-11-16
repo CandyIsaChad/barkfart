@@ -15,6 +15,9 @@ Allowed
 - Using the bundled sample files as local-only test fixtures, read from
   `main/` at test time and skipped when absent. Never copied into the repo.
 
+- Comparing our renders with the preview images stored inside the bundled
+  movieclips (renders made by the original app). Local only: neither the
+  previews nor renders of bundled content are committed.
 - Public, openly licensed documentation of the formats, such as the MIT
   sticknodes-rs spec, credited in NOTES.md.
 
@@ -26,6 +29,6 @@ Not allowed
   movieclips or sample projects.
 - The Stick Nodes name, logo or look-alike branding.
 
-Golden references for import tests come from screen captures of the original
-app (made by the user) plus our own renders, not from running the original
-renderer's code.
+Golden references for import tests come from the original app's own preview
+images inside its movieclip files (local only), screen captures made by the
+user, and our own renders. Never from running the original's code.

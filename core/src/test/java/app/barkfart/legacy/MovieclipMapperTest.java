@@ -29,6 +29,7 @@ class MovieclipMapperTest {
     void referenceClipsImportAndRender() throws Exception {
         java.util.List<File> files = MovieclipFormatTest.referenceClips();
         assumeTrue(!files.isEmpty(), "reference bundle not present");
+        java.util.List<String> goldenFailures = new java.util.ArrayList<String>();
         File outDir = new File(System.getProperty("barkfart.root", ".."), "core/build/legacy-renders");
         outDir.mkdirs();
         for (File f : files) {
@@ -79,7 +80,11 @@ class MovieclipMapperTest {
             // Diagnostic: which of our frames best matches each preview.
             BufferedImage[] oursAll = new BufferedImage[n];
             for (int i = 0; i < n; i++) {
-                oursAll[i] = Raster.fill(Tessellator.tessellate(scaled(Evaluator.evaluate(q, q.rootSymbol, i / (double) mc.fps))), w, h, 0xffdddddd);
+                // Like for like: render the full 1920x1080 stage, then box-downsample 3x;
+                // a preview pixel counts as drawn at >= half coverage, coloured by the mean.
+                BufferedImage full = Raster.fill(Tessellator.tessellate(Evaluator.evaluate(q, q.rootSymbol, i / (double) mc.fps)),
+                        w * 3, h * 3, 0x00000000);
+                oursAll[i] = downsample3(full, w, h);
             }
             StringBuilder best = new StringBuilder();
             for (int pvi = 0; pvi < previews.length; pvi++) {
@@ -108,19 +113,23 @@ class MovieclipMapperTest {
                 double iou = iou(previews[k], oursAll[fi]);
                 double f1 = tolerantF1(previews[k], oursAll[fi]);
                 long area = union(previews[k], oursAll[fi]);
-                ious.append(String.format(" f%d: IoU %.3f F1 %.3f (%dpx);", fi, iou, f1, area));
+                double[] ac = areaAndColour(previews[k], oursAll[fi]);
+                ious.append(String.format(" f%d: IoU %.3f F1 %.3f area %.2f dCol %.0f (%dpx);", fi, iou, f1, ac[0], ac[1], area));
                 // Golden vs the ORIGINAL renderer (local only): clips that use only
                 // shapes we draw natively must match the original's silhouette.
                 if (rep.approximations.isEmpty() && !hasGradients && area >= MIN_AREA) {
-                    assertTrue(f1 >= GOLDEN_F1, f.getName() + " frame " + fi + " silhouette F1 " + f1);
+                    boolean knownGap = KNOWN_GAPS.contains(f.getName());
+                    if (!knownGap && iou < GOLDEN_IOU) goldenFailures.add(f.getName() + " frame " + fi + " IoU " + String.format("%.3f", iou));
+                    if (f1 < GOLDEN_F1) goldenFailures.add(f.getName() + " frame " + fi + " F1 " + String.format("%.3f", f1));
                 }
             }
             System.out.println("[mc-golden] " + f.getName() + ":" + ious
-                    + (rep.approximations.isEmpty() && !hasGradients ? "  (asserted F1 >= " + GOLDEN_F1 + " where >= " + MIN_AREA + "px)"
+                    + (rep.approximations.isEmpty() && !hasGradients ? "  (asserted IoU >= " + GOLDEN_IOU + (KNOWN_GAPS.contains(f.getName()) ? " [known gap: F1 only]" : "") + " where >= " + MIN_AREA + "px)"
                     : "  (not asserted: approximations " + rep.approximations + (hasGradients ? ", gradients/polyfills" : "") + ")"));
             g.dispose();
             ImageIO.write(sheet, "png", new File(outDir, "mc_" + f.getName().replaceAll("[^A-Za-z0-9]+", "_") + ".png"));
         }
+        assertTrue(goldenFailures.isEmpty(), "original-renderer golden: " + goldenFailures);
     }
 
     /** Documented tolerance for silhouette agreement with the original's previews. */
@@ -159,6 +168,13 @@ class MovieclipMapperTest {
         double recall = o == 0 ? 0 : om / (double) o, precision = u == 0 ? 0 : um / (double) u;
         return precision + recall == 0 ? 0 : 2 * precision * recall / (precision + recall);
     }
+    /**
+     * Clips that fall short of the strict IoU for a known, open reason. They are
+     * still held to the edge-tolerant F1. Sparks: ellipse-heavy, IoU 0.82 with
+     * our drawn area 87-98% of the original's; cause open (NOTES.md).
+     */
+    static final java.util.Set<String> KNOWN_GAPS = new java.util.HashSet<String>(java.util.Arrays.asList("_Sparks.nodemc"));
+
     /** Below this many drawn pixels IoU is dominated by edge pixels; such frames are reported only. */
     static final long MIN_AREA = 500;
 
@@ -199,33 +215,43 @@ class MovieclipMapperTest {
         return uni == 0 ? 1 : inter / (double) uni;
     }
 
-    /** Scales a view-space scene by 1/3 by wrapping it (test helper). */
-    private static Scene scaled(Scene s) {
-        app.barkfart.eval.Group g = new app.barkfart.eval.Group("scaled");
-        scaleInto(s.root, g, 1f / 3);
-        Scene out = new Scene(g, s.time);
+    /** 3x3 box filter: drawn where >= 5 of 9 subpixels are covered; colour = mean of covered. */
+    static BufferedImage downsample3(BufferedImage full, int w, int h) {
+        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int cov = 0, r = 0, g = 0, b = 0;
+                for (int dy = 0; dy < 3; dy++) {
+                    for (int dx = 0; dx < 3; dx++) {
+                        int c = full.getRGB(x * 3 + dx, y * 3 + dy);
+                        if ((c >>> 24) >= 128) {
+                            cov++;
+                            r += (c >> 16) & 0xff;
+                            g += (c >> 8) & 0xff;
+                            b += c & 0xff;
+                        }
+                    }
+                }
+                out.setRGB(x, y, cov >= 5 ? 0xff000000 | ((r / cov) << 16) | ((g / cov) << 8) | (b / cov) : 0xffdddddd);
+            }
+        }
         return out;
     }
 
-    private static void scaleInto(app.barkfart.eval.Group src, app.barkfart.eval.Group dst, float k) {
-        dst.opacity = src.opacity;
-        for (Object o : src.children) {
-            if (o instanceof app.barkfart.eval.Group) {
-                app.barkfart.eval.Group c = new app.barkfart.eval.Group("c");
-                scaleInto((app.barkfart.eval.Group) o, c, k);
-                dst.children.add(c);
-            } else if (o instanceof app.barkfart.eval.Shape.Line) {
-                app.barkfart.eval.Shape.Line l = (app.barkfart.eval.Shape.Line) o;
-                dst.children.add(new app.barkfart.eval.Shape.Line(l.x1 * k, l.y1 * k, l.x2 * k, l.y2 * k, l.width * k, l.color, l.source));
-            } else if (o instanceof app.barkfart.eval.Shape.Polygon) {
-                app.barkfart.eval.Shape.Polygon pg = (app.barkfart.eval.Shape.Polygon) o;
-                float[] q = pg.points.clone();
-                for (int i = 0; i < q.length; i++) q[i] *= k;
-                dst.children.add(new app.barkfart.eval.Shape.Polygon(q, pg.color, pg.source));
-            } else if (o instanceof app.barkfart.eval.Shape.Circle) {
-                app.barkfart.eval.Shape.Circle c = (app.barkfart.eval.Shape.Circle) o;
-                dst.children.add(new app.barkfart.eval.Shape.Circle(c.cx * k, c.cy * k, c.r * k, c.color, c.source));
+    /** Drawn-area ratio ours/original, and mean max-channel colour difference on pixels drawn in both. */
+    static double[] areaAndColour(BufferedImage orig, BufferedImage ours) {
+        long a = 0, b = 0, both = 0, cd = 0;
+        for (int y = 0; y < orig.getHeight(); y++) {
+            for (int x = 0; x < orig.getWidth(); x++) {
+                boolean pa = drawn(orig, x, y), pb = drawn(ours, x, y);
+                if (pa) a++;
+                if (pb) b++;
+                if (pa && pb) {
+                    both++;
+                    cd += diff(orig.getRGB(x, y), ours.getRGB(x, y));
+                }
             }
         }
+        return new double[] {a == 0 ? 0 : b / (double) a, both == 0 ? 0 : cd / (double) both};
     }
 }

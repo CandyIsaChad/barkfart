@@ -90,13 +90,28 @@ which matters for import scale (DESIGN Q4).
   4-byte trailer that the one-figure model folds into the instance. Time box
   reached; next attempt should start there.
 
-## Shape semantics confirmed against the original's previews (2026-11-16)
+## Shape semantics: current best fit against the original's previews (2026-11-16)
 - Ellipse (type 5): centred on the segment midpoint, major axis = segment
-  length, minor = thickness. (Centred-on-node with semi-major = length
-  scored worse: Sparks 0.38 vs 0.42 IoU before the frame mapping fix.)
+  length, minor = thickness. Best of the variants tried, scored like for
+  like: extending it by half a thickness at each end dropped Forcefield from
+  0.93 to 0.36-0.41 IoU and Sparks to 0.75-0.80; centring on the node with
+  semi-major = length also scored worse (older metric).
 - Triangle (3, right-triangle direction 0): base of width = thickness at the
-  parent, apex at the node. Right-triangle and upside-down variants are not
-  drawn yet.
+  parent, apex at the node. Alternatives not yet scored (apex at the parent
+  would be the first to try). Right-triangle and upside-down variants are
+  not drawn yet.
 - Square segment (1): rectangle of width = thickness, no caps.
 - Movieclip previews are frames k x floor(frames / previews), stored
   bottom-up, rendered on an opaque #f0f0f0 stage.
+
+## Golden metric (final form, 2026-11-16)
+Ours is rendered at the full 1920x1080 stage and box-downsampled 3x to the
+preview size (drawn = at least 5 of 9 subpixels covered, colour = mean), so
+both sides have the same pixel grid. A preview pixel is drawn when it
+differs from the stage colour by more than half the clip's contrast. Plain
+IoU >= 0.85 is asserted; the 1px-tolerant F1 >= 0.9 is asserted too.
+Results: Fire 0.98, SSJB Aura 0.99, Ground Dust 0.97, Speed Zoom 0.95-0.96,
+Forcefield 0.93, Electricity 0.93 (an earlier "wrong outline" was a test
+helper that dropped the concave flag), SSJ Aura 0.79 (gradients, area 1.26),
+Sparks 0.82 (known gap: our area 87-98% of the original; open).
+Colour difference is 0 on every clip without gradients.
