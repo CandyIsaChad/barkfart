@@ -155,11 +155,12 @@ project fps.
 4. **Symbol instances**: local time = timeOffset(t) + (t − 0) × speed(t),
    then ONCE (clamp to [0, duration]), LOOP (mod) or PING_PONG. Nesting is
    processed with an **explicit work stack** of `(symbol, time, transform,
-   depth, path)` frames, never Java recursion. Each instance stops expanding
-   when `depth > recursionLimit` (its own limit, default 8). Two global guards
-   stop exponential blow-up from symbols that contain themselves more than
-   once: a hard depth cap of 64 and a budget of 250,000 primitives. Hitting
-   any guard truncates and records a diagnostic.
+   depth, path)` frames, never Java recursion. An instance stops expanding
+   when its target symbol already occurs on the nesting path more than
+   `recursionLimit` times (default 8, so a self-containing symbol draws itself
+   9 times). Two global guards stop runaway nesting: a hard depth cap of 64,
+   and a budget of 250,000 scene objects (shapes plus groups). Hitting any
+   guard truncates and records a diagnostic.
 5. **Camera**: the topmost visible CAMERA layer of the evaluated symbol gives
    the view transform. Cameras inside nested symbols are ignored.
 6. **Effects** are not executed by the evaluator. The scene is a tree of
