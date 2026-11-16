@@ -2,7 +2,8 @@
 
 Source: `main/Payload/IOSLauncher.app`, Stick Nodes 4.3.4 (build 119),
 bundle id `org.fortheloss.sticknodes`, iOS 14+, landscape only, GLES2.
-Observed from Info.plist, folder layout and data files only (see CLEANROOM.md).
+Observed from Info.plist, folder layout, data files, UI atlas images and UI
+string files only. The binary was not disassembled (see CLEANROOM.md).
 
 ## Stack (from bundled library jars)
 - LibGDX 1.12.1 on RoboVM/MobiVM (all Java AOT-compiled into one arm64

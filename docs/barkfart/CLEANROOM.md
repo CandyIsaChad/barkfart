@@ -9,6 +9,9 @@ Allowed
   gestures, workflow). Re-implementing that behaviour in our own code.
 - Reading the original's *data files* (.nodes, .nodemc, .stknds) to learn the
   file formats, so users can import their own work (interoperability).
+- Looking at the bundle's UI atlases and UI string files to inventory tools,
+  menus and pain points (documented in UI.md). We redraw every icon and write
+  every string ourselves; nothing is traced, copied or paraphrased line by line.
 - Using the bundled sample files as local-only test fixtures, read from
   `main/` at test time and skipped when absent. Never copied into the repo.
 
