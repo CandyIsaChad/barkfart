@@ -51,6 +51,18 @@ public final class Property {
         }
     }
 
+    /** Inserts at a position (for undo). A Loop must stay first. */
+    public void insertModifier(int i, Modifier m) {
+        if (m instanceof Modifier.Loop) {
+            if (i != 0 || (!modifiers.isEmpty() && modifiers.get(0) instanceof Modifier.Loop)) {
+                throw new IllegalStateException("Loop modifier must be first and unique");
+            }
+        } else if (i == 0 && !modifiers.isEmpty() && modifiers.get(0) instanceof Modifier.Loop) {
+            throw new IllegalStateException("only a Loop modifier can be first");
+        }
+        modifiers.add(i, m);
+    }
+
     public Modifier removeModifier(int i) {
         return modifiers.remove(i);
     }

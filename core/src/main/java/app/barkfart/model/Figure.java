@@ -70,6 +70,48 @@ public final class Figure {
         return out;
     }
 
+    /** The node and all its descendants, in hierarchy order. */
+    public List<Node> subtree(String id) {
+        List<Node> out = new ArrayList<Node>();
+        Node n = node(id);
+        if (n == null) return out;
+        java.util.HashSet<String> ids = new java.util.HashSet<String>();
+        ids.add(id);
+        for (Node x : nodes) {
+            if (x == n || (x.parent != null && ids.contains(x.parent))) {
+                ids.add(x.id);
+                out.add(x);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Removes a node and its descendants (not the root). Returns their former
+     * list positions, ascending, parallel to the removed nodes, for exact undo.
+     */
+    public int[] removeSubtree(String id) {
+        Node n = node(id);
+        if (n == null || n.parent == null) throw new IllegalArgumentException("cannot remove " + id);
+        List<Node> sub = subtree(id);
+        int[] pos = new int[sub.size()];
+        for (int i = 0; i < sub.size(); i++) pos[i] = indexOf(sub.get(i).id);
+        nodes.removeAll(sub);
+        reindex();
+        return pos;
+    }
+
+    /** Reinserts nodes at the given ascending positions (inverse of removeSubtree). */
+    public void restore(List<Node> sub, int[] pos) {
+        for (int i = 0; i < sub.size(); i++) nodes.add(Math.min(pos[i], nodes.size()), sub.get(i));
+        reindex();
+    }
+
+    private void reindex() {
+        index.clear();
+        for (int i = 0; i < nodes.size(); i++) index.put(nodes.get(i).id, i);
+    }
+
     public Map<String, Integer> indexView() {
         return Collections.unmodifiableMap(index);
     }
