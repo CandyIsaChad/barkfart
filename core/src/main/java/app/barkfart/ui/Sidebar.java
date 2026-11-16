@@ -181,6 +181,10 @@ public final class Sidebar extends WidgetGroup {
                     .colspan(2).width(innerW).row();
             return;
         }
+        if (!st.selectedKeys.isEmpty()) {
+            keyPanel(innerW);
+            return;
+        }
         if (st.selectedLayer == null) {
             panel.add(title("Nothing selected")).colspan(2).width(innerW).padBottom(Theme.GAP).row();
             full(new UiButton(theme, "Add figure", UiButton.Style.ACCENT_OUTLINE, new Runnable() {
@@ -226,6 +230,103 @@ public final class Sidebar extends WidgetGroup {
                 deleteFigure();
             }
         }));
+    }
+
+    private List<KeyRef> sel() {
+        return new ArrayList<KeyRef>(st.selectedKeys);
+    }
+
+    private void keyPanel(float innerW) {
+        int n = st.selectedKeys.size();
+        panel.add(title(n == 1 ? "1 key" : n + " keys")).colspan(2).width(innerW).padBottom(Theme.GAP).row();
+        row(new UiButton(theme, "Copy", UiButton.Style.NORMAL, new Runnable() {
+            public void run() {
+                st.keyClipboard = st.editor.copy(sel());
+                st.flash("Copied " + st.selectedKeys.size() + " keys", null);
+            }
+        }), pasteKeysButton());
+        panel.add(note("Easing")).colspan(2).width(innerW).padBottom(4).row();
+        row(ease("Hold", app.barkfart.model.Interp.HOLD, null), ease("Linear", app.barkfart.model.Interp.LINEAR, null));
+        row(ease("Ease", app.barkfart.model.Interp.BEZIER, app.barkfart.model.Ease.EASE_IN_OUT),
+                ease("In", app.barkfart.model.Interp.BEZIER, app.barkfart.model.Ease.EASE_IN));
+        row(ease("Out", app.barkfart.model.Interp.BEZIER, app.barkfart.model.Ease.EASE_OUT), new UiButton(theme, "Clear", UiButton.Style.NORMAL, new Runnable() {
+            public void run() {
+                st.selectedKeys.clear();
+                st.fire();
+            }
+        }));
+        panel.add(note("Offset along chain (frames)")).colspan(2).width(innerW).padBottom(4).row();
+        row(new UiButton(theme, "− 1", UiButton.Style.NORMAL, offset(-1)), new UiButton(theme, "+ 1", UiButton.Style.NORMAL, offset(1)));
+        panel.add(note("Scale time")).colspan(2).width(innerW).padBottom(4).row();
+        row(new UiButton(theme, "50%", UiButton.Style.NORMAL, scale(0.5)), new UiButton(theme, "200%", UiButton.Style.NORMAL, scale(2)));
+        full(new UiButton(theme, "Delete keys", UiButton.Style.DANGER, new Runnable() {
+            public void run() {
+                int count = st.selectedKeys.size();
+                st.editor.delete(sel());
+                st.selectedKeys.clear();
+                st.flash("Deleted " + count + " keys · Undo", new Runnable() {
+                    public void run() {
+                        st.doc.undo();
+                    }
+                });
+            }
+        }));
+    }
+
+    private UiButton pasteKeysButton() {
+        UiButton b = new UiButton(theme, "Paste", UiButton.Style.NORMAL, new Runnable() {
+            public void run() {
+                int k = st.editor.paste(st.keyClipboard, st.frames.time(st.frame), null);
+                st.flash("Pasted " + k + " keys at frame " + (st.frame + 1), null);
+            }
+        });
+        b.enabled = st.keyClipboard != null;
+        return b;
+    }
+
+    private UiButton ease(String label, final app.barkfart.model.Interp interp, final app.barkfart.model.Ease e) {
+        return new UiButton(theme, label, UiButton.Style.NORMAL, new Runnable() {
+            public void run() {
+                st.editor.setInterp(sel(), interp, e == null ? app.barkfart.model.Ease.LINEAR : e);
+            }
+        });
+    }
+
+    /** Stagger: each joint's selected keys shift by (its index along the hierarchy) x frames. */
+    private Runnable offset(final int frames) {
+        return new Runnable() {
+            public void run() {
+                java.util.LinkedHashMap<String, List<KeyRef>> byNode = new java.util.LinkedHashMap<String, List<KeyRef>>();
+                for (Layer l : st.project().root().layers) {
+                    if (!(l instanceof Layer.FigureLayer)) continue;
+                    for (Node nd : ((Layer.FigureLayer) l).figure.nodes()) {
+                        for (KeyRef k : st.selectedKeys) {
+                            if (k.property == nd.rotation || k.property == nd.length || k.property == nd.thickness
+                                    || k.property == nd.color || k.property == nd.shown) {
+                                List<KeyRef> list = byNode.get(l.id + "/" + nd.id);
+                                if (list == null) byNode.put(l.id + "/" + nd.id, list = new ArrayList<KeyRef>());
+                                list.add(k);
+                            }
+                        }
+                    }
+                }
+                st.editor.stagger(new ArrayList<List<KeyRef>>(byNode.values()), frames);
+                st.selectedKeys.clear();
+                st.flash("Offset " + byNode.size() + " joints by " + frames + " frame steps", null);
+            }
+        };
+    }
+
+    private Runnable scale(final double factor) {
+        return new Runnable() {
+            public void run() {
+                double pivot = Double.MAX_VALUE;
+                for (KeyRef k : st.selectedKeys) pivot = Math.min(pivot, k.time);
+                st.editor.scaleTime(sel(), pivot, factor);
+                st.selectedKeys.clear();
+                st.fire();
+            }
+        };
     }
 
     private static int jointNumber(Layer.FigureLayer l, Node n) {

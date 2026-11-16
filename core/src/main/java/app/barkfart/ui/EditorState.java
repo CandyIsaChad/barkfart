@@ -25,6 +25,14 @@ public final class EditorState {
     public Node selectedNode;
     public boolean onion = true;
 
+    // Dope sheet
+    public final java.util.LinkedHashSet<app.barkfart.edit.KeyRef> selectedKeys = new java.util.LinkedHashSet<app.barkfart.edit.KeyRef>();
+    public final java.util.HashSet<String> collapsedFigures = new java.util.HashSet<String>();
+    public boolean sheetShowAll;
+    /** Sheet height in points (72 = collapsed). */
+    public float sheetHeight = 72;
+    public app.barkfart.edit.Editor.Clip keyClipboard;
+
     public boolean playing;
     public double playTime;
     private int playStartFrame;
@@ -104,6 +112,18 @@ public final class EditorState {
             selectedNode = null;
         }
         if (frame >= frames.frameCount()) frame = frames.frameCount() - 1;
+        // drop selected keys that no longer exist (after undo, delete, retime)
+        java.util.Iterator<app.barkfart.edit.KeyRef> it = selectedKeys.iterator();
+        while (it.hasNext()) {
+            app.barkfart.edit.KeyRef k = it.next();
+            if (k.property.track().indexOf(k.time) < 0) it.remove();
+        }
+    }
+
+    public void selectKeys(java.util.Collection<app.barkfart.edit.KeyRef> keys, boolean add) {
+        if (!add) selectedKeys.clear();
+        selectedKeys.addAll(keys);
+        fire();
     }
 
     public void play() {

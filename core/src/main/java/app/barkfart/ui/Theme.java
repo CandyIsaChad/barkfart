@@ -33,6 +33,7 @@ public final class Theme implements Disposable {
     public final BitmapFont small, body, title;
     private final Texture roundTex;
     private final Texture whiteTex;
+    private final Texture diamondTex;
 
     /** @param pixelsPerPoint backbuffer pixels per UI point (3 on recent iPhones). */
     public Theme(float pixelsPerPoint) {
@@ -50,6 +51,29 @@ public final class Theme implements Disposable {
         w.fill();
         whiteTex = new Texture(w);
         w.dispose();
+        diamondTex = diamond((int) Math.ceil(9 * px));
+    }
+
+    /** Anti-aliased white diamond (key glyph), size px square. */
+    private static Texture diamond(int size) {
+        Pixmap pm = new Pixmap(size, size, Pixmap.Format.RGBA8888);
+        pm.setBlending(Pixmap.Blending.None);
+        float c = size / 2f;
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                float d = Math.abs(x + 0.5f - c) + Math.abs(y + 0.5f - c);
+                float a = Math.max(0, Math.min(1, c - d + 0.5f));
+                pm.drawPixel(x, y, Color.rgba8888(1, 1, 1, a));
+            }
+        }
+        Texture t = new Texture(pm);
+        t.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+        pm.dispose();
+        return t;
+    }
+
+    public Texture diamond() {
+        return diamondTex;
     }
 
     private BitmapFont font(FreeTypeFontGenerator gen, float pt) {
@@ -58,7 +82,7 @@ public final class Theme implements Disposable {
         p.minFilter = Texture.TextureFilter.Linear;
         p.magFilter = Texture.TextureFilter.Linear;
         p.hinting = FreeTypeFontGenerator.Hinting.AutoMedium;
-        p.characters = FreeTypeFontGenerator.DEFAULT_CHARS + "\u00b7\u2026\u2013\u2014\u00b0\u2212";
+        p.characters = FreeTypeFontGenerator.DEFAULT_CHARS + "\u00b7\u2026\u2013\u2014\u00b0\u2212\u25be\u25b8";
         BitmapFont f = gen.generateFont(p);
         f.getData().setScale(1f / px);   // draw in points, rasterized in pixels
         f.setUseIntegerPositions(false);
@@ -126,5 +150,6 @@ public final class Theme implements Disposable {
         title.dispose();
         roundTex.dispose();
         whiteTex.dispose();
+        diamondTex.dispose();
     }
 }

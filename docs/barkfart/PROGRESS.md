@@ -176,6 +176,19 @@ Not done
   panel): waits for the user's screenshots so the layout matches the
   original. Markers exist in the model but have no edit commands yet.
 
+### M4 Timeline: dope sheet (2026-11-17)
+The frame strip was replaced by a dope sheet (user decision): ruler with
+tabular frame numbers and a draggable playhead, summary row, per-figure
+header (tap to collapse), Move row, one row per joint, Camera row; filter
+Selected | All; keys as diamonds; tap/box-select (long-press then drag);
+drag selected keys to retime (snapped, one undo step); pinch to zoom time,
+drag to scroll; drag the length handle on the ruler to change duration;
+drag the bottom grip to expand up to 60% of the screen. Sidebar key panel:
+copy/paste at the playhead, delete (undo from the status line), easing
+Hold/Linear/Ease/In/Out, offset along the chain -1/+1 frame, scale time
+50%/200%. Tested: DopeRows unit tests (3); desktop phone-preview screenshots
+collapsed and expanded with a selection. Touch on a device not yet tested.
+
 ### M4 Timeline: first interactive editor (2026-11-17, prototype)
 What works (UI-SPEC v2, after an independent design review)
 - Layout like the original: sidebar (Undo/Redo, Figure | All | Camera,
@@ -265,9 +278,14 @@ M3 is split (recorded per the brief's rule; nothing cut):
 2. Drag the orange square: the whole figure moves.
 3. One-finger drag on empty stage pans; pinch zooms; double-tap fits.
 4. Two-finger tap undoes; three-finger tap redoes; Undo/Redo buttons too.
-5. "+" adds a frame; pose differently; tap Play: it loops; Stop returns.
-6. Tap the current frame (or long-press any frame): the menu works;
-   Delete frame shows "Deleted frame N · Undo" and tapping it restores.
+5. Drag the playhead on the dope sheet's ruler; pose at a few frames; drag
+   the length handle (end of the ruler) to make the animation longer; Play
+   loops; Stop returns to where you were.
+6. Tap a key diamond to select it; drag it sideways to retime; long-press
+   empty sheet space then drag to box-select; pinch the sheet to zoom time;
+   drag the grip under the sheet to expand it and see joint rows; tap a
+   figure row's "-" to collapse it. Key panel: easing, offset, scale,
+   delete (then "Undo" in the status line).
 7. Camera: drag pans and pinch zooms the shot; the blue border shows.
 8. Swiping down from the very top edge or up from the bottom edge does not
    open Notification Centre / go home on the first swipe.

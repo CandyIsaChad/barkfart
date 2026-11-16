@@ -17,10 +17,9 @@ public final class EditorScreen implements Disposable {
     private final Theme theme;
     private final Stage stage;
     private final Sidebar sidebar;
-    private final FrameStrip strip;
+    private final DopeSheet sheet;
     private final StageView view;
     private final UiButton play;
-    private final FrameMenu menu;
     private final float uiScale;
     private float insetL, insetR, insetB, insetT;
 
@@ -35,10 +34,9 @@ public final class EditorScreen implements Disposable {
         stage = new Stage(vp);
         view = new StageView(theme, state);
         sidebar = new Sidebar(theme, state);
-        menu = new FrameMenu(theme, state);
-        strip = new FrameStrip(theme, state, new FrameStrip.MenuOpener() {
-            public void open(int frame, float sx, float sy) {
-                menu.open(frame, sx, sy);
+        sheet = new DopeSheet(theme, state, new DopeSheet.Resized() {
+            public void resized() {
+                layout();
             }
         });
         play = new UiButton(theme, "Play", UiButton.Style.NORMAL, new Runnable() {
@@ -66,13 +64,14 @@ public final class EditorScreen implements Disposable {
             }
         };
         stage.addActor(view);
-        stage.addActor(strip);
+        stage.addActor(sheet);
         stage.addActor(play);
         stage.addActor(sidebar);
-        stage.addActor(menu);
         state.addListener(new Runnable() {
             public void run() {
-                if (!state.playing) strip.reveal(state.frame);
+                if (Math.abs(sheet.getHeight() - Math.max(DopeSheet.COLLAPSED, Math.min(state.sheetHeight, stage.getHeight() * 0.6f))) > 0.5f) {
+                    layout();
+                }
             }
         });
         Gdx.input.setInputProcessor(new InputMultiplexer(stage));
@@ -94,12 +93,12 @@ public final class EditorScreen implements Disposable {
         float sbw = insetL + Theme.SIDEBAR_W;
         sidebar.setBounds(0, 0, sbw, h);
         sidebar.setPadding(insetL, insetB);
-        float stripY = h - insetT - Theme.STRIP_H;
+        float sheetH = Math.max(DopeSheet.COLLAPSED, Math.min(state.sheetHeight, h * 0.6f));
+        float sheetY = h - insetT - sheetH;
         float playX = w - insetR - Theme.PLAY - Theme.GAP;
-        strip.setBounds(sbw, stripY, playX - Theme.GAP - sbw, Theme.STRIP_H);
-        play.setBounds(playX, stripY + (Theme.STRIP_H - Theme.PLAY) / 2, Theme.PLAY, Theme.PLAY);
-        view.setBounds(sbw, 0, w - sbw, stripY);
-        menu.setBounds(0, 0, w, h);
+        sheet.setBounds(sbw, sheetY, playX - Theme.GAP - sbw, sheetH);
+        play.setBounds(playX, h - insetT - DopeSheet.COLLAPSED + (DopeSheet.COLLAPSED - Theme.PLAY) / 2, Theme.PLAY, Theme.PLAY);
+        view.setBounds(sbw, 0, w - sbw, sheetY);
         sidebar.invalidate();
     }
 

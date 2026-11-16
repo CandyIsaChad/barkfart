@@ -105,4 +105,4 @@ are undoable instead of confirmed; always-on auto-key behaves like the
 original's per-frame snapshots but stores sparse keys.
 
 ## Out of scope for this screen
-Dope sheet, layers panel, creation mode, effects, sound, export, files.
+Curve editor, layers panel, creation mode, effects, sound, export, files.

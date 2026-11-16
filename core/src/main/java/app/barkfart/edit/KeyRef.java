@@ -11,4 +11,16 @@ public final class KeyRef {
         this.property = property;
         this.time = time;
     }
+
+    @Override
+    public boolean equals(Object o) {
+        if (!(o instanceof KeyRef)) return false;
+        KeyRef k = (KeyRef) o;
+        return k.property == property && Double.compare(k.time, time) == 0;
+    }
+
+    @Override
+    public int hashCode() {
+        return System.identityHashCode(property) * 31 + Double.valueOf(time).hashCode();
+    }
 }
