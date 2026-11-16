@@ -39,13 +39,20 @@ public abstract class Shape {
         }
     }
 
-    /** A filled convex polygon, points as x0,y0,x1,y1,... counter-clockwise or clockwise. */
+    /** A filled polygon, points as x0,y0,x1,y1,... in either winding. */
     public static final class Polygon extends Shape {
         public final float[] points;
+        /** True when known convex (fan triangulation); false means ear clipping. */
+        public final boolean convex;
 
         public Polygon(float[] points, Color color, String source) {
+            this(points, color, source, true);
+        }
+
+        public Polygon(float[] points, Color color, String source, boolean convex) {
             super(color, source);
             this.points = points;
+            this.convex = convex;
         }
     }
 

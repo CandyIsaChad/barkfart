@@ -145,6 +145,17 @@ public final class ProjectCodec {
             List<Object> nodes = new ArrayList<Object>();
             for (Node n : ((Layer.FigureLayer) l).figure.nodes()) nodes.add(node(n));
             m.put("nodes", nodes);
+            List<Object> fills = new ArrayList<Object>();
+            for (app.barkfart.model.Polyfill pf : ((Layer.FigureLayer) l).figure.polyfills) {
+                Map<String, Object> pm = obj();
+                pm.put("id", pf.id);
+                pm.put("anchor", pf.anchor);
+                pm.put("nodes", new ArrayList<Object>(pf.nodes));
+                pm.put("ownColor", pf.useOwnColor);
+                pm.put("color", prop(pf.color, false));
+                fills.add(pm);
+            }
+            m.put("polyfills", fills);
         } else if (l instanceof Layer.SpriteLayer) {
             Layer.SpriteLayer s = (Layer.SpriteLayer) l;
             m.put("asset", s.asset);
@@ -461,6 +472,15 @@ public final class ProjectCodec {
             case FIGURE: {
                 Layer.FigureLayer fl = new Layer.FigureLayer(id, name);
                 for (Object o : list(m, "nodes")) fl.figure.add(node(id, asMap(o, "node")));
+                for (Object o : list(m, "polyfills")) {
+                    Map<String, Object> pm = asMap(o, "polyfill");
+                    app.barkfart.model.Polyfill pf = new app.barkfart.model.Polyfill(id, req(pm, "id"));
+                    pf.anchor = req(pm, "anchor");
+                    for (Object nid : list(pm, "nodes")) pf.nodes.add((String) nid);
+                    pf.useOwnColor = b(pm, "ownColor");
+                    readProp(pm, "color", pf.color);
+                    fl.figure.polyfills.add(pf);
+                }
                 l = fl;
                 break;
             }

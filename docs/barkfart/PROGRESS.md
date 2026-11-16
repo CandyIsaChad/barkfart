@@ -137,10 +137,12 @@ What works
   more than half the clip's contrast from the stage colour; asserted >= 0.9
   for clips using only shapes we draw, on frames with >= 500 drawn pixels.
   Passing: Fire, Sparks, Hit, Speed Zoom, Ground Dust (F1 0.97-1.00).
-  Reported only: Forcefield 0.99, SSJ Aura 0.77-0.80, SSJB Aura 0.49-0.51,
-  Electricity 0 (gradients and polyfills not drawn yet).
+  Reported only (use gradients, not drawn yet): Forcefield 1.00, SSJB Aura
+  0.98, SSJ Aura 0.90, Electricity 0.44-0.48 (its polyfill outline lands in
+  the wrong place; suspect a node option such as stretchy positioning; open).
 - Shapes now drawn natively: round segment, square segment, circle, ellipse,
-  isosceles triangle. Trapezoid and polygon still approximate.
+  isosceles triangle, polyfills (concave, ear-clipped, drawn just before the
+  anchor). Trapezoid, polygon, gradients and curves still approximate.
 Not done (time box reached; recorded in NOTES.md)
 - Frames with several figures (3 clips). Other movieclip versions.
 

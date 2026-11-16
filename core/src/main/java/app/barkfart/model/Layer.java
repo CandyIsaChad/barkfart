@@ -59,6 +59,7 @@ public abstract class Layer {
         public List<Property> properties() {
             List<Property> out = super.properties();
             for (Node n : figure.nodes()) for (Property p : n.properties()) out.add(p);
+            for (Polyfill pf : figure.polyfills) out.add(pf.color);
             return out;
         }
     }

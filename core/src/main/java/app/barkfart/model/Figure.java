@@ -13,6 +13,8 @@ import java.util.Map;
  */
 public final class Figure {
     private final ArrayList<Node> nodes = new ArrayList<Node>();
+    /** Filled shapes through node joints. */
+    public final List<Polyfill> polyfills = new ArrayList<Polyfill>();
     private final HashMap<String, Integer> index = new HashMap<String, Integer>();
 
     public List<Node> nodes() {

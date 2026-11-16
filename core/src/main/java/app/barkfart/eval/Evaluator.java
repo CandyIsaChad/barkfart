@@ -218,9 +218,42 @@ public final class Evaluator {
             py[i] = py[pi] + len * Math.sin(rad);
         }
         double sf = xf.scaleFactor();
+        java.util.Map<String, java.util.List<app.barkfart.model.Polyfill>> fills = null;
+        if (!f.polyfills.isEmpty()) {
+            fills = new java.util.HashMap<String, java.util.List<app.barkfart.model.Polyfill>>();
+            for (app.barkfart.model.Polyfill pf : f.polyfills) {
+                java.util.List<app.barkfart.model.Polyfill> l = fills.get(pf.anchor);
+                if (l == null) fills.put(pf.anchor, l = new java.util.ArrayList<app.barkfart.model.Polyfill>());
+                l.add(pf);
+            }
+        }
         for (int i : f.drawSequence()) {
             Node node = nodes.get(i);
             int pi = parent[i];
+            if (fills != null && fills.containsKey(node.id)) {
+                for (app.barkfart.model.Polyfill pf : fills.get(node.id)) {
+                    if (pf.nodes.size() < 2 || !spend(scene, layer.id)) continue;
+                    float[] pts = new float[(pf.nodes.size() + 1) * 2];
+                    pts[0] = (float) xf.mapX(px[i], py[i]);
+                    pts[1] = (float) xf.mapY(px[i], py[i]);
+                    boolean ok = true;
+                    for (int k = 0; k < pf.nodes.size(); k++) {
+                        int ni = f.indexOf(pf.nodes.get(k));
+                        if (ni < 0) {
+                            ok = false;
+                            break;
+                        }
+                        pts[(k + 1) * 2] = (float) xf.mapX(px[ni], py[ni]);
+                        pts[(k + 1) * 2 + 1] = (float) xf.mapY(px[ni], py[ni]);
+                    }
+                    if (!ok) {
+                        scene.diagnostics.add(new Diagnostic(Diagnostic.Kind.MISSING_REF, layer.id + "/" + pf.id));
+                        continue;
+                    }
+                    Color pc = (Color) r.resolve(pf.useOwnColor ? pf.color : node.color, t);
+                    g.children.add(new Shape.Polygon(pts, pc, layer.id + "/" + pf.id, false));
+                }
+            }
             if (pi < 0 || node.shape == Node.Shape.NONE || !r.b(node.shown, t)) continue;
             if (!spend(scene, layer.id)) return;
             Color c = (Color) r.resolve(node.color, t);

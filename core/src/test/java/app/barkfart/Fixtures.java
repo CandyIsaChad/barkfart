@@ -93,6 +93,14 @@ public final class Fixtures {
         blur.mix.setValue(0.5f);
         blur.mask = new Scope(Scope.Kind.NODE, man.id, "head");
         man.effects.append(blur);
+        app.barkfart.model.Polyfill fill = new app.barkfart.model.Polyfill(man.id, "pf0");
+        fill.anchor = "torso";
+        fill.nodes.add("armL1");
+        fill.nodes.add("armL2");
+        fill.useOwnColor = true;
+        fill.color.track().put(new Key(0, Color.rgba8888(0x33aa55ff), Interp.LINEAR));
+        fill.color.track().put(new Key(1, Color.rgba8888(0x5533aaff), Interp.LINEAR));
+        man.figure.polyfills.add(fill);
         root.layers.add(man);
 
         Symbol inner = p.addSymbol(new Symbol(p.newId("S"), "inner", 1.0));

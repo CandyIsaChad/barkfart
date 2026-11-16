@@ -43,8 +43,17 @@ public final class Tessellator {
                 Shape.Circle ci = (Shape.Circle) s;
                 fan(ci.cx, ci.cy, ci.r, 0, (float) (2 * Math.PI), rgba, batch);
             } else if (s instanceof Shape.Polygon) {
-                float[] q = ((Shape.Polygon) s).points;
-                for (int i = 2; i + 3 < q.length; i += 2) tri(batch, q[0], q[1], q[i], q[i + 1], q[i + 2], q[i + 3], rgba);
+                Shape.Polygon pg = (Shape.Polygon) s;
+                float[] q = pg.points;
+                if (pg.convex) {
+                    for (int i = 2; i + 3 < q.length; i += 2) tri(batch, q[0], q[1], q[i], q[i + 1], q[i + 2], q[i + 3], rgba);
+                } else {
+                    int[] idx = EarClip.triangulate(q);
+                    for (int i = 0; i + 2 < idx.length; i += 3) {
+                        tri(batch, q[idx[i] * 2], q[idx[i] * 2 + 1], q[idx[i + 1] * 2], q[idx[i + 1] * 2 + 1],
+                                q[idx[i + 2] * 2], q[idx[i + 2] * 2 + 1], rgba);
+                    }
+                }
             } else if (s instanceof Shape.Quad) {
                 float[] q = ((Shape.Quad) s).corners;
                 tri(batch, q[0], q[1], q[2], q[3], q[4], q[5], rgba);

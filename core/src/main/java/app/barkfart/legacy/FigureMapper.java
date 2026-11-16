@@ -61,6 +61,15 @@ public final class FigureMapper {
             layer.figure.add(n);
             for (int i = ln.children.size() - 1; i >= 0; i--) stack.add(new Object[] {ln.children.get(i), n.id});
         }
+        int k = 0;
+        for (NodesFormat.Polyfill lp : fig.polyfills) {
+            app.barkfart.model.Polyfill pf = new app.barkfart.model.Polyfill(layer.id, "pf" + (k++));
+            pf.anchor = "n" + lp.anchor;
+            for (int nid : lp.nodes) pf.nodes.add("n" + nid);
+            pf.useOwnColor = lp.useColor != 0;
+            pf.color.setValue(color(lp.color));
+            layer.figure.polyfills.add(pf);
+        }
         p.invalidateIndex();
         return layer;
     }
@@ -100,13 +109,6 @@ public final class FigureMapper {
         root.legacyExtras.put("fig.scale", fig.scale);
         root.legacyExtras.put("fig.little", fig.littleEndian);
         root.legacyExtras.put("fig.compressed", fig.compressed);
-        StringBuilder pf = new StringBuilder();
-        for (NodesFormat.Polyfill p : fig.polyfills) {
-            if (pf.length() > 0) pf.append(';');
-            pf.append(p.anchor).append(':').append(p.color).append(':').append(p.useColor).append(':');
-            for (int i = 0; i < p.nodes.size(); i++) pf.append(i == 0 ? "" : ",").append(p.nodes.get(i));
-        }
-        root.legacyExtras.put("fig.polyfills", pf.toString());
         StringBuilder cn = new StringBuilder();
         for (int[] c : fig.connections) cn.append(cn.length() == 0 ? "" : ";").append(c[0]).append(',').append(c[1]);
         root.legacyExtras.put("fig.connections", cn.toString());
@@ -172,17 +174,13 @@ public final class FigureMapper {
             if (isRoot) fig.root = ln;
             else byId.get(n.parent).children.add(ln);
         }
-        String pf = strExtra(root, "fig.polyfills");
-        if (pf != null && !pf.isEmpty()) {
-            for (String part : pf.split(";")) {
-                String[] q = part.split(":", -1);
-                NodesFormat.Polyfill p = new NodesFormat.Polyfill();
-                p.anchor = Integer.parseInt(q[0]);
-                p.color = Integer.parseInt(q[1]);
-                p.useColor = Integer.parseInt(q[2]);
-                if (!q[3].isEmpty()) for (String s : q[3].split(",")) p.nodes.add(Integer.parseInt(s));
-                fig.polyfills.add(p);
-            }
+        for (app.barkfart.model.Polyfill mp : layer.figure.polyfills) {
+            NodesFormat.Polyfill p = new NodesFormat.Polyfill();
+            p.anchor = drawIndexOf(layer, mp.anchor);
+            p.color = legacyColor((Color) mp.color.value());
+            p.useColor = mp.useOwnColor ? 1 : 0;
+            for (String nid : mp.nodes) p.nodes.add(drawIndexOf(layer, nid));
+            fig.polyfills.add(p);
         }
         String cn = strExtra(root, "fig.connections");
         if (cn != null && !cn.isEmpty()) {
@@ -222,6 +220,12 @@ public final class FigureMapper {
         double rad = Math.toRadians(world);
         ln.fields.put("localX", (float) (want * Math.cos(rad)));
         ln.fields.put("localY", (float) (want * Math.sin(rad)));
+    }
+
+    private static int drawIndexOf(Layer.FigureLayer layer, String nodeId) throws IOException {
+        Node n = layer.figure.node(nodeId);
+        if (n == null) throw new IOException("polyfill refers to missing node " + nodeId);
+        return n.parent == null ? 0 : n.drawOrder;
     }
 
     private static Object defaultValue(NodesFormat.Field f) {
