@@ -153,4 +153,47 @@ class CanvasToolsTest {
         man.locked = true;
         assertTrue(tools.handles(0).isEmpty());
     }
+
+    @Test
+    void canvasHelpers() {
+        setUp(1, 0);
+        tools.throughCamera = false;
+        app.barkfart.model.Layer.FigureLayer twin = Fixtures.stickman(p, "twin");
+        twin.transform.x.setValue(30f);   // exactly on top of man
+        p.root().layers.add(twin);
+        p.invalidateIndex();
+        // node digging: repeated taps on one joint cycle through both figures' joints
+        CanvasTools.Handle head = handle("head");
+        CanvasTools.Hit a = tools.pickCycling(head.x, head.y, 6, 0, null, null);
+        CanvasTools.Hit b = tools.pickCycling(head.x, head.y, 6, 0, null, a.node);
+        assertNotSame(a.node, b.node, "the second tap digs to the other joint");
+        assertSame(a.node, tools.pickCycling(head.x, head.y, 6, 0, null, b.node).node, "and wraps around");
+        assertSame(b.node, tools.pickCycling(head.x, head.y, 6, 0, b.node, null).node, "a selected joint sticks");
+        // snapping
+        assertEquals(45, CanvasTools.snap(52, 45), 1e-9);
+        assertEquals(52, CanvasTools.snap(52, 0), 1e-9);
+        // rotate a figure about its main node
+        app.barkfart.eval.Affine st0 = app.barkfart.eval.Evaluator.layerStage(p, p.root(), man, 0);
+        tools.rotateFigure(man, 30, 0);
+        app.barkfart.eval.Affine st1 = app.barkfart.eval.Evaluator.layerStage(p, p.root(), man, 0);
+        assertEquals(st0.mapX(0, 0), st1.mapX(0, 0), 1e-3, "main node stays put");
+        assertEquals(30, Math.toDegrees(Math.atan2(st1.b, st1.a)) - Math.toDegrees(Math.atan2(st0.b, st0.a)), 1e-3);
+        // panning mode: everything moves together, one undo step
+        float mx = man.transform.x.floatValue();
+        tools.moveAll(10, -5, 0);
+        app.barkfart.eval.PropertyResolver r = new app.barkfart.eval.PropertyResolver(p, new java.util.ArrayList<app.barkfart.eval.Diagnostic>());
+        assertEquals(40f, r.f(twin.transform.x, 0), 1e-4);
+        d.undo();
+        assertEquals(30f, new app.barkfart.eval.PropertyResolver(p, new java.util.ArrayList<app.barkfart.eval.Diagnostic>()).f(twin.transform.x, 0), 1e-4);
+        // axis lock: a diagonal drag of the main node moves along x only
+        tools.axisLock = true;
+        CanvasTools.Handle root = null;
+        for (CanvasTools.Handle h : tools.handles(0)) if (h.root && h.layer == twin) root = h;
+        tools.begin(new CanvasTools.Hit(twin, twin.figure.root(), root.x, root.y), root.x, root.y, 0);
+        tools.move(root.x + 40, root.y + 15, 0);
+        tools.end();
+        r = new app.barkfart.eval.PropertyResolver(p, new java.util.ArrayList<app.barkfart.eval.Diagnostic>());
+        assertEquals(70f, r.f(twin.transform.x, 0), 1e-3);
+        assertEquals(0f, r.f(twin.transform.y, 0), 1e-3, "no vertical drift");
+    }
 }

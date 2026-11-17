@@ -118,6 +118,87 @@ public final class CanvasTools {
         return best == null ? null : new Hit(best.layer, best.node, best.x, best.y);
     }
 
+    /**
+     * Picking with node-digging (Stick Nodes 4.2.0): all handles within the
+     * radius, nearest first; tapping again on the same cluster (previous is
+     * one of them) gives the next one, wrapping. A selected joint within reach
+     * wins the first tap ("selected node sticks").
+     */
+    public Hit pickCycling(float x, float y, float radius, double t, Node selected, Node previous) {
+        List<Handle> near = new ArrayList<Handle>();
+        for (Handle h : handles(t)) if ((h.x - x) * (h.x - x) + (h.y - y) * (h.y - y) <= radius * radius) near.add(h);
+        if (near.isEmpty()) return null;
+        final float fx = x, fy = y;
+        java.util.Collections.sort(near, new java.util.Comparator<Handle>() {
+            public int compare(Handle a, Handle b) {
+                double da = (a.x - fx) * (a.x - fx) + (a.y - fy) * (a.y - fy), db = (b.x - fx) * (b.x - fx) + (b.y - fy) * (b.y - fy);
+                if (Math.abs(da - db) > 1e-6) return da < db ? -1 : 1;
+                return a.root == b.root ? 0 : (a.root ? 1 : -1);   // joints before main nodes
+            }
+        });
+        int at = -1;
+        for (int i = 0; i < near.size(); i++) if (near.get(i).node == previous) at = i;
+        Handle h;
+        if (at >= 0) h = near.get((at + 1) % near.size());
+        else {
+            h = near.get(0);
+            for (Handle c : near) if (c.node == selected) h = c;
+        }
+        return new Hit(h.layer, h.node, h.x, h.y);
+    }
+
+    /** While dragging a whole figure, keep to the axis it moved most along (Stick Nodes 2.2.0). */
+    public boolean axisLock;
+    /** When > 0, joint angles from drags snap to multiples of this many degrees (e.g. 45). */
+    public float snapDegrees;
+
+    /** Snaps an angle to the nearest multiple of step degrees (step <= 0: unchanged). */
+    public static double snap(double deg, double step) {
+        return step > 0 ? Math.round(deg / step) * step : deg;
+    }
+
+    /**
+     * Turns a whole figure about its main node by delta degrees at time t
+     * (pinch-rotate, 1.2.8): rotation and position change together so the main
+     * node stays put. One undo step.
+     */
+    public void rotateFigure(Layer.FigureLayer l, double delta, double t) {
+        PropertyResolver r = new PropertyResolver(editor.doc.project, new ArrayList<Diagnostic>());
+        Affine stage = Evaluator.layerStage(editor.doc.project, symbol(), l, t);
+        FigurePose pose = FigurePose.compute(l, t, r);
+        double px = stage.mapX(pose.x[0], pose.y[0]), py = stage.mapY(pose.x[0], pose.y[0]);
+        double rot = r.f(l.transform.rotation, t) + delta;
+        editor.doc.begin("Rotate figure");
+        try {
+            editor.change(l.transform.rotation, (float) rot, t);
+            Affine after = Evaluator.layerStage(editor.doc.project, symbol(), l, t);
+            double qx = after.mapX(pose.x[0], pose.y[0]), qy = after.mapY(pose.x[0], pose.y[0]);
+            editor.change(l.transform.x, (float) (r.f(l.transform.x, t) + (px - qx)), t);
+            editor.change(l.transform.y, (float) (r.f(l.transform.y, t) + (py - qy)), t);
+        } finally {
+            editor.doc.commit();
+        }
+    }
+
+    /**
+     * Panning mode (1.1.3): moves every top-level figure, sprite, text and
+     * movieclip layer by (dx, dy) stage units at time t (joined and
+     * camera-locked layers follow their parents). One undo step.
+     */
+    public void moveAll(float dx, float dy, double t) {
+        PropertyResolver r = new PropertyResolver(editor.doc.project, new ArrayList<Diagnostic>());
+        editor.doc.begin("Move everything");
+        try {
+            for (Layer l : symbol().layers) {
+                if (l.parent != null || l instanceof Layer.CameraLayer || l instanceof Layer.AudioLayer || l.locked) continue;
+                editor.change(l.transform.x, r.f(l.transform.x, t) + dx, t);
+                editor.change(l.transform.y, r.f(l.transform.y, t) + dy, t);
+            }
+        } finally {
+            editor.doc.commit();
+        }
+    }
+
     public boolean dragging() {
         return drag != null;
     }
@@ -177,6 +258,10 @@ public final class CanvasTools {
         else if (n.dragLock == Node.DRAG_VERTICAL) tx = drag.x;
         if (n.parent == null) {
             // Move the figure: convert the view-space offset into the layer's parent space.
+            if (axisLock) {   // keep to the axis moved along most
+                if (Math.abs(tx - drag.x) >= Math.abs(ty - drag.y)) ty = drag.y;
+                else tx = drag.x;
+            }
             Affine inv = dragView.inverse();
             double ox = inv.mapX(drag.x, drag.y), oy = inv.mapY(drag.x, drag.y);
             double nx = inv.mapX(tx, ty), ny = inv.mapY(tx, ty);
@@ -198,6 +283,7 @@ public final class CanvasTools {
         double world = Math.toDegrees(Math.atan2(dy, dx));
         double current = r.f(n.rotation, t);
         double rel = world - pose.baseAngle(drag.layer.figure.nodes(), i);   // angle locks measure from elsewhere
+        rel = snap(rel, snapDegrees);
         rel += 360 * Math.round((current - rel) / 360);                 // stay continuous with the old angle
         editor.change(n.rotation, (float) rel, t);
         if (stretch) {
