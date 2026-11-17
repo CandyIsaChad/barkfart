@@ -83,6 +83,45 @@ public final class CanvasTools {
         return editor.doc.project.root();
     }
 
+    /**
+     * View options (Stick Nodes 4.1.6 / 4.2.4 / 4.3.3): only main nodes and
+     * join anchors, except on the active figure; hide pinned joints.
+     */
+    public boolean mainNodesOnly, hideLocked;
+    public Layer.FigureLayer activeFigure;
+
+    /** True when a filter hides joints (the original shows a warning dot). */
+    public boolean filtering() {
+        return mainNodesOnly || hideLocked;
+    }
+
+    /** Joints of the figure that other layers are joined to. */
+    public static java.util.Set<String> joinAnchors(Symbol s, Layer.FigureLayer fl) {
+        java.util.Set<String> out = new java.util.HashSet<String>();
+        for (Layer l : s.layers) if (fl.id.equals(l.parent) && l.parentNode != null) out.add(l.parentNode);
+        return out;
+    }
+
+    /**
+     * Joints directly connected to a joint (Stick Nodes 3.1.0 neighbour
+     * nodes): its parent and children, and with acrossJoins (4.1.3) the main
+     * nodes of figures joined at it, or the anchor its own figure is joined to.
+     */
+    public List<Handle> neighbours(Layer.FigureLayer fl, Node n, boolean acrossJoins, double t) {
+        List<Handle> all = handles(t), out = new ArrayList<Handle>();
+        Symbol s = symbol();
+        for (Handle h : all) {
+            if (h.layer == fl) {
+                if (h.node.id.equals(n.parent) || n.id.equals(h.node.parent)) out.add(h);
+                continue;
+            }
+            if (!acrossJoins) continue;
+            if (h.root && fl.id.equals(h.layer.parent) && n.id.equals(h.layer.parentNode)) out.add(h);
+            else if (n.parent == null && fl.parent != null && fl.parent.equals(h.layer.id) && h.node.id.equals(fl.parentNode)) out.add(h);
+        }
+        return out;
+    }
+
     /** Handles for every visible, unlocked figure layer of the root symbol at time t. */
     public List<Handle> handles(double t) {
         List<Handle> out = new ArrayList<Handle>();
@@ -94,8 +133,12 @@ public final class CanvasTools {
             Affine v = view(s, l, t);
             FigurePose pose = FigurePose.compute(fl, t, r);
             List<Node> nodes = fl.figure.nodes();
+            java.util.Set<String> anchors = mainNodesOnly && fl != activeFigure ? joinAnchors(s, fl) : null;
             for (int i = 0; i < nodes.size(); i++) {
-                if (nodes.get(i).isStatic && !showStatic) continue;
+                Node n = nodes.get(i);
+                if (n.isStatic && !showStatic) continue;
+                if (anchors != null && n.parent != null && !anchors.contains(n.id)) continue;
+                if (hideLocked && n.pinned) continue;
                 out.add(new Handle(fl, nodes.get(i), (float) v.mapX(pose.x[i], pose.y[i]), (float) v.mapY(pose.x[i], pose.y[i])));
             }
         }
