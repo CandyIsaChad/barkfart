@@ -40,24 +40,42 @@ public class BarkfartApp extends ApplicationAdapter {
     @Override
     public void create() {
         editor = new EditorScreen(platform, uiScale);
-        // GL effects against the reference renderer, on this device's GPU (GL thread, a few ms).
+        editor.state.diagnosticsRunner = new Runnable() {
+            public void run() {
+                runDiagnostics(false);
+            }
+        };
+        runDiagnostics(true);
+    }
+
+    /**
+     * Every check, on this device: core and feature checks and the audio output
+     * on a worker thread, the GPU effects check here (GL thread). Results go to
+     * the Diagnostics screen; at launch a summary shows (tap it for details).
+     */
+    private void runDiagnostics(final boolean atLaunch) {
+        long g0 = System.nanoTime();
         final String fx = app.barkfart.render.EffectCheck.run();
+        final long fxMs = (System.nanoTime() - g0) / 1000000;
         System.out.println("[Barkfart] effects " + (fx == null ? "OK" : fx));
         Thread st = new Thread(new Runnable() {
             public void run() {
                 final SelfTest.Result r = SelfTest.run(platform.documents());
+                long a0 = System.nanoTime();
                 final String au = platform.audio().check();   // opens the output, plays silence, waits for it
-                System.out.println("[Barkfart] audio " + (au == null ? "OK" : au));
+                r.add("Device", "GPU draws effects like the reference", fx, fxMs);
+                r.add("Device", "audio output plays", au, (System.nanoTime() - a0) / 1000000);
                 System.out.println("[Barkfart] self-test " + r.summary());
                 for (String f : r.failures) System.out.println("[Barkfart] FAIL " + f);
                 Gdx.app.postRunnable(new Runnable() {
                     public void run() {
-                        // Results first, so they are what you read; details after.
-                        editor.state.flash("Self-test " + r.summary() + " · Effects " + (fx == null ? "OK" : "FAIL") + " · Audio " + (au == null ? "OK" : "FAIL")
-                                + (r.ok() ? "" : " · " + r.failures.get(0))
-                                + (fx == null ? "" : " · " + fx)
-                                + (au == null ? "" : " · " + au)
-                                + " · v" + VERSION, null, 12);
+                        editor.state.diagnostics = r;
+                        if (atLaunch || !r.ok()) {
+                            int failed = r.entries.size() - r.passed;
+                            editor.state.flash((failed == 0 ? "All " + r.entries.size() + " checks passed" : failed + " of " + r.entries.size() + " checks FAILED")
+                                    + " · tap for Diagnostics · v" + VERSION, editor.state.diagnosticsOpener, 12);
+                        }
+                        editor.state.fire();
                     }
                 });
             }

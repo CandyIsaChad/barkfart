@@ -147,6 +147,10 @@ public final class EditorState {
         fire();
     }
 
+    /** Latest results of every check (null while running); opener and runner set by the screen / app. */
+    public app.barkfart.selftest.SelfTest.Result diagnostics;
+    public Runnable diagnosticsOpener, diagnosticsRunner;
+
     /** Sound output (set by the screen from the platform). */
     public app.barkfart.audio.AudioBackend audio = app.barkfart.audio.AudioBackend.NONE;
     private final java.util.Map<String, app.barkfart.audio.Pcm> soundCache = new java.util.HashMap<String, app.barkfart.audio.Pcm>();

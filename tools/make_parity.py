@@ -147,6 +147,7 @@ STATUS = {
 
 ROADMAP = """
 ## Order of work (parity first, then our own additions)
+Our own additions wait in ADDITIONS.md until this list is done.
 1. **Files and content:** project save/open/new with a file list; import
    the user's .nodes / .nodemc / .stknds and Pivot .stk; stickfigure export;
    our own default figures and samples.

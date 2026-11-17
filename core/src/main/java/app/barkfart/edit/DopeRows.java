@@ -18,7 +18,7 @@ import java.util.TreeSet;
  * (layer position) and a Camera row. Headless so it can be tested.
  */
 public final class DopeRows {
-    public enum Kind { SUMMARY, FIGURE, JOINT, MOVE, CAMERA }
+    public enum Kind { SUMMARY, FIGURE, JOINT, MOVE, CAMERA, SOUND }
 
     public static final class Row {
         public final Kind kind;
@@ -26,13 +26,20 @@ public final class DopeRows {
         public final int depth;
         public final Layer layer;
         public final List<Property> props;
+        /** SOUND rows: the clip drawn as a bar. */
+        public final app.barkfart.model.Clip clip;
 
         Row(Kind kind, String label, int depth, Layer layer, List<Property> props) {
+            this(kind, label, depth, layer, props, null);
+        }
+
+        Row(Kind kind, String label, int depth, Layer layer, List<Property> props, app.barkfart.model.Clip clip) {
             this.kind = kind;
             this.label = label;
             this.depth = depth;
             this.layer = layer;
             this.props = props;
+            this.clip = clip;
         }
 
         /** Distinct key times across this row's properties, ascending. */
@@ -60,6 +67,7 @@ public final class DopeRows {
         List<Row> rows = new ArrayList<Row>();
         List<Property> all = new ArrayList<Property>();
         List<Row> body = new ArrayList<Row>();
+        List<Row> sounds = new ArrayList<Row>();
         for (Layer l : p.root().layers) {
             if (l instanceof Layer.FigureLayer) {
                 if (only != null && l != only) continue;
@@ -96,9 +104,19 @@ public final class DopeRows {
                 cp.add(c.rotation);
                 all.addAll(cp);
                 body.add(new Row(Kind.CAMERA, "Camera", 0, l, cp));
+            } else if (l instanceof Layer.AudioLayer) {
+                // sounds are listed whatever the figure filter: they are timing context
+                for (app.barkfart.model.Clip c : ((Layer.AudioLayer) l).clips) {
+                    List<Property> sp = new ArrayList<Property>();
+                    sp.add(c.volume);
+                    sp.add(c.pan);
+                    all.addAll(sp);
+                    sounds.add(new Row(Kind.SOUND, l.name, 0, l, sp, c));
+                }
             }
         }
         rows.add(new Row(Kind.SUMMARY, "All keys", 0, null, all));
+        rows.addAll(sounds);   // timing context, right under the summary
         rows.addAll(body);
         return rows;
     }

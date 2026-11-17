@@ -1,0 +1,323 @@
+package app.barkfart.selftest;
+
+import app.barkfart.audio.AudioPlan;
+import app.barkfart.audio.Mixer;
+import app.barkfart.audio.Pcm;
+import app.barkfart.audio.Wav;
+import app.barkfart.canvas.CanvasTools;
+import app.barkfart.edit.Document;
+import app.barkfart.edit.Editor;
+import app.barkfart.eval.Diagnostic;
+import app.barkfart.eval.Evaluator;
+import app.barkfart.eval.FigurePose;
+import app.barkfart.eval.Group;
+import app.barkfart.eval.PropertyResolver;
+import app.barkfart.eval.Scene;
+import app.barkfart.eval.Shape;
+import app.barkfart.fx.Compositor;
+import app.barkfart.fx.EffectTypes;
+import app.barkfart.fx.Image;
+import app.barkfart.geom.DrawList;
+import app.barkfart.geom.Tessellator;
+import app.barkfart.model.Clip;
+import app.barkfart.model.Color;
+import app.barkfart.model.EffectNode;
+import app.barkfart.model.Layer;
+import app.barkfart.model.Modifier;
+import app.barkfart.model.Node;
+import app.barkfart.model.Project;
+import app.barkfart.model.Symbol;
+import app.barkfart.model.ValueType;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * One check per feature, run on the device by the Diagnostics screen (and at
+ * launch). They use only app code, so they exercise the same runtime the
+ * user has. Unit tests cover the same ground in more depth.
+ */
+final class FeatureChecks {
+    private FeatureChecks() {}
+
+    // ---- tiny builders ----
+
+    private static Project project() {
+        Project p = new Project();
+        Symbol s = p.addSymbol(new Symbol(p.newId("S"), "check", 2));
+        p.rootSymbol = s.id;
+        return p;
+    }
+
+    private static Layer.FigureLayer figure(Project p) {
+        Layer.FigureLayer l = new Layer.FigureLayer(p.newId("L"), "f");
+        l.figure.add(new Node(l.id, "r", null, Node.Shape.NONE));
+        p.root().layers.add(l);
+        return l;
+    }
+
+    private static Node node(Layer.FigureLayer l, String id, String parent, Node.Shape shape, float rot, float len, float thick) {
+        Node n = new Node(l.id, id, parent, shape);
+        n.rotation.setValue(rot);
+        n.length.setValue(len);
+        n.thickness.setValue(thick);
+        l.figure.add(n);
+        return n;
+    }
+
+    private static List<Shape> shapes(Project p) {
+        p.invalidateIndex();
+        List<Shape> out = new ArrayList<Shape>();
+        collect(Evaluator.evaluate(p, p.rootSymbol, 0).root, out);
+        return out;
+    }
+
+    private static void collect(Group g, List<Shape> out) {
+        for (Object o : g.children) {
+            if (o instanceof Group) collect((Group) o, out);
+            else out.add((Shape) o);
+        }
+    }
+
+    private static Image render(Project p, int w, int h) {
+        p.invalidateIndex();
+        Image im = new Image(w, h, -w / 2f, h / 2f, 1);
+        Compositor.render(Tessellator.layered(Evaluator.evaluate(p, p.rootSymbol, 0)), im);
+        return im;
+    }
+
+    private static int alpha(Image im, float x, float y) {
+        return Compositor.rgba(im, (int) (x - im.x0), (int) (im.y0 - y)) & 0xff;
+    }
+
+    private static PropertyResolver resolver(Project p) {
+        return new PropertyResolver(p, new ArrayList<Diagnostic>());
+    }
+
+    static void run(SelfTest.Result r) {
+        r.group = "Shapes";
+        SelfTest.check(r, "curved segments bend", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.FigureLayer l = figure(p);
+                node(l, "a", "r", Node.Shape.LINE, 0, 100, 8).curve = 30;
+                Shape s = shapes(p).get(0);
+                SelfTest.expect(s instanceof Shape.Line && Math.abs(((Shape.Line) s).bend) > 1, "no bend");
+            }
+        });
+        SelfTest.check(r, "ellipse glow has a centre colour", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.FigureLayer l = figure(p);
+                Node e = node(l, "e", "r", Node.Shape.ELLIPSE, 0, 160, 60);
+                e.color.setValue(Color.rgba8888(0xffffffff));
+                e.gradient = true;
+                e.gradientColor.setValue(Color.rgba8888(0x0000ffff));
+                p.invalidateIndex();
+                DrawList dl = Tessellator.tessellate(Evaluator.evaluate(p, p.rootSymbol, 0));
+                boolean centre = false;
+                for (DrawList.Batch b : dl.batches) for (int i = 0; i < b.vertexCount(); i++) centre |= (b.rgba(i) >>> 24) >= 0xf0;
+                SelfTest.expect(centre, "flat rim colour");
+            }
+        });
+        SelfTest.check(r, "hollow circles, polygons, trapezoids", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.FigureLayer l = figure(p);
+                node(l, "c", "r", Node.Shape.CIRCLE, 0, 60, 6).circleHollow = true;
+                Node poly = node(l, "p", "r", Node.Shape.POLYGON, 90, 60, 6);
+                poly.polygonSides = 7;
+                Node trap = node(l, "t", "r", Node.Shape.TRAPEZOID, 180, 60, 40);
+                trap.trapezoidRatio = 0.25f;
+                List<Shape> s = shapes(p);
+                SelfTest.expect(s.get(0) instanceof Shape.Ring, "hollow circle is not a ring");
+                SelfTest.expect(((Shape.Polygon) s.get(1)).points.length == 14, "polygon corners");
+                float[] q = ((Shape.Polygon) s.get(2)).points;
+                double wA = Math.hypot(q[0] - q[2], q[1] - q[3]), wB = Math.hypot(q[4] - q[6], q[5] - q[7]);
+                SelfTest.expect(Math.abs(wB / wA - 0.25) < 0.01, "trapezoid ratio " + wB / wA);
+            }
+        });
+        SelfTest.check(r, "polyfills follow curves", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.FigureLayer l = figure(p);
+                node(l, "c", "r", Node.Shape.LINE, 0, 140, 2).curve = 60;
+                node(l, "d", "r", Node.Shape.NONE, -60, 100, 0);
+                app.barkfart.model.Polyfill pf = new app.barkfart.model.Polyfill(l.id, "pf");
+                pf.anchor = "r";
+                pf.nodes.add("c");
+                pf.nodes.add("d");
+                l.figure.polyfills.add(pf);
+                for (Shape s : shapes(p)) {
+                    if (s instanceof Shape.Polygon) {
+                        SelfTest.expect(((Shape.Polygon) s).points.length > 8, "fill edge is straight");
+                        return;
+                    }
+                }
+                throw new AssertionError("no fill");
+            }
+        });
+
+        r.group = "Rigging";
+        SelfTest.check(r, "node scale stretches its own segment", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.FigureLayer l = figure(p);
+                node(l, "a", "r", Node.Shape.LINE, 0, 100, 4).scale.setValue(0.5f);
+                node(l, "b", "a", Node.Shape.LINE, 0, 100, 4);
+                p.invalidateIndex();
+                FigurePose ps = FigurePose.compute(l, 0, resolver(p));
+                SelfTest.expect(Math.abs(ps.x[1] - 50) < 1e-6 && Math.abs(ps.x[2] - 150) < 1e-6, "positions " + ps.x[1] + ", " + ps.x[2]);
+            }
+        });
+        SelfTest.check(r, "smart-stretch matches the original", new SelfTest.Check() {
+            public void run() {
+                // The original's own stored result (Rain's stretched circle): 132.3 -> 701.2.
+                Project p = project();
+                Layer.FigureLayer l = figure(p);
+                Node s = node(l, "s", "r", Node.Shape.LINE, 90, 132.3f, 4);
+                s.smartStretch = true;
+                s.restLength = 132.3f;
+                Node back = node(l, "back", "s", Node.Shape.LINE, 180, 132.3f, 4);
+                back.isStatic = true;
+                back.restLength = 132.3f;
+                Node d = node(l, "d", "back", Node.Shape.LINE, 85, 132.3f, 4);
+                d.isStatic = true;
+                d.restLength = 132.3f;
+                p.invalidateIndex();
+                CanvasTools tools = new CanvasTools(new Editor(new Document(p)));
+                tools.smartStretch(l, FigurePose.compute(l, 0, resolver(p)), 1, 701.2f, 0);
+                float got = resolver(p).f(d.length, 0);
+                SelfTest.expect(Math.abs(got - 145.3f) < 0.3f, "detail length " + got + " (original: 145.3)");
+            }
+        });
+        SelfTest.check(r, "angle locks and static nodes", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.FigureLayer l = figure(p);
+                node(l, "arm", "r", Node.Shape.LINE, 40, 100, 4);
+                Node plate = node(l, "plate", "arm", Node.Shape.LINE, 30, 50, 4);
+                plate.isStatic = true;
+                node(l, "abs", "plate", Node.Shape.LINE, 10, 30, 4).angleLock = Node.LOCK_ABSOLUTE;
+                p.invalidateIndex();
+                FigurePose ps = FigurePose.compute(l, 0, resolver(p));
+                SelfTest.expect(Math.abs(ps.angle[3] - 10) < 1e-9, "absolute lock " + ps.angle[3]);
+                CanvasTools tools = new CanvasTools(new Editor(new Document(p)));
+                for (CanvasTools.Handle h : tools.handles(0)) SelfTest.expect(!h.node.isStatic, "static node has a handle");
+            }
+        });
+
+        r.group = "Effects (reference)";
+        SelfTest.check(r, "translucent figures composite once", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.FigureLayer l = figure(p);
+                node(l, "a", "r", Node.Shape.SQUARE_LINE, 0, 40, 40);
+                node(l, "b", "r", Node.Shape.SQUARE_LINE, 0, 40, 40);
+                l.opacity.setValue(0.5f);
+                Image im = render(p, 80, 60);
+                int a = alpha(im, 20, 0);
+                SelfTest.expect(Math.abs(a - 128) <= 2, "overlap alpha " + a);
+            }
+        });
+        SelfTest.check(r, "blur, glow, shadow, invert", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.FigureLayer l = figure(p);
+                node(l, "s", "r", Node.Shape.SQUARE_LINE, 0, 20, 20).color.setValue(Color.rgba8888(0xffffffff));
+                EffectNode sh = new EffectNode(l.id, "FXs", EffectTypes.SHADOW);
+                sh.param(l.id, "dx", ValueType.FLOAT, 10f);
+                sh.param(l.id, "dy", ValueType.FLOAT, -10f);
+                sh.param(l.id, "radius", ValueType.FLOAT, 0f);
+                sh.param(l.id, "color", ValueType.COLOR, Color.rgba8888(0x000000ff));
+                l.effects.append(sh);
+                Image im = render(p, 80, 60);
+                SelfTest.expect(alpha(im, 26, -16) == 255 && alpha(im, -6, 16) == 0, "shadow direction");
+                l.effects.nodes.clear();
+                l.effects.output = null;
+                EffectNode b = new EffectNode(l.id, "FXb", EffectTypes.BLUR);
+                b.param(l.id, "radius", ValueType.FLOAT, 8f);
+                l.effects.append(b);
+                im = render(p, 80, 60);
+                SelfTest.expect(alpha(im, 24, 0) > 10, "blur does not spread");
+                l.effects.nodes.clear();
+                l.effects.output = null;
+                l.effects.append(new EffectNode(l.id, "FXi", EffectTypes.INVERT));
+                im = render(p, 80, 60);
+                SelfTest.expect((Compositor.rgba(im, 50, 30) >>> 8) == 0, "invert");
+            }
+        });
+
+        r.group = "Audio (mixer)";
+        SelfTest.check(r, "wav decode", new SelfTest.Check() {
+            public void run() {
+                Pcm t = Mixer.tone(440, 0.05, 44100, 0.5f);
+                Pcm b = Wav.decode(Wav.encode(t));
+                SelfTest.expect(b != null && java.util.Arrays.equals(t.data, b.data), "round trip");
+            }
+        });
+        SelfTest.check(r, "sound timing, trim, loop, pan", new SelfTest.Check() {
+            public void run() {
+                final Pcm tone = Mixer.tone(440, 1.0, 44100, 0.5f);
+                Project p = project();
+                Layer.AudioLayer a = new Layer.AudioLayer(p.newId("L"), "a");
+                Clip c = new Clip(a.id, "c", "A", 0.5, 0, 0.25);
+                c.pan.setValue(-1f);
+                a.clips.add(c);
+                p.root().layers.add(a);
+                p.invalidateIndex();
+                AudioPlan plan = AudioPlan.build(p, p.root(), new AudioPlan.Sounds() {
+                    public Pcm pcm(String id) {
+                        return tone;
+                    }
+                });
+                float[] out = new float[44100 * 2];
+                Mixer.mix(plan, 0, 44100, 44100, out);
+                double before = 0, during = 0, after = 0, right = 0;
+                for (int i = 0; i < 44100; i++) {
+                    double v = out[i * 2] * out[i * 2];
+                    if (i < 22000) before += v;
+                    else if (i > 22600 && i < 32500) during += v;
+                    else if (i > 33200) after += v;
+                    right += out[i * 2 + 1] * out[i * 2 + 1];
+                }
+                SelfTest.expect(before == 0 && after == 0 && during > 100 && right < 1e-6, "timing " + before + " " + during + " " + after + " pan " + right);
+            }
+        });
+
+        r.group = "Safety limits";
+        SelfTest.check(r, "runaway delayed links stop", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.FigureLayer l = figure(p);
+                Node prev = null;
+                for (int i = 0; i < 40; i++) prev = node(l, "n" + i, prev == null ? "r" : prev.id, Node.Shape.LINE, 1, 1, 1);
+                p.invalidateIndex();
+                List<Node> ns = l.figure.nodes();
+                for (int i = 1; i + 2 < ns.size(); i++) {
+                    // a different delay per link: every path lands on its own time (2^38 of them)
+                    ns.get(i).rotation.addModifier(new Modifier.DelayFollow(ns.get(i + 1).rotation.id, 0.013f + i * 1.3e-4f, 1, 0));
+                    ns.get(i).rotation.addModifier(new Modifier.DelayFollow(ns.get(i + 2).rotation.id, 0.029f + i * 2.9e-4f, 1, 0));
+                }
+                long t0 = System.currentTimeMillis();
+                Scene s = Evaluator.evaluate(p, p.rootSymbol, 1);
+                SelfTest.expect(System.currentTimeMillis() - t0 < 20000, "too slow");
+                boolean hit = false;
+                for (Diagnostic d : s.diagnostics) hit |= d.kind == Diagnostic.Kind.RESOLVE_BUDGET;
+                SelfTest.expect(hit, "no budget diagnostic");
+            }
+        });
+        SelfTest.check(r, "bad effect values render", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.FigureLayer l = figure(p);
+                node(l, "s", "r", Node.Shape.SQUARE_LINE, 0, 20, 20);
+                EffectNode e = new EffectNode(l.id, "FXn", EffectTypes.GLOW);
+                e.param(l.id, "radius", ValueType.FLOAT, Float.NaN);
+                e.param(l.id, "strength", ValueType.FLOAT, 1e30f);
+                e.mix.setValue(Float.NaN);
+                l.effects.append(e);
+                render(p, 40, 30);
+            }
+        });
+    }
+}

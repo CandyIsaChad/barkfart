@@ -63,4 +63,18 @@ class DopeRowsTest {
         assertTrue(moved.contains(new KeyRef(a.figure.node("armR1").rotation, 0.75)));
         assertEquals(0.75, a.figure.node("armR1").rotation.track().get(0).time, 1e-12);
     }
+
+    @Test
+    void soundsAreListedUnderTheSummaryWhateverTheFilter() {
+        app.barkfart.model.Project p = app.barkfart.Fixtures.empty();
+        app.barkfart.model.Layer.FigureLayer man = app.barkfart.Fixtures.stickman(p, "man");
+        p.root().layers.add(man);
+        app.barkfart.model.Layer.AudioLayer a = new app.barkfart.model.Layer.AudioLayer(p.newId("L"), "boom");
+        a.clips.add(new app.barkfart.model.Clip(a.id, "c", "A", 0.5, 0, 1));
+        p.root().layers.add(a);
+        java.util.List<DopeRows.Row> rows = DopeRows.build(p, man, null);
+        assertEquals(DopeRows.Kind.SUMMARY, rows.get(0).kind);
+        assertEquals(DopeRows.Kind.SOUND, rows.get(1).kind);
+        assertSame(a.clips.get(0), rows.get(1).clip);
+    }
 }

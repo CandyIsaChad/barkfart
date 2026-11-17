@@ -29,10 +29,35 @@ import java.util.List;
  * MobiVM runtime is exercised, so this mirrors key unit tests without JUnit.
  */
 public final class SelfTest {
+    /** One check's outcome, for the Diagnostics screen. */
+    public static final class Entry {
+        public final String group, name, detail;
+        public final boolean ok;
+        public final long millis;
+
+        public Entry(String group, String name, boolean ok, String detail, long millis) {
+            this.group = group;
+            this.name = name;
+            this.ok = ok;
+            this.detail = detail;
+            this.millis = millis;
+        }
+    }
+
     public static final class Result {
         public final List<String> failures = new ArrayList<String>();
+        public final List<Entry> entries = new ArrayList<Entry>();
         public int passed;
         public long millis;
+        /** Group the next checks belong to. */
+        public String group = "Core";
+
+        /** Records a check run elsewhere (GPU and audio checks run on their own threads). */
+        public synchronized void add(String group, String name, String problem, long ms) {
+            entries.add(new Entry(group, name, problem == null, problem == null ? "" : problem, ms));
+            if (problem == null) passed++;
+            else failures.add(name + ": " + problem);
+        }
 
         public boolean ok() {
             return failures.isEmpty();
@@ -43,7 +68,7 @@ public final class SelfTest {
         }
     }
 
-    private interface Check {
+    interface Check {
         void run() throws Exception;
     }
 
@@ -57,6 +82,7 @@ public final class SelfTest {
     public static Result run(final java.io.File documents) {
         Result r = new Result();
         if (documents != null) {
+            r.group = "Files";
             check(r, "save and reload in Documents", new Check() {
                 public void run() throws Exception {
                     java.io.File f = new java.io.File(documents, ".selftest.bark");   // hidden from lists
@@ -75,6 +101,7 @@ public final class SelfTest {
             });
         }
         long t0 = System.currentTimeMillis();
+        r.group = "Animation";
         check(r, "float text round trip", new Check() {
             public void run() {
                 float[] vs = {0.1f, -363.24f, 1e-30f, 3.4028235e38f, 1.0f / 3, 30.123457f};
@@ -110,6 +137,7 @@ public final class SelfTest {
                 eq(10f, b.y2, "y");
             }
         });
+        r.group = "Safety limits";
         check(r, "self recursion limit", new Check() {
             public void run() {
                 Project p = single();
@@ -146,6 +174,7 @@ public final class SelfTest {
                 if (!Evaluator.evaluate(p, p.rootSymbol, 0).has(Diagnostic.Kind.CYCLE)) throw new AssertionError("no cycle");
             }
         });
+        r.group = "Files";
         check(r, "save/load round trip", new Check() {
             public void run() throws Exception {
                 Project p = Demo.waving();
@@ -158,6 +187,7 @@ public final class SelfTest {
                 if (!a.equals(ProjectCodec.encode(q))) throw new AssertionError("zip differs");
             }
         });
+        r.group = "Animation";
         check(r, "key reduction", new Check() {
             public void run() {
                 Track t = new Track(ValueType.FLOAT);
@@ -178,6 +208,7 @@ public final class SelfTest {
                 }
             }
         });
+        r.group = "Files";
         check(r, "legacy figure round trip", new Check() {
             public void run() throws Exception {
                 Project p = single();
@@ -190,6 +221,7 @@ public final class SelfTest {
                 if (back.figure.nodes().size() != l.figure.nodes().size()) throw new AssertionError("node count");
             }
         });
+        r.group = "Shapes";
         check(r, "polyfill ear clipping", new Check() {
             public void run() {
                 Project p = single();
@@ -208,6 +240,7 @@ public final class SelfTest {
                 if (tris < 10) throw new AssertionError("triangles " + tris);
             }
         });
+        r.group = "Animation";
         check(r, "edit, pose and undo", new Check() {
             public void run() {
                 Project p = single();
@@ -224,6 +257,7 @@ public final class SelfTest {
                 if (!before.equals(ProjectCodec.encode(p))) throw new AssertionError("undo did not restore");
             }
         });
+        FeatureChecks.run(r);
         r.millis = System.currentTimeMillis() - t0;
         return r;
     }
@@ -252,12 +286,19 @@ public final class SelfTest {
         }
     }
 
-    private static void check(Result r, String name, Check c) {
+    static void check(Result r, String name, Check c) {
+        long t0 = System.nanoTime();
+        String problem = null;
         try {
             c.run();
-            r.passed++;
         } catch (Throwable t) {
-            r.failures.add(name + ": " + t);
+            problem = t.getMessage() != null && t instanceof AssertionError ? t.getMessage() : String.valueOf(t);
         }
+        r.add(r.group, name, problem, (System.nanoTime() - t0) / 1000000);
+    }
+
+    /** Fails a check with a message. */
+    static void expect(boolean ok, String what) {
+        if (!ok) throw new AssertionError(what);
     }
 }

@@ -73,7 +73,12 @@ public final class EditorScreen implements Disposable {
     }
 
     private void attach(Project p, java.io.File file, String name, float user, app.barkfart.canvas.CanvasTools.KeyScope scope) {
+        EditorState old = state;
         state = new EditorState(p);
+        if (old != null) {   // checks belong to the device, not the project
+            state.diagnostics = old.diagnostics;
+            state.diagnosticsRunner = old.diagnosticsRunner;
+        }
         state.audio = platform.audio();
         state.uiUserScale = user;
         state.tools.keyScope = scope;
@@ -88,6 +93,44 @@ public final class EditorScreen implements Disposable {
         };
         session.attach(state.doc, file, name);
         prefs.putString("lastProject", file == null ? "" : file.getName()).flush();
+    }
+
+    /** The Diagnostics screen's "try it yourself" actions. */
+    private void diagnosticsTry(int i) {
+        if (i == 0) {
+            String err = state.audio.play(app.barkfart.audio.AudioPlan.single(app.barkfart.audio.Mixer.tone(440, 0.6, 44100, 0.4f)), 0, 0);
+            state.flash(err == null ? "Playing a test tone (440 Hz)" : "Sound off: " + err, null, 6);
+        } else if (i == 1) {
+            app.barkfart.model.Symbol root = state.project().root();
+            int before = root.layers.size();
+            app.barkfart.fx.EffectScene.addTo(state.project(), root, 3);
+            java.util.List<app.barkfart.model.Layer> added = new java.util.ArrayList<app.barkfart.model.Layer>(root.layers.subList(before, root.layers.size()));
+            root.layers.subList(before, root.layers.size()).clear();
+            state.doc.begin("Add effects demo");
+            try {
+                for (app.barkfart.model.Layer l : added) state.doc.apply(app.barkfart.edit.StructureEdits.addLayer(root, l, root.layers.size()));
+            } finally {
+                state.doc.commit();
+            }
+            state.project().invalidateIndex();
+            state.flash("Added the effects demo (Undo removes it)", null, 6);
+        } else if (i == 2) {
+            try {
+                java.io.File f = java.io.File.createTempFile("test-tone", ".wav");
+                java.io.FileOutputStream out = new java.io.FileOutputStream(f);
+                try {
+                    out.write(app.barkfart.audio.Wav.encode(app.barkfart.audio.Mixer.tone(330, 1.5, 44100, 0.3f)));
+                } finally {
+                    out.close();
+                }
+                app.barkfart.files.Importer.Result r = app.barkfart.files.Importer.importFile(state.doc, f, state.audio, state.frames.time(state.frame));
+                f.delete();
+                state.flash(r.message, null, 6);
+            } catch (Exception e) {
+                state.flash("Could not add the test sound: " + e.getMessage(), null, 6);
+            }
+        }
+        state.fire();
     }
 
     /** Saves the current project if it changed; returns false (and reports) on failure. */
@@ -225,6 +268,34 @@ public final class EditorScreen implements Disposable {
             }
         });
         stage.addActor(filePanel);
+        final DiagnosticsPanel diag = new DiagnosticsPanel(theme, new DiagnosticsPanel.Host() {
+            public EditorState state() {
+                return state;
+            }
+
+            public void rerun() {
+                if (state.diagnosticsRunner != null) state.diagnosticsRunner.run();
+            }
+
+            public String[][] tryItLabels() {
+                return new String[][] {
+                    {"Play a test tone", "You should hear a short beep. Nothing? Check the volume and the silent switch."},
+                    {"Add the effects demo", "Adds six squares: blurred, glowing, shadowed, recoloured, see-through, and an inverting layer over all of it. Undo removes them."},
+                    {"Add a test sound", "Adds a 1.5 s tone at the current frame. Press Play to hear it with the animation; it shows in the dope sheet."},
+                };
+            }
+
+            public void tryIt(int i) {
+                diagnosticsTry(i);
+            }
+        });
+        stage.addActor(diag);
+        state.diagnosticsOpener = new Runnable() {
+            public void run() {
+                diag.setBounds(0, 0, stage.getWidth(), stage.getHeight());
+                diag.open();
+            }
+        };
         state.easingOpener = new EditorState.EasingOpener() {
             public void open(float sx, float sy, EasingMenu.Preset cur, EasingMenu.Chosen chosen) {
                 easing.setBounds(0, 0, stage.getWidth(), stage.getHeight());

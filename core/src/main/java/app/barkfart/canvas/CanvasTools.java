@@ -218,7 +218,7 @@ public final class CanvasTools {
      * its angle to the stretched node. Parallel details scale by k, perpendicular
      * ones keep their length.
      */
-    void smartStretch(Layer.FigureLayer layer, FigurePose pose, int si, float len, double t) {
+    public void smartStretch(Layer.FigureLayer layer, FigurePose pose, int si, float len, double t) {
         List<Node> nodes = layer.figure.nodes();
         Node s = nodes.get(si);
         float rest = s.restLength > 0 ? s.restLength : startLength.containsKey(s) ? startLength.get(s) : 0;

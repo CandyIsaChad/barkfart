@@ -226,6 +226,20 @@ Not done
   node scale. Not yet: curved trapezoids, floaty tweening, creation-mode UI
   for all of these (parity order step 3).
 
+### Diagnostics screen and sounds in the dope sheet (2026-11-17)
+- User request: stop the build-test-report loop per feature. The app now
+  has a Diagnostics screen (sidebar button, or tap the launch message):
+  every check run on the device, grouped by feature (Files, Animation,
+  Safety limits, Shapes, Rigging, Effects, Audio, Device), failures first
+  with the reason, Run again, and "try it yourself" actions (test tone,
+  effects demo, test sound). 28 checks now; each new feature adds its own
+  (selftest.FeatureChecks). Builds are batched: several features per IPA.
+- Sounds show in the dope sheet right under "All keys": one bar per clip
+  over its time span, labelled with its name; drag to retime (snapped to
+  frames, one undo step), tap to move the playhead; volume / pan keys show
+  on the same row.
+- The user's timeline idea is recorded in ADDITIONS.md (after parity).
+
 ### Audio engine (core-first step 5, 2026-11-17)
 - Core (app.barkfart.audio): WAV decoder (8/16/24/32-bit, float, any
   channels; exact 16-bit), 16-bit PCM storage capped at 10 minutes per

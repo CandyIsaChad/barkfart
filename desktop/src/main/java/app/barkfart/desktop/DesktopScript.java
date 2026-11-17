@@ -68,13 +68,21 @@ final class DesktopScript {
                 try {
                     java.io.File w = new java.io.File(System.getProperty("barkfart.docs"), "beep.wav");
                     java.nio.file.Files.write(w.toPath(), Wav.encode(Mixer.tone(330, 1.5, 44100, 0.3f)));
-                    Importer.Result r = Importer.importFile(st.doc, w, st.audio, 0);
+                    Importer.Result r = Importer.importFile(st.doc, w, st.audio, st.frames.time(st.frame));
                     st.select(null, null);
                     st.flash(r.message, null, 12);
                 } catch (Exception e) {
                     System.out.println("[script] " + e);
                 }
                 st.fire();
+            } else if (step.equals("sheet")) {
+                st.sheetHeight = 260;
+                st.fire();
+            } else if (step.equals("frame10")) {
+                st.doc.apply(StructureEdits.setDuration(st.project().root(), 60 / st.editor.fps()));
+                st.setFrame(10);
+            } else if (step.equals("diag")) {
+                if (st.diagnosticsOpener != null) st.diagnosticsOpener.run();
             } else if (step.equals("play")) {
                 st.play();
             } else if (step.equals("noonion")) st.onion = false;

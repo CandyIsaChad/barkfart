@@ -36,7 +36,7 @@ public final class DopeSheet extends Actor {
     private float scrollRows;        // vertical scroll in points
 
     // gesture state
-    private enum Mode { NONE, SCRUB, LENGTH, RESIZE, KEY, SCROLL, MARQUEE, LABEL, PINCH }
+    private enum Mode { NONE, SCRUB, LENGTH, RESIZE, KEY, SCROLL, MARQUEE, LABEL, PINCH, SOUND }
 
     private Mode mode = Mode.NONE;
     private final Vector2 down = new Vector2(), last = new Vector2(), p1 = new Vector2();
@@ -111,6 +111,7 @@ public final class DopeSheet extends Actor {
                         scrollRows = Math.max(0, Math.min(maxRowScroll(), scrollRows + dy));
                         break;
                     case KEY:
+                    case SOUND:
                         if (moved) dragDelta = Math.round((x - down.x) / ppf);
                         break;
                     case MARQUEE:
@@ -135,6 +136,15 @@ public final class DopeSheet extends Actor {
                         else tapKey();
                         break;
                     case MARQUEE: endMarquee(); break;
+                    case SOUND:
+                        if (moved && dragDelta != 0) {   // retime the clip, snapped to frames (one undo step)
+                            double fps = st.editor.fps();
+                            double start = Math.max(0, Math.round(pressRow.clip.start * fps + dragDelta) / fps);
+                            st.doc.apply(StructureEdits.setClipStart(pressRow.clip, start));
+                            dragDelta = 0;
+                            st.fire();
+                        } else if (!moved) scrubTo(x);
+                        break;
                     case LABEL: if (!moved) tapLabel(x, y); break;
                     case NONE:
                         if (!moved) {
@@ -221,9 +231,28 @@ public final class DopeSheet extends Actor {
                 pressTime = best;
                 return Mode.KEY;
             }
+            if (row.kind == DopeRows.Kind.SOUND) {
+                float[] bar = soundBar(row);
+                if (x >= bar[0] && x <= bar[1]) {
+                    pressRow = row;
+                    return Mode.SOUND;
+                }
+            }
         }
         longArmed = false;
         return Mode.NONE;
+    }
+
+    /** A sound row's bar in local x: start, end (an unknown length shows one second). */
+    private float[] soundBar(DopeRows.Row row) {
+        app.barkfart.model.Clip c = row.clip;
+        double fps = st.editor.fps();
+        app.barkfart.audio.Pcm pcm = st.sounds().pcm(c.asset);
+        double len = c.out > c.in ? c.out - c.in : (pcm == null ? 1 : pcm.seconds() - c.in);
+        double end = c.loop ? st.frames.frameCount() / fps : c.start + Math.max(0, len);
+        float shift = (mode == Mode.SOUND && pressRow == row) ? dragDelta : 0;
+        float a = xOfFrame((float) (c.start * fps) + shift) - ppf / 2, b = xOfFrame((float) (end * fps) + shift) - ppf / 2;
+        return new float[] {a, Math.max(a + 4, b)};
     }
 
     private void scrubTo(float x) {
@@ -402,10 +431,26 @@ public final class DopeSheet extends Actor {
             DopeRows.Row r = rows.get(i);
             boolean header = r.kind != DopeRows.Kind.JOINT && r.kind != DopeRows.Kind.MOVE;
             String label = r.kind == DopeRows.Kind.FIGURE
-                    ? (st.collapsedFigures.contains(r.layer.id) ? "▸ " : "▾ ") + r.label : r.label;
+                    ? (st.collapsedFigures.contains(r.layer.id) ? "▸ " : "▾ ") + r.label
+                    : (r.kind == DopeRows.Kind.SOUND ? "Sound" : r.label);
             (header ? theme.small : theme.small).setColor(header ? Theme.TEXT : Theme.TEXT_DIM);
             theme.small.draw(batch, label, x0 + 6 + r.depth * 8, top - 5, LABEL_W - 10 - r.depth * 8,
                     com.badlogic.gdx.utils.Align.left, false);
+        }
+        // sound bars
+        for (int i = 0; i < rows.size(); i++) {
+            DopeRows.Row r = rows.get(i);
+            if (r.kind != DopeRows.Kind.SOUND) continue;
+            float top = y0 + rowTop(i);
+            if (top < keyBottom || top - ROW > keyTop) continue;
+            float[] bar = soundBar(r);
+            float a = Math.max(x0 + LABEL_W, x0 + bar[0]), b = Math.min(x0 + w, x0 + bar[1]);
+            if (b <= a) continue;
+            boolean pressed = mode == Mode.SOUND && pressRow == r;
+            batch.setColor(pressed ? Theme.ACCENT : Theme.SEGMENT_EDGE);
+            batch.draw(theme.white(), a, top - ROW + 3, b - a, ROW - 6);
+            theme.small.setColor(Theme.TEXT);
+            theme.small.draw(batch, r.label, a + 4, top - 5, Math.max(0, b - a - 8), com.badlogic.gdx.utils.Align.left, false);
         }
         // keys
         float d = 8;
