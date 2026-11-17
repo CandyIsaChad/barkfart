@@ -53,8 +53,13 @@ public final class Importer {
         }
     }
 
-    /** Imports a file into doc's root symbol (one undo step). */
+    /** Imports a file into doc's root symbol (one undo step). Sounds: WAV only (no platform decoder), at time 0. */
     public static Result importFile(Document doc, File f) throws IOException, Unsupported {
+        return importFile(doc, f, app.barkfart.audio.AudioBackend.NONE, 0);
+    }
+
+    /** Imports a file; sounds are decoded with audio (to refuse what cannot play) and placed at time at. */
+    public static Result importFile(Document doc, File f, app.barkfart.audio.AudioBackend audio, double at) throws IOException, Unsupported {
         ProjectStore.Kind k = ProjectStore.kindOf(f.getName());
         String name = new ProjectStore.Entry(f, k).name;
         byte[] bytes = read(f);
@@ -116,6 +121,27 @@ public final class Importer {
                 }
                 return new Result(last, "Imported " + h.figures.size() + " figures from " + name
                         + " (its animation cannot be imported yet)", rep.approximations);
+            }
+            case SOUND: {
+                app.barkfart.audio.Pcm pcm = audio.decode(f.getName(), bytes);
+                if (pcm == null) {
+                    throw new Unsupported("Can't play " + f.getName() + " on this device. Use mp3, m4a or wav"
+                            + (f.getName().toLowerCase().endsWith(".ogg") ? " (ogg is not supported by iOS)" : "") + ".");
+                }
+                String ext = f.getName().substring(f.getName().lastIndexOf('.')).toLowerCase();
+                String aid = p.newId("A");
+                app.barkfart.model.Asset a = new app.barkfart.model.Asset(aid, app.barkfart.model.Asset.Kind.AUDIO, "assets/" + aid + ext);
+                Layer.AudioLayer al = new Layer.AudioLayer(p.newId("L"), name);
+                double start = at == at && at >= 0 ? at : 0;
+                al.clips.add(new app.barkfart.model.Clip(al.id, p.newId("C"), a.id, start, 0, pcm.seconds()));
+                doc.begin("Add sound " + name);
+                try {
+                    doc.apply(StructureEdits.addAsset(p, a, bytes));
+                    doc.apply(StructureEdits.addLayer(root, al, root.layers.size()));
+                } finally {
+                    doc.commit();
+                }
+                return new Result(al, String.format("Added sound %s (%.1f s) at %.2f s", name, pcm.seconds(), start), new java.util.ArrayList<String>());
             }
             case PIVOT:
                 throw new Unsupported("Pivot figures (.stk) cannot be imported yet");

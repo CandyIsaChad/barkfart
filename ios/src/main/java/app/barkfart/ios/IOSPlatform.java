@@ -83,6 +83,13 @@ final class IOSPlatform implements Platform {
         root().presentViewController(picker, true, null);
     }
 
+    private IOSAudio audio;
+
+    public app.barkfart.audio.AudioBackend audio() {
+        if (audio == null) audio = new IOSAudio();
+        return audio;
+    }
+
     public boolean canShare() {
         return true;
     }

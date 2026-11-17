@@ -45,7 +45,7 @@ class EvaluatorFuzzTest {
             int layers = 1 + r.nextInt(5);
             for (int k = 0; k < layers; k++) {
                 Layer l;
-                switch (r.nextInt(4)) {
+                switch (r.nextInt(5)) {
                     case 0:
                     case 1: {
                         Layer.FigureLayer fl = Fixtures.stickman(p, "m");
@@ -72,6 +72,26 @@ class EvaluatorFuzzTest {
                         l = sl;
                         break;
                     }
+                    case 3:
+                        if (r.nextBoolean()) {
+                            Layer.AudioLayer al = new Layer.AudioLayer(p.newId("L"), "a");
+                            int nc = r.nextInt(4);
+                            for (int q = 0; q < nc; q++) {
+                                double[] times = {0, -1, 1e9, Double.NaN, r.nextDouble() * 3, -r.nextDouble()};
+                                app.barkfart.model.Clip c = new app.barkfart.model.Clip(al.id, "c" + q, r.nextInt(5) == 0 ? "missing" : "tone",
+                                        times[r.nextInt(times.length)], times[r.nextInt(times.length)], times[r.nextInt(times.length)]);
+                                c.loop = r.nextBoolean();
+                                c.fadeIn = times[r.nextInt(times.length)];
+                                c.fadeOut = times[r.nextInt(times.length)];
+                                if (r.nextBoolean()) c.volume.track().put(new Key(r.nextDouble(), EXTREMES[r.nextInt(EXTREMES.length)], Interp.LINEAR));
+                                if (r.nextBoolean()) c.pan.setValue(EXTREMES[r.nextInt(EXTREMES.length)]);
+                                al.clips.add(c);
+                            }
+                            l = al;
+                            break;
+                        }
+                        l = new Layer.CameraLayer(p.newId("L"), "c");
+                        break;
                     default:
                         l = new Layer.CameraLayer(p.newId("L"), "c");
                 }
@@ -129,6 +149,17 @@ class EvaluatorFuzzTest {
                     Object v = randomValue(prop, r);
                     if (v != null) prop.track().put(new Key(r.nextDouble() * 4 - 1, v, Interp.values()[r.nextInt(3)]));
             }
+        }
+        final app.barkfart.audio.Pcm tone = app.barkfart.audio.Mixer.tone(440, 0.2, 8000, 0.5f);
+        app.barkfart.audio.AudioPlan plan = app.barkfart.audio.AudioPlan.build(p, p.root(), new app.barkfart.audio.AudioPlan.Sounds() {
+            public app.barkfart.audio.Pcm pcm(String id) {
+                return "tone".equals(id) ? tone : null;
+            }
+        });
+        float[] buf = new float[512];
+        for (double at : new double[] {0, -1, r.nextDouble() * 3, 1e9, Double.NaN}) {
+            app.barkfart.audio.Mixer.mix(plan, at, 256, 44100, buf);
+            for (float v : buf) assertTrue(v >= -1 && v <= 1, "mix in range, iter " + iter);
         }
         double[] times = {0, -5, r.nextDouble() * 3, 1e9, -1e-9};
         for (double t : times) {

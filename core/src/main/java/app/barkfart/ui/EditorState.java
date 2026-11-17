@@ -147,17 +147,56 @@ public final class EditorState {
         fire();
     }
 
+    /** Sound output (set by the screen from the platform). */
+    public app.barkfart.audio.AudioBackend audio = app.barkfart.audio.AudioBackend.NONE;
+    private final java.util.Map<String, app.barkfart.audio.Pcm> soundCache = new java.util.HashMap<String, app.barkfart.audio.Pcm>();
+    private final java.util.Set<String> undecodable = new java.util.HashSet<String>();
+    private Project soundCacheFor;
+
+    /** Decoded sounds of the open project (cached; undecodable ones remembered). */
+    public app.barkfart.audio.AudioPlan.Sounds sounds() {
+        final Project p = project();
+        if (p != soundCacheFor) {
+            soundCache.clear();
+            undecodable.clear();
+            soundCacheFor = p;
+        }
+        return new app.barkfart.audio.AudioPlan.Sounds() {
+            public app.barkfart.audio.Pcm pcm(String id) {
+                app.barkfart.audio.Pcm c = soundCache.get(id);
+                if (c != null || undecodable.contains(id)) return c;
+                app.barkfart.model.Asset a = p.assets.get(id);
+                try {
+                    byte[] b = a == null ? null : p.assetData.bytes(id);
+                    c = b == null ? null : audio.decode(a.path, b);
+                } catch (java.io.IOException e) {
+                    c = null;
+                }
+                if (c == null) undecodable.add(id);
+                else soundCache.put(id, c);
+                return c;
+            }
+        };
+    }
+
     public void play() {
         if (playing) return;
         playStartFrame = frame;
         playTime = frames.time(frame);
         playing = true;
+        double dur = frames.frameCount() / editor.fps();
+        app.barkfart.audio.AudioPlan plan = app.barkfart.audio.AudioPlan.build(project(), project().root(), sounds());
+        if (!plan.entries.isEmpty()) {
+            String err = audio.play(plan, playTime, dur);
+            if (err != null) flash("Sound off: " + err, null, 6);
+        }
         fire();
     }
 
     public void stop() {
         if (!playing) return;
         playing = false;
+        audio.stop();
         frame = playStartFrame;
         fire();
     }

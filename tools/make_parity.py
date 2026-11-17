@@ -107,6 +107,12 @@ STATUS = {
     "Drop shadow": ("~", "sidebar Shadow with softness; offset and colour fixed for now"),
     "Blur/glow max 2.0": ("x", "radius up to 400 px, strength up to 4"),
     "Low in-app quality": (" ", "effects render at full resolution for now; half-resolution preview not yet"),
+    # Sound
+    "Sounds on frames": ("x", "import a sound at the current frame; heard on Play; move, volume, remove (export with sound later)"),
+    "Custom MP3 import": ("x", "mp3, m4a, wav, aac, caf, aiff, no size limit (ogg: iOS cannot decode it)"),
+    "Multi-select sound import": ("x", "the Files picker imports several at once"),
+    "Sound pan": ("~", "per-clip pan track in the mixer; no control yet"),
+    "Bundled sound library": ("-", "cannot ship the original's sounds; our own later"),
     # Files
     "Save/open projects": ("x", "File panel: new, open, save, rename, duplicate, delete with undo; autosave"),
     "Save/import stickfigures": ("x", "import from the folder or the Files picker; export .nodes byte-exact + share"),

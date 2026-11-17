@@ -36,6 +36,9 @@ public interface Platform {
     /** Offers the file to other apps / Save to Files. */
     void share(File f);
 
+    /** Sound decoding and output. */
+    app.barkfart.audio.AudioBackend audio();
+
     /** Default: no picker or sharing, documents in ~/Barkfart (desktop, tests). */
     class Basic implements Platform {
         private final File docs;
@@ -61,6 +64,13 @@ public interface Platform {
         }
 
         public void share(File f) {
+        }
+
+        private app.barkfart.audio.AudioBackend audio;
+
+        public app.barkfart.audio.AudioBackend audio() {
+            if (audio == null) audio = new app.barkfart.audio.GdxAudio();
+            return audio;
         }
     }
 }

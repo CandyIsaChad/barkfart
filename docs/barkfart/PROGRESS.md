@@ -226,6 +226,34 @@ Not done
   node scale. Not yet: curved trapezoids, floaty tweening, creation-mode UI
   for all of these (parity order step 3).
 
+### Audio engine (core-first step 5, 2026-11-17)
+- Core (app.barkfart.audio): WAV decoder (8/16/24/32-bit, float, any
+  channels; exact 16-bit), 16-bit PCM storage capped at 10 minutes per
+  sound, an immutable AudioPlan built on the UI thread (clip timing, trims,
+  loops to the timeline end, fades, volume and pan sampled at 100 Hz, layer
+  visibility / solo, layer opacity as volume), and a pure Mixer (linear
+  rate conversion, constant-power pan for mono, balance for stereo, clamp,
+  NaN and huge-time guards). The audio thread only reads the plan.
+- Output: a shared pump thread mixes 2048-frame blocks; desktop writes to
+  LibGDX's AudioDevice, iOS feeds an AVAudioEngine player node (three
+  buffers queued, completion frees a slot; session category Playback) and
+  decodes mp3 / m4a / wav / aac / caf / aiff with AVAudioFile. Failures
+  return a reason ("Sound off: ...") and never crash.
+- Editor: Play builds the plan and plays from the playhead, looping with
+  the timeline; Stop stops it. Sidebar (nothing selected): Sounds list with
+  Vol - / +, Move here, Remove, Add sound (File panel import, placed at the
+  current frame, one undo step), Test tone. Launch line adds "Audio OK".
+- Tests: AudioTest (decode depths, garbage input, timing / trim / loop,
+  fades, volume keys, pan, rate conversion keeps pitch, missing / hidden /
+  broken clips, clamping, import + undo, ogg refused with a clear message);
+  the fuzz test adds random audio layers and mixes them.
+- Checked on desktop (audio OK, playback runs); iOS output unverified until
+  the user hears the test tone.
+- Not done: audio inside nested symbols, scrubbing, pan / fade / trim
+  controls, waveform display or audio rows in the dope sheet, relink of
+  missing sounds, export with sound, pitch. Wall clock stays master (no
+  audio-clock sync), fine for short loops.
+
 ### Effects pipeline (core-first step 4, 2026-11-17)
 - Isolates: Tessellator.layered() marks every group with an enabled effect,
   an adjustment layer, or opacity below 1 as an isolate (DrawList.Isolate

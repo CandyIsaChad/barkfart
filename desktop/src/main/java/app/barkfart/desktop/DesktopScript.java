@@ -3,6 +3,8 @@ package app.barkfart.desktop;
 import app.barkfart.BarkfartApp;
 import app.barkfart.edit.DopeRows;
 import app.barkfart.files.Importer;
+import app.barkfart.audio.Mixer;
+import app.barkfart.audio.Wav;
 import app.barkfart.fx.EffectScene;
 import app.barkfart.fx.EffectTypes;
 import app.barkfart.model.EffectNode;
@@ -62,6 +64,19 @@ final class DesktopScript {
                 st.select(f, null);
                 st.flash("Self-test PASS 13/13 (120 ms) · Effects OK · v0.1.0-fx and a long tail to check the status line wraps", null, 12);
                 st.fire();
+            } else if (step.equals("sound")) {
+                try {
+                    java.io.File w = new java.io.File(System.getProperty("barkfart.docs"), "beep.wav");
+                    java.nio.file.Files.write(w.toPath(), Wav.encode(Mixer.tone(330, 1.5, 44100, 0.3f)));
+                    Importer.Result r = Importer.importFile(st.doc, w, st.audio, 0);
+                    st.select(null, null);
+                    st.flash(r.message, null, 12);
+                } catch (Exception e) {
+                    System.out.println("[script] " + e);
+                }
+                st.fire();
+            } else if (step.equals("play")) {
+                st.play();
             } else if (step.equals("noonion")) st.onion = false;
             else if (step.equals("deselect")) st.select(null, null);
             else if (step.equals("easing")) {

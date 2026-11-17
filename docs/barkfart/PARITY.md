@@ -5,7 +5,7 @@ Built by tools/make_parity.py from research/stick-nodes-features-raw.md (64 upda
 Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without UI, **[ ]** not yet, **(won't)** with the reason.
 
 
-**Totals (382 features):** 65 usable now, 36 partial or core-only, 250 not yet, 31 won't.
+**Totals (382 features):** 68 usable now, 37 partial or core-only, 245 not yet, 32 won't.
 
 
 ## Order of work (parity first, then our own additions)
@@ -284,15 +284,15 @@ Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without U
 
 ## Sound
 
-- [ ] **Sounds on frames** (since 1.6.0): Attach sound clips to frames; heard in playback and MP4 export
-- [ ] **Bundled sound library** (since 1.6.0): Ships ~40 sounds, regularly expanded (searchable by version tag, e.g. "330")
-- [ ] **Custom MP3 import** (since 1.6.0): Use own MP3s (max 256 KB)
+- [x] **Sounds on frames** (since 1.6.0): Attach sound clips to frames; heard in playback and MP4 export *Barkfart: import a sound at the current frame; heard on Play; move, volume, remove (export with sound later).*
+- (won't) **Bundled sound library** (since 1.6.0): Ships ~40 sounds, regularly expanded (searchable by version tag, e.g. "330") *Barkfart: cannot ship the original's sounds; our own later.*
+- [x] **Custom MP3 import** (since 1.6.0): Use own MP3s (max 256 KB) *Barkfart: mp3, m4a, wav, aac, caf, aiff, no size limit (ogg: iOS cannot decode it).*
 - [ ] **iOS share-sheet import** (since 2.2.2): Open an MP3 from another app into Stick Nodes Pro
 - [ ] **stknds:// URL download** (since 2.2.2): Prefix a web MP3 URL to download it into the app (iOS)
 - [ ] **Sound preview** (since 2.3.7): Preview sounds in the import list
-- [ ] **Multi-select sound import** (since 2.3.7): Import several sounds at once
+- [x] **Multi-select sound import** (since 2.3.7): Import several sounds at once *Barkfart: the Files picker imports several at once.*
 - [ ] **Copy/paste sounds** (since 2.3.0): Copy a frame's sounds and paste onto another
-- [ ] **Sound pan** (since 3.1.0): Left/right stereo panning per sound
+- [~] **Sound pan** (since 3.1.0): Left/right stereo panning per sound *Barkfart: per-clip pan track in the mixer; no control yet.*
 - [ ] **Sound pitch** (since 3.1.0): Pitch shift per sound
 - [ ] **Pause with device music** (since 1.7.6): Clips stay silent while the user plays music
 - [ ] **Background music on iOS** (since 2.2.4): Other apps' music can keep playing while animating

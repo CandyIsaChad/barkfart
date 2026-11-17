@@ -18,7 +18,7 @@ import java.util.List;
 public final class ProjectStore {
     public static final String EXT = ".bark";
 
-    public enum Kind { PROJECT, FIGURE, MOVIECLIP, LEGACY_PROJECT, PIVOT, OTHER }
+    public enum Kind { PROJECT, FIGURE, MOVIECLIP, LEGACY_PROJECT, PIVOT, SOUND, OTHER }
 
     public static final class Entry {
         public final File file;
@@ -43,6 +43,9 @@ public final class ProjectStore {
         if (!root.exists() && !root.mkdirs()) throw new IllegalStateException("cannot create " + root);
     }
 
+    /** Sound files the import accepts (ogg is listed so it gets a clear "not supported" message). */
+    public static final String[] SOUND_EXTENSIONS = {".wav", ".mp3", ".m4a", ".aac", ".caf", ".aif", ".aiff", ".ogg"};
+
     public static Kind kindOf(String fileName) {
         String n = fileName.toLowerCase();
         if (n.endsWith(EXT)) return Kind.PROJECT;
@@ -50,6 +53,7 @@ public final class ProjectStore {
         if (n.endsWith(".nodemc")) return Kind.MOVIECLIP;
         if (n.endsWith(".stknds")) return Kind.LEGACY_PROJECT;
         if (n.endsWith(".stk")) return Kind.PIVOT;
+        for (String e : SOUND_EXTENSIONS) if (n.endsWith(e)) return Kind.SOUND;
         return Kind.OTHER;
     }
 

@@ -235,7 +235,7 @@ public final class FilePanel extends WidgetGroup {
 
     private void importFile(File f) {
         try {
-            Importer.Result r = Importer.importFile(host.state().doc, f);
+            Importer.Result r = Importer.importFile(host.state().doc, f, host.platform().audio(), host.state().frames.time(host.state().frame));
             close();
             if (r.layer instanceof Layer.FigureLayer) host.state().select((Layer.FigureLayer) r.layer, null);
             status(r.message + (r.approximations.isEmpty() ? "" : " · approximated: " + join(r.approximations)));
@@ -262,8 +262,8 @@ public final class FilePanel extends WidgetGroup {
                         File f = host.session().store.addCopy(p.name, p.bytes);
                         ProjectStore.Kind k = ProjectStore.kindOf(f.getName());
                         if (k == ProjectStore.Kind.PROJECT) openMe = f;
-                        else if (k == ProjectStore.Kind.FIGURE || k == ProjectStore.Kind.MOVIECLIP) {
-                            Importer.importFile(host.state().doc, f);
+                        else if (k == ProjectStore.Kind.FIGURE || k == ProjectStore.Kind.MOVIECLIP || k == ProjectStore.Kind.SOUND) {
+                            Importer.importFile(host.state().doc, f, host.platform().audio(), host.state().frames.time(host.state().frame));
                             imported++;
                         }
                     } catch (Exception e) {

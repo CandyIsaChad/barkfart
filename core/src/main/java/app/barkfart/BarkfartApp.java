@@ -11,7 +11,7 @@ import com.badlogic.gdx.Gdx;
 
 /** Barkfart: opens straight into the editor with a new project (UI-SPEC "Missing states"). */
 public class BarkfartApp extends ApplicationAdapter {
-    public static final String VERSION = "0.1.0-fx";
+    public static final String VERSION = "0.1.0-audio";
 
     private final float uiScale;
     private final app.barkfart.platform.Platform platform;
@@ -46,14 +46,17 @@ public class BarkfartApp extends ApplicationAdapter {
         Thread st = new Thread(new Runnable() {
             public void run() {
                 final SelfTest.Result r = SelfTest.run(platform.documents());
+                final String au = platform.audio().check();   // opens the output, plays silence, waits for it
+                System.out.println("[Barkfart] audio " + (au == null ? "OK" : au));
                 System.out.println("[Barkfart] self-test " + r.summary());
                 for (String f : r.failures) System.out.println("[Barkfart] FAIL " + f);
                 Gdx.app.postRunnable(new Runnable() {
                     public void run() {
                         // Results first, so they are what you read; details after.
-                        editor.state.flash("Self-test " + r.summary() + " · Effects " + (fx == null ? "OK" : "FAIL")
+                        editor.state.flash("Self-test " + r.summary() + " · Effects " + (fx == null ? "OK" : "FAIL") + " · Audio " + (au == null ? "OK" : "FAIL")
                                 + (r.ok() ? "" : " · " + r.failures.get(0))
                                 + (fx == null ? "" : " · " + fx)
+                                + (au == null ? "" : " · " + au)
                                 + " · v" + VERSION, null, 12);
                     }
                 });

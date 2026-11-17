@@ -219,6 +219,7 @@ public final class Sidebar extends WidgetGroup {
             full(onion);
             panel.add(note("Frame rate: " + Math.round(st.editor.fps()) + " fps")).colspan(2).width(innerW).padBottom(4).row();
             row(new UiButton(theme, "−", UiButton.Style.NORMAL, fps(-1)), new UiButton(theme, "+", UiButton.Style.NORMAL, fps(1)));
+            soundsSection(innerW);
             return;
         }
         Layer.FigureLayer l = st.selectedLayer;
@@ -252,6 +253,51 @@ public final class Sidebar extends WidgetGroup {
         full(new UiButton(theme, "Delete figure", UiButton.Style.DANGER, new Runnable() {
             public void run() {
                 deleteFigure();
+            }
+        }));
+    }
+
+    // ---- sounds (a first, plain panel) ----
+
+    private void soundsSection(float innerW) {
+        final app.barkfart.model.Symbol sym = st.project().root();
+        final double t = st.frames.time(st.frame);
+        PropertyResolver r = new PropertyResolver(st.project(), new ArrayList<Diagnostic>());
+        boolean any = false;
+        for (final Layer l : sym.layers) {
+            if (!(l instanceof Layer.AudioLayer)) continue;
+            for (final app.barkfart.model.Clip c : ((Layer.AudioLayer) l).clips) {
+                if (!any) panel.add(note("Sounds (play to hear them)")).colspan(2).width(innerW).padBottom(4).row();
+                any = true;
+                app.barkfart.audio.Pcm pcm = st.sounds().pcm(c.asset);
+                double len = pcm == null ? 0 : (c.out > c.in ? c.out - c.in : pcm.seconds() - c.in);
+                String info = l.name + " · " + String.format("%.2f s", c.start) + (pcm == null ? " · can't play" : String.format(" · %.1f s long", len))
+                        + " · vol " + Math.round(r.f(c.volume, t) * 100) + "%";
+                panel.add(note(info)).colspan(2).width(innerW).padBottom(4).row();
+                row(new UiButton(theme, "Vol −", UiButton.Style.NORMAL, step(c.volume, -0.1f, 0f, 2f, "Volume")),
+                        new UiButton(theme, "Vol +", UiButton.Style.NORMAL, step(c.volume, 0.1f, 0f, 2f, "Volume")));
+                row(new UiButton(theme, "Move here", UiButton.Style.NORMAL, new Runnable() {
+                    public void run() {
+                        st.doc.apply(StructureEdits.setClipStart(c, st.frames.time(st.frame)));
+                        st.fire();
+                    }
+                }), new UiButton(theme, "Remove", UiButton.Style.NORMAL, new Runnable() {
+                    public void run() {
+                        st.doc.apply(StructureEdits.removeLayer(sym, l));
+                        st.fire();
+                    }
+                }));
+            }
+        }
+        row(new UiButton(theme, "Add sound", UiButton.Style.NORMAL, new Runnable() {
+            public void run() {
+                if (st.fileOpener != null) st.fileOpener.run();
+                st.flash("Import a sound (mp3, m4a or wav): it is placed at the current frame", null, 6);
+            }
+        }), new UiButton(theme, "Test tone", UiButton.Style.NORMAL, new Runnable() {
+            public void run() {
+                String err = st.audio.play(app.barkfart.audio.AudioPlan.single(app.barkfart.audio.Mixer.tone(440, 0.6, 44100, 0.4f)), 0, 0);
+                st.flash(err == null ? "Playing a test tone (440 Hz). If you hear nothing, check the volume and the silent switch." : "Sound off: " + err, null, 6);
             }
         }));
     }

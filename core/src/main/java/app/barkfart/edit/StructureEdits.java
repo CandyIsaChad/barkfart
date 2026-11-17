@@ -31,6 +31,37 @@ public final class StructureEdits {
         }
     }
 
+    // ---- assets ----
+
+    /** Adds an asset with its bytes (undo removes both). */
+    public static Command addAsset(final Project p, final app.barkfart.model.Asset a, final byte[] bytes) {
+        return new Named("Add " + a.kind.name().toLowerCase()) {
+            public void apply() {
+                p.assets.put(a.id, a);
+                p.assetData.put(a.id, bytes);
+            }
+
+            public void revert() {
+                p.assets.remove(a.id);
+                p.assetData.remove(a.id);
+            }
+        };
+    }
+
+    /** Moves an audio clip to start at a time. */
+    public static Command setClipStart(final app.barkfart.model.Clip c, final double start) {
+        final double old = c.start;
+        return new Named("Move sound") {
+            public void apply() {
+                c.start = start;
+            }
+
+            public void revert() {
+                c.start = old;
+            }
+        };
+    }
+
     // ---- effects ----
 
     /** Appends an effect to the end of a layer's chain. */

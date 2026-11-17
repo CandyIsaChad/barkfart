@@ -74,6 +74,7 @@ public final class EditorScreen implements Disposable {
 
     private void attach(Project p, java.io.File file, String name, float user, app.barkfart.canvas.CanvasTools.KeyScope scope) {
         state = new EditorState(p);
+        state.audio = platform.audio();
         state.uiUserScale = user;
         state.tools.keyScope = scope;
         state.onUiScaleChanged = new Runnable() {
