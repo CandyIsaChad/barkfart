@@ -179,6 +179,11 @@ public final class ProjectCodec {
             m.put("width", Json.num(s.width));
             m.put("height", Json.num(s.height));
             m.put("tint", prop(s.tint, false));
+            if (s.distorted()) {
+                List<Object> dl = new ArrayList<Object>();
+                for (app.barkfart.model.Property q : s.distort) dl.add(prop(q, false));
+                m.put("distort", dl);
+            }
         } else if (l instanceof Layer.TextLayer) {
             Layer.TextLayer s = (Layer.TextLayer) l;
             m.put("text", s.text);
@@ -614,6 +619,16 @@ public final class ProjectCodec {
                 s.width = f(m, "width", 0);
                 s.height = f(m, "height", 0);
                 readProp(m, "tint", s.tint);
+                if (m.get("distort") instanceof List) {
+                    List<?> dl = (List<?>) m.get("distort");
+                    for (int k = 0; k < Math.min(8, dl.size()); k++) {
+                        if (dl.get(k) instanceof Map) {
+                            Map<String, Object> dm = asMap(dl.get(k), "distort");
+                            s.distort[k].setValue(parseValue(s.distort[k].type, dm.get("v")));
+                            fillProp(dm, s.distort[k]);
+                        }
+                    }
+                }
                 l = s;
                 break;
             }

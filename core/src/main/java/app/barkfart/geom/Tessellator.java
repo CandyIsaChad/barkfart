@@ -192,14 +192,31 @@ public final class Tessellator {
         } else if (s instanceof Shape.Quad) {
             // corners BL, BR, TR, TL; image v runs downward
             float[] q = ((Shape.Quad) s).corners;
-            batch.add(q[0], q[1], rgba, 0, 1);
-            batch.add(q[2], q[3], rgba, 1, 1);
-            batch.add(q[4], q[5], rgba, 1, 0);
-            batch.add(q[0], q[1], rgba, 0, 1);
-            batch.add(q[4], q[5], rgba, 1, 0);
-            batch.add(q[6], q[7], rgba, 0, 0);
+            // a parallelogram maps exactly with two triangles; a distorted
+            // quad is split into a grid with bilinear corners (no diagonal kink)
+            float ex = q[0] + q[4] - q[2] - q[6], ey = q[1] + q[5] - q[3] - q[7];
+            float span = Math.abs(q[4] - q[0]) + Math.abs(q[5] - q[1]) + Math.abs(q[6] - q[2]) + Math.abs(q[7] - q[3]);
+            int n = Math.abs(ex) + Math.abs(ey) <= 1e-4f * Math.max(1, span) ? 1 : 12;
+            for (int j = 0; j < n; j++) {
+                for (int i = 0; i < n; i++) {
+                    float u0 = (float) i / n, u1 = (float) (i + 1) / n, v0 = (float) j / n, v1 = (float) (j + 1) / n;
+                    quadVertex(batch, q, u0, v0, rgba);
+                    quadVertex(batch, q, u1, v0, rgba);
+                    quadVertex(batch, q, u1, v1, rgba);
+                    quadVertex(batch, q, u0, v0, rgba);
+                    quadVertex(batch, q, u1, v1, rgba);
+                    quadVertex(batch, q, u0, v1, rgba);
+                }
+            }
         }
         if (s.gradient != null) recolor(batch, first, c, s.gradient, op);
+    }
+
+    /** Point at (u, v) of corners BL, BR, TR, TL (v up), bilinear; texture v runs downward. */
+    private static void quadVertex(DrawList.Batch b, float[] q, float u, float v, int rgba) {
+        float bx = q[0] + (q[2] - q[0]) * u, by = q[1] + (q[3] - q[1]) * u;
+        float tx = q[6] + (q[4] - q[6]) * u, ty = q[7] + (q[5] - q[7]) * u;
+        b.add(bx + (tx - bx) * v, by + (ty - by) * v, rgba, u, 1 - v);
     }
 
     /** Recomputes vertex colours [first, end) from a gradient (straight RGBA, group opacity applied). */

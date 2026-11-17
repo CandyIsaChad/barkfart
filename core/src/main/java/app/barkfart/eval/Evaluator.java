@@ -530,6 +530,10 @@ public final class Evaluator {
         if (l.asset == null || !spend(scene, l.id)) return;
         float w = l.width, h = l.height;
         double[][] pts = {{0, 0}, {w, 0}, {w, h}, {0, h}};
+        for (int i = 0; i < 4; i++) {   // distort: corner offsets
+            pts[i][0] += r.f(l.distort[i * 2], t);
+            pts[i][1] += r.f(l.distort[i * 2 + 1], t);
+        }
         float[] c = new float[8];
         for (int i = 0; i < 4; i++) {
             c[i * 2] = (float) xf.mapX(pts[i][0], pts[i][1]);

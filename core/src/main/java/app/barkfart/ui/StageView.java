@@ -247,7 +247,7 @@ public final class StageView extends Actor {
 
     private void updatePinch() {
         float k = pts[0].dst(pts[1]) / pinchDist;
-        float newZoom = Math.max(0.25f, Math.min(8f, pinchZoom * k));
+        float newZoom = Math.max(0.05f, Math.min(50f, pinchZoom * k));   // 5000% like the original (3.2.0)
         // keep the point under the fingers' midpoint fixed
         float cx = pinchMid.x - getWidth() / 2, cy = pinchMid.y - getHeight() / 2;
         float r = newZoom / pinchZoom;

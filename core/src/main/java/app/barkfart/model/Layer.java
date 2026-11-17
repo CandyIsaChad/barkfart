@@ -84,10 +84,22 @@ public abstract class Layer {
         public String asset;
         public float width, height;
         public final Property tint;
+        /**
+         * Distort (Stick Nodes 4.3.0): offsets of the corners bottom-left,
+         * bottom-right, top-right, top-left as x, y pairs in the sprite's own
+         * units; all zero is the plain rectangle. Keyable.
+         */
+        public final Property[] distort = new Property[8];
 
         public SpriteLayer(String id, String name) {
             super(id, name);
             tint = new Property(id + "/tint", ValueType.COLOR, Color.WHITE);
+            for (int i = 0; i < 8; i++) distort[i] = new Property(id + "/distort/" + (i / 2) + (i % 2 == 0 ? "x" : "y"), ValueType.FLOAT, 0f);
+        }
+
+        public boolean distorted() {
+            for (Property q : distort) if (!q.track().isEmpty() || q.floatValue() != 0) return true;
+            return false;
         }
 
         @Override
@@ -99,6 +111,7 @@ public abstract class Layer {
         public List<Property> properties() {
             List<Property> out = super.properties();
             out.add(tint);
+            for (Property q : distort) out.add(q);
             return out;
         }
     }
