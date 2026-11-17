@@ -113,6 +113,19 @@ final class DesktopScript {
                 if (st.diagnosticsOpener != null) st.diagnosticsOpener.run();
             } else if (step.equals("play")) {
                 st.play();
+            } else if (step.equals("text")) {
+                Layer.TextLayer tl = new Layer.TextLayer(st.project().newId("L"), "caption");
+                tl.text = "Hello Barkfart!\nÇa marche — 123";
+                tl.size = 70;
+                tl.color.setValue(Color.rgba8888(0xff3b30ff));
+                tl.transform.y.setValue(220f);
+                tl.transform.rotation.setValue(8f);
+                EffectNode sh = new EffectNode(tl.id, st.project().newId("FX"), EffectTypes.SHADOW);
+                sh.param(tl.id, "radius", ValueType.FLOAT, 4f);
+                tl.effects.append(sh);
+                st.doc.apply(StructureEdits.addLayer(st.project().root(), tl, st.project().root().layers.size()));
+                st.project().invalidateIndex();
+                st.fire();
             } else if (step.equals("noonion")) st.onion = false;
             else if (step.equals("deselect")) st.select(null, null);
             else if (step.equals("easing")) {

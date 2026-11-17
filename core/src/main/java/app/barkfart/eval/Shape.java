@@ -156,4 +156,22 @@ public abstract class Shape {
             this.corners = corners;
         }
     }
+
+    /**
+     * Text, laid out by the tessellator from a glyph source: lines centred on
+     * the layer origin, size = line height in layer units, mapped by xf.
+     */
+    public static final class Text extends Shape {
+        public final String text, font;
+        public final float size;
+        public final Affine xf;
+
+        public Text(String text, String font, float size, Affine xf, Color color, String source) {
+            super(color, source);
+            this.text = text;
+            this.font = font;
+            this.size = size;
+            this.xf = xf;
+        }
+    }
 }

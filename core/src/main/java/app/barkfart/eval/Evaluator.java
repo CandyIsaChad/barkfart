@@ -166,8 +166,15 @@ public final class Evaluator {
                     w.into.children.add(g);
                     pushInstance(project, (Layer.SymbolLayer) l, xf, t, r, scene, g, w.path, stack);
                     break;
+                case TEXT: {
+                    w.into.children.add(g);
+                    Layer.TextLayer tl = (Layer.TextLayer) l;
+                    if (tl.text != null && !tl.text.isEmpty() && tl.size > 0 && spend(scene, l.id)) {
+                        g.children.add(new Shape.Text(tl.text, tl.font, Math.min(tl.size, 10000), xf, (Color) r.resolve(tl.color, t), l.id));
+                    }
+                    break;
+                }
                 default:
-                    // TEXT renders in a later milestone; it contributes no shapes yet.
                     break;
             }
         }

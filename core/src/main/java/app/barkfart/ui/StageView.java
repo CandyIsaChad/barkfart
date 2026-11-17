@@ -31,6 +31,7 @@ public final class StageView extends Actor {
     private final EditorState st;
     private final MeshRenderer renderer = new MeshRenderer();
     private final app.barkfart.render.EffectRenderer effects = new app.barkfart.render.EffectRenderer(renderer);
+    private final app.barkfart.render.GlyphAtlas glyphs = new app.barkfart.render.GlyphAtlas();
     private AssetTextures textures;
     private Project texturesFor;
     private final ShapeRenderer shapes = new ShapeRenderer();
@@ -404,7 +405,7 @@ public final class StageView extends Actor {
             shotClip = ScissorStack.pushScissors(sc);
         }
         // groups with effects or translucency draw offscreen; everything else draws as before
-        effects.draw(Tessellator.layered(scene), m, textures);   // limited to the scissor set above
+        effects.draw(Tessellator.layered(scene, glyphs), m, glyphs.with(textures));   // limited to the scissor set above
         if (shotClip) ScissorStack.popScissors();
         if (!shot) {
             drawCameraFrame(o);
@@ -517,6 +518,7 @@ public final class StageView extends Actor {
 
     public void dispose() {
         effects.dispose();
+        glyphs.dispose();
         renderer.dispose();
         if (textures != null) textures.dispose();
         shapes.dispose();

@@ -1,5 +1,6 @@
 package app.barkfart.geom;
 
+import app.barkfart.eval.Affine;
 import app.barkfart.eval.Group;
 import app.barkfart.eval.Scene;
 import app.barkfart.eval.Shape;
@@ -17,10 +18,73 @@ public final class Tessellator {
 
     private Tessellator() {}
 
+    /** Glyphs for text shapes during one tessellation (none: text is skipped). */
+    private static final ThreadLocal<GlyphSource> GLYPHS = new ThreadLocal<GlyphSource>();
+
     public static DrawList tessellate(Scene scene) {
         DrawList out = new DrawList();
         walk(scene.root, 1f, Layer.Blend.NORMAL, null, out);
         return out;
+    }
+
+    public static DrawList tessellate(Scene scene, GlyphSource glyphs) {
+        GLYPHS.set(glyphs);
+        try {
+            return tessellate(scene);
+        } finally {
+            GLYPHS.remove();
+        }
+    }
+
+    public static DrawList layered(Scene scene, GlyphSource glyphs) {
+        GLYPHS.set(glyphs);
+        try {
+            return layered(scene);
+        } finally {
+            GLYPHS.remove();
+        }
+    }
+
+    /** Lines centred on the origin; each glyph a textured quad in the text's colour. */
+    private static void text(Shape.Text tx, float op, Layer.Blend b, String effects, DrawList out) {
+        GlyphSource gs = GLYPHS.get();
+        if (gs == null || !(gs.basePx() > 0)) return;
+        Color c = tx.color;
+        int rgba = new Color(c.r, c.g, c.b, c.a * op).toRgba8888();
+        if ((rgba & 0xff) == 0) return;
+        float k = tx.size / gs.basePx(), lh = gs.lineHeight();
+        String[] lines = tx.text.split("\n", -1);
+        float total = lines.length * lh;
+        for (int li = 0; li < lines.length && li < 500; li++) {
+            String line = lines[li];
+            float width = 0;
+            for (int i = 0; i < line.length() && i < 10000; i++) {
+                GlyphSource.Glyph g = gs.glyph(line.charAt(i));
+                width += g == null ? lh * 0.3f : g.advance;
+            }
+            float pen = -width / 2, base = total / 2 - (li + 1) * lh + lh * 0.25f;
+            for (int i = 0; i < line.length() && i < 10000; i++) {
+                GlyphSource.Glyph g = gs.glyph(line.charAt(i));
+                if (g == null) {
+                    pen += lh * 0.3f;
+                    continue;
+                }
+                if (g.w > 0 && g.h > 0) {
+                    float x0 = (pen + g.x) * k, y0 = (base + g.y) * k, x1 = x0 + g.w * k, y1 = y0 + g.h * k;
+                    DrawList.Batch batch = out.batch(b, effects, g.texture);
+                    Affine m = tx.xf;
+                    float ax = (float) m.mapX(x0, y0), ay = (float) m.mapY(x0, y0), bx = (float) m.mapX(x1, y0), by = (float) m.mapY(x1, y0);
+                    float cx = (float) m.mapX(x1, y1), cy = (float) m.mapY(x1, y1), dx = (float) m.mapX(x0, y1), dy = (float) m.mapY(x0, y1);
+                    batch.add(ax, ay, rgba, g.u0, g.v0);
+                    batch.add(bx, by, rgba, g.u1, g.v0);
+                    batch.add(cx, cy, rgba, g.u1, g.v1);
+                    batch.add(ax, ay, rgba, g.u0, g.v0);
+                    batch.add(cx, cy, rgba, g.u1, g.v1);
+                    batch.add(dx, dy, rgba, g.u0, g.v1);
+                }
+                pen += g.advance;
+            }
+        }
     }
 
     /**
@@ -83,6 +147,10 @@ public final class Tessellator {
 
     /** Appends one shape's triangles to the current batch for (blend, effect group, texture). */
     private static void emit(Shape s, float op, Layer.Blend b, String effects, DrawList out) {
+        if (s instanceof Shape.Text) {
+            text((Shape.Text) s, op, b, effects, out);
+            return;
+        }
         DrawList.Batch batch = s instanceof Shape.Quad ? out.batch(b, effects, ((Shape.Quad) s).asset) : out.batch(b, effects);
         int first = batch.vertices;
         Color c = s.color;

@@ -24,6 +24,7 @@ public final class FrameGrabber implements Disposable {
     private final EffectRenderer fx = new EffectRenderer(mesh);
     private final FrameBuffer fb;
     private final AssetTextures textures;
+    private final GlyphAtlas glyphs = new GlyphAtlas();
     private final ByteBuffer buf;
     private final byte[] raw;
 
@@ -49,7 +50,7 @@ public final class FrameGrabber implements Disposable {
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
         float sw = p.settings.width, sh = p.settings.height;
         Matrix4 proj = new Matrix4().setToOrtho2D(-sw / 2, -sh / 2, sw, sh);
-        fx.draw(Tessellator.layered(Evaluator.evaluate(p, p.rootSymbol, t, false, true)), proj, textures, true);
+        fx.draw(Tessellator.layered(Evaluator.evaluate(p, p.rootSymbol, t, false, true), glyphs), proj, glyphs.with(textures), true);
         fb.bind();   // the renderer restores the binding it found; be explicit before reading
         Gdx.gl.glPixelStorei(GL20.GL_PACK_ALIGNMENT, 1);
         buf.clear();
@@ -90,5 +91,6 @@ public final class FrameGrabber implements Disposable {
         fx.dispose();
         mesh.dispose();
         textures.dispose();
+        glyphs.dispose();
     }
 }
