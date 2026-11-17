@@ -60,6 +60,14 @@ public final class ProjectCodec {
         s.put("background", color(p.settings.background));
         if (p.settings.letterbox != 0) s.put("letterbox", Json.num(p.settings.letterbox));
         m.put("settings", s);
+        if (!p.view.isDefault()) {
+            Map<String, Object> v = obj();
+            v.put("zoom", Json.num(p.view.zoom));
+            v.put("panX", Json.num(p.view.panX));
+            v.put("panY", Json.num(p.view.panY));
+            v.put("frame", Json.num(p.view.frame));
+            m.put("view", v);
+        }
         m.put("rootSymbol", p.rootSymbol);
         List<Object> lib = new ArrayList<Object>();
         for (Symbol sym : p.library.values()) lib.add(symbol(sym));
@@ -476,6 +484,13 @@ public final class ProjectCodec {
         p.settings.height = i(s, "height", defaults.height);
         p.settings.background = s.containsKey("background") ? parseColor(req(s, "background")) : defaults.background;
         p.settings.letterbox = f(s, "letterbox", 0);
+        if (m.containsKey("view")) {
+            Map<String, Object> vw = asMap(m.get("view"), "view");
+            p.view.zoom = f(vw, "zoom", 1);
+            p.view.panX = f(vw, "panX", 0);
+            p.view.panY = f(vw, "panY", 0);
+            p.view.frame = i(vw, "frame", 0);
+        }
         p.rootSymbol = req(m, "rootSymbol");
         for (Object o : list(m, "assets")) {
             Map<String, Object> am = asMap(o, "asset");

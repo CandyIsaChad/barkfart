@@ -18,7 +18,7 @@ import java.util.List;
 public final class ProjectStore {
     public static final String EXT = ".bark";
 
-    public enum Kind { PROJECT, FIGURE, MOVIECLIP, LEGACY_PROJECT, PIVOT, SOUND, IMAGE, OTHER }
+    public enum Kind { PROJECT, FIGURE, MOVIECLIP, LEGACY_PROJECT, PIVOT, SOUND, IMAGE, ZIP, OTHER }
 
     public static final class Entry {
         public final File file;
@@ -55,6 +55,7 @@ public final class ProjectStore {
         if (n.endsWith(".stk")) return Kind.PIVOT;
         for (String e : SOUND_EXTENSIONS) if (n.endsWith(e)) return Kind.SOUND;
         if (n.endsWith(".png") || n.endsWith(".jpg") || n.endsWith(".jpeg")) return Kind.IMAGE;
+        if (n.endsWith(".zip")) return Kind.ZIP;
         return Kind.OTHER;
     }
 
@@ -75,6 +76,100 @@ public final class ProjectStore {
             }
         });
         return new ArrayList<Entry>(Arrays.asList(arr));
+    }
+
+    /** List orders (Stick Nodes: A-Z 1.6.0, natural numbers 3.1.0, new/old 2.3.0). */
+    public enum Sort { NEWEST, OLDEST, NAME }
+
+    /**
+     * Projects or importable files, filtered by a case-insensitive part of the
+     * name (null or empty: all) and sorted; names compare numbers by value
+     * ("fig 2" before "fig 10").
+     */
+    public List<Entry> list(boolean projects, Sort sort, String filter) {
+        List<Entry> all = list(projects);
+        List<Entry> out = new ArrayList<Entry>();
+        String f = filter == null ? "" : filter.trim().toLowerCase();
+        for (Entry e : all) if (f.isEmpty() || e.name.toLowerCase().contains(f)) out.add(e);
+        final Sort by = sort == null ? Sort.NEWEST : sort;
+        java.util.Collections.sort(out, new Comparator<Entry>() {
+            public int compare(Entry a, Entry b) {
+                if (by == Sort.NAME || a.modified == b.modified) {
+                    int c = natural(a.name, b.name);
+                    return by == Sort.NAME || c != 0 ? c : 0;
+                }
+                return by == Sort.NEWEST ? (a.modified > b.modified ? -1 : 1) : (a.modified < b.modified ? -1 : 1);
+            }
+        });
+        return out;
+    }
+
+    /** Natural order: case-insensitive, runs of digits compared by value. */
+    public static int natural(String a, String b) {
+        int i = 0, j = 0;
+        while (i < a.length() && j < b.length()) {
+            char ca = a.charAt(i), cb = b.charAt(j);
+            if (Character.isDigit(ca) && Character.isDigit(cb)) {
+                int si = i, sj = j;
+                while (i < a.length() && a.charAt(i) == '0') i++;
+                while (j < b.length() && b.charAt(j) == '0') j++;
+                int ni = i, nj = j;
+                while (ni < a.length() && Character.isDigit(a.charAt(ni))) ni++;
+                while (nj < b.length() && Character.isDigit(b.charAt(nj))) nj++;
+                int la = ni - i, lb = nj - j;
+                if (la != lb) return la < lb ? -1 : 1;
+                for (int k = 0; k < la; k++) {
+                    char da = a.charAt(i + k), db = b.charAt(j + k);
+                    if (da != db) return da < db ? -1 : 1;
+                }
+                if ((ni - si) != (nj - sj)) return (ni - si) < (nj - sj) ? -1 : 1;   // fewer leading zeros first
+                i = ni;
+                j = nj;
+                continue;
+            }
+            int c = Character.compare(Character.toLowerCase(ca), Character.toLowerCase(cb));
+            if (c != 0) return c;
+            i++;
+            j++;
+        }
+        return (a.length() - i) - (b.length() - j);
+    }
+
+    /**
+     * Opens a ZIP pack (Stick Nodes 2.0.1 / 4.0.0): every importable file in it
+     * is copied into the folder (projects, figures, movieclips, sounds,
+     * images; folders inside are flattened). Unsafe names, nested ZIPs and
+     * oversized archives are skipped. Returns the files added.
+     */
+    public List<File> extractPack(byte[] zip) throws IOException {
+        List<File> out = new ArrayList<File>();
+        java.util.zip.ZipInputStream in = new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(zip));
+        long total = 0;
+        int entries = 0;
+        try {
+            java.util.zip.ZipEntry e;
+            byte[] buf = new byte[65536];
+            while ((e = in.getNextEntry()) != null) {
+                if (++entries > 5000) break;
+                if (e.isDirectory()) continue;
+                String name = e.getName().replace('\\', '/');
+                name = name.substring(name.lastIndexOf('/') + 1);
+                if (name.isEmpty() || name.startsWith(".") || name.startsWith("__MACOSX")) continue;
+                Kind k = kindOf(name);
+                if (k == Kind.OTHER || k == Kind.ZIP) continue;
+                java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    total += n;
+                    if (total > 512L * 1024 * 1024) throw new IOException("pack is too large (over 512 MB unpacked)");
+                    bytes.write(buf, 0, n);
+                }
+                out.add(addCopy(sanitize(name), bytes.toByteArray()));
+            }
+        } finally {
+            in.close();
+        }
+        return out;
     }
 
     /** Barkfart projects, newest first. */

@@ -93,6 +93,12 @@ public final class EditorScreen implements Disposable {
             }
         };
         session.attach(state.doc, file, name);
+        state.restoreView();
+        session.beforeSave = new Runnable() {
+            public void run() {
+                state.storeView();
+            }
+        };
         prefs.putString("lastProject", file == null ? "" : file.getName()).flush();
     }
 

@@ -42,7 +42,11 @@ public final class Session {
         return doc != null && doc.revision() != savedRevision && (file != null || doc.revision() > 0);
     }
 
+    /** Runs just before every save (the editor stores its view state here). */
+    public Runnable beforeSave;
+
     public File save() throws IOException {
+        if (beforeSave != null) beforeSave.run();
         if (file == null) file = store.unique(name == null ? "Untitled" : name, ProjectStore.EXT);
         store.save(doc.project, file);
         savedRevision = doc.revision();

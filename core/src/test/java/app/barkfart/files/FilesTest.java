@@ -141,4 +141,59 @@ class FilesTest {
         d.undo();
         assertTrue(s.dirty(), "undo is a change too");
     }
+
+    @Test
+    void listsSortNaturallyAndFilter() throws Exception {
+        java.io.File dir = java.nio.file.Files.createTempDirectory("lists").toFile();
+        ProjectStore store = new ProjectStore(dir);
+        String[] names = {"fig 10.nodes", "Fig 2.nodes", "fig 1.nodes", "walk.nodemc", "boom.wav"};
+        long t = 1_700_000_000_000L;
+        for (int i = 0; i < names.length; i++) {
+            java.io.File f = new java.io.File(dir, names[i]);
+            java.nio.file.Files.write(f.toPath(), new byte[] {1});
+            f.setLastModified(t + i * 1000L);
+        }
+        java.util.List<String> byName = new java.util.ArrayList<String>();
+        for (ProjectStore.Entry e : store.list(false, ProjectStore.Sort.NAME, null)) byName.add(e.name);
+        assertEquals(java.util.Arrays.asList("boom", "fig 1", "Fig 2", "fig 10", "walk"), byName);
+        assertEquals("boom", store.list(false, ProjectStore.Sort.NEWEST, null).get(0).name);
+        assertEquals("fig 10", store.list(false, ProjectStore.Sort.OLDEST, null).get(0).name);
+        assertEquals(3, store.list(false, ProjectStore.Sort.NAME, "FIG").size());
+        assertTrue(ProjectStore.natural("a2", "a10") < 0 && ProjectStore.natural("a02", "a2") > 0 && ProjectStore.natural("b", "A") > 0);
+    }
+
+    @Test
+    void zipPacksUnpackSafely() throws Exception {
+        java.io.File dir = java.nio.file.Files.createTempDirectory("pack").toFile();
+        ProjectStore store = new ProjectStore(dir);
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        java.util.zip.ZipOutputStream z = new java.util.zip.ZipOutputStream(bytes);
+        for (String n : new String[] {"pack/heroes/Hero.nodes", "../../evil.nodemc", "__MACOSX/._Hero.nodes", "readme.txt", "inner.zip", "sfx/boom.wav"}) {
+            z.putNextEntry(new java.util.zip.ZipEntry(n));
+            z.write(new byte[] {1, 2, 3});
+            z.closeEntry();
+        }
+        z.close();
+        java.util.List<java.io.File> got = store.extractPack(bytes.toByteArray());
+        java.util.Set<String> names = new java.util.TreeSet<String>();
+        for (java.io.File f : got) {
+            names.add(f.getName());
+            assertEquals(dir.getCanonicalFile(), f.getParentFile().getCanonicalFile(), "nothing escapes the folder");
+        }
+        assertEquals(new java.util.TreeSet<String>(java.util.Arrays.asList("Hero.nodes", "evil.nodemc", "boom.wav")), names);
+    }
+
+    @Test
+    void viewStateIsSavedWithTheProject() throws Exception {
+        app.barkfart.model.Project p = app.barkfart.Fixtures.empty();
+        p.view.zoom = 2.5f;
+        p.view.panX = -40;
+        p.view.frame = 7;
+        String s = app.barkfart.io.ProjectCodec.encode(p);
+        app.barkfart.model.Project q = app.barkfart.io.ProjectCodec.decode(s);
+        assertEquals(2.5f, q.view.zoom);
+        assertEquals(-40f, q.view.panX);
+        assertEquals(7, q.view.frame);
+        assertFalse(app.barkfart.io.ProjectCodec.encode(app.barkfart.Fixtures.empty()).contains("\"view\""), "default view not written");
+    }
 }

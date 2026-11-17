@@ -17,6 +17,18 @@ public final class Project {
     }
 
     public final Settings settings = new Settings();
+
+    /** Where the editor was looking when saved (Stick Nodes 2.5.1 "save view state"). */
+    public static final class View {
+        public float zoom = 1, panX, panY;
+        public int frame;
+
+        public boolean isDefault() {
+            return zoom == 1 && panX == 0 && panY == 0 && frame == 0;
+        }
+    }
+
+    public final View view = new View();
     public final Map<String, Symbol> library = new LinkedHashMap<String, Symbol>();
     public String rootSymbol;
     public final Map<String, Asset> assets = new LinkedHashMap<String, Asset>();

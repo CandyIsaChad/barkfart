@@ -194,6 +194,24 @@ public final class EditorState {
         return new double[] {frames.time(a), frames.time(b + 1)};
     }
 
+    /** Copies the view (zoom, pan, frame) into the project for saving. */
+    public void storeView() {
+        Project.View v = project().view;
+        v.zoom = zoom;
+        v.panX = panX;
+        v.panY = panY;
+        v.frame = frame;
+    }
+
+    /** Restores the view saved with the project. */
+    public void restoreView() {
+        Project.View v = project().view;
+        zoom = v.zoom > 0.05f && v.zoom < 100 ? v.zoom : 1;
+        panX = v.panX == v.panX ? v.panX : 0;
+        panY = v.panY == v.panY ? v.panY : 0;
+        frame = Math.max(0, Math.min(frames.frameCount() - 1, v.frame));
+    }
+
     public void play() {
         if (playing) return;
         playStartFrame = frame;

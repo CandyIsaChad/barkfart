@@ -234,6 +234,16 @@ public final class FilePanel extends WidgetGroup {
     }
 
     private void importFile(File f) {
+        if (ProjectStore.kindOf(f.getName()) == ProjectStore.Kind.ZIP) {
+            try {
+                List<File> got = host.session().store.extractPack(Importer.read(f));
+                status("Unpacked " + got.size() + " files from " + f.getName());
+                refresh();
+            } catch (Exception e) {
+                status("Could not open " + f.getName() + ": " + e.getMessage());
+            }
+            return;
+        }
         try {
             Importer.Result r = Importer.importFile(host.state().doc, f, host.platform().audio(), host.state().frames.time(host.state().frame));
             close();
@@ -259,6 +269,10 @@ public final class FilePanel extends WidgetGroup {
                 int imported = 0;
                 for (Platform.Picked p : files) {
                     try {
+                        if (ProjectStore.kindOf(p.name) == ProjectStore.Kind.ZIP) {
+                            imported += host.session().store.extractPack(p.bytes).size();   // a pack: its files join the list
+                            continue;
+                        }
                         File f = host.session().store.addCopy(p.name, p.bytes);
                         ProjectStore.Kind k = ProjectStore.kindOf(f.getName());
                         if (k == ProjectStore.Kind.PROJECT) openMe = f;
