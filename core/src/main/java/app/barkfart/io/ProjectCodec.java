@@ -386,6 +386,45 @@ public final class ProjectCodec {
 
     // ================= decode =================
 
+    /**
+     * A deep copy of a layer under a new id (copy / paste, duplicate).
+     * ids maps old layer ids to new ones: the layer's own id, its parent, and
+     * property references in links (old + "/...") are rewritten when listed.
+     */
+    @SuppressWarnings("unchecked")
+    public static Layer copyLayer(Layer l, Map<String, String> ids) throws FormatException {
+        try {
+            Object m = Json.parse(Json.write(layer(l)));
+            return layer(asMap(remap(m, ids), "layer"));
+        } catch (RuntimeException e) {
+            throw new FormatException("cannot copy layer: " + e.getMessage(), e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object remap(Object o, Map<String, String> ids) {
+        if (o instanceof Map) {
+            Map<String, Object> out = new LinkedHashMap<String, Object>();
+            for (Map.Entry<String, Object> e : ((Map<String, Object>) o).entrySet()) {
+                boolean words = e.getKey().equals("text") || e.getKey().equals("name");   // user text is never an id
+                out.put(e.getKey(), words ? e.getValue() : remap(e.getValue(), ids));
+            }
+            return out;
+        }
+        if (o instanceof List) {
+            List<Object> out = new ArrayList<Object>();
+            for (Object x : (List<Object>) o) out.add(remap(x, ids));
+            return out;
+        }
+        if (o instanceof String) {
+            String str = (String) o;
+            if (ids.containsKey(str)) return ids.get(str);
+            int slash = str.indexOf('/');
+            if (slash > 0 && ids.containsKey(str.substring(0, slash))) return ids.get(str.substring(0, slash)) + str.substring(slash);
+        }
+        return o;
+    }
+
     public static Project decode(String json) throws FormatException {
         try {
             Object root = Json.parse(json);
