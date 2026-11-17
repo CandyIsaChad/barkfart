@@ -402,6 +402,28 @@ public final class ProjectCodec {
         return num(m.get(k), k).i();
     }
 
+    // Optional fields: absent means the model's default (format rule, see FORMAT.md).
+    private static float f(Map<String, Object> m, String k, float def) {
+        return m.containsKey(k) ? f(m, k) : def;
+    }
+
+    private static double d(Map<String, Object> m, String k, double def) {
+        return m.containsKey(k) ? d(m, k) : def;
+    }
+
+    private static int i(Map<String, Object> m, String k, int def) {
+        return m.containsKey(k) ? i(m, k) : def;
+    }
+
+    private static boolean b(Map<String, Object> m, String k, boolean def) {
+        return m.containsKey(k) ? b(m, k) : def;
+    }
+
+    private static <E extends Enum<E>> E en(Map<String, Object> m, String k, Class<E> c, E def) {
+        String v = str(m, k);
+        return v == null ? def : Enum.valueOf(c, v);
+    }
+
     private static boolean b(Map<String, Object> m, String k) {
         Object o = m.get(k);
         if (!(o instanceof Boolean)) throw new IllegalArgumentException(k + " must be a boolean");
@@ -416,11 +438,12 @@ public final class ProjectCodec {
         }
         m = Migrations.upgrade(m, v);
         Project p = new Project();
-        Map<String, Object> s = asMap(m.get("settings"), "settings");
-        p.settings.fps = f(s, "fps");
-        p.settings.width = i(s, "width");
-        p.settings.height = i(s, "height");
-        p.settings.background = parseColor(req(s, "background"));
+        Map<String, Object> s = m.containsKey("settings") ? asMap(m.get("settings"), "settings") : new LinkedHashMap<String, Object>();
+        Project.Settings defaults = new Project.Settings();
+        p.settings.fps = f(s, "fps", defaults.fps);
+        p.settings.width = i(s, "width", defaults.width);
+        p.settings.height = i(s, "height", defaults.height);
+        p.settings.background = s.containsKey("background") ? parseColor(req(s, "background")) : defaults.background;
         p.rootSymbol = req(m, "rootSymbol");
         for (Object o : list(m, "assets")) {
             Map<String, Object> am = asMap(o, "asset");
@@ -443,17 +466,18 @@ public final class ProjectCodec {
             p.nodeSets.put(ns.id, ns);
         }
         if (!p.library.containsKey(p.rootSymbol)) throw new IllegalArgumentException("root symbol missing");
-        p.setIdCounter(i(m, "idCounter"));
+        p.setIdCounter(i(m, "idCounter", 1));
         p.invalidateIndex();
         return p;
     }
 
     private static Symbol symbol(Map<String, Object> m) {
-        Symbol s = new Symbol(req(m, "id"), str(m, "name"), d(m, "duration"));
+        Symbol s = new Symbol(req(m, "id"), str(m, "name"), d(m, "duration", 1.0));
         for (Object o : list(m, "layers")) s.layers.add(layer(asMap(o, "layer")));
         for (Object o : list(m, "markers")) {
             Map<String, Object> mm = asMap(o, "marker");
-            s.markers.add(new Marker(d(mm, "time"), str(mm, "name"), parseColor(req(mm, "color"))));
+            s.markers.add(new Marker(d(mm, "time", 0), str(mm, "name"),
+                    mm.containsKey("color") ? parseColor(req(mm, "color")) : app.barkfart.model.Color.WHITE));
         }
         for (Object o : list(m, "scopedEffects")) {
             Map<String, Object> sm = asMap(o, "scopedEffect");
@@ -478,7 +502,7 @@ public final class ProjectCodec {
                     app.barkfart.model.Polyfill pf = new app.barkfart.model.Polyfill(id, req(pm, "id"));
                     pf.anchor = req(pm, "anchor");
                     for (Object nid : list(pm, "nodes")) pf.nodes.add((String) nid);
-                    pf.useOwnColor = b(pm, "ownColor");
+                    pf.useOwnColor = b(pm, "ownColor", false);
                     readProp(pm, "color", pf.color);
                     fl.figure.polyfills.add(pf);
                 }
@@ -488,8 +512,8 @@ public final class ProjectCodec {
             case SPRITE: {
                 Layer.SpriteLayer s = new Layer.SpriteLayer(id, name);
                 s.asset = str(m, "asset");
-                s.width = f(m, "width");
-                s.height = f(m, "height");
+                s.width = f(m, "width", 0);
+                s.height = f(m, "height", 0);
                 readProp(m, "tint", s.tint);
                 l = s;
                 break;
@@ -498,7 +522,7 @@ public final class ProjectCodec {
                 Layer.TextLayer s = new Layer.TextLayer(id, name);
                 s.text = str(m, "text");
                 s.font = str(m, "font");
-                s.size = f(m, "size");
+                s.size = f(m, "size", s.size);
                 readProp(m, "color", s.color);
                 l = s;
                 break;
@@ -507,8 +531,8 @@ public final class ProjectCodec {
                 Layer.SymbolLayer s = new Layer.SymbolLayer(id, name, req(m, "symbol"));
                 readProp(m, "timeOffset", s.timeOffset);
                 readProp(m, "speed", s.speed);
-                s.loop = Layer.SymbolLayer.LoopMode.valueOf(req(m, "loop"));
-                s.recursionLimit = i(m, "recursionLimit");
+                s.loop = en(m, "loop", Layer.SymbolLayer.LoopMode.class, s.loop);
+                s.recursionLimit = i(m, "recursionLimit", s.recursionLimit);
                 l = s;
                 break;
             }
@@ -519,10 +543,10 @@ public final class ProjectCodec {
                 Layer.AudioLayer a = new Layer.AudioLayer(id, name);
                 for (Object o : list(m, "clips")) {
                     Map<String, Object> cm = asMap(o, "clip");
-                    Clip c = new Clip(id, req(cm, "id"), str(cm, "asset"), d(cm, "start"), d(cm, "in"), d(cm, "out"));
-                    c.loop = b(cm, "loop");
-                    c.fadeIn = d(cm, "fadeIn");
-                    c.fadeOut = d(cm, "fadeOut");
+                    Clip c = new Clip(id, req(cm, "id"), str(cm, "asset"), d(cm, "start", 0), d(cm, "in", 0), d(cm, "out", 0));
+                    c.loop = b(cm, "loop", false);
+                    c.fadeIn = d(cm, "fadeIn", 0);
+                    c.fadeOut = d(cm, "fadeOut", 0);
                     readProp(cm, "volume", c.volume);
                     readProp(cm, "pan", c.pan);
                     a.clips.add(c);
@@ -539,15 +563,15 @@ public final class ProjectCodec {
                 l = c;
             }
         }
-        l.visible = b(m, "visible");
-        l.locked = b(m, "locked");
-        l.solo = b(m, "solo");
-        if (m.containsKey("onion")) l.onion = b(m, "onion");
-        l.blend = Layer.Blend.valueOf(req(m, "blend"));
+        l.visible = b(m, "visible", true);
+        l.locked = b(m, "locked", false);
+        l.solo = b(m, "solo", false);
+        l.onion = b(m, "onion", true);
+        l.blend = en(m, "blend", Layer.Blend.class, Layer.Blend.NORMAL);
         l.parent = str(m, "parent");
         readProp(m, "shown", l.shown);
         readProp(m, "opacity", l.opacity);
-        Map<String, Object> t = asMap(m.get("transform"), "transform");
+        Map<String, Object> t = m.containsKey("transform") ? asMap(m.get("transform"), "transform") : new LinkedHashMap<String, Object>();
         readProp(t, "x", l.transform.x);
         readProp(t, "y", l.transform.y);
         readProp(t, "rotation", l.transform.rotation);
@@ -555,13 +579,13 @@ public final class ProjectCodec {
         readProp(t, "scaleY", l.transform.scaleY);
         readProp(t, "anchorX", l.transform.anchorX);
         readProp(t, "anchorY", l.transform.anchorY);
-        readStack(asMap(m.get("effects"), "effects"), l.effects, id);
+        if (m.containsKey("effects")) readStack(asMap(m.get("effects"), "effects"), l.effects, id);
         return l;
     }
 
     private static Node node(String layerId, Map<String, Object> m) {
-        Node n = new Node(layerId, req(m, "id"), str(m, "parent"), Node.Shape.valueOf(req(m, "shape")));
-        n.drawOrder = i(m, "draw");
+        Node n = new Node(layerId, req(m, "id"), str(m, "parent"), en(m, "shape", Node.Shape.class, Node.Shape.LINE));
+        n.drawOrder = i(m, "draw", Node.UNASSIGNED);
         readProp(m, "rotation", n.rotation);
         readProp(m, "length", n.length);
         readProp(m, "thickness", n.thickness);
@@ -592,9 +616,10 @@ public final class ProjectCodec {
         for (Object o : list(m, "nodes")) {
             Map<String, Object> em = asMap(o, "effect");
             EffectNode e = new EffectNode(owner, req(em, "id"), req(em, "type"));
-            e.enabled = b(em, "enabled");
+            e.enabled = b(em, "enabled", true);
             readProp(em, "mix", e.mix);
-            for (Map.Entry<String, Object> pe : asMap(em.get("params"), "params").entrySet()) {
+            Map<String, Object> params = em.containsKey("params") ? asMap(em.get("params"), "params") : new LinkedHashMap<String, Object>();
+            for (Map.Entry<String, Object> pe : params.entrySet()) {
                 Map<String, Object> pm = asMap(pe.getValue(), "param");
                 ValueType vt = ValueType.valueOf(req(pm, "t"));
                 Property p = e.param(owner, pe.getKey(), vt, parseValue(vt, pm.get("v")));
@@ -642,19 +667,19 @@ public final class ProjectCodec {
         String type = req(m, "type");
         Modifier mod;
         if ("wiggle".equals(type)) {
-            mod = new Modifier.Wiggle(f(m, "frequency"), f(m, "amplitude"), i(m, "seed"), i(m, "octaves"));
+            mod = new Modifier.Wiggle(f(m, "frequency", 1), f(m, "amplitude", 0), i(m, "seed", 0), i(m, "octaves", 1));
         } else if ("sine".equals(type)) {
-            mod = new Modifier.Sine(f(m, "frequency"), f(m, "amplitude"), f(m, "phase"));
+            mod = new Modifier.Sine(f(m, "frequency", 1), f(m, "amplitude", 0), f(m, "phase", 0));
         } else if ("loop".equals(type)) {
-            mod = new Modifier.Loop(Modifier.Loop.Mode.valueOf(req(m, "mode")), d(m, "start"), d(m, "end"));
+            mod = new Modifier.Loop(en(m, "mode", Modifier.Loop.Mode.class, Modifier.Loop.Mode.CYCLE), d(m, "start", 0), d(m, "end", 1));
         } else if ("delayFollow".equals(type)) {
-            mod = new Modifier.DelayFollow(req(m, "source"), d(m, "delay"), f(m, "scale"), f(m, "offset"));
+            mod = new Modifier.DelayFollow(req(m, "source"), d(m, "delay", 0), f(m, "scale", 1), f(m, "offset", 0));
         } else if ("link".equals(type)) {
-            mod = new Modifier.Link(req(m, "source"), f(m, "scale"), f(m, "offset"));
+            mod = new Modifier.Link(req(m, "source"), f(m, "scale", 1), f(m, "offset", 0));
         } else {
             throw new IllegalArgumentException("unknown modifier " + type);
         }
-        mod.enabled = b(m, "enabled");
+        mod.enabled = b(m, "enabled", true);
         return mod;
     }
 

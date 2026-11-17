@@ -43,7 +43,7 @@ public final class Figure {
         } else if (n.parent == null || !index.containsKey(n.parent)) {
             throw new IllegalArgumentException("parent " + n.parent + " must be added before " + n.id);
         }
-        if (n.drawOrder == 0 && !nodes.isEmpty()) n.drawOrder = maxDrawOrder() + 1;
+        if (n.drawOrder == Node.UNASSIGNED) n.drawOrder = nodes.isEmpty() ? 0 : maxDrawOrder() + 1;
         index.put(n.id, nodes.size());
         nodes.add(n);
     }

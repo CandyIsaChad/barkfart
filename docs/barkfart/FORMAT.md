@@ -1,0 +1,17 @@
+# .bark format rules
+
+The .bark file is a ZIP holding project.json (and, from the assets work on,
+assets/). `formatVersion` is 1. These rules keep every saved file loadable:
+
+1. **Locked fixture.** core/src/test/resources/formats/v1-kitchen-sink.bark
+   was written by format version 1 (2026-11-17). Every build must load it and
+   render it like v1-kitchen-sink.png (FormatLockTest). It is never
+   regenerated; a later version adds its own fixture next to it.
+2. **New fields are optional with a default** equal to the model's default,
+   so files without them load unchanged. Only identity and reference fields
+   are required: ids, type names, rootSymbol, link sources.
+3. **Changing meaning or removing a field needs a version bump** and a step
+   in Migrations (version N to N + 1), with a test that upgrades a fixture.
+4. **Unknown fields are ignored** within a version (tested).
+5. A file with a newer formatVersion than the app is refused with a message,
+   never half-loaded.

@@ -23,8 +23,10 @@ public final class Node {
     /** Parent node id, or null for the root. Parents precede children in Figure.nodes. */
     public final String parent;
     public Shape shape;
+    /** drawOrder value meaning "not set": Figure.add then puts the node in front. */
+    public static final int UNASSIGNED = Integer.MIN_VALUE;
     /** Draw order within the figure: lower draws behind. Independent of hierarchy. */
-    public int drawOrder;
+    public int drawOrder = UNASSIGNED;
     public final Property rotation, length, thickness, scale, color, shown;
     /** Legacy fields not yet understood, kept for faithful re-export. */
     public final Map<String, Object> legacyExtras = new LinkedHashMap<String, Object>();

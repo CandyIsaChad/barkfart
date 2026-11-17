@@ -1,6 +1,13 @@
 # Progress
 
 ## Decisions
+- 2026-11-17: Order changed to core-first (user asked; advisor's plan):
+  1 lock the save format, 2 renderer foundation (per-vertex colour,
+  textures, offscreen buffers), 3 shapes/gradients/curves/node options
+  checked against the original's previews, 4 effects pipeline, 5 audio
+  engine, 6 export, 7 UI per feature. Each step ends with an IPA.
+- 2026-11-17: .stknds frames: stop blind probing; ask the user for tiny
+  projects that differ by one thing each, then diff.
 - 2026-11-16: The repo had only a compiled App Store IPA, no source. User chose a
   clean-room original app instead of a fork. Rules in CLEANROOM.md.
 - 2026-11-16: Stack: LibGDX + MobiVM (Java 17, Gradle), modules core / desktop /
@@ -175,6 +182,12 @@ Not done
 - All M4 UI (dope sheet, curve editor, modifier UI, onion skin, markers
   panel): waits for the user's screenshots so the layout matches the
   original. Markers exist in the model but have no edit commands yet.
+
+### Format lock (2026-11-17)
+- FORMAT.md rules; v1 fixture + reference render that every build must load
+  and match; loader treats every non-identity field as optional with the
+  model default; unknown fields ignored; Migrations has a real, tested step
+  mechanism; fixed: a non-root node with draw order 0 was renumbered on load.
 
 ### .stknds import, partial (2026-11-17)
 - Header + stickfigure library reader (spec-based, corrected ID maps);
