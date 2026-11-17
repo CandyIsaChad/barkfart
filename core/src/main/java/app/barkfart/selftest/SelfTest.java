@@ -50,7 +50,30 @@ public final class SelfTest {
     private SelfTest() {}
 
     public static Result run() {
+        return run(null);
+    }
+
+    /** @param documents the user's folder; when given, a save/reload there is checked too. */
+    public static Result run(final java.io.File documents) {
         Result r = new Result();
+        if (documents != null) {
+            check(r, "save and reload in Documents", new Check() {
+                public void run() throws Exception {
+                    java.io.File f = new java.io.File(documents, ".selftest.bark");   // hidden from lists
+                    Project p = Demo.waving();
+                    p.assets.put("Aself", new app.barkfart.model.Asset("Aself", app.barkfart.model.Asset.Kind.IMAGE, "assets/Aself.bin"));
+                    byte[] data = new byte[4096];
+                    for (int i = 0; i < data.length; i++) data[i] = (byte) i;
+                    p.assetData.put("Aself", data);
+                    BarkFile.save(p, f);
+                    Project q = BarkFile.load(f);
+                    if (!ProjectCodec.encode(p).equals(ProjectCodec.encode(q))) throw new AssertionError("project differs");
+                    if (!java.util.Arrays.equals(data, q.assetData.bytes("Aself"))) throw new AssertionError("asset differs");
+                    f.delete();
+                    new java.io.File(f.getPath() + ".bak").delete();
+                }
+            });
+        }
         long t0 = System.currentTimeMillis();
         check(r, "float text round trip", new Check() {
             public void run() {

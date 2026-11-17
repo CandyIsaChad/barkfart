@@ -116,4 +116,34 @@ class RoundTripTest {
         BarkFile.write(p, out);
         return out.toByteArray();
     }
+
+    @Test
+    void assetsLiveInTheContainerAndSurviveRepeatedSaves() throws Exception {
+        File f = new File(tmp, "assets.bark");
+        Project p = Fixtures.kitchenSink();
+        byte[] img = new byte[50000], snd = new byte[1234];
+        new Random(1).nextBytes(img);
+        new Random(2).nextBytes(snd);
+        java.util.List<app.barkfart.model.Asset> as = new java.util.ArrayList<app.barkfart.model.Asset>(p.assets.values());
+        p.assetData.put(as.get(0).id, img);
+        p.assetData.put(as.get(1).id, snd);
+        BarkFile.save(p, f);
+        Project q = BarkFile.load(f);
+        assertArrayEquals(img, q.assetData.bytes(as.get(0).id));
+        // Save the loaded project twice (assets come from the file lazily), then reload.
+        BarkFile.save(q, f);
+        BarkFile.save(q, f);
+        Project r = BarkFile.load(f);
+        assertArrayEquals(img, r.assetData.bytes(as.get(0).id));
+        assertArrayEquals(snd, r.assetData.bytes(as.get(1).id));
+        // Streams load assets eagerly.
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        BarkFile.write(r, out);
+        Project s = BarkFile.read(new ByteArrayInputStream(out.toByteArray()));
+        assertArrayEquals(snd, s.assetData.bytes(as.get(1).id));
+        // Deterministic bytes with assets too.
+        ByteArrayOutputStream again = new ByteArrayOutputStream();
+        BarkFile.write(s, again);
+        assertArrayEquals(out.toByteArray(), again.toByteArray());
+    }
 }

@@ -19,6 +19,8 @@ public final class Project {
     public String rootSymbol;
     public final Map<String, Asset> assets = new LinkedHashMap<String, Asset>();
     public final Map<String, NodeSet> nodeSets = new LinkedHashMap<String, NodeSet>();
+    /** Bytes for the assets above (stored as ZIP entries, not JSON). */
+    public final AssetData assetData = new AssetData();
     private int nextId = 1;
     private Map<String, Property> propertyIndex;
 

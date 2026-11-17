@@ -49,7 +49,9 @@ public final class EditorScreen implements Disposable {
             // unknown value from a newer build: keep the default
         }
         // Reopen the last project, or start a new one.
-        java.io.File last = new java.io.File(prefs.getString("lastProject", ""));
+        // Stored by file name: iOS app container paths change between installs/updates.
+        String lastName = prefs.getString("lastProject", "");
+        java.io.File last = lastName.isEmpty() ? new java.io.File("") : new java.io.File(platform.documents(), new java.io.File(lastName).getName());
         Project p = null;
         if (last.isFile()) {
             try {
@@ -84,14 +86,14 @@ public final class EditorScreen implements Disposable {
             }
         };
         session.attach(state.doc, file, name);
-        prefs.putString("lastProject", file == null ? "" : file.getAbsolutePath()).flush();
+        prefs.putString("lastProject", file == null ? "" : file.getName()).flush();
     }
 
     /** Saves the current project if it changed; returns false (and reports) on failure. */
     public boolean saveNow() {
         try {
             boolean saved = session.saveIfDirty();
-            if (saved) prefs.putString("lastProject", session.file().getAbsolutePath()).flush();
+            if (saved) prefs.putString("lastProject", session.file().getName()).flush();
             return true;
         } catch (Exception e) {
             if (state != null) state.flash("Could not save: " + e.getMessage(), null);

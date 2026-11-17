@@ -42,7 +42,7 @@ public class BarkfartApp extends ApplicationAdapter {
         editor = new EditorScreen(platform, uiScale);
         Thread st = new Thread(new Runnable() {
             public void run() {
-                final SelfTest.Result r = SelfTest.run();
+                final SelfTest.Result r = SelfTest.run(platform.documents());
                 System.out.println("[Barkfart] self-test " + r.summary());
                 for (String f : r.failures) System.out.println("[Barkfart] FAIL " + f);
                 Gdx.app.postRunnable(new Runnable() {

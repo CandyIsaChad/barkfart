@@ -1,7 +1,9 @@
 # .bark format rules
 
-The .bark file is a ZIP holding project.json (and, from the assets work on,
-assets/). `formatVersion` is 1. These rules keep every saved file loadable:
+The .bark file is a ZIP holding project.json and one STORED entry per asset
+(assets/<id>.<ext>; images and audio are already compressed). Loading from a
+file keeps assets on disk until needed; saving copies them across without
+re-encoding, so autosave stays cheap. `formatVersion` is 1. These rules keep every saved file loadable:
 
 1. **Locked fixture.** core/src/test/resources/formats/v1-kitchen-sink.bark
    was written by format version 1 (2026-11-17). Every build must load it and

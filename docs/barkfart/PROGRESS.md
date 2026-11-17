@@ -188,6 +188,11 @@ Not done
   and match; loader treats every non-identity field as optional with the
   model default; unknown fields ignored; Migrations has a real, tested step
   mechanism; fixed: a non-root node with draw order 0 was renumbered on load.
+- Assets live in the .bark ZIP as STORED entries, lazily read from the file,
+  copied across on save (tested: repeated saves, stream loads, determinism).
+- Last project remembered by file name (iOS container paths change).
+- Self-test (now 13 checks) saves and reloads a project with an asset in
+  the real documents folder.
 
 ### .stknds import, partial (2026-11-17)
 - Header + stickfigure library reader (spec-based, corrected ID maps);
