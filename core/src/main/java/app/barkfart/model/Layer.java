@@ -19,6 +19,12 @@ public abstract class Layer {
     public Blend blend = Blend.NORMAL;
     /** Parent layer id for transform inheritance, or null. */
     public String parent;
+    /**
+     * Joining: with a figure parent, the node this layer hangs from (its joint
+     * position, and its angle when parentNodeRotate), or null for the figure itself.
+     */
+    public String parentNode;
+    public boolean parentNodeRotate = true;
     public final Transform transform;
     public final EffectStack effects = new EffectStack();
 

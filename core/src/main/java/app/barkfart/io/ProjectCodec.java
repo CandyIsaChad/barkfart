@@ -130,6 +130,8 @@ public final class ProjectCodec {
         m.put("onion", l.onion);
         m.put("blend", l.blend.name());
         m.put("parent", l.parent);
+        if (l.parentNode != null) m.put("parentNode", l.parentNode);
+        if (!l.parentNodeRotate) m.put("parentNodeRotate", false);
         m.put("shown", prop(l.shown, false));
         m.put("opacity", prop(l.opacity, false));
         Map<String, Object> t = obj();
@@ -597,6 +599,8 @@ public final class ProjectCodec {
         l.onion = b(m, "onion", true);
         l.blend = en(m, "blend", Layer.Blend.class, Layer.Blend.NORMAL);
         l.parent = str(m, "parent");
+        l.parentNode = str(m, "parentNode");
+        l.parentNodeRotate = b(m, "parentNodeRotate", true);
         readProp(m, "shown", l.shown);
         readProp(m, "opacity", l.opacity);
         Map<String, Object> t = m.containsKey("transform") ? asMap(m.get("transform"), "transform") : new LinkedHashMap<String, Object>();

@@ -205,10 +205,33 @@ public final class Evaluator {
                 scene.diagnostics.add(new Diagnostic(Diagnostic.Kind.PARENT_CYCLE, l.id));
                 break;
             }
-            acc = local(p, t, r).mul(acc);
+            Affine joint = cur.parentNode == null ? null : nodeFrame(p, cur.parentNode, cur.parentNodeRotate, t, r, scene, cur.id);
+            acc = local(p, t, r).mul(joint == null ? acc : joint.mul(acc));
             cur = p;
         }
         return acc;
+    }
+
+    /** A joint's frame inside its figure: at the joint, turned by its world angle (joining). */
+    static Affine nodeFrame(Layer p, String nodeId, boolean rotate, double t, PropertyResolver r, Scene scene, String who) {
+        if (!(p instanceof Layer.FigureLayer)) return null;
+        Layer.FigureLayer f = (Layer.FigureLayer) p;
+        int i = f.figure.indexOf(nodeId);
+        if (i < 0) {
+            if (scene != null) scene.diagnostics.add(new Diagnostic(Diagnostic.Kind.MISSING_REF, who + "/parentNode"));
+            return null;
+        }
+        FigurePose pose = FigurePose.compute(f, t, r);
+        Affine a = Affine.translate(pose.x[i], pose.y[i]);
+        return rotate ? a.mul(Affine.rotateDeg(pose.angle[i])) : a;
+    }
+
+    /** The transform a layer's own values are expressed in: its parent chain, joint included (stage space). */
+    public static Affine parentFrame(Project project, Symbol sym, Layer l, double t) {
+        Scene scratch = new Scene(new Group(l.id), t);
+        PropertyResolver r = new PropertyResolver(project, scratch.diagnostics);
+        Affine local = local(l, t, r);
+        return layerChain(sym, l, t, r, scratch).mul(local.inverse());
     }
 
     private static Affine local(Layer l, double t, PropertyResolver r) {
