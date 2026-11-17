@@ -226,6 +226,23 @@ Not done
   node scale. Not yet: curved trapezoids, floaty tweening, creation-mode UI
   for all of these (parity order step 3).
 
+### Core functions batch 2 (2026-11-17 night; user asleep, "implement as much as you can")
+Core operations with tests and a Diagnostics check per area; no buttons yet.
+- Files: natural / name / date sort, name filter, ZIP packs (mixed kinds,
+  folders flattened, unsafe names skipped, 512 MB cap), view state saved.
+- Figure tools: duplicate with joins, push/pull with joined figures,
+  copy/paste all properties (optionally the stack position), keep during
+  tween, polyfill creation (pick nodes in order, finish).
+- Canvas helpers: node digging, selected joint wins, axis lock, angle snap,
+  rotate a figure about its main node, move everything.
+- Sound: per-sound pitch, paste a sound elsewhere, iOS mixes with other
+  apps' music.
+- Effects: joined layers can use their parent's effects; clear all.
+- Export: 2x supersampling (smooth edges); canvas presets incl. vertical
+  video and widescreen bars.
+- GIF import: own decoder (matches Java's reader pixel for pixel on our and
+  Java's interlaced files); animated GIFs become a looping movieclip.
+
 ### Core functions batch (2026-11-17; user: "base functions first, UI later")
 All as core operations (one undo step each, tests, a Diagnostics check per
 area; 39 device checks now). No buttons yet unless noted.

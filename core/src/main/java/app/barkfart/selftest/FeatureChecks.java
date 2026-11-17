@@ -484,5 +484,116 @@ final class FeatureChecks {
                 SelfTest.expect(alpha(im, 26, 0) > 10 && alpha(im, 0, 16) == 0, "motion direction");
             }
         });
+
+        r.group = "Files and figure tools";
+        SelfTest.check(r, "natural sort, zip packs, saved view", new SelfTest.Check() {
+            public void run() throws Exception {
+                SelfTest.expect(app.barkfart.files.ProjectStore.natural("fig 2", "fig 10") < 0, "natural sort");
+                Project p = project();
+                p.view.zoom = 2;
+                p.view.frame = 3;
+                Project q = app.barkfart.io.ProjectCodec.decode(app.barkfart.io.ProjectCodec.encode(p));
+                SelfTest.expect(q.view.zoom == 2 && q.view.frame == 3, "view state");
+                java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+                java.util.zip.ZipOutputStream z = new java.util.zip.ZipOutputStream(bytes);
+                z.putNextEntry(new java.util.zip.ZipEntry("../x/a.nodes"));
+                z.write(new byte[] {1});
+                z.closeEntry();
+                z.close();
+                java.io.File dir = new java.io.File(System.getProperty("java.io.tmpdir"), "bf-pack-" + System.nanoTime());
+                dir.mkdirs();
+                try {
+                    java.util.List<java.io.File> got = new app.barkfart.files.ProjectStore(dir).extractPack(bytes.toByteArray());
+                    SelfTest.expect(got.size() == 1 && got.get(0).getParentFile().getCanonicalPath().equals(dir.getCanonicalPath()), "pack unpacked inside the folder");
+                } finally {
+                    java.io.File[] fs = dir.listFiles();
+                    if (fs != null) for (java.io.File f : fs) f.delete();
+                    dir.delete();
+                }
+            }
+        });
+        SelfTest.check(r, "duplicate with joins, copy properties", new SelfTest.Check() {
+            public void run() throws Exception {
+                Project p = project();
+                Layer.FigureLayer a = figure(p), b = figure(p);
+                node(a, "arm", "r", Node.Shape.LINE, 0, 100, 6);
+                p.invalidateIndex();
+                Document d = new Document(p);
+                d.apply(app.barkfart.edit.JoinOps.join(p, p.root(), b, a, "arm", true, 0));
+                app.barkfart.edit.LayerOps.Made m = new app.barkfart.edit.LayerOps.Made();
+                d.apply(app.barkfart.edit.LayerOps.duplicate(p, p.root(), a, true, 30, 0, m));
+                SelfTest.expect(m.layers.size() == 2 && m.layers.get(0).id.equals(m.layers.get(1).parent), "joins kept");
+                a.transform.rotation.setValue(33f);
+                app.barkfart.edit.LayerOps.Props c = app.barkfart.edit.LayerOps.copyProps(p, p.root(), a, 0);
+                Editor ed = new Editor(d);
+                ed.autoKey = true;
+                app.barkfart.edit.LayerOps.pasteProps(ed, p.root(), m.layers.get(0), c, false, false, 0);
+                SelfTest.expect(Math.abs(resolver(p).f(m.layers.get(0).transform.rotation, 0) - 33) < 1e-3, "properties pasted");
+            }
+        });
+        SelfTest.check(r, "polyfill creation, node digging", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.FigureLayer a = figure(p);
+                node(a, "x", "r", Node.Shape.LINE, 0, 100, 6);
+                node(a, "y", "r", Node.Shape.LINE, 90, 100, 6);
+                p.invalidateIndex();
+                app.barkfart.edit.PolyfillBuilder pb = new app.barkfart.edit.PolyfillBuilder(a, "r");
+                pb.add("x");
+                pb.add("y");
+                new Document(p).apply(pb.finish("pf0", Color.rgba8888(0xff0000ff)));
+                SelfTest.expect(a.figure.polyfills.size() == 1, "fill made");
+                Layer.FigureLayer twin = figure(p);
+                node(twin, "x", "r", Node.Shape.LINE, 0, 100, 6);
+                p.invalidateIndex();
+                CanvasTools tools = new CanvasTools(new Editor(new Document(p)));
+                tools.showStatic = true;
+                CanvasTools.Hit h1 = tools.pickCycling(0, 0, 4, 0, null, null);
+                CanvasTools.Hit h2 = tools.pickCycling(0, 0, 4, 0, null, h1.node);
+                SelfTest.expect(h1.node != h2.node, "digging");
+            }
+        });
+
+        r.group = "Sound, GIF, onion";
+        SelfTest.check(r, "pitch, gif round trip, seam-free ghosts", new SelfTest.Check() {
+            public void run() throws Exception {
+                final Pcm tone = Mixer.tone(440, 1.0, 44100, 0.5f);
+                Project p = project();
+                Layer.AudioLayer al = new Layer.AudioLayer(p.newId("L"), "a");
+                Clip c = new Clip(al.id, "c", "A", 0, 0, 0);
+                c.pitch = 2;
+                al.clips.add(c);
+                p.root().layers.add(al);
+                p.invalidateIndex();
+                AudioPlan plan = AudioPlan.build(p, p.root(), new AudioPlan.Sounds() {
+                    public Pcm pcm(String id) {
+                        return tone;
+                    }
+                });
+                SelfTest.expect(Math.abs(plan.entries.get(0).end - 0.5) < 1e-9, "pitch 2 halves the length");
+                java.io.ByteArrayOutputStream gb = new java.io.ByteArrayOutputStream();
+                app.barkfart.export.Gif g = new app.barkfart.export.Gif(gb, 8, 6, 10, true);
+                byte[] px = new byte[8 * 6 * 4];
+                for (int i = 0; i < 48; i++) {
+                    px[i * 4] = (byte) 255;
+                    px[i * 4 + 3] = (byte) 255;
+                }
+                g.frame(px);
+                g.frame(px);
+                g.finish();
+                app.barkfart.image.GifDecoder.Result res = app.barkfart.image.GifDecoder.decode(gb.toByteArray());
+                SelfTest.expect(res != null && res.frames.size() == 2 && (res.frames.get(1).rgba[0] & 0xff) == 255, "gif decode");
+                Layer.FigureLayer f = figure(p);
+                node(f, "a", "r", Node.Shape.SQUARE_LINE, 0, 20, 20);
+                node(f, "b", "r", Node.Shape.SQUARE_LINE, 0, 20, 20);
+                p.invalidateIndex();
+                app.barkfart.geom.OnionSkin o = new app.barkfart.geom.OnionSkin();
+                o.before = 1;
+                o.after = 0;
+                Image im = new Image(60, 40, -30, 20, 1);
+                Compositor.render(o.buildLayered(p, p.rootSymbol, 0.5), im);
+                SelfTest.expect(Math.abs(alpha(im, 10, 0) - Math.round(o.opacity * 255)) <= 2, "ghost overlap");
+            }
+        });
     }
 }

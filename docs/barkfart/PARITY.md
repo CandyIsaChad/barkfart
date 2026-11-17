@@ -5,7 +5,7 @@ Built by tools/make_parity.py from research/stick-nodes-features-raw.md (64 upda
 Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without UI, **[ ]** not yet, **(won't)** with the reason.
 
 
-**Totals (382 features):** 81 usable now, 74 partial or core-only, 193 not yet, 34 won't.
+**Totals (382 features):** 89 usable now, 94 partial or core-only, 165 not yet, 34 won't.
 
 
 ## Order of work (parity first, then our own additions)
@@ -43,16 +43,16 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [x] **Zoom out below 100% and move stage** (since 1.2.6): Zoom out to 50% and drag the stage to place figures off-frame
 - [ ] **Max zoom increases** (since 1.7.0): Max zoom went 500% → 800% (1.7.0) → 2000% (2.3.2) → 5000% (3.2.0)
 - [x] **Smoother zoom** (since 2.4.4): Zoom made far more responsive
-- [ ] **Panning mode** (since 1.1.3): Drag the canvas to move every figure on the current frame at once *Barkfart: dragging empty stage pans the view; moving all figures at once is not built yet.*
+- [~] **Panning mode** (since 1.1.3): Drag the canvas to move every figure on the current frame at once *Barkfart: core: move every figure on the frame at once (one undo step); no toggle UI.*
 - [~] **Lock stickfigure** (since 1.2.6): Lock button freezes a figure in place to prevent accidental moves *Barkfart: layer lock in the model and undo; no button yet.*
 - [x] **Locked figures hide nodes** (since 2.5.1): A locked figure hides all its nodes except the main node (later: regardless of joins) *Barkfart: locked layers show no handles.*
-- [ ] **Pinch-rotate figure** (since 1.2.8): Two-finger pinch-rotate rotates the selected stickfigure
+- [~] **Pinch-rotate figure** (since 1.2.8): Two-finger pinch-rotate rotates the selected stickfigure *Barkfart: core: rotate a figure about its main node; no gesture yet.*
 - [ ] **Rotation knobs** (since ≤2.1.0 (improved)): Knob controls for angles that preview rotation in real time
 - [ ] **Tap knob to snap** (since 3.2.2): Tapping the rotate knob snaps to 0/90/180/270
-- [ ] **45° snap on angle fields** (since 4.1.6): Quick button on every angle field to snap to 45° steps
+- [~] **45° snap on angle fields** (since 4.1.6): Quick button on every angle field to snap to 45° steps *Barkfart: core: angle snapping to any step; no field button.*
 - [ ] **Figure rotation indicator** (since 4.2.0): Main node shows a line for the figure's rotation; rotation editable numerically
 - [ ] **Segment angle +/-** (since 2.2.2): Set segment angle with increment buttons
-- [ ] **Axis lock while dragging** (since 2.2.0): Dragging a figure, textfield or camera in a straight line locks to that axis (toggle in settings)
+- [~] **Axis lock while dragging** (since 2.2.0): Dragging a figure, textfield or camera in a straight line locks to that axis (toggle in settings) *Barkfart: core: figure drags lock to the dominant axis; no settings toggle.*
 - [~] **Flip figure (X/Y)** (since ≤1.7.8): Flip a stickfigure horizontally/vertically *Barkfart: core: mirror a figure (scale sign, keys included).*
 - [~] **Flip segments in Animation Mode** (since 2.3.7): Flip individual segments while animating, not just in creation *Barkfart: core: same branch flip, works on animated figures.*
 - [ ] **Join-anchor flip** (since 4.2.3): Long-press flip to mirror joined figures around the join anchor axis
@@ -62,10 +62,10 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [ ] **Floaty stretchy nodes** (since 4.2.0): Alternate tween behaviour for stretchy nodes
 - [~] **Reset length** (since ≤2.4.9): Button that restores a segment's original length (applies smart-stretch) *Barkfart: core: back to rest length, keyed, with smart-stretch.*
 - [~] **Push back / bring forward** (since ≤4.0.0): Change a figure's layer order in the frame *Barkfart: layer order and node draw order commands exist; no UI.*
-- [ ] **Push moves joined figures** (since 4.0.0): Layer push/pull also moves all joined figures
+- [x] **Push moves joined figures** (since 4.0.0): Layer push/pull also moves all joined figures *Barkfart: core: push back / bring forward move joined figures together; no buttons.*
 - [ ] **Precision mode** (since 1.4.0): Choose exact (stylus) or approximate (finger) touch precision
-- [ ] **Node-digging** (since 4.2.0): Repeated taps in a node cluster cycle through every node there
-- [ ] **Selected node sticks** (since 4.2.0): A just-selected node stays selected on the next touch so it can be dragged
+- [x] **Node-digging** (since 4.2.0): Repeated taps in a node cluster cycle through every node there *Barkfart: repeated taps cycle overlapping joints.*
+- [x] **Selected node sticks** (since 4.2.0): A just-selected node stays selected on the next touch so it can be dragged *Barkfart: a selected joint wins the next touch.*
 - [ ] **Dig to joined main node** (since 4.3.3): Tapping a join-anchor again quickly selects the joined figure's main node
 - [x] **Forgiving taps** (since 4.0.2): More tolerant tap hit-testing (esp. sprites, phones) *Barkfart: 44 pt hit radius, nearest joint wins.*
 - [x] **Tap off-stage to deselect** (since 4.0.3): Tapping dead area beside the stage counts as tapping nothing *Barkfart: tap empty stage deselects.*
@@ -116,7 +116,7 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [~] **Trapezoid curves and rounded ends** (since 4.2.0): Trapezoids can curve, have rounded tips, easier thickness *Barkfart: round ends drawn; curved trapezoids not yet.*
 - [ ] **0-length segments visible** (since 3.2.1): Zero-length segments render
 - [x] **Polyfills** (since 2.3.0): Fill shapes defined by an ordered set of nodes (polynodes) *Barkfart: drawn (concave, ear-clipped) and round-trip; no creation UI.*
-- [ ] **Finish polyfill** (since ≤2.4.9): Button to complete a polyfill definition
+- [~] **Finish polyfill** (since ≤2.4.9): Button to complete a polyfill definition *Barkfart: core: pick polynodes in order, finish makes the fill; no buttons.*
 - [ ] **Polyanchor outline** (since 2.3.2): Selecting a polyanchor highlights its polyfill
 - [ ] **Copy/paste polyfills** (since 3.1.0): Polyfills copy with segments when all polynodes are included
 - [x] **Polyfills follow curves** (since 4.1.0): Polyfill edges follow curved segments; curve precision setting *Barkfart: fill edges follow the drawn arc.*
@@ -155,7 +155,7 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [x] **Tweened-frame count** (since 1.7.6): Choose 1–8 in-between frames (previously fixed at 2) *Barkfart: keys are placed in time; in-betweens are implicit.*
 - [x] **Tween 0 frames** (since 3.3.1): Tweening on with 0 in-betweens, enabling per-frame slow motion only *Barkfart: Hold easing.*
 - [x] **Is loop** (since 1.2.7): Tween last frame back to first for seamless loops *Barkfart: playback loops.*
-- [ ] **Keep during tween** (since 1.8.0): Per-figure flag to stop a figure flickering/vanishing during tweening
+- [~] **Keep during tween** (since 1.8.0): Per-figure flag to stop a figure flickering/vanishing during tweening *Barkfart: core: off makes a figure hold its poses; no toggle.*
 - [x] **Tween colors** (since 2.3.0): Per-figure checkbox to interpolate colors *Barkfart: colour tracks interpolate.*
 - [x] **Tween Mode per figure** (since 4.2.4): Linear, ease-in, ease-out or both per figure per frame *Barkfart: per key easing presets with curves.*
 - [~] **Frame delay** (since 2.0.0): Hold a frame for extra time *Barkfart: core: hold a frame for N frames.*
@@ -181,7 +181,7 @@ Our own additions wait in ADDITIONS.md until this list is done.
 ## Onion skin & view options
 
 - [x] **Onion skin** (since ≤1.1.4): Ghosts of neighbouring frames *Barkfart: from the evaluator, past red / future blue.*
-- [ ] **Onion skin in front** (since 1.6.2): Show onion skin on top of figures
+- [~] **Onion skin in front** (since 1.6.2): Show onion skin on top of figures *Barkfart: onion drawn in front or behind (saved in the view); no toggle.*
 - [~] **Onion skin frame count** (since 3.0.0): Past/future onion frame counts (0 allowed) *Barkfart: fixed 2 back / 1 forward; no setting yet.*
 - [ ] **Textfields in onion skin** (since 2.2.2): Text appears in onion skin
 - [ ] **Camera in onion skin** (since 1.7.1): Camera box shown in onion skin
@@ -256,7 +256,7 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [ ] **Generated sprites hidden** (since 4.0.1): Auto-generated sprites/figures hidden in library by default
 - [ ] **SpriteGroups** (since ≤4.1.6): Named groups of sprites; next name auto-numbered
 - [x] **Mass image import** (since 4.2.7): Import many images as sprites at once *Barkfart: the Files picker imports several images at once.*
-- [ ] **GIF import** (since 4.2.7): Animated GIF imported as a movieclip
+- [x] **GIF import** (since 4.2.7): Animated GIF imported as a movieclip *Barkfart: animated GIFs import as a looping movieclip, one sprite per frame; single frames as sprites.*
 - [ ] **Sprite distort / skew** (since 4.3.0): Toggle a distort mode to warp, skew and squash sprites
 - [~] **Separate X/Y sprite scale** (since 4.3.0): Independent axis scale controls for sprites *Barkfart: separate x/y scale in the model; no control yet.*
 - [~] **Negative import scale** (since 4.3.0): Internal scale at import can be negative (baked-in flip) *Barkfart: flip figure works on sprites (negative scale).*
@@ -292,11 +292,11 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [ ] **stknds:// URL download** (since 2.2.2): Prefix a web MP3 URL to download it into the app (iOS)
 - [ ] **Sound preview** (since 2.3.7): Preview sounds in the import list
 - [x] **Multi-select sound import** (since 2.3.7): Import several sounds at once *Barkfart: the Files picker imports several at once.*
-- [ ] **Copy/paste sounds** (since 2.3.0): Copy a frame's sounds and paste onto another
+- [~] **Copy/paste sounds** (since 2.3.0): Copy a frame's sounds and paste onto another *Barkfart: core: paste a sound at another time; no buttons.*
 - [~] **Sound pan** (since 3.1.0): Left/right stereo panning per sound *Barkfart: per-clip pan track in the mixer; no control yet.*
-- [ ] **Sound pitch** (since 3.1.0): Pitch shift per sound
+- [~] **Sound pitch** (since 3.1.0): Pitch shift per sound *Barkfart: core: per-sound pitch (speed and length); no slider.*
 - [ ] **Pause with device music** (since 1.7.6): Clips stay silent while the user plays music
-- [ ] **Background music on iOS** (since 2.2.4): Other apps' music can keep playing while animating
+- [x] **Background music on iOS** (since 2.2.4): Other apps' music can keep playing while animating *Barkfart: other apps' music keeps playing.*
 - [ ] **Higher export audio quality** (since 3.1.0): Improved audio encoding in exports
 
 ## Filters/effects
@@ -315,8 +315,8 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [~] **Outline** (since 4.1.6): Outline filter around a figure *Barkfart: coloured outline of a set width; no panel button yet.*
 - [x] **Blur/glow max 2.0** (since 3.0.5): Raised maximum strength *Barkfart: radius up to 400 px, strength up to 4.*
 - [ ] **Low in-app quality** (since 2.2.0): Filters preview at lower quality, full quality on export *Barkfart: effects render at full resolution for now; half-resolution preview not yet.*
-- [ ] **Copy/paste/clear filters** (since 2.3.0): Filter clipboard and clear button
-- [ ] **Use parent's filters** (since 3.1.0): Joined figures inherit their parent's filters
+- [~] **Copy/paste/clear filters** (since 2.3.0): Filter clipboard and clear button *Barkfart: core: copy with figure properties, clear all effects; no buttons.*
+- [~] **Use parent's filters** (since 3.1.0): Joined figures inherit their parent's filters *Barkfart: core: joined layers use their parent's effects first; no toggle.*
 - [ ] **Collapsible Filter Tools** (since 4.1.6): Filter panel can be collapsed
 
 ## Export & sharing
@@ -330,10 +330,10 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [x] **PNG export** (since 2.5.1): Single-image export *Barkfart: Export: PNG frames (zip), optional transparent background.*
 - [ ] **4K PNG** (since 3.3.0): PNG at 4K
 - [ ] **Export frame range** (since 2.3.0): Choose start/end frames (single frame allowed) *Barkfart: whole timeline only for now.*
-- [ ] **Anti-aliasing** (since 2.3.6): Smooth-lines export option (GIF unlocked at any size 2.4.1)
+- [x] **Anti-aliasing** (since 2.3.6): Smooth-lines export option (GIF unlocked at any size 2.4.1) *Barkfart: exports are rendered at 2x and averaged down.*
 - (won't) **Low-quality blur export** (since 3.0.0): Export using preview-quality blur *Barkfart: not needed: exports always use full quality.*
 - [x] **Better quality blur** (since 3.3.0): Experimental higher-quality blur/glow export *Barkfart: exports always use full-quality effects.*
-- [ ] **Vertical video** (since 4.0.3): Portrait export toggle (Project Tools)
+- [~] **Vertical video** (since 4.0.3): Portrait export toggle (Project Tools) *Barkfart: core: canvas size presets incl. vertical; no picker.*
 - [~] **Export size slider** (since 4.0.3): Size slider on GIF and PNG export windows *Barkfart: Full / Half / Small presets, no slider.*
 - [x] **Non-blocking export** (since 1.6.0): Exporting no longer freezes the device *Barkfart: exports run a frame per tick with progress and Cancel.*
 - [x] **Exports to gallery** (since 1.2.3): iOS camera roll; Android Pictures/Movies (3.3.0) *Barkfart: share sheet after export: Save Video / Save Image to Photos.*
@@ -348,21 +348,21 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [ ] **Pivot STK import** (since 1.0): Import Pivot 2.x stickfigures
 - (won't) **Default stickfigures** (since 1.0): Bundled starter figures (refreshed 2.0.0) *Barkfart: cannot ship the original's figures; ours later.*
 - [x] **Delete files** (since 1.6.0): Permanently delete projects/figures/sounds in-app *Barkfart: soft delete with Undo.*
-- [ ] **Alphabetical lists** (since 1.6.0): Open/import lists sorted A–Z
-- [ ] **Natural sort** (since 3.1.0): Numbers in names sorted numerically
-- [ ] **Sort new/old** (since 2.3.0): Sort file lists by date
-- [ ] **List filter** (since 2.0.0): Text filter on open/import lists
+- [~] **Alphabetical lists** (since 1.6.0): Open/import lists sorted A–Z *Barkfart: core: name order; no sort menu.*
+- [x] **Natural sort** (since 3.1.0): Numbers in names sorted numerically *Barkfart: numbers in names sort by value.*
+- [~] **Sort new/old** (since 2.3.0): Sort file lists by date *Barkfart: core: newest / oldest; no sort menu.*
+- [~] **List filter** (since 2.0.0): Text filter on open/import lists *Barkfart: core: filter by part of the name; no field.*
 - [ ] **Library dropdown filter** (since 3.3.2): Filter in imported figure/MC/sound dropdowns
 - [ ] **Figure preview** (since 2.3.7 / 4.1.2): Preview figures before importing; nodes on/off in preview
 - [x] **Multi-select import** (since 2.3.7): Import several figures at once *Barkfart: the Files picker allows several files.*
 - [ ] **Edit imported library** (since 3.0.0): Rename, hide, delete imported figures (search added 4.1.6)
 - [~] **Open with / file association** (since 1.7.9): Open NODES/STK/STKNDS from other apps *Barkfart: the Files picker imports; Open-in from other apps not wired yet.*
 - [ ] **Android download auto-scan** (since 1.7.9): Auto-collects downloaded files; **REMOVED 3.2.0**
-- [ ] **Open ZIP packs** (since 2.0.1): Extract figure packs into the library
-- [ ] **Open mixed ZIPs** (since 4.0.0): ZIP containing any Stick Nodes file types
+- [~] **Open ZIP packs** (since 2.0.1): Extract figure packs into the library *Barkfart: core: unpack importable files into the folder; no picker hook.*
+- [~] **Open mixed ZIPs** (since 4.0.0): ZIP containing any Stick Nodes file types *Barkfart: core: any importable kind inside; folders flattened.*
 - [~] **Partial project open** (since 2.2.2 / 2.3.6): Open fewer frames, or a percentage from first/last frame *Barkfart: .stknds: figure library imports; animation not yet.*
 - [ ] **Out-of-memory warning** (since 2.5.7): Warns instead of crashing on oversized projects
-- [ ] **Save view state** (since 2.5.1): Project saves zoom, position, current frame, guides
+- [x] **Save view state** (since 2.5.1): Project saves zoom, position, current frame, guides *Barkfart: zoom, position, frame and onion settings are saved.*
 - [x] **Local project backup** (since 4.3.0): Overwritten saves kept temporarily, restorable *Barkfart: one rolling .bak per save; deleted projects go to a hidden trash with Undo.*
 - [ ] **Library tools** (since 1.2.4): Submit figures to and download figures from the website library in-app (submission form existed earlier)
 - [ ] **Pack submission** (since 2.3.7 / 2.5.9): Multi-figure submit with auto-ZIP and file renaming
@@ -376,10 +376,10 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [ ] **Join anchor list** (since 3.0.0): Selecting an anchor lists figures joined to it
 - [ ] **Joined-figure navigation** (since 4.0.0): Tap names to hop between joined figures; shows parent
 - [ ] **Joined scale option** (since 2.4.4): Joined figures scale together
-- [ ] **Copy with joins** (since 3.1.0): Long-press copy includes joined figures
+- [~] **Copy with joins** (since 3.1.0): Long-press copy includes joined figures *Barkfart: core: duplicate keeps joined figures joined to the copy; no long-press.*
 - [ ] **Paste with layering** (since 3.1.0): Long-press paste tries to keep layer position
-- [ ] **Copy all figure properties** (since 2.5.9): Copy scale, filters, position etc. onto another figure
-- [ ] **Properties include layer** (since 2.6.1): Property copy includes layer position
+- [~] **Copy all figure properties** (since 2.5.9): Copy scale, filters, position etc. onto another figure *Barkfart: core: transform, opacity, blend, effects; no buttons.*
+- [~] **Properties include layer** (since 2.6.1): Property copy includes layer position *Barkfart: core: optional stack position; no buttons.*
 - [ ] **Edit figure shortcut** (since 4.1.6): Edit button in Stickfigure Tools opens that figure
 - [ ] **Quick Tools figure lock** (since 4.3.1): Lock toggle in quick tools
 
