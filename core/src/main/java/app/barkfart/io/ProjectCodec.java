@@ -210,6 +210,18 @@ public final class ProjectCodec {
         m.put("shape", n.shape.name());
         m.put("draw", Json.num(n.drawOrder));
         if (n.curve != 0) m.put("curve", Json.num(n.curve));
+        if (n.triangleUpsideDown) m.put("upsideDown", true);
+        if (n.rightTriangle != 0) m.put("rightTriangle", Json.num(n.rightTriangle));
+        // Saved whenever it carries information, even with the gradient off (exact legacy export).
+        boolean gradColourSet = !n.gradientColor.track().isEmpty() || !app.barkfart.model.Color.WHITE.equals(n.gradientColor.value());
+        if (n.gradient || n.gradientReverse || n.gradientSideways || gradColourSet) {
+            Map<String, Object> gm = obj();
+            gm.put("on", n.gradient);
+            gm.put("reverse", n.gradientReverse);
+            gm.put("sideways", n.gradientSideways);
+            gm.put("color", prop(n.gradientColor, false));
+            m.put("gradient", gm);
+        }
         m.put("rotation", prop(n.rotation, false));
         m.put("length", prop(n.length, false));
         m.put("thickness", prop(n.thickness, false));
@@ -588,6 +600,15 @@ public final class ProjectCodec {
         Node n = new Node(layerId, req(m, "id"), str(m, "parent"), en(m, "shape", Node.Shape.class, Node.Shape.LINE));
         n.drawOrder = i(m, "draw", Node.UNASSIGNED);
         n.curve = f(m, "curve", 0);
+        n.triangleUpsideDown = b(m, "upsideDown", false);
+        n.rightTriangle = i(m, "rightTriangle", 0);
+        if (m.containsKey("gradient")) {
+            Map<String, Object> gm = asMap(m.get("gradient"), "gradient");
+            n.gradient = b(gm, "on", true);
+            n.gradientReverse = b(gm, "reverse", false);
+            n.gradientSideways = b(gm, "sideways", false);
+            readProp(gm, "color", n.gradientColor);
+        }
         readProp(m, "rotation", n.rotation);
         readProp(m, "length", n.length);
         readProp(m, "thickness", n.thickness);

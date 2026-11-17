@@ -280,6 +280,16 @@ public final class Evaluator {
             float ax = (float) xf.mapX(px[pi], py[pi]), ay = (float) xf.mapY(px[pi], py[pi]);
             float bx = (float) xf.mapX(px[i], py[i]), by = (float) xf.mapY(px[i], py[i]);
             float w = (float) (Math.abs(r.f(node.thickness, t)) * sf);
+            Color gEnd = null;
+            if (node.gradient) {
+                gEnd = (Color) r.resolve(node.gradientColor, t);
+                if (node.gradientReverse) {
+                    Color tmp = c;
+                    c = gEnd;
+                    gEnd = tmp;
+                }
+            }
+            int before = g.children.size();
             switch (node.shape) {
                 case LINE: {
                     // a mirrored transform flips the bend's direction
@@ -300,8 +310,23 @@ public final class Evaluator {
                     break;
                 }
                 default: {
-                    float[] pts = Outline.of(node.shape, ax, ay, bx, by, w);
+                    float[] pts = Outline.of(node.shape, ax, ay, bx, by, w, node.triangleUpsideDown, node.rightTriangle);
                     if (pts != null) g.children.add(new Shape.Polygon(pts, c, src));
+                }
+            }
+            if (gEnd != null && g.children.size() > before) {
+                Shape added = (Shape) g.children.get(g.children.size() - 1);
+                float mx = (ax + bx) / 2, my = (ay + by) / 2;
+                if (node.shape == Node.Shape.CIRCLE || node.shape == Node.Shape.ELLIPSE) {
+                    float rad = node.shape == Node.Shape.CIRCLE ? (float) (Math.hypot(bx - ax, by - ay) / 2)
+                            : (float) Math.max(Math.hypot(bx - ax, by - ay) / 2, w / 2);
+                    added.gradient = Shape.Gradient.radial(mx, my, rad, gEnd);
+                } else if (node.gradientSideways) {
+                    float len = (float) Math.max(1e-6, Math.hypot(bx - ax, by - ay));
+                    float nx = -(by - ay) / len * w / 2, ny = (bx - ax) / len * w / 2;
+                    added.gradient = Shape.Gradient.linear(mx - nx, my - ny, mx + nx, my + ny, gEnd);
+                } else {
+                    added.gradient = Shape.Gradient.linear(ax, ay, bx, by, gEnd);
                 }
             }
         }

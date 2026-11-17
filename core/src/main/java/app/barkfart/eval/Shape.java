@@ -7,6 +7,45 @@ public abstract class Shape {
     public final Color color;
     /** Source path for picking and debugging, e.g. "L1/n3". */
     public final String source;
+    /** Optional gradient from color to Gradient.end (vertex colours are recomputed from it). */
+    public Gradient gradient;
+
+    /** Linear (from p0 to p1) or radial (centre p0, radius r) colour ramp, view space. */
+    public static final class Gradient {
+        public final boolean radial;
+        public final float x0, y0, x1, y1, r;
+        public final Color end;
+
+        private Gradient(boolean radial, float x0, float y0, float x1, float y1, float r, Color end) {
+            this.radial = radial;
+            this.x0 = x0;
+            this.y0 = y0;
+            this.x1 = x1;
+            this.y1 = y1;
+            this.r = r;
+            this.end = end;
+        }
+
+        public static Gradient linear(float x0, float y0, float x1, float y1, Color end) {
+            return new Gradient(false, x0, y0, x1, y1, 0, end);
+        }
+
+        public static Gradient radial(float cx, float cy, float r, Color end) {
+            return new Gradient(true, cx, cy, cx, cy, r, end);
+        }
+
+        /** Ramp position 0..1 at a point. */
+        public float at(float x, float y) {
+            float t;
+            if (radial) {
+                t = r <= 0 ? 0 : (float) (Math.hypot(x - x0, y - y0) / r);
+            } else {
+                float dx = x1 - x0, dy = y1 - y0, l2 = dx * dx + dy * dy;
+                t = l2 <= 0 ? 0 : ((x - x0) * dx + (y - y0) * dy) / l2;
+            }
+            return t < 0 ? 0 : (t > 1 ? 1 : t);
+        }
+    }
 
     private Shape(Color color, String source) {
         this.color = color;

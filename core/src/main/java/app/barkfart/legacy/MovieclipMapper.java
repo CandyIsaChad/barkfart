@@ -63,6 +63,11 @@ public final class MovieclipMapper {
                     boolean own = lib.get(i).i("useSegmentColor") != 0;
                     Color c = own ? FigureMapper.color(MovieclipFormat.FrameFigure.nodeColor(r)) : figColor;
                     n.color.track().put(new Key(t, c, interp));
+                    if (n.gradient) {
+                        // Figure-coloured segments take the figure colour at both ends (fitted, NOTES.md).
+                        Color gc = own ? FigureMapper.color(MovieclipFormat.FrameFigure.nodeGradientColor(r)) : figColor;
+                        n.gradientColor.track().put(new Key(t, gc, interp));
+                    }
                 }
             }
             for (Map.Entry<Integer, Layer.FigureLayer> e : layers.entrySet()) {

@@ -5,7 +5,7 @@ Built by tools/make_parity.py from research/stick-nodes-features-raw.md (64 upda
 Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without UI, **[ ]** not yet, **(won't)** with the reason.
 
 
-**Totals (382 features):** 51 usable now, 23 partial or core-only, 277 not yet, 31 won't.
+**Totals (382 features):** 57 usable now, 23 partial or core-only, 271 not yet, 31 won't.
 
 
 ## Order of work (parity first, then our own additions)
@@ -83,7 +83,7 @@ Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without U
 - [x] **Line segment** (since 1.0): Basic straight segment *Barkfart: square-ended segment drawn natively.*
 - [x] **Circle segment** (since ≤1.7.6): Circle-shaped segment (outline; fill via gradient from 1.8.0)
 - [x] **Rounded segment** (since ≤3.0.2): Segment with rounded caps
-- [x] **Triangle segment** (since ≤3.0.0): Triangle shape (exact launch list of segment types unknown) *Barkfart: isosceles drawn; right/upside-down variants not yet.*
+- [x] **Triangle segment** (since ≤3.0.0): Triangle shape (exact launch list of segment types unknown) *Barkfart: isosceles, right-angled and upside-down.*
 - [x] **Filled Circle segment** (since ≤1.7.x): White-filled circle type; **REMOVED 1.8.0** (replaced by circle + gradient) *Barkfart: imported as a filled circle.*
 - [ ] **Draw tools always visible** (since 1.2.5): Drawing tools permanently shown in Creation Mode
 - [ ] **Split segment** (since 1.2.5): Split a segment into two
@@ -98,19 +98,19 @@ Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without U
 - [ ] **Load figure as guide** (since 2.2.2): Load another stickfigure as a background reference in Creation Mode
 - [ ] **Trace frame** (since 3.0.0): Use a project frame as a reference background in Creation/MC editing
 - [ ] **Trace options** (since 4.2.4): Show/hide nodes when tracing; scrub the traced frame quickly
-- [ ] **Segment color gradients** (since 1.7.6): Two-color gradient along a segment
-- [ ] **Radial circle gradients** (since 2.5.6): Circle gradients radiate from center; separate circle outline color
-- [ ] **Sideways gradients** (since 4.1.0): Gradient direction toggle "sideways" for segments and trapezoids; triangles in 4.3.0
+- [x] **Segment color gradients** (since 1.7.6): Two-color gradient along a segment *Barkfart: along the segment, figure-colour rule fitted.*
+- [x] **Radial circle gradients** (since 2.5.6): Circle gradients radiate from center; separate circle outline color
+- [x] **Sideways gradients** (since 4.1.0): Gradient direction toggle "sideways" for segments and trapezoids; triangles in 4.3.0
 - [ ] **Circle gradient horizontal/vertical** (since 4.2.4): Linear gradients on circles
 - [ ] **Polygon radial gradient** (since 4.2.6): Radial gradient on polygons
-- [ ] **Reverse gradient** (since ≤4.2.2): Swap gradient direction
+- [x] **Reverse gradient** (since ≤4.2.2): Swap gradient direction
 - [~] **Shapes: ellipse, trapezoid, right-triangle, polygon** (since 2.5.6): New shape types with Shape Tools menu *Barkfart: ellipse drawn; trapezoid/polygon/right-triangle approximate.*
 - [ ] **Shape Tools properties** (since 2.5.6): Per-shape properties: half arc, vertex count (polygon), trapezoid top ratio
 - [ ] **Polygon min 4 sides** (since 3.0.5): Polygons from 4 to 16 vertices (was 5)
-- [ ] **Triangle upside-down** (since 3.0.0): Upside-down option for triangles
+- [x] **Triangle upside-down** (since 3.0.0): Upside-down option for triangles
 - [ ] **Half-circle reversible** (since 4.2.4): Flip half-arc circles
 - [ ] **Circle hollow** (since 4.1.0): Circle without interior fill
-- [ ] **Curved segments** (since 3.2.0): Segments and rounded segments can bend with a curve radius
+- [x] **Curved segments** (since 3.2.0): Segments and rounded segments can bend with a curve radius *Barkfart: arcs, bulge fitted to the original's renders.*
 - [ ] **Curve "circular" toggle** (since 4.1.0): Alternative circular curve behaviour
 - [ ] **Trapezoid curves and rounded ends** (since 4.2.0): Trapezoids can curve, have rounded tips, easier thickness
 - [ ] **0-length segments visible** (since 3.2.1): Zero-length segments render
@@ -118,7 +118,7 @@ Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without U
 - [ ] **Finish polyfill** (since ≤2.4.9): Button to complete a polyfill definition
 - [ ] **Polyanchor outline** (since 2.3.2): Selecting a polyanchor highlights its polyfill
 - [ ] **Copy/paste polyfills** (since 3.1.0): Polyfills copy with segments when all polynodes are included
-- [ ] **Polyfills follow curves** (since 4.1.0): Polyfill edges follow curved segments; curve precision setting *Barkfart: curves not drawn yet.*
+- [ ] **Polyfills follow curves** (since 4.1.0): Polyfill edges follow curved segments; curve precision setting *Barkfart: curves drawn; polyfills do not follow them yet.*
 - [ ] **Polyfill Precise mode** (since 4.2.4): Easier node picking, view/adjust polynode order
 - [ ] **Smart-Stretch** (since 2.4.8): Stretching a node proportionally squashes/stretches its static child detail nodes
 - [ ] **Smart-stretch changes** (since 2.5.1–2.5.2): Children need not be stretchy; ignores non-stretchy children

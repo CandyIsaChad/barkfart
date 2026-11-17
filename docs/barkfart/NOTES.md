@@ -149,3 +149,14 @@ constant. Feature usage in the bundled content: curves 346 nodes (Hit,
 Sparks), upside-down triangles (Forcefield, Hit, SSJB Aura), gradients (SSJ
 Aura, Gradient Ball), node scale != 1 (4 files); no trapezoids, polygons,
 outlines or hollow circles.
+
+## Triangles and gradients (fitted 2026-11-17)
+- triangleUpsideDown: apex at the parent, base at the node (small gains on
+  Hit and SSJB Aura, no losses). rightTriangle -1/+1: right angle on one side.
+- Gradients: segment colour at the parent end, gradient colour at the node
+  end (reverse swaps); sideways = across the width; circles and ellipses are
+  radial (centre -> rim). Segments WITHOUT their own colour show the figure
+  colour at both ends (the stored gradient colour is ignored): with that rule
+  SSJ Aura's colour error is back to its no-gradient level (20) instead of
+  31-41. SSJ Aura's remaining gap (area 1.26x, colour 20) is elsewhere,
+  likely the large glow ellipse's sizing; open.

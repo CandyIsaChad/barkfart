@@ -50,6 +50,16 @@ public final class FigureMapper {
             n.length.setValue(ln.f("length"));
             n.thickness.setValue((float) ln.i("thickness"));
             n.curve = ln.i("curveRadius");
+            n.triangleUpsideDown = ln.i("triangleUpsideDown") != 0;
+            n.rightTriangle = Integer.signum(ln.i("rightTriangleDirection"));
+            n.gradient = ln.i("gradient") != 0;
+            n.gradientReverse = ln.i("reverseGradient") != 0;
+            n.gradientSideways = ln.i("gradientMode") == 1;
+            // Segments without their own colour follow the figure colour at both gradient ends
+            // (fitted against the original's previews, NOTES.md); the stored value is kept for export.
+            if (ln.fields.containsKey("gradientColor")) {
+                n.gradientColor.setValue(ln.i("useSegmentColor") != 0 ? color(ln.i("gradientColor")) : figColor);
+            }
             n.color.setValue(ln.i("useSegmentColor") != 0 ? color(ln.i("color")) : figColor);
             for (Map.Entry<String, Object> e : ln.fields.entrySet()) {
                 if (!e.getKey().startsWith("~")) n.legacyExtras.put("L." + e.getKey(), e.getValue());
@@ -160,6 +170,23 @@ public final class FigureMapper {
             setIfChanged(ln, "length", n.length.floatValue());
             if (ln.fields.containsKey("curveRadius") && ln.i("curveRadius") != Math.round(n.curve)) {
                 ln.fields.put("curveRadius", Math.round(n.curve));
+            }
+            if (ln.fields.containsKey("triangleUpsideDown") && (ln.i("triangleUpsideDown") != 0) != n.triangleUpsideDown) {
+                ln.fields.put("triangleUpsideDown", n.triangleUpsideDown ? 1 : 0);
+            }
+            if (ln.fields.containsKey("rightTriangleDirection") && Integer.signum(ln.i("rightTriangleDirection")) != n.rightTriangle) {
+                ln.fields.put("rightTriangleDirection", n.rightTriangle);
+            }
+            if (ln.fields.containsKey("gradient") && (ln.i("gradient") != 0) != n.gradient) ln.fields.put("gradient", n.gradient ? 1 : 0);
+            if (ln.fields.containsKey("reverseGradient") && (ln.i("reverseGradient") != 0) != n.gradientReverse) {
+                ln.fields.put("reverseGradient", n.gradientReverse ? 1 : 0);
+            }
+            if (ln.fields.containsKey("gradientMode") && (ln.i("gradientMode") == 1) != n.gradientSideways) {
+                ln.fields.put("gradientMode", n.gradientSideways ? 1 : 0);
+            }
+            if (ln.fields.containsKey("gradientColor")) {
+                Color imported = ln.i("useSegmentColor") != 0 ? color(ln.i("gradientColor")) : figColorModel;
+                if (!imported.equals(n.gradientColor.value())) ln.fields.put("gradientColor", legacyColor((Color) n.gradientColor.value()));
             }
             int thick = Math.round(n.thickness.floatValue());
             if (ln.i("thickness") != thick) ln.fields.put("thickness", thick);

@@ -85,6 +85,35 @@ class GoldenTest {
     }
 
     @Test
+    void gradientShapes() throws IOException {
+        Project p = Fixtures.empty();
+        Layer.FigureLayer l = new Layer.FigureLayer(p.newId("L"), "g");
+        l.figure.add(new Node(l.id, "r", null, Node.Shape.NONE));
+        Node along = Fixtures.add(l, "along", "r", Node.Shape.LINE, 160, 110);
+        along.thickness.setValue(26f);
+        along.color.setValue(Color.rgba8888(0xff3b30ff));
+        along.gradient = true;
+        along.gradientColor.setValue(Color.rgba8888(0xffd60aff));
+        Node side = Fixtures.add(l, "side", "r", Node.Shape.SQUARE_LINE, 20, 110);
+        side.thickness.setValue(30f);
+        side.color.setValue(Color.rgba8888(0x0a84ffff));
+        side.gradient = true;
+        side.gradientSideways = true;
+        side.gradientColor.setValue(Color.rgba8888(0x30d158ff));
+        Node ball = Fixtures.add(l, "ball", "r", Node.Shape.CIRCLE, -90, 90);
+        ball.color.setValue(Color.rgba8888(0xffffffff));
+        ball.gradient = true;
+        ball.gradientColor.setValue(Color.rgba8888(0x5e5ce6ff));
+        Node fade = Fixtures.add(l, "fade", "r", Node.Shape.LINE, -160, 100);
+        fade.thickness.setValue(20f);
+        fade.color.setValue(Color.rgba8888(0x000000ff));
+        fade.gradient = true;
+        fade.gradientColor.setValue(Color.rgba8888(0x00000000));   // fades out
+        p.root().layers.add(l);
+        check("gradient_shapes", p, 0);
+    }
+
+    @Test
     void perVertexColourGradient() throws IOException {
         DrawList dl = new DrawList();
         DrawList.Batch b = dl.batch(Layer.Blend.NORMAL, null);

@@ -76,6 +76,10 @@ public final class MovieclipFormat {
         public static int nodeColor(byte[] r) {
             return be32(r, 31);
         }
+
+        public static int nodeGradientColor(byte[] r) {
+            return be32(r, 35);
+        }
     }
 
     public static final class Frame {

@@ -35,9 +35,10 @@ public final class Tessellator {
             }
             Shape s = (Shape) o;
             DrawList.Batch batch = s instanceof Shape.Quad ? out.batch(b, effects, ((Shape.Quad) s).asset) : out.batch(b, effects);
+            int first = batch.vertices;
             Color c = s.color;
             int rgba = new Color(c.r, c.g, c.b, c.a * op).toRgba8888();
-            if ((rgba & 0xff) == 0) continue;
+            if ((rgba & 0xff) == 0 && s.gradient == null) continue;   // invisible unless a gradient fades in
             if (s instanceof Shape.Line) line((Shape.Line) s, rgba, batch);
             else if (s instanceof Shape.Circle) {
                 Shape.Circle ci = (Shape.Circle) s;
@@ -64,6 +65,17 @@ public final class Tessellator {
                 batch.add(q[4], q[5], rgba, 1, 0);
                 batch.add(q[6], q[7], rgba, 0, 0);
             }
+            if (s.gradient != null) recolor(batch, first, c, s.gradient, op);
+        }
+    }
+
+    /** Recomputes vertex colours [first, end) from a gradient (straight RGBA, group opacity applied). */
+    private static void recolor(DrawList.Batch b, int first, Color c0, Shape.Gradient g, float op) {
+        Color c1 = g.end;
+        for (int i = first; i < b.vertices; i++) {
+            float t = g.at(b.x(i), b.y(i));
+            Color m = c0.lerp(c1, t);
+            b.rgba[i] = new Color(m.r, m.g, m.b, m.a * op).toRgba8888();
         }
     }
 

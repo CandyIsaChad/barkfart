@@ -187,6 +187,13 @@ Not done
 - Curved segments: arcs (one strip, no double-blending) with the bulge
   fitted to the original's previews; Sparks now passes the strict IoU check
   (was the one known gap), Hit improved. Known-gaps list is empty.
+- Upside-down and right-angled triangles.
+- Gradients: along, sideways, radial (circles/ellipses), fading to
+  transparent; per-frame gradient colours from movieclips; exact legacy
+  export kept (a bug where gradient colours were lost on save was caught by
+  the byte-exact test and fixed). New golden: gradient shapes.
+- Next in this step: node scale semantics, SSJ Aura's glow sizing, outlines,
+  hollow circles, trapezoids, polygons, smart-stretch, angle/drag locks.
 
 ### Renderer foundation (2026-11-17, core-first step 2)
 - DrawList batches carry per-vertex colour, texture coordinates and a
