@@ -226,6 +226,37 @@ Not done
   node scale. Not yet: curved trapezoids, floaty tweening, creation-mode UI
   for all of these (parity order step 3).
 
+### Core functions batch (2026-11-17; user: "base functions first, UI later")
+All as core operations (one undo step each, tests, a Diagnostics check per
+area; 39 device checks now). No buttons yet unless noted.
+- Figure building (FigureOps): add segment (inherits the parent's look),
+  split into N (along curves: pieces follow the arc exactly), duplicate a
+  branch (with its polyfills, on top), flip a branch (keys included) or a
+  figure, modify a whole branch (static, thickness, colour, shape, length),
+  push a branch back / forward, reset length (keyed, with smart-stretch).
+  Generic before/after snapshot restores onto the same node objects.
+  Node parents can change only through Figure methods that keep order.
+- Joining (JoinOps): attach any layer to a figure's joint (position and,
+  optionally, angle), unjoin; no jump either way, keys rewritten in the new
+  frame (a rotated joint mixes axes, so all transform properties get keys at
+  every key time; found by the test). Saved as parentNode.
+- Movieclips (SymbolOps): layers to a movieclip (animation unchanged,
+  checked vertex by vertex), break an instance apart at the current frame.
+- Frames: key the tweened pose (any fraction between keys), hold a frame,
+  playback range (Play and sound loop over it), export follows the range.
+- Camera: lock a layer to the camera (stays put in the shot), follow a
+  layer (auto-camera, keys thinned), widescreen bars (letterbox setting).
+- Effects: pixelate (grid anchored to the stage), outline, motion blur;
+  GPU matches the reference (desktop --fxcheck, scene now 3 rows).
+- Images: png/jpg import as sprites (size from the header), remove a
+  background colour (tolerance, soft edge, edges only; decoded with LibGDX
+  on the device).
+- Text: text layers draw (Inter, Latin and Latin-1, multi-line, centred),
+  with transform, opacity and effects; editor and export.
+- Not done in this batch: buttons for all of the above, polyfill creation,
+  connectors, GIF import, fonts beyond Inter, MC edit-in-place, parallax,
+  camera-follow easing presets.
+
 ### Export (core-first step 6, 2026-11-17)
 - Export screen (sidebar Export, nothing selected): Video (MP4 with sound,
   iPad), GIF, PNG frames (zip); Full / Half / Small size (even dimensions);

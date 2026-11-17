@@ -319,5 +319,170 @@ final class FeatureChecks {
                 render(p, 40, 30);
             }
         });
+
+        r.group = "Figure building";
+        SelfTest.check(r, "split a curved segment along its arc", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.FigureLayer l = figure(p);
+                Node a = node(l, "a", "r", Node.Shape.LINE, 30, 120, 6);
+                a.curve = 20;
+                p.invalidateIndex();
+                FigurePose b = FigurePose.compute(l, 0, resolver(p));
+                double ex = b.x[1], ey = b.y[1];
+                Document d = new Document(p);
+                d.apply(app.barkfart.edit.FigureOps.split(l, "a", 3));
+                FigurePose c = FigurePose.compute(l, 0, resolver(p));
+                int ai = l.figure.indexOf("a");
+                SelfTest.expect(Math.hypot(c.x[ai] - ex, c.y[ai] - ey) < 1e-3, "end moved");
+                SelfTest.expect(l.figure.nodes().size() == 4, "pieces " + l.figure.nodes().size());
+                d.undo();
+                SelfTest.expect(l.figure.nodes().size() == 2, "undo");
+            }
+        });
+        SelfTest.check(r, "duplicate and flip a branch", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.FigureLayer l = figure(p);
+                node(l, "a", "r", Node.Shape.LINE, 30, 100, 6);
+                node(l, "b", "a", Node.Shape.LINE, 20, 50, 6);
+                p.invalidateIndex();
+                Document d = new Document(p);
+                app.barkfart.edit.FigureOps.Made m = new app.barkfart.edit.FigureOps.Made();
+                d.apply(app.barkfart.edit.FigureOps.duplicateBranch(l, "a", m));
+                SelfTest.expect(l.figure.nodes().size() == 5, "copies");
+                d.apply(app.barkfart.edit.FigureOps.flipBranch(p, l, "a", true, 0));
+                FigurePose ps = FigurePose.compute(l, 0, resolver(p));
+                SelfTest.expect(ps.x[l.figure.indexOf("b")] < 0, "flipped to the left");
+            }
+        });
+
+        r.group = "Joining, movieclips, camera";
+        SelfTest.check(r, "join a figure to a joint without a jump", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.FigureLayer a = figure(p), b = figure(p);
+                node(a, "arm", "r", Node.Shape.LINE, 0, 100, 6).rotation.track().put(new app.barkfart.model.Key(1, 90f, app.barkfart.model.Interp.LINEAR));
+                a.figure.node("arm").rotation.track().put(new app.barkfart.model.Key(0, 0f, app.barkfart.model.Interp.LINEAR));
+                b.transform.x.setValue(150f);
+                p.invalidateIndex();
+                double before = Evaluator.layerStage(p, p.root(), b, 0).tx;
+                new Document(p).apply(app.barkfart.edit.JoinOps.join(p, p.root(), b, a, "arm", true, 0));
+                SelfTest.expect(Math.abs(Evaluator.layerStage(p, p.root(), b, 0).tx - before) < 1e-3, "jumped");
+                SelfTest.expect(Math.abs(Evaluator.layerStage(p, p.root(), b, 1).tx - before) > 10, "does not follow");
+            }
+        });
+        SelfTest.check(r, "make a movieclip, break it apart", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.FigureLayer a = figure(p);
+                node(a, "arm", "r", Node.Shape.LINE, 30, 100, 6);
+                p.invalidateIndex();
+                int tris = Tessellator.tessellate(Evaluator.evaluate(p, p.rootSymbol, 0.3)).triangleCount();
+                Document d = new Document(p);
+                app.barkfart.edit.SymbolOps.Made m = new app.barkfart.edit.SymbolOps.Made();
+                d.apply(app.barkfart.edit.SymbolOps.convertToSymbol(p, p.root(), java.util.Arrays.<Layer>asList(a), "clip", m));
+                SelfTest.expect(Tessellator.tessellate(Evaluator.evaluate(p, p.rootSymbol, 0.3)).triangleCount() == tris, "frame changed");
+                d.apply(app.barkfart.edit.SymbolOps.breakApart(p, p.root(), (Layer.SymbolLayer) m.instance, 0.3, null));
+                SelfTest.expect(Tessellator.tessellate(Evaluator.evaluate(p, p.rootSymbol, 0.3)).triangleCount() == tris, "broken apart differs");
+            }
+        });
+        SelfTest.check(r, "camera lock, follow, widescreen bars", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.FigureLayer a = figure(p), cap = figure(p);
+                a.transform.x.track().put(new app.barkfart.model.Key(0, 0f, app.barkfart.model.Interp.LINEAR));
+                a.transform.x.track().put(new app.barkfart.model.Key(2, 300f, app.barkfart.model.Interp.LINEAR));
+                Layer.CameraLayer cam = new Layer.CameraLayer(p.newId("L"), "cam");
+                p.root().layers.add(cam);
+                p.invalidateIndex();
+                Document d = new Document(p);
+                d.apply(app.barkfart.edit.CameraOps.follow(p, p.root(), cam, a, 0, 60));
+                double s0 = Evaluator.layerView(p, p.root(), a, 0).tx, s1 = Evaluator.layerView(p, p.root(), a, 1.5).tx;
+                SelfTest.expect(Math.abs(s0 - s1) < 3, "follow drifts " + s0 + " " + s1);
+                d.apply(app.barkfart.edit.CameraOps.lock(p, p.root(), cap, cam, true, 0));
+                double c0 = Evaluator.layerView(p, p.root(), cap, 0).tx, c1 = Evaluator.layerView(p, p.root(), cap, 1.5).tx;
+                SelfTest.expect(Math.abs(c0 - c1) < 1e-3, "locked layer moves in the shot");
+                p.settings.letterbox = 2.39f;
+                Group root = Evaluator.evaluate(p, p.rootSymbol, 0, false, true).root;
+                SelfTest.expect("letterbox".equals(((Group) root.children.get(root.children.size() - 1)).source), "no bars");
+            }
+        });
+
+        r.group = "Frames, images, text";
+        SelfTest.check(r, "tweened frame and hold", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.FigureLayer a = figure(p);
+                Node arm = node(a, "arm", "r", Node.Shape.LINE, 0, 100, 6);
+                arm.rotation.track().put(new app.barkfart.model.Key(0, 0f, app.barkfart.model.Interp.LINEAR));
+                arm.rotation.track().put(new app.barkfart.model.Key(1, 100f, app.barkfart.model.Interp.LINEAR));
+                p.invalidateIndex();
+                app.barkfart.edit.FrameOps ops = new app.barkfart.edit.FrameOps(new Editor(new Document(p)));
+                ops.keyPoseBetween(null, 0, 1, 0.5);
+                SelfTest.expect(arm.rotation.track().indexOf(0.5) >= 0 && Math.abs((Float) arm.rotation.keyValue(0.5) - 50) < 1e-3, "tweened key");
+                float at = (Float) arm.rotation.keyValue(0.2);
+                ops.hold(6, 3);
+                SelfTest.expect(Math.abs((Float) arm.rotation.keyValue(0.2 + 2 / 30.0) - at) < 1e-3, "not held");
+            }
+        });
+        SelfTest.check(r, "remove a background colour", new SelfTest.Check() {
+            public void run() {
+                byte[] px = new byte[4 * 4 * 4];
+                for (int i = 0; i < 16; i++) {
+                    boolean edge = i % 4 == 0 || i % 4 == 3 || i < 4 || i >= 12;
+                    px[i * 4] = px[i * 4 + 1] = px[i * 4 + 2] = (byte) (edge ? 255 : 0);
+                    px[i * 4 + 3] = (byte) 255;
+                }
+                byte[] out = app.barkfart.image.ImageOps.removeColor(px, 4, 4, 0xffffff, 5, 0, true);
+                SelfTest.expect(out[3] == 0 && (out[(5) * 4 + 3] & 0xff) == 255, "background / subject");
+                SelfTest.expect(java.util.Arrays.equals(new int[] {4, 4}, app.barkfart.image.ImageInfo.size(app.barkfart.export.Png.encode(px, 4, 4, true))), "png size");
+            }
+        });
+        SelfTest.check(r, "text layout", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.TextLayer t = new Layer.TextLayer(p.newId("L"), "t");
+                t.text = "Hi there";
+                t.size = 20;
+                p.root().layers.add(t);
+                p.invalidateIndex();
+                app.barkfart.geom.GlyphSource g = new app.barkfart.geom.GlyphSource() {
+                    public float basePx() {
+                        return 20;
+                    }
+
+                    public float lineHeight() {
+                        return 20;
+                    }
+
+                    public Glyph glyph(char c) {
+                        return new Glyph("glyphs:0", 0, 0, 1, 1, 0, 0, c == ' ' ? 0 : 10, 10, 10);
+                    }
+                };
+                SelfTest.expect(Tessellator.tessellate(Evaluator.evaluate(p, p.rootSymbol, 0), g).triangleCount() == 14, "glyph quads");
+            }
+        });
+
+        r.group = "Effects (reference)";
+        SelfTest.check(r, "pixelate, outline, motion blur", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.FigureLayer l = figure(p);
+                node(l, "s", "r", Node.Shape.SQUARE_LINE, 0, 20, 20).color.setValue(Color.rgba8888(0xffffffff));
+                EffectNode o = new EffectNode(l.id, "FXo", EffectTypes.OUTLINE);
+                o.param(l.id, "width", ValueType.FLOAT, 4f);
+                l.effects.append(o);
+                Image im = render(p, 80, 60);
+                SelfTest.expect(alpha(im, 22, 0) == 255 && alpha(im, 26, 0) == 0, "outline width");
+                l.effects.nodes.clear();
+                l.effects.output = null;
+                EffectNode m = new EffectNode(l.id, "FXm", EffectTypes.MOTION);
+                m.param(l.id, "distance", ValueType.FLOAT, 16f);
+                l.effects.append(m);
+                im = render(p, 80, 60);
+                SelfTest.expect(alpha(im, 26, 0) > 10 && alpha(im, 0, 16) == 0, "motion direction");
+            }
+        });
     }
 }

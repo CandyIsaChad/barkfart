@@ -11,7 +11,7 @@ import com.badlogic.gdx.Gdx;
 
 /** Barkfart: opens straight into the editor with a new project (UI-SPEC "Missing states"). */
 public class BarkfartApp extends ApplicationAdapter {
-    public static final String VERSION = "0.1.0-export";
+    public static final String VERSION = "0.2.0-core";
 
     private final float uiScale;
     private final app.barkfart.platform.Platform platform;
@@ -48,6 +48,27 @@ public class BarkfartApp extends ApplicationAdapter {
         runDiagnostics(true);
     }
 
+    /** LibGDX decodes an image (sprites, background removal) and the font atlas has glyphs (text). GL thread. */
+    private static String mediaCheck() {
+        try {
+            byte[] px = new byte[4 * 3 * 4];
+            for (int i = 0; i < px.length; i++) px[i] = (byte) (i * 7);
+            Object[] img = app.barkfart.render.SpriteOps.decode(app.barkfart.export.Png.encode(px, 4, 3, true));
+            if (img == null || (Integer) img[1] != 4 || (Integer) img[2] != 3) return "could not decode a PNG";
+            if (!java.util.Arrays.equals(px, (byte[]) img[0])) return "decoded pixels differ";
+            app.barkfart.render.GlyphAtlas g = new app.barkfart.render.GlyphAtlas();
+            try {
+                app.barkfart.geom.GlyphSource.Glyph a = g.glyph('A'), e = g.glyph('\u00e9');
+                if (a == null || e == null || g.texture(a.texture) == null) return "the font has no glyphs";
+            } finally {
+                g.dispose();
+            }
+            return null;
+        } catch (RuntimeException ex) {
+            return String.valueOf(ex);
+        }
+    }
+
     // The video check finishes on its own schedule; it joins the results whichever arrives last.
     private String videoResult;
     private long videoMs;
@@ -74,6 +95,9 @@ public class BarkfartApp extends ApplicationAdapter {
         long g0 = System.nanoTime();
         final String fx = app.barkfart.render.EffectCheck.run();
         final long fxMs = (System.nanoTime() - g0) / 1000000;
+        long m0 = System.nanoTime();
+        final String media = mediaCheck();
+        final long mediaMs = (System.nanoTime() - m0) / 1000000;
         long e0 = System.nanoTime();
         final String files = app.barkfart.render.ExportCheck.files(platform.documents());
         final long filesMs = (System.nanoTime() - e0) / 1000000;
@@ -100,6 +124,7 @@ public class BarkfartApp extends ApplicationAdapter {
                 final String au = platform.audio().check();   // opens the output, plays silence, waits for it
                 r.add("Device", "GPU draws effects like the reference", fx, fxMs);
                 r.add("Export", "GIF and PNG frames export", files, filesMs);
+                r.add("Device", "image decoding and text glyphs", media, mediaMs);
                 r.add("Device", "audio output plays", au, (System.nanoTime() - a0) / 1000000);
                 System.out.println("[Barkfart] self-test " + r.summary());
                 for (String f : r.failures) System.out.println("[Barkfart] FAIL " + f);
