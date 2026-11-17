@@ -30,7 +30,7 @@ public final class Node {
 
     public final String id;
     /** Parent node id, or null for the root. Parents precede children in Figure.nodes. */
-    public final String parent;
+    public String parent;   // changed only through Figure (setNodes / reparent keep parents first)
     public Shape shape;
     /** drawOrder value meaning "not set": Figure.add then puts the node in front. */
     public static final int UNASSIGNED = Integer.MIN_VALUE;

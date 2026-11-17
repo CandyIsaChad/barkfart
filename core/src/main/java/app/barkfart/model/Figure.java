@@ -112,6 +112,47 @@ public final class Figure {
         for (int i = 0; i < nodes.size(); i++) index.put(nodes.get(i).id, i);
     }
 
+    /** A copy of the node list in hierarchy order. */
+    public List<Node> nodeList() {
+        return new ArrayList<Node>(nodes);
+    }
+
+    /** Replaces the node list (undo snapshots). Parents must precede children. */
+    public void setNodes(List<Node> list) {
+        java.util.HashSet<String> seen = new java.util.HashSet<String>();
+        for (int i = 0; i < list.size(); i++) {
+            Node n = list.get(i);
+            if (i == 0 ? n.parent != null : (n.parent == null || !seen.contains(n.parent))) {
+                throw new IllegalArgumentException("node order: " + n.id);
+            }
+            if (!seen.add(n.id)) throw new IllegalArgumentException("duplicate node id " + n.id);
+        }
+        nodes.clear();
+        nodes.addAll(list);
+        reindex();
+    }
+
+    /** Inserts a node at a list position; its parent must come earlier. */
+    public void insert(int pos, Node n) {
+        List<Node> l = nodeList();
+        if (n.drawOrder == Node.UNASSIGNED) n.drawOrder = maxDrawOrder() + 1;
+        l.add(Math.max(1, Math.min(pos, l.size())), n);
+        setNodes(l);
+    }
+
+    /** Gives a node a new parent that already precedes it in the list. */
+    public void reparent(String id, String parent) {
+        Node n = node(id), p = node(parent);
+        if (n == null || p == null || indexOf(parent) >= indexOf(id)) throw new IllegalArgumentException("reparent " + id + " -> " + parent);
+        for (Node x : subtree(id)) if (x == p) throw new IllegalArgumentException("cycle");
+        n.parent = parent;
+    }
+
+    /** An id not used by any node, from a prefix. */
+    public String freeId(String prefix) {
+        for (int i = nodes.size(); ; i++) if (!index.containsKey(prefix + i)) return prefix + i;
+    }
+
     public Map<String, Integer> indexView() {
         return Collections.unmodifiableMap(index);
     }
