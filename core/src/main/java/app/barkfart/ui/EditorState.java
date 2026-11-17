@@ -181,9 +181,13 @@ public final class EditorState {
 
     /** Shows a transient status message (4 s); action runs if the user taps it. */
     public void flash(String text, Runnable action) {
+        flash(text, action, 4);
+    }
+
+    public void flash(String text, Runnable action, float seconds) {
         message = text;
         messageAction = action;
-        messageSeconds = 4;
+        messageSeconds = seconds;
         fire();
     }
 

@@ -258,8 +258,15 @@ Not done
   unverified until that line is read.
 - Not done (tracked): effect masks (saved, ignored when drawing), scoped
   effects, output caching, half-resolution preview, motion / one-direction
-  blur, pixelate, outline filter, textures in the reference renderer, an
-  effects panel (no UI adds effects yet). Onion-skin ghosts are drawn flat,
+  blur, pixelate, outline filter, textures in the reference renderer.
+- First effects panel (2026-11-17, after the user found nothing to test):
+  with a figure selected, the sidebar has Opacity - / +, the figure's
+  effects in order (each with - / + for its main setting and Remove), and
+  Add: Blur, Glow, Shadow, Tint, Grey (colour adjust), Invert. Changes key
+  the current frame and undo like any edit (StructureEditsTest). Colours,
+  shadow offset and hue have no controls yet.
+- The status line wraps (up to four lines) and the launch result stays 12 s,
+  results first: "Self-test PASS n/n · Effects OK · v...". Onion-skin ghosts are drawn flat,
   so translucent overlaps show in the ghosts. Effect ids and node ids of
   one layer share a property-id namespace (layer/id/name); generated ids
   never collide, but hand-made ids could (found by a test).

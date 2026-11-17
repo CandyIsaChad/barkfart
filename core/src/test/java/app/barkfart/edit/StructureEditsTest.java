@@ -146,4 +146,33 @@ class StructureEditsTest {
                     : StructureEdits.addSymbol(p, new Symbol(p.newId("S"), "extra", 1));
         }
     }
+
+    @Test
+    void addingAndRemovingEffectsIsUndoableAndKeepsTheChainLinked() {
+        app.barkfart.model.Project p = app.barkfart.Fixtures.empty();
+        app.barkfart.model.Layer.FigureLayer l = app.barkfart.Fixtures.stickman(p, "m");
+        p.root().layers.add(l);
+        p.invalidateIndex();
+        Document d = new Document(p);
+        String before = app.barkfart.io.ProjectCodec.encode(p);
+        app.barkfart.model.EffectNode a = new app.barkfart.model.EffectNode(l.id, "FXa", "blur.gaussian");
+        app.barkfart.model.EffectNode b = new app.barkfart.model.EffectNode(l.id, "FXb", "glow");
+        app.barkfart.model.EffectNode c = new app.barkfart.model.EffectNode(l.id, "FXc", "invert");
+        d.apply(StructureEdits.addEffect(l, a));
+        d.apply(StructureEdits.addEffect(l, b));
+        d.apply(StructureEdits.addEffect(l, c));
+        assertEquals(java.util.Arrays.asList(a, b, c), l.effects.chain());
+        String three = app.barkfart.io.ProjectCodec.encode(p);
+        d.apply(StructureEdits.removeEffect(l, b));
+        assertEquals(java.util.Arrays.asList(a, c), l.effects.chain());
+        d.apply(StructureEdits.removeEffect(l, c));
+        assertEquals(java.util.Arrays.asList(a), l.effects.chain());
+        d.undo();
+        d.undo();
+        assertEquals(three, app.barkfart.io.ProjectCodec.encode(p));
+        d.undo();
+        d.undo();
+        d.undo();
+        assertEquals(before, app.barkfart.io.ProjectCodec.encode(p));
+    }
 }

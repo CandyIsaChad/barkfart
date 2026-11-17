@@ -5,7 +5,7 @@ Built by tools/make_parity.py from research/stick-nodes-features-raw.md (64 upda
 Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without UI, **[ ]** not yet, **(won't)** with the reason.
 
 
-**Totals (382 features):** 64 usable now, 37 partial or core-only, 250 not yet, 31 won't.
+**Totals (382 features):** 65 usable now, 36 partial or core-only, 250 not yet, 31 won't.
 
 
 ## Order of work (parity first, then our own additions)
@@ -300,15 +300,15 @@ Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without U
 
 ## Filters/effects
 
-- [~] **Transparency** (since 2.2.0): Per-figure opacity *Barkfart: layer opacity drawn correctly (one composite, no overlap seams); no slider yet.*
-- [~] **Invert colors** (since 2.2.0): Invert a figure's colors *Barkfart: rendered (GL + reference); no effects panel yet.*
-- [~] **Tint** (since 2.2.0): Wash a figure in a color *Barkfart: rendered; no effects panel yet.*
-- [~] **Saturation** (since 2.2.0): Desaturate or boost color *Barkfart: colour adjust: saturation, hue, brightness; no effects panel yet.*
-- [~] **Blur** (since 2.2.0): Horizontal, vertical or both *Barkfart: Gaussian blur rendered; horizontal-only / vertical-only not yet; no panel.*
-- [~] **Glow** (since 2.3.0): Glow around a figure *Barkfart: rendered (colour, radius, strength); no panel.*
-- [~] **Glow intensity** (since 2.4.2): Strength control for glow *Barkfart: strength 0-4; no panel.*
-- [~] **Hue shift** (since 3.0.4): Rotate a figure's hues *Barkfart: colour adjust hue rotation; no effects panel yet.*
-- [~] **Drop shadow** (since 3.3.0): Offset shadow, also usable as edge glow *Barkfart: offset, radius, colour; no panel.*
+- [x] **Transparency** (since 2.2.0): Per-figure opacity *Barkfart: sidebar Opacity - / +, drawn as one composite (no overlap seams).*
+- [~] **Invert colors** (since 2.2.0): Invert a figure's colors *Barkfart: sidebar: Add Invert, Remove.*
+- [~] **Tint** (since 2.2.0): Wash a figure in a color *Barkfart: sidebar Tint with amount; colour fixed to blue for now.*
+- [~] **Saturation** (since 2.2.0): Desaturate or boost color *Barkfart: sidebar Grey: saturation - / +; hue and brightness in the core only.*
+- [~] **Blur** (since 2.2.0): Horizontal, vertical or both *Barkfart: sidebar Blur with radius; horizontal-only / vertical-only not yet.*
+- [~] **Glow** (since 2.3.0): Glow around a figure *Barkfart: sidebar Glow with radius; colour fixed to yellow for now.*
+- [~] **Glow intensity** (since 2.4.2): Strength control for glow *Barkfart: strength 0-4 in the core; no control yet.*
+- [~] **Hue shift** (since 3.0.4): Rotate a figure's hues *Barkfart: colour adjust hue in the core; no control yet.*
+- [~] **Drop shadow** (since 3.3.0): Offset shadow, also usable as edge glow *Barkfart: sidebar Shadow with softness; offset and colour fixed for now.*
 - [ ] **Pixelate** (since 4.0.3): Pixelation filter
 - [ ] **Motion blur** (since 4.0.3): Directional motion-blur toggle (incl. one direction) in blur
 - [ ] **Outline** (since 4.1.6): Outline filter around a figure

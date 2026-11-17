@@ -4,6 +4,10 @@ import app.barkfart.BarkfartApp;
 import app.barkfart.edit.DopeRows;
 import app.barkfart.files.Importer;
 import app.barkfart.fx.EffectScene;
+import app.barkfart.fx.EffectTypes;
+import app.barkfart.model.EffectNode;
+import app.barkfart.model.ValueType;
+import app.barkfart.model.Color;
 import app.barkfart.edit.StructureEdits;
 import app.barkfart.model.Asset;
 import app.barkfart.model.Layer;
@@ -43,6 +47,20 @@ final class DesktopScript {
             } else if (step.equals("fxscene")) {
                 // the effect check scene, three times larger, added with this project's ids
                 EffectScene.addTo(st.project(), st.project().root(), 3);
+                st.fire();
+            } else if (step.equals("glowfig") && f != null) {
+                EffectNode g = new EffectNode(f.id, st.project().newId("FX"), EffectTypes.GLOW);
+                g.param(f.id, "radius", ValueType.FLOAT, 10f);
+                g.param(f.id, "color", ValueType.COLOR, Color.rgba8888(0xffd60aff));
+                st.doc.apply(StructureEdits.addEffect(f, g));
+                EffectNode sh = new EffectNode(f.id, st.project().newId("FX"), EffectTypes.SHADOW);
+                sh.param(f.id, "radius", ValueType.FLOAT, 6f);
+                sh.param(f.id, "dx", ValueType.FLOAT, 10f);
+                sh.param(f.id, "dy", ValueType.FLOAT, -10f);
+                st.doc.apply(StructureEdits.addEffect(f, sh));
+                st.project().invalidateIndex();
+                st.select(f, null);
+                st.flash("Self-test PASS 13/13 (120 ms) · Effects OK · v0.1.0-fx and a long tail to check the status line wraps", null, 12);
                 st.fire();
             } else if (step.equals("noonion")) st.onion = false;
             else if (step.equals("deselect")) st.select(null, null);

@@ -65,7 +65,7 @@ public final class Sidebar extends WidgetGroup {
         modeCamera = mode("Camera", EditorState.Mode.CAMERA);
         readout = new Label("", new Label.LabelStyle(theme.small, Theme.TEXT_DIM));
         status = new Label("", new Label.LabelStyle(theme.small, Theme.TEXT_DIM));
-        status.setEllipsis(true);
+        status.setWrap(true);   // long messages (the launch check) wrap upward instead of being cut
         status.addListener(new InputListener() {
             @Override
             public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
@@ -114,8 +114,12 @@ public final class Sidebar extends WidgetGroup {
         modeFigure.setBounds(p, y, sw, Theme.CONTROL_H);
         modeAll.setBounds(p + sw + 2, y, sw, Theme.CONTROL_H);
         modeCamera.setBounds(p + 2 * (sw + 2), y, sw, Theme.CONTROL_H);
-        status.setBounds(p, 6 + insetB, inner, 16);
-        float top = y - g, bottom = 6 + insetB + 16 + g;
+        status.setWidth(inner);
+        status.layout();
+        float line = theme.small.getLineHeight();
+        float sh = Math.max(16, Math.min(4 * line + 2, status.getPrefHeight()));
+        status.setBounds(p, 6 + insetB, inner, sh);
+        float top = y - g, bottom = 6 + insetB + sh + g;
         scroll.setBounds(p, bottom, inner, Math.max(0, top - bottom));
         if (inner != builtWidth) {
             builtWidth = inner;
@@ -142,6 +146,7 @@ public final class Sidebar extends WidgetGroup {
         String modeName = st.mode == EditorState.Mode.CAMERA ? "Camera" : (st.mode == EditorState.Mode.ALL ? "All" : "Figure");
         readout.setText(modeName + " · " + Math.round(st.zoom * 100) + "%");
         String msg = st.message();
+        String before = status.getText().toString();
         if (msg != null) {
             status.setText(msg);
             status.getStyle().fontColor = Theme.TEXT;
@@ -150,6 +155,7 @@ public final class Sidebar extends WidgetGroup {
             status.setText("Frame " + (f + 1) + " / " + st.frames.frameCount() + " · " + String.format("%.2f s", st.frames.time(f)));
             status.getStyle().fontColor = Theme.TEXT_DIM;
         }
+        if (!before.equals(status.getText().toString())) invalidate();   // height follows the text
         rebuildPanel();
     }
 
@@ -242,11 +248,109 @@ public final class Sidebar extends WidgetGroup {
             panel.add(new AngleScrub(theme, st, st.selectedNode)).colspan(2).width(innerW).height(Theme.CONTROL_H)
                     .padBottom(Theme.GAP).row();
         }
+        effectsSection(l, innerW);
         full(new UiButton(theme, "Delete figure", UiButton.Style.DANGER, new Runnable() {
             public void run() {
                 deleteFigure();
             }
         }));
+    }
+
+    // ---- effects (a first, plain panel: each effect has one main setting) ----
+
+    /** Display name, main parameter, step, minimum, maximum, unit scale and unit for each effect type. */
+    private static final Object[][] EFFECTS = {
+        {app.barkfart.fx.EffectTypes.BLUR, "Blur", "radius", 2f, 0f, 200f, 1f, " px"},
+        {app.barkfart.fx.EffectTypes.GLOW, "Glow", "radius", 2f, 0f, 200f, 1f, " px"},
+        {app.barkfart.fx.EffectTypes.SHADOW, "Shadow", "radius", 2f, 0f, 200f, 1f, " px soft"},
+        {app.barkfart.fx.EffectTypes.TINT, "Tint", "amount", 0.1f, 0f, 1f, 100f, "%"},
+        {app.barkfart.fx.EffectTypes.ADJUST, "Grey", "saturation", 0.25f, 0f, 4f, 100f, "% colour"},
+        {app.barkfart.fx.EffectTypes.INVERT, "Invert", null, 0f, 0f, 0f, 1f, ""},
+    };
+
+    private static Object[] spec(String type) {
+        for (Object[] e : EFFECTS) if (e[0].equals(type)) return e;
+        return null;
+    }
+
+    private void effectsSection(final Layer.FigureLayer l, float innerW) {
+        final double t = st.frames.time(st.frame);
+        PropertyResolver r = new PropertyResolver(st.project(), new ArrayList<Diagnostic>());
+        final float op = r.f(l.opacity, t);
+        panel.add(note("Opacity " + Math.round(op * 100) + "%")).colspan(2).width(innerW).padBottom(4).row();
+        row(new UiButton(theme, "−", UiButton.Style.NORMAL, step(l.opacity, -0.1f, 0f, 1f, "Opacity")),
+                new UiButton(theme, "+", UiButton.Style.NORMAL, step(l.opacity, 0.1f, 0f, 1f, "Opacity")));
+        panel.add(note(l.effects.isEmpty() ? "Effects: none" : "Effects (top to bottom, in order)")).colspan(2).width(innerW).padBottom(4).row();
+        for (final app.barkfart.model.EffectNode e : l.effects.chain()) {
+            Object[] sp = spec(e.type);
+            String name = sp == null ? e.type : (String) sp[1];
+            String value = "";
+            if (sp != null && sp[2] != null) {
+                app.barkfart.model.Property pr = e.params.get(sp[2]);
+                float v = pr == null ? 0 : r.f(pr, t);
+                value = " · " + Math.round(v * (Float) sp[6]) + sp[7];
+            }
+            panel.add(note(name + value)).colspan(2).width(innerW).padBottom(4).row();
+            if (sp != null && sp[2] != null) {
+                app.barkfart.model.Property pr = e.params.get(sp[2]);
+                if (pr != null) {
+                    float stp = (Float) sp[3], min = (Float) sp[4], max = (Float) sp[5];
+                    row(new UiButton(theme, "−", UiButton.Style.NORMAL, step(pr, -stp, min, max, name)),
+                            new UiButton(theme, "+", UiButton.Style.NORMAL, step(pr, stp, min, max, name)));
+                }
+            }
+            full(new UiButton(theme, "Remove " + name, UiButton.Style.NORMAL, new Runnable() {
+                public void run() {
+                    st.doc.apply(StructureEdits.removeEffect(l, e));
+                    st.fire();
+                }
+            }));
+        }
+        panel.add(note("Add effect")).colspan(2).width(innerW).padBottom(4).row();
+        for (int i = 0; i < EFFECTS.length; i += 2) {
+            row(addButton(l, EFFECTS[i]), addButton(l, EFFECTS[i + 1]));
+        }
+    }
+
+    /** Changes a numeric property by delta at the current frame (keyed, one undo step). */
+    private Runnable step(final app.barkfart.model.Property p, final float delta, final float min, final float max, final String label) {
+        return new Runnable() {
+            public void run() {
+                double t = st.frames.time(st.frame);
+                float v = new PropertyResolver(st.project(), new ArrayList<Diagnostic>()).f(p, t);
+                float nv = Math.max(min, Math.min(max, Math.round((v + delta) / delta) * delta));
+                if (Math.abs(delta) < 1e-6f) return;
+                st.doc.begin(label);
+                st.editor.change(p, nv, t);
+                st.doc.commit();
+                st.fire();
+            }
+        };
+    }
+
+    private UiButton addButton(final Layer.FigureLayer l, final Object[] sp) {
+        return new UiButton(theme, (String) sp[1], UiButton.Style.NORMAL, new Runnable() {
+            public void run() {
+                String type = (String) sp[0];
+                app.barkfart.model.EffectNode e = new app.barkfart.model.EffectNode(l.id, st.project().newId("FX"), type);
+                app.barkfart.model.ValueType f = app.barkfart.model.ValueType.FLOAT, c = app.barkfart.model.ValueType.COLOR;
+                if (type.equals(app.barkfart.fx.EffectTypes.BLUR)) e.param(l.id, "radius", f, 6f);
+                else if (type.equals(app.barkfart.fx.EffectTypes.GLOW)) {
+                    e.param(l.id, "radius", f, 10f);
+                    e.param(l.id, "color", c, app.barkfart.model.Color.rgba8888(0xffd60aff));
+                } else if (type.equals(app.barkfart.fx.EffectTypes.SHADOW)) {
+                    e.param(l.id, "radius", f, 6f);
+                    e.param(l.id, "dx", f, 10f);
+                    e.param(l.id, "dy", f, -10f);
+                } else if (type.equals(app.barkfart.fx.EffectTypes.TINT)) {
+                    e.param(l.id, "amount", f, 0.5f);
+                    e.param(l.id, "color", c, app.barkfart.model.Color.rgba8888(0x0a84ffff));
+                } else if (type.equals(app.barkfart.fx.EffectTypes.ADJUST)) e.param(l.id, "saturation", f, 0f);
+                st.doc.apply(StructureEdits.addEffect(l, e));
+                st.project().invalidateIndex();
+                st.fire();
+            }
+        });
     }
 
     private void cameraPanel(float innerW) {

@@ -31,6 +31,59 @@ public final class StructureEdits {
         }
     }
 
+    // ---- effects ----
+
+    /** Appends an effect to the end of a layer's chain. */
+    public static Command addEffect(final Layer l, final app.barkfart.model.EffectNode e) {
+        final String oldOutput = l.effects.output;
+        return new Named("Add effect") {
+            public void apply() {
+                l.effects.append(e);
+            }
+
+            public void revert() {
+                l.effects.nodes.remove(e.id);
+                l.effects.output = oldOutput;
+            }
+        };
+    }
+
+    /** Removes an effect from a linear chain, linking what followed it to what fed it. */
+    public static Command removeEffect(final Layer l, final app.barkfart.model.EffectNode e) {
+        final String oldOutput = l.effects.output;
+        final List<String> oldInputs = new ArrayList<String>(e.inputs);
+        app.barkfart.model.EffectNode next = null;
+        for (app.barkfart.model.EffectNode n : l.effects.nodes.values()) if (n.inputs.contains(e.id)) next = n;
+        final app.barkfart.model.EffectNode follower = next;
+        final List<String> followerInputs = next == null ? null : new ArrayList<String>(next.inputs);
+        final List<String> order = new ArrayList<String>(l.effects.nodes.keySet());
+        return new Named("Remove effect") {
+            public void apply() {
+                l.effects.nodes.remove(e.id);
+                if (follower != null) {
+                    follower.inputs.clear();
+                    for (String in : followerInputs) {
+                        if (in.equals(e.id)) follower.inputs.addAll(oldInputs);
+                        else follower.inputs.add(in);
+                    }
+                }
+                if (e.id.equals(l.effects.output)) l.effects.output = oldInputs.isEmpty() ? null : oldInputs.get(0);
+            }
+
+            public void revert() {
+                java.util.LinkedHashMap<String, app.barkfart.model.EffectNode> m = new java.util.LinkedHashMap<String, app.barkfart.model.EffectNode>();
+                for (String id : order) m.put(id, id.equals(e.id) ? e : l.effects.nodes.get(id));
+                l.effects.nodes.clear();
+                l.effects.nodes.putAll(m);
+                if (follower != null) {
+                    follower.inputs.clear();
+                    follower.inputs.addAll(followerInputs);
+                }
+                l.effects.output = oldOutput;
+            }
+        };
+    }
+
     // ---- layers ----
 
     public static Command addLayer(final Symbol s, final Layer l, final int index) {

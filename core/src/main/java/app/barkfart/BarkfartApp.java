@@ -50,9 +50,11 @@ public class BarkfartApp extends ApplicationAdapter {
                 for (String f : r.failures) System.out.println("[Barkfart] FAIL " + f);
                 Gdx.app.postRunnable(new Runnable() {
                     public void run() {
-                        editor.state.flash("Barkfart " + VERSION + " · self-test " + r.summary()
+                        // Results first, so they are what you read; details after.
+                        editor.state.flash("Self-test " + r.summary() + " · Effects " + (fx == null ? "OK" : "FAIL")
                                 + (r.ok() ? "" : " · " + r.failures.get(0))
-                                + " · effects " + (fx == null ? "OK" : "FAIL: " + fx), null);
+                                + (fx == null ? "" : " · " + fx)
+                                + " · v" + VERSION, null, 12);
                     }
                 });
             }
