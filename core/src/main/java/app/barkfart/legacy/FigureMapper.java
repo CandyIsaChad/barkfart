@@ -60,6 +60,21 @@ public final class FigureMapper {
             // the child end, so lines import with the flag flipped (fitted, NOTES.md).
             n.gradientReverse = (ln.i("reverseGradient") != 0) ^ (type == 0);   // type 0 = round segment
             n.gradientSideways = ln.i("gradientMode") == 1;
+            n.isStatic = ln.i("static") != 0;
+            n.stretchy = ln.i("stretchy") != 0;
+            n.smartStretch = ln.i("smartStretch") != 0;
+            n.noSmartStretch = ln.i("noSmartStretch") != 0;
+            n.restLength = ln.f("defaultLength");
+            n.circleHollow = ln.i("circleHollow") != 0;
+            n.circleOutline = ln.i("circleOutline") != 0;
+            if (ln.fields.containsKey("circleOutlineColor")) n.outlineColor.setValue(color(ln.i("circleOutlineColor")));
+            n.halfArc = ln.i("halfArc") != 0 ? 1 : 0;
+            n.polygonSides = ln.i("polygonVertices");
+            n.trapezoidRatio = trapezoidRatio(ln);
+            n.trapezoidRoundStart = ln.i("trapezoidRoundedStart") != 0;
+            n.trapezoidRoundEnd = ln.i("trapezoidRoundedEnd") != 0;
+            // Angle and drag locks stay in legacyExtras: no bundled file uses them, so
+            // their legacy encoding is unverified (NOTES.md).
             // The stored gradient colour applies even when the segment follows the figure
             // colour (fitted against the original's previews, NOTES.md).
             if (ln.fields.containsKey("gradientColor")) n.gradientColor.setValue(color(ln.i("gradientColor")));
@@ -97,8 +112,10 @@ public final class FigureMapper {
             case 1: return Node.Shape.SQUARE_LINE;
             case 3: return Node.Shape.TRIANGLE;
             case 5: return Node.Shape.ELLIPSE;
+            case 6: return Node.Shape.TRAPEZOID;
+            case 7: return Node.Shape.POLYGON;
             default:
-                String what = type == 6 ? "trapezoid" : type == 7 ? "polygon" : "unknown type " + type;
+                String what = "unknown type " + type;
                 if (report != null && !report.approximations.contains(what)) report.approximations.add(what);
                 return Node.Shape.LINE;
         }
@@ -196,6 +213,24 @@ public final class FigureMapper {
             if (ln.fields.containsKey("gradientMode") && (ln.i("gradientMode") == 1) != n.gradientSideways) {
                 ln.fields.put("gradientMode", n.gradientSideways ? 1 : 0);
             }
+            syncFlag(ln, "static", n.isStatic);
+            syncFlag(ln, "stretchy", n.stretchy);
+            syncFlag(ln, "smartStretch", n.smartStretch);
+            syncFlag(ln, "noSmartStretch", n.noSmartStretch);
+            if (ln.fields.containsKey("defaultLength")) setIfChanged(ln, "defaultLength", n.restLength);
+            syncFlag(ln, "circleHollow", n.circleHollow);
+            syncFlag(ln, "circleOutline", n.circleOutline);
+            if (ln.fields.containsKey("circleOutlineColor") && !color(ln.i("circleOutlineColor")).equals(n.outlineColor.value())) {
+                ln.fields.put("circleOutlineColor", legacyColor((Color) n.outlineColor.value()));
+            }
+            syncFlag(ln, "halfArc", n.halfArc != 0);
+            if (ln.fields.containsKey("polygonVertices") && ln.i("polygonVertices") != n.polygonSides) ln.fields.put("polygonVertices", n.polygonSides);
+            if (trapezoidRatio(ln) != n.trapezoidRatio) {
+                if (ln.fields.containsKey("trapezoidTopRatio")) ln.fields.put("trapezoidTopRatio", n.trapezoidRatio);
+                if (ln.fields.containsKey("trapezoidEndF") && ln.f("trapezoidStartF") > 0) ln.fields.put("trapezoidEndF", ln.f("trapezoidStartF") * n.trapezoidRatio);
+            }
+            syncFlag(ln, "trapezoidRoundedStart", n.trapezoidRoundStart);
+            syncFlag(ln, "trapezoidRoundedEnd", n.trapezoidRoundEnd);
             if (ln.fields.containsKey("gradientColor")) {
                 Color imported = color(ln.i("gradientColor"));
                 if (!imported.equals(n.gradientColor.value())) ln.fields.put("gradientColor", legacyColor((Color) n.gradientColor.value()));
@@ -241,9 +276,28 @@ public final class FigureMapper {
             case SQUARE_LINE: return 1;
             case TRIANGLE: return 3;
             case ELLIPSE: return 5;
+            case TRAPEZOID: return 6;
+            case POLYGON: return 7;
             case LINE: return previous == 0 || previous == 6 || previous == 7 ? previous : 0;
             default: return previous;
         }
+    }
+
+    /** Writes a legacy flag only when the file has it and the value differs (exact export). */
+    private static void syncFlag(NodesFormat.LegacyNode ln, String k, boolean v) {
+        if (ln.fields.containsKey(k) && (ln.i(k) != 0) != v) ln.fields.put(k, v ? 1 : 0);
+    }
+
+    /**
+     * Trapezoid width at the node over width at the parent: the stored top ratio,
+     * else end / start width (newer builds), else 1. Unverified against the
+     * original's renderer: no bundled file has a trapezoid (NOTES.md).
+     */
+    static float trapezoidRatio(NodesFormat.LegacyNode ln) {
+        if (ln.fields.containsKey("trapezoidTopRatio") && ln.f("trapezoidTopRatio") > 0) return ln.f("trapezoidTopRatio");
+        float a = ln.f("trapezoidStartF"), b = ln.f("trapezoidEndF");
+        if (a > 0 && b > 0) return b / a;
+        return 1f;
     }
 
     /** Keeps the stored float bits unless the value really changed. */

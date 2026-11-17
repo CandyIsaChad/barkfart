@@ -42,7 +42,10 @@ public final class Tessellator {
             if (s instanceof Shape.Line) line((Shape.Line) s, rgba, batch);
             else if (s instanceof Shape.Circle) {
                 Shape.Circle ci = (Shape.Circle) s;
-                fan(ci.cx, ci.cy, ci.r, 0, (float) (2 * Math.PI), rgba, batch);
+                fan(ci.cx, ci.cy, ci.r, ci.start, ci.span, rgba, batch);
+            } else if (s instanceof Shape.Ring) {
+                Shape.Ring ri = (Shape.Ring) s;
+                ring(ri, rgba, batch);
             } else if (s instanceof Shape.Polygon) {
                 Shape.Polygon pg = (Shape.Polygon) s;
                 float[] q = pg.points;
@@ -165,6 +168,26 @@ public final class Tessellator {
         double t1 = a1 + (sweep > 0 ? Math.PI / 2 : -Math.PI / 2);
         fan(l.x1, l.y1, hw, (float) (t0 - Math.PI / 2), (float) Math.PI, c, b);
         fan(l.x2, l.y2, hw, (float) (t1 - Math.PI / 2), (float) Math.PI, c, b);
+    }
+
+    /** Band between r - width/2 and r + width/2 (inner radius clamped at 0). */
+    private static void ring(Shape.Ring ri, int c, DrawList.Batch b) {
+        float hw = ri.width / 2;
+        if (hw <= 0) return;
+        float r0 = Math.max(0, ri.r - hw), r1 = ri.r + hw;
+        if (ri.r <= 0 && r0 <= 0) {
+            fan(ri.cx, ri.cy, r1, ri.start, ri.span, c, b);
+            return;
+        }
+        int n = segments(r1, ri.span);
+        for (int i = 0; i < n; i++) {
+            double a0 = ri.start + ri.span * i / n, a1 = ri.start + ri.span * (i + 1) / n;
+            float c0 = (float) Math.cos(a0), s0 = (float) Math.sin(a0), c1 = (float) Math.cos(a1), s1 = (float) Math.sin(a1);
+            float ix0 = ri.cx + r0 * c0, iy0 = ri.cy + r0 * s0, ox0 = ri.cx + r1 * c0, oy0 = ri.cy + r1 * s0;
+            float ix1 = ri.cx + r0 * c1, iy1 = ri.cy + r0 * s1, ox1 = ri.cx + r1 * c1, oy1 = ri.cy + r1 * s1;
+            tri(b, ix0, iy0, ox0, oy0, ox1, oy1, c);
+            tri(b, ix0, iy0, ox1, oy1, ix1, iy1, c);
+        }
     }
 
     private static void fan(float cx, float cy, float r, float start, float span, int c, DrawList.Batch b) {

@@ -5,7 +5,7 @@ Built by tools/make_parity.py from research/stick-nodes-features-raw.md (64 upda
 Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without UI, **[ ]** not yet, **(won't)** with the reason.
 
 
-**Totals (382 features):** 57 usable now, 23 partial or core-only, 271 not yet, 31 won't.
+**Totals (382 features):** 63 usable now, 29 partial or core-only, 259 not yet, 31 won't.
 
 
 ## Order of work (parity first, then our own additions)
@@ -33,10 +33,10 @@ Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without U
 ## Canvas & posing
 
 - [x] **Drag nodes to pose** (since 1.0): Touch-drag a node to rotate its segment around its parent; the main node moves the whole figure *Barkfart: drag any joint; Rotate / Stretch.*
-- [~] **Static vs dynamic nodes** (since ≤1.2.5): Static nodes are fixed detail nodes that cannot be dragged while animating *Barkfart: static flag imported and kept; not enforced while posing.*
-- [~] **Stretchy nodes** (since 1.0): Nodes marked stretchy can change their segment length while animating *Barkfart: Stretch mode stretches any joint; per-node stretchy flag imported, not enforced.*
+- [x] **Static vs dynamic nodes** (since ≤1.2.5): Static nodes are fixed detail nodes that cannot be dragged while animating *Barkfart: static (detail) nodes have no handles while animating.*
+- [~] **Stretchy nodes** (since 1.0): Nodes marked stretchy can change their segment length while animating *Barkfart: Stretch mode stretches any joint; stretchy flag in the model and import, not enforced.*
 - [~] **Per-figure scale** (since 1.0): Scale a whole stickfigure up or down *Barkfart: layer scale in the model; no UI.*
-- [~] **Per-segment scale** (since 1.0): Scale an individual segment/limb independently *Barkfart: node scale in the model; no UI.*
+- [~] **Per-segment scale** (since 1.0): Scale an individual segment/limb independently *Barkfart: node scale imported (own length only, fitted to the original); no UI.*
 - [~] **Per-figure and per-segment color** (since 1.0): Recolor whole figures or single segments while animating *Barkfart: colour tracks in the model and import; no picker UI.*
 - [x] **Pinch zoom on stage** (since 1.0): Pinch to zoom the stage view
 - [x] **Zoom out below 100% and move stage** (since 1.2.6): Zoom out to 50% and drag the stage to place figures off-frame
@@ -56,8 +56,8 @@ Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without U
 - [ ] **Flip segments in Animation Mode** (since 2.3.7): Flip individual segments while animating, not just in creation
 - [ ] **Join-anchor flip** (since 4.2.3): Long-press flip to mirror joined figures around the join anchor axis
 - [ ] **Individual node lock** (since 2.4.8): Pin a single node so it stays in world position while other nodes move (e.g. planted foot)
-- [ ] **Angle Lock (node)** (since 4.2.0): Keep a node at a fixed angle, absolute or relative to the nearest non-static parent
-- [ ] **Drag Lock (node)** (since 4.2.0): Constrain a node's drag to a specific axis
+- [~] **Angle Lock (node)** (since 4.2.0): Keep a node at a fixed angle, absolute or relative to the nearest non-static parent *Barkfart: absolute and relative locks in pose and drag; legacy encoding not mapped; no UI.*
+- [~] **Drag Lock (node)** (since 4.2.0): Constrain a node's drag to a specific axis *Barkfart: horizontal / vertical drag lock; legacy encoding not mapped; no UI.*
 - [ ] **Floaty stretchy nodes** (since 4.2.0): Alternate tween behaviour for stretchy nodes
 - [ ] **Reset length** (since ≤2.4.9): Button that restores a segment's original length (applies smart-stretch)
 - [~] **Push back / bring forward** (since ≤4.0.0): Change a figure's layer order in the frame *Barkfart: layer order and node draw order commands exist; no UI.*
@@ -102,27 +102,27 @@ Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without U
 - [x] **Radial circle gradients** (since 2.5.6): Circle gradients radiate from center; separate circle outline color
 - [x] **Sideways gradients** (since 4.1.0): Gradient direction toggle "sideways" for segments and trapezoids; triangles in 4.3.0
 - [ ] **Circle gradient horizontal/vertical** (since 4.2.4): Linear gradients on circles
-- [ ] **Polygon radial gradient** (since 4.2.6): Radial gradient on polygons
+- [x] **Polygon radial gradient** (since 4.2.6): Radial gradient on polygons *Barkfart: polygons take radial gradients.*
 - [x] **Reverse gradient** (since ≤4.2.2): Swap gradient direction
-- [~] **Shapes: ellipse, trapezoid, right-triangle, polygon** (since 2.5.6): New shape types with Shape Tools menu *Barkfart: ellipse drawn; trapezoid/polygon/right-triangle approximate.*
-- [ ] **Shape Tools properties** (since 2.5.6): Per-shape properties: half arc, vertex count (polygon), trapezoid top ratio
-- [ ] **Polygon min 4 sides** (since 3.0.5): Polygons from 4 to 16 vertices (was 5)
+- [x] **Shapes: ellipse, trapezoid, right-triangle, polygon** (since 2.5.6): New shape types with Shape Tools menu *Barkfart: all drawn and imported; trapezoid and polygon geometry unverified (no reference file).*
+- [~] **Shape Tools properties** (since 2.5.6): Per-shape properties: half arc, vertex count (polygon), trapezoid top ratio *Barkfart: half arc, polygon sides, trapezoid ratio in the model, drawn, imported; no UI.*
+- [~] **Polygon min 4 sides** (since 3.0.5): Polygons from 4 to 16 vertices (was 5) *Barkfart: 4-16 sides in the model; no UI.*
 - [x] **Triangle upside-down** (since 3.0.0): Upside-down option for triangles
-- [ ] **Half-circle reversible** (since 4.2.4): Flip half-arc circles
-- [ ] **Circle hollow** (since 4.1.0): Circle without interior fill
+- [~] **Half-circle reversible** (since 4.2.4): Flip half-arc circles *Barkfart: half arcs drawn either side; no creation UI.*
+- [~] **Circle hollow** (since 4.1.0): Circle without interior fill *Barkfart: drawn and imported; no creation UI.*
 - [x] **Curved segments** (since 3.2.0): Segments and rounded segments can bend with a curve radius *Barkfart: arcs, bulge fitted to the original's renders.*
 - [ ] **Curve "circular" toggle** (since 4.1.0): Alternative circular curve behaviour
-- [ ] **Trapezoid curves and rounded ends** (since 4.2.0): Trapezoids can curve, have rounded tips, easier thickness
+- [~] **Trapezoid curves and rounded ends** (since 4.2.0): Trapezoids can curve, have rounded tips, easier thickness *Barkfart: round ends drawn; curved trapezoids not yet.*
 - [ ] **0-length segments visible** (since 3.2.1): Zero-length segments render
 - [x] **Polyfills** (since 2.3.0): Fill shapes defined by an ordered set of nodes (polynodes) *Barkfart: drawn (concave, ear-clipped) and round-trip; no creation UI.*
 - [ ] **Finish polyfill** (since ≤2.4.9): Button to complete a polyfill definition
 - [ ] **Polyanchor outline** (since 2.3.2): Selecting a polyanchor highlights its polyfill
 - [ ] **Copy/paste polyfills** (since 3.1.0): Polyfills copy with segments when all polynodes are included
-- [ ] **Polyfills follow curves** (since 4.1.0): Polyfill edges follow curved segments; curve precision setting *Barkfart: curves drawn; polyfills do not follow them yet.*
+- [x] **Polyfills follow curves** (since 4.1.0): Polyfill edges follow curved segments; curve precision setting *Barkfart: fill edges follow the drawn arc.*
 - [ ] **Polyfill Precise mode** (since 4.2.4): Easier node picking, view/adjust polynode order
-- [ ] **Smart-Stretch** (since 2.4.8): Stretching a node proportionally squashes/stretches its static child detail nodes
-- [ ] **Smart-stretch changes** (since 2.5.1–2.5.2): Children need not be stretchy; ignores non-stretchy children
-- [ ] **Do not smart-stretch** (since 2.5.2): Exclude a node/branch from smart-stretch
+- [x] **Smart-Stretch** (since 2.4.8): Stretching a node proportionally squashes/stretches its static child detail nodes *Barkfart: stretching a smart-stretch joint reshapes its static details (rule fitted to the original's own files).*
+- [x] **Smart-stretch changes** (since 2.5.1–2.5.2): Children need not be stretchy; ignores non-stretchy children *Barkfart: details need not be stretchy; moving nodes stop it.*
+- [~] **Do not smart-stretch** (since 2.5.2): Exclude a node/branch from smart-stretch *Barkfart: honoured; set only by import (no creation UI).*
 - [ ] **Test smart-stretch** (since ≤2.4.9 / keep 3.0.0): Preview smart-stretch in creation; option to keep the test changes
 - [ ] **Smart-stretch advanced options** (since 4.2.0): Extra options enabling IK-style rigs with connectors
 - [~] **Connectors** (since 4.2.0): Segment that always stays attached between two nodes, with draggable midpoint *Barkfart: imported and exported; not drawn as connectors.*

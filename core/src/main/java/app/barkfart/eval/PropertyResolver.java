@@ -23,6 +23,15 @@ public final class PropertyResolver {
     /** Hard cap on nested link hops, in case a project has a huge chain. */
     private static final int MAX_LINK_DEPTH = 256;
     private int linkDepth;
+    /**
+     * Cap on link and delay-follow lookups per resolver. Delayed links fan out over many
+     * times (each delay asks for a different t), so a chain of them is
+     * exponential; past the cap, links are skipped (plain keys and other
+     * modifiers still apply). Unlinked properties never count.
+     */
+    public static final int RESOLVE_BUDGET = 200_000;
+    private int resolves;
+    private boolean budgetReported;
 
     public PropertyResolver(Project project, List<Diagnostic> diagnostics) {
         this.project = project;
@@ -98,6 +107,12 @@ public final class PropertyResolver {
             diagnostics.add(new Diagnostic(Diagnostic.Kind.MISSING_REF, p.id + "->" + sourceId));
             return current;
         }
+        if (resolves >= RESOLVE_BUDGET) {
+            if (!budgetReported) diagnostics.add(new Diagnostic(Diagnostic.Kind.RESOLVE_BUDGET, p.id));
+            budgetReported = true;
+            return current;
+        }
+        resolves++;
         Object s = resolve(src, t);
         if (src.type == p.type && (!p.type.continuous() || p.type == ValueType.COLOR)) return s;
         return p.type.fromScalar(ValueType.toScalar(s) * scale + offset, current);

@@ -64,6 +64,7 @@ public final class MovieclipMapper {
                     boolean own = lib.get(i).i("useSegmentColor") != 0;
                     Color c = own ? FigureMapper.color(MovieclipFormat.FrameFigure.nodeColor(r)) : figColor;
                     n.color.track().put(new Key(t, c, interp));
+                    if (n.circleOutline) n.outlineColor.track().put(new Key(t, FigureMapper.color(MovieclipFormat.FrameFigure.nodeOutlineColor(r)), interp));
                     if (n.gradient) {
                         // The stored gradient colour applies even to figure-coloured segments (NOTES.md).
                         Color gc = FigureMapper.color(MovieclipFormat.FrameFigure.nodeGradientColor(r));

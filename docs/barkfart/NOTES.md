@@ -188,3 +188,32 @@ outlines or hollow circles.
 - Compatibility: a .bark saved before this change with imported round
   segments that use gradients now exports reverseGradient flipped. Pre-release,
   so no migration.
+
+## Node options (2026-11-17)
+- Smart-stretch, fitted exactly on the original's own stored results (Rain's
+  "Smart-Stretch-Circle": every detail length to 0.1; Action Lines: 234 /
+  117 / 966): with k = length / defaultLength of the smart-stretch node S,
+  each static descendant of S keeps its angle and its length becomes
+  defaultLength x sqrt((k cos b)^2 + sin^2 b), b = its world angle minus S's.
+  Details need not be stretchy (Action Lines' are not). The original bakes
+  the result into stored lengths, so imports need nothing; our editor
+  applies the rule while stretching. Traversal stops at non-static nodes
+  and "do not smart-stretch" branches (changelog wording; the instruction
+  image shows the fist keeping its size).
+- Circle type 2 is a filled disc on the segment as diameter: a ring of width
+  = thickness scored lower on Ground Dust (0.936 vs 0.967); "diameter +
+  thickness" was indistinguishable (0.968), so thickness stays unused for
+  fills. Type 4 ("filled circle") is drawn the same; only .nodes figures
+  without previews use it, so it is unverified.
+- Hollow / outline (changelog: hollow = no fill; separate outline colour,
+  per-frame @39 in movieclips): drawn as a band of width = thickness centred
+  on the rim. Half arc: the half to the left of parent -> node (legacy flag
+  only; the flipped side has no known encoding). Polygon: regular, inscribed
+  in the circle on the segment, a corner at the node, 5 sides by default.
+  Trapezoid: thickness at the parent, thickness x ratio at the node, ratio =
+  trapezoidTopRatio, else end / start width. None of these appear in any
+  bundled file: unverified.
+- Angle lock (changelog: fixed angle, absolute or relative to the nearest
+  non-static parent) and drag lock (one axis) are implemented as described;
+  their legacy fields (angleLocked, angleLockMain, offsets, multiplier,
+  dragLocked) are kept raw and not mapped, since no file shows their meaning.

@@ -61,6 +61,8 @@ public final class CanvasTools {
     }
 
     public KeyScope keyScope = KeyScope.JOINT;
+    /** Show and pick static (detail) nodes too; off while animating, like the original. */
+    public boolean showStatic;
     /** Editing view through the camera (old behaviour); the editor now edits in stage space. */
     public boolean throughCamera;
 
@@ -68,6 +70,8 @@ public final class CanvasTools {
     private Affine dragView;
     private float grabDx, grabDy;
     private float startLayerX, startLayerY;
+    /** Lengths at drag start, used as rest lengths where a node has none (smart-stretch). */
+    private final java.util.Map<Node, Float> startLength = new java.util.HashMap<Node, Float>();
 
     public CanvasTools(Editor editor) {
         this.editor = editor;
@@ -89,6 +93,7 @@ public final class CanvasTools {
             FigurePose pose = FigurePose.compute(fl, t, r);
             List<Node> nodes = fl.figure.nodes();
             for (int i = 0; i < nodes.size(); i++) {
+                if (nodes.get(i).isStatic && !showStatic) continue;
                 out.add(new Handle(fl, nodes.get(i), (float) v.mapX(pose.x[i], pose.y[i]), (float) v.mapY(pose.x[i], pose.y[i])));
             }
         }
@@ -127,6 +132,9 @@ public final class CanvasTools {
         startLayerY = hit.layer.transform.y.floatValue();
         if (!hit.layer.transform.x.track().isEmpty()) startLayerX = (Float) hit.layer.transform.x.keyValue(t);
         if (!hit.layer.transform.y.track().isEmpty()) startLayerY = (Float) hit.layer.transform.y.keyValue(t);
+        startLength.clear();
+        PropertyResolver r0 = new PropertyResolver(editor.doc.project, new ArrayList<Diagnostic>());
+        for (Node n : hit.layer.figure.nodes()) startLength.put(n, r0.f(n.length, t));
         editor.doc.begin(hit.node.parent == null ? "Move figure" : "Pose node");
         pinKeys(hit, t);
     }
@@ -165,6 +173,8 @@ public final class CanvasTools {
         if (drag == null) return;
         float tx = x + grabDx, ty = y + grabDy;
         Node n = drag.node;
+        if (n.dragLock == Node.DRAG_HORIZONTAL) ty = drag.y;
+        else if (n.dragLock == Node.DRAG_VERTICAL) tx = drag.x;
         if (n.parent == null) {
             // Move the figure: convert the view-space offset into the layer's parent space.
             Affine inv = dragView.inverse();
@@ -187,12 +197,44 @@ public final class CanvasTools {
         if (dx * dx + dy * dy < 1e-9) return;
         double world = Math.toDegrees(Math.atan2(dy, dx));
         double current = r.f(n.rotation, t);
-        double rel = world - pose.angle[pi];
+        double rel = world - pose.baseAngle(drag.layer.figure.nodes(), i);   // angle locks measure from elsewhere
         rel += 360 * Math.round((current - rel) / 360);                 // stay continuous with the old angle
         editor.change(n.rotation, (float) rel, t);
         if (stretch) {
             float scale = r.f(n.scale, t);
-            if (scale > 1e-6f) editor.change(n.length, (float) (Math.sqrt(dx * dx + dy * dy) / scale), t);
+            if (scale > 1e-6f) {
+                float len = (float) (Math.sqrt(dx * dx + dy * dy) / scale);
+                editor.change(n.length, len, t);
+                if (n.smartStretch) smartStretch(drag.layer, pose, i, len, t);
+            }
+        }
+    }
+
+    /**
+     * Smart-stretch, fitted against the original's own movieclips (Rain, Action
+     * Lines; NOTES.md): with k = length / rest length of the stretched node, each
+     * static descendant (not past a non-static node or a "do not smart-stretch"
+     * branch) keeps its angle and gets rest x sqrt((k cos b)^2 + sin^2 b), b being
+     * its angle to the stretched node. Parallel details scale by k, perpendicular
+     * ones keep their length.
+     */
+    void smartStretch(Layer.FigureLayer layer, FigurePose pose, int si, float len, double t) {
+        List<Node> nodes = layer.figure.nodes();
+        Node s = nodes.get(si);
+        float rest = s.restLength > 0 ? s.restLength : startLength.containsKey(s) ? startLength.get(s) : 0;
+        if (rest <= 1e-6f) return;
+        double k = len / rest;
+        boolean[] in = new boolean[nodes.size()];
+        in[si] = true;
+        for (int j = si + 1; j < nodes.size(); j++) {   // parents precede children
+            int pj = pose.parent[j];
+            Node nj = nodes.get(j);
+            if (pj < 0 || !in[pj] || !nj.isStatic || nj.noSmartStretch) continue;
+            in[j] = true;
+            float rj = nj.restLength > 0 ? nj.restLength : startLength.containsKey(nj) ? startLength.get(nj) : 0;
+            double b = Math.toRadians(pose.angle[j] - pose.angle[si]);
+            double f = Math.sqrt(k * k * Math.cos(b) * Math.cos(b) + Math.sin(b) * Math.sin(b));
+            editor.change(nj.length, (float) (rj * f), t);
         }
     }
 

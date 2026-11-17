@@ -16,8 +16,17 @@ public final class Node {
         /** Ellipse spanning the segment; width = thickness. */
         ELLIPSE,
         /** Isosceles triangle: base of width = thickness at the parent, apex at the node. */
-        TRIANGLE
+        TRIANGLE,
+        /** Quad of width = thickness at the parent and thickness x trapezoidRatio at the node. */
+        TRAPEZOID,
+        /** Regular polygon (polygonSides) inscribed in the circle spanning the segment, a corner at the node. */
+        POLYGON
     }
+
+    /** Angle lock: what the rotation is measured against. */
+    public static final int LOCK_NONE = 0, LOCK_ABSOLUTE = 1, LOCK_RELATIVE = 2;
+    /** Drag lock: the axis a drag of this joint is held to. */
+    public static final int DRAG_FREE = 0, DRAG_HORIZONTAL = 1, DRAG_VERTICAL = 2;
 
     public final String id;
     /** Parent node id, or null for the root. Parents precede children in Figure.nodes. */
@@ -39,6 +48,33 @@ public final class Node {
     /** Gradient from color to gradientColor: along the segment, across it (sideways), or radial for round shapes. */
     public boolean gradient, gradientReverse, gradientSideways;
     public final Property gradientColor;
+    /** A detail node: drawn, but not dragged while animating; moves only with its parent. */
+    public boolean isStatic;
+    /** Its length may change while animating. */
+    public boolean stretchy;
+    /**
+     * Stretching this node reshapes its static details: each keeps its angle and
+     * its length follows the stretch along this node's direction (NOTES.md).
+     */
+    public boolean smartStretch;
+    /** Smart-stretch leaves this node and its branch alone. */
+    public boolean noSmartStretch;
+    /** Length smart-stretch measures from; 0 = not set (the length at the start of a drag). */
+    public float restLength;
+    /** Circles: no fill; outline ring of width = thickness in outlineColor. */
+    public boolean circleHollow, circleOutline;
+    public final Property outlineColor;
+    /** Circles: only the half on one side of the segment (1 = left, -1 = right, 0 = whole). */
+    public int halfArc;
+    /** Polygon corner count (4-16); 0 = 5. */
+    public int polygonSides;
+    /** Trapezoid width at the node as a fraction of the width at the parent; round ends. */
+    public float trapezoidRatio = 1f;
+    public boolean trapezoidRoundStart, trapezoidRoundEnd;
+    /** LOCK_ABSOLUTE: rotation is the world angle; LOCK_RELATIVE: relative to the nearest non-static ancestor. */
+    public int angleLock;
+    /** DRAG_HORIZONTAL / DRAG_VERTICAL: drags of this joint move along one stage axis only. */
+    public int dragLock;
     /** Legacy fields not yet understood, kept for faithful re-export. */
     public final Map<String, Object> legacyExtras = new LinkedHashMap<String, Object>();
 
@@ -54,9 +90,14 @@ public final class Node {
         color = new Property(p + "color", ValueType.COLOR, Color.BLACK);
         shown = new Property(p + "shown", ValueType.BOOL, Boolean.TRUE);
         gradientColor = new Property(p + "gradientColor", ValueType.COLOR, Color.WHITE);
+        outlineColor = new Property(p + "outlineColor", ValueType.COLOR, Color.BLACK);
+    }
+
+    public int sides() {
+        return polygonSides <= 0 ? 5 : Math.max(3, Math.min(16, polygonSides));
     }
 
     public Property[] properties() {
-        return new Property[] {rotation, length, thickness, scale, color, shown, gradientColor};
+        return new Property[] {rotation, length, thickness, scale, color, shown, gradientColor, outlineColor};
     }
 }

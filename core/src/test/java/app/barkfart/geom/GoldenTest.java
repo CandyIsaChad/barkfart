@@ -114,6 +114,100 @@ class GoldenTest {
     }
 
     @Test
+    void nodeOptionShapes() throws IOException {
+        // Hollow and outlined circles, half arcs, trapezoids (plain and round-ended),
+        // polygons. Unverified against the original (no bundled file uses them).
+        Project p = Fixtures.empty();
+        Layer.FigureLayer l = new Layer.FigureLayer(p.newId("L"), "g");
+        l.figure.add(new Node(l.id, "r", null, Node.Shape.NONE));
+        Fixtures.add(l, "sp_hollow", "r", Node.Shape.NONE, 140, 100);
+        Node hollow = Fixtures.add(l, "hollow", "sp_hollow", Node.Shape.CIRCLE, 0, 50);
+        hollow.thickness.setValue(6f);
+        hollow.circleHollow = true;
+        Fixtures.add(l, "sp_outlined", "r", Node.Shape.NONE, 95, 50);
+        Node outlined = Fixtures.add(l, "outlined", "sp_outlined", Node.Shape.CIRCLE, 0, 50);
+        outlined.thickness.setValue(8f);
+        outlined.color.setValue(Color.rgba8888(0xffd60aff));
+        outlined.circleOutline = true;
+        outlined.outlineColor.setValue(Color.rgba8888(0x0a84ffff));
+        Fixtures.add(l, "sp_half", "r", Node.Shape.NONE, 35, 80);
+        Node half = Fixtures.add(l, "half", "sp_half", Node.Shape.CIRCLE, 0, 50);
+        half.color.setValue(Color.rgba8888(0xff3b30ff));
+        half.halfArc = 1;
+        Fixtures.add(l, "sp_trap", "r", Node.Shape.NONE, -10, 90);
+        Node trap = Fixtures.add(l, "trap", "sp_trap", Node.Shape.TRAPEZOID, 0, 60);
+        trap.thickness.setValue(30f);
+        trap.trapezoidRatio = 0.3f;
+        trap.color.setValue(Color.rgba8888(0x30d158ff));
+        Fixtures.add(l, "sp_round", "r", Node.Shape.NONE, -45, 70);
+        Node round = Fixtures.add(l, "round", "sp_round", Node.Shape.TRAPEZOID, 0, 60);
+        round.thickness.setValue(36f);
+        round.trapezoidRatio = 0.5f;
+        round.trapezoidRoundStart = true;
+        round.trapezoidRoundEnd = true;
+        round.color.setValue(Color.rgba8888(0x5e5ce6ff));
+        Fixtures.add(l, "sp_hex", "r", Node.Shape.NONE, -125, 70);
+        Node hex = Fixtures.add(l, "hex", "sp_hex", Node.Shape.POLYGON, 0, 50);
+        hex.polygonSides = 6;
+        hex.color.setValue(Color.rgba8888(0xff9f0aff));
+        Fixtures.add(l, "sp_pent", "r", Node.Shape.NONE, 185, 110);
+        Node pent = Fixtures.add(l, "pent", "sp_pent", Node.Shape.POLYGON, 0, 50);
+        pent.color.setValue(Color.rgba8888(0x8e8e93ff));
+        pent.gradient = true;
+        pent.gradientColor.setValue(Color.rgba8888(0xffffffff));
+        p.root().layers.add(l);
+        check("node_option_shapes", p, 0);
+    }
+
+    @Test
+    void polyfillEdgesFollowCurvedSegments() {
+        for (int run = 0; run < 4; run++) {
+            float curve = run % 2 == 0 ? 60 : -60;
+            boolean childFirst = run >= 2;   // ring r, d, c (c -> r walks child to parent) or r, c, d
+            // A curved line r->c and a polyfill around it that walks the curved
+            // segment in either direction; its edge must follow the drawn arc.
+            Project p = Fixtures.empty();
+            Layer.FigureLayer l = new Layer.FigureLayer(p.newId("L"), "g");
+            l.figure.add(new Node(l.id, "r", null, Node.Shape.NONE));
+            Node c = Fixtures.add(l, "c", "r", Node.Shape.LINE, 0, 140);
+            c.curve = curve;
+            c.thickness.setValue(2f);
+            Node d = Fixtures.add(l, "d", "r", Node.Shape.NONE, curve > 0 ? -60 : 60, 100);
+            app.barkfart.model.Polyfill pf = new app.barkfart.model.Polyfill(l.id, "pf");
+            pf.anchor = "r";
+            pf.nodes.add(childFirst ? "d" : "c");
+            pf.nodes.add(childFirst ? "c" : "d");
+            pf.useOwnColor = true;
+            pf.color.setValue(Color.rgba8888(0xff0000ff));
+            l.figure.polyfills.add(pf);
+            p.root().layers.add(l);
+            // apex of the drawn arc: the line pixel farthest from the chord's row
+            l.figure.polyfills.clear();
+            BufferedImage line = Raster.fill(Tessellator.tessellate(Evaluator.evaluate(p, p.rootSymbol, 0)), W, H, 0xffffffff);
+            int apexX = -1, apexY = -1, best = -1;
+            // the chord is horizontal (rotation 0): its row is where the line starts
+            int minX = W, maxX = 0;
+            for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) if ((line.getRGB(x, y) & 0xffffff) != 0xffffff) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); }
+            int rowAtEnd = -1;
+            for (int y = 0; y < H; y++) if ((line.getRGB(minX, y) & 0xffffff) != 0xffffff) rowAtEnd = y;
+            for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+                if ((line.getRGB(x, y) & 0xffffff) == 0xffffff) continue;
+                int dist = Math.abs(y - rowAtEnd);
+                if (dist > best) { best = dist; apexX = x; apexY = y; }
+            }
+            assertTrue(best > 10, "the line is curved");
+            c.shown.setValue(false);
+            l.figure.polyfills.add(pf);
+            BufferedImage fill = Raster.fill(Tessellator.tessellate(Evaluator.evaluate(p, p.rootSymbol, 0)), W, H, 0xffffffff);
+            int step = apexY > rowAtEnd ? -1 : 1;   // from the apex back toward the chord
+            int inside = fill.getRGB(apexX, apexY + 3 * step) & 0xffffff;
+            assertEquals(0xff0000, inside, "fill reaches the arc's apex (curve " + curve + ")");
+            int outside = fill.getRGB(apexX, apexY - 3 * step) & 0xffffff;
+            assertEquals(0xffffff, outside, "and stops there (curve " + curve + ")");
+        }
+    }
+
+    @Test
     void ellipseRadialGradientHasItsCentreColour() {
         // An ellipse fanned from a rim vertex has no interior vertex, so a radial
         // gradient came out flat at the rim colour (SSJ Aura's glow, NOTES.md).

@@ -252,23 +252,39 @@ public final class Evaluator {
             if (fills != null && fills.containsKey(node.id)) {
                 for (app.barkfart.model.Polyfill pf : fills.get(node.id)) {
                     if (pf.nodes.size() < 2 || !spend(scene, layer.id)) continue;
-                    float[] pts = new float[(pf.nodes.size() + 1) * 2];
-                    pts[0] = (float) xf.mapX(px[i], py[i]);
-                    pts[1] = (float) xf.mapY(px[i], py[i]);
+                    int[] ring = new int[pf.nodes.size() + 1];
+                    ring[0] = i;
                     boolean ok = true;
                     for (int k = 0; k < pf.nodes.size(); k++) {
-                        int ni = f.indexOf(pf.nodes.get(k));
-                        if (ni < 0) {
+                        ring[k + 1] = f.indexOf(pf.nodes.get(k));
+                        if (ring[k + 1] < 0) {
                             ok = false;
                             break;
                         }
-                        pts[(k + 1) * 2] = (float) xf.mapX(px[ni], py[ni]);
-                        pts[(k + 1) * 2 + 1] = (float) xf.mapY(px[ni], py[ni]);
                     }
                     if (!ok) {
                         scene.diagnostics.add(new Diagnostic(Diagnostic.Kind.MISSING_REF, layer.id + "/" + pf.id));
                         continue;
                     }
+                    // Edges along a curved segment follow its arc (either direction).
+                    java.util.ArrayList<Float> q = new java.util.ArrayList<Float>();
+                    boolean mirrored = xf.a * xf.d - xf.b * xf.c < 0;
+                    for (int k = 0; k < ring.length; k++) {
+                        int a = ring[k], b = ring[(k + 1) % ring.length];
+                        float x0 = (float) xf.mapX(px[a], py[a]), y0 = (float) xf.mapY(px[a], py[a]);
+                        float x1 = (float) xf.mapX(px[b], py[b]), y1 = (float) xf.mapY(px[b], py[b]);
+                        q.add(x0);
+                        q.add(y0);
+                        int child = parent[b] == a ? b : parent[a] == b ? a : -1;
+                        if (child >= 0 && nodes.get(child).curve != 0 && nodes.get(child).shape == Node.Shape.LINE) {
+                            float h = (float) (nodes.get(child).curve * Shape.CURVE_SAGITTA * sf);
+                            if (mirrored) h = -h;
+                            if (child == a) h = -h;      // walking child -> parent: the bulge is on the other side
+                            arcInterior(q, x0, y0, x1, y1, h);
+                        }
+                    }
+                    float[] pts = new float[q.size()];
+                    for (int k = 0; k < pts.length; k++) pts[k] = q.get(k);
                     Color pc = (Color) r.resolve(pf.useOwnColor ? pf.color : node.color, t);
                     g.children.add(new Shape.Polygon(pts, pc, layer.id + "/" + pf.id, false));
                 }
@@ -304,20 +320,35 @@ public final class Evaluator {
                     break;
                 }
                 case CIRCLE: {
+                    // Filled disc on the segment as diameter (fitted). Half arc: only the side
+                    // to the left (1) or right (-1) of parent -> node. Hollow drops the fill;
+                    // the outline is a band of width = thickness on the rim (unverified, NOTES.md).
                     float cx = (ax + bx) / 2, cy = (ay + by) / 2;
                     float rad2 = (float) (Math.hypot(bx - ax, by - ay) / 2);
-                    g.children.add(new Shape.Circle(cx, cy, rad2, c, src));
+                    float start = 0, span = (float) (2 * Math.PI);
+                    if (node.halfArc != 0) {
+                        float toB = (float) Math.atan2(by - cy, bx - cx);
+                        span = (float) Math.PI;
+                        start = node.halfArc > 0 ? toB : toB + (float) Math.PI;
+                        if (xf.a * xf.d - xf.b * xf.c < 0) start += (float) Math.PI;   // mirrored: keep the side
+                    }
+                    if (!node.circleHollow) g.children.add(new Shape.Circle(cx, cy, rad2, start, span, c, src));
+                    if (node.circleOutline || node.circleHollow) {
+                        Color oc = node.circleOutline ? (Color) r.resolve(node.outlineColor, t) : c;
+                        float ow = Math.max(w, (float) sf);
+                        g.children.add(new Shape.Ring(cx, cy, rad2, ow, start, span, oc, src));
+                    }
                     break;
                 }
                 default: {
-                    float[] pts = Outline.of(node.shape, ax, ay, bx, by, w, node.triangleUpsideDown, node.rightTriangle);
-                    if (pts != null) g.children.add(new Shape.Polygon(pts, c, src));
+                    float[] pts = Outline.of(node, ax, ay, bx, by, w);
+                    if (pts != null) g.children.add(new Shape.Polygon(pts, c, src, node.shape != Node.Shape.TRAPEZOID));
                 }
             }
             if (gEnd != null && g.children.size() > before) {
-                Shape added = (Shape) g.children.get(g.children.size() - 1);
+                Shape added = (Shape) g.children.get(before);   // the fill, not an outline drawn over it
                 float mx = (ax + bx) / 2, my = (ay + by) / 2;
-                if (node.shape == Node.Shape.CIRCLE) {
+                if (node.shape == Node.Shape.CIRCLE || node.shape == Node.Shape.POLYGON) {
                     added.gradient = Shape.Gradient.radial(mx, my, (float) (Math.hypot(bx - ax, by - ay) / 2), gEnd);
                 } else if (node.shape == Node.Shape.ELLIPSE) {
                     // follows the ellipse: rim colour on the whole outline, both axes
@@ -331,6 +362,38 @@ public final class Evaluator {
                 }
             }
         }
+    }
+
+    /**
+     * Points strictly between (x0, y0) and (x1, y1) on the circular arc whose bulge
+     * (sagitta) is h to the left of the walking direction, as drawn for curved lines.
+     */
+    static void arcInterior(java.util.List<Float> out, float x0, float y0, float x1, float y1, float h) {
+        double dx = x1 - x0, dy = y1 - y0, c = Math.hypot(dx, dy);
+        if (c < 1e-6 || Math.abs(h) < 1e-6) return;
+        double nx = -dy / c, ny = dx / c;                 // left normal
+        double mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+        double R = (c * c / 4 + h * h) / (2 * Math.abs(h));
+        double side = Math.signum(h);
+        double cx = mx + nx * side * (Math.abs(h) - R), cy = my + ny * side * (Math.abs(h) - R);
+        double a0 = Math.atan2(y0 - cy, x0 - cx), a1 = Math.atan2(y1 - cy, x1 - cx);
+        double sweep = a1 - a0;
+        // go the way that passes the bulge apex
+        double ax = mx + nx * h, ay = my + ny * h, am = Math.atan2(ay - cy, ax - cx);
+        double s1 = norm(sweep), s2 = s1 - Math.signum(s1) * 2 * Math.PI, toApex = norm(am - a0);
+        sweep = (Math.signum(toApex) == Math.signum(s1) && Math.abs(toApex) < Math.abs(s1)) ? s1 : s2;
+        int n = Math.max(2, Math.min(64, (int) Math.ceil(Math.abs(sweep) * R / 2)));
+        for (int k = 1; k < n; k++) {
+            double a = a0 + sweep * k / n;
+            out.add((float) (cx + R * Math.cos(a)));
+            out.add((float) (cy + R * Math.sin(a)));
+        }
+    }
+
+    private static double norm(double a) {
+        while (a > Math.PI) a -= 2 * Math.PI;
+        while (a < -Math.PI) a += 2 * Math.PI;
+        return a;
     }
 
     private static void emitSprite(Layer.SpriteLayer l, Affine xf, double t, PropertyResolver r, Scene scene, Group g) {

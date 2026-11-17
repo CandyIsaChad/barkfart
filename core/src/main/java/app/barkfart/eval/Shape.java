@@ -96,12 +96,35 @@ public abstract class Shape {
     /** A filled circle. */
     public static final class Circle extends Shape {
         public final float cx, cy, r;
+        /** Filled sector from start over span (radians); a full circle by default. */
+        public final float start, span;
 
         public Circle(float cx, float cy, float r, Color color, String source) {
+            this(cx, cy, r, 0, (float) (2 * Math.PI), color, source);
+        }
+
+        public Circle(float cx, float cy, float r, float start, float span, Color color, String source) {
             super(color, source);
             this.cx = cx;
             this.cy = cy;
             this.r = r;
+            this.start = start;
+            this.span = span;
+        }
+    }
+
+    /** A circular band of the given width centred on radius r, from start over span (radians). */
+    public static final class Ring extends Shape {
+        public final float cx, cy, r, width, start, span;
+
+        public Ring(float cx, float cy, float r, float width, float start, float span, Color color, String source) {
+            super(color, source);
+            this.cx = cx;
+            this.cy = cy;
+            this.r = r;
+            this.width = width;
+            this.start = start;
+            this.span = span;
         }
     }
 

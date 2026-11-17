@@ -212,6 +212,21 @@ public final class ProjectCodec {
         if (n.curve != 0) m.put("curve", Json.num(n.curve));
         if (n.triangleUpsideDown) m.put("upsideDown", true);
         if (n.rightTriangle != 0) m.put("rightTriangle", Json.num(n.rightTriangle));
+        if (n.isStatic) m.put("static", true);
+        if (n.stretchy) m.put("stretchy", true);
+        if (n.smartStretch) m.put("smartStretch", true);
+        if (n.noSmartStretch) m.put("noSmartStretch", true);
+        if (n.restLength != 0) m.put("restLength", Json.num(n.restLength));
+        if (n.circleHollow) m.put("hollow", true);
+        if (n.circleOutline) m.put("outline", true);
+        if (!n.outlineColor.track().isEmpty() || !app.barkfart.model.Color.BLACK.equals(n.outlineColor.value())) m.put("outlineColor", prop(n.outlineColor, false));
+        if (n.halfArc != 0) m.put("halfArc", Json.num(n.halfArc));
+        if (n.polygonSides != 0) m.put("sides", Json.num(n.polygonSides));
+        if (n.trapezoidRatio != 1f) m.put("trapezoidRatio", Json.num(n.trapezoidRatio));
+        if (n.trapezoidRoundStart) m.put("roundStart", true);
+        if (n.trapezoidRoundEnd) m.put("roundEnd", true);
+        if (n.angleLock != 0) m.put("angleLock", Json.num(n.angleLock));
+        if (n.dragLock != 0) m.put("dragLock", Json.num(n.dragLock));
         // Saved whenever it carries information, even with the gradient off (exact legacy export).
         boolean gradColourSet = !n.gradientColor.track().isEmpty() || !app.barkfart.model.Color.WHITE.equals(n.gradientColor.value());
         if (n.gradient || n.gradientReverse || n.gradientSideways || gradColourSet) {
@@ -602,6 +617,21 @@ public final class ProjectCodec {
         n.curve = f(m, "curve", 0);
         n.triangleUpsideDown = b(m, "upsideDown", false);
         n.rightTriangle = i(m, "rightTriangle", 0);
+        n.isStatic = b(m, "static", false);
+        n.stretchy = b(m, "stretchy", false);
+        n.smartStretch = b(m, "smartStretch", false);
+        n.noSmartStretch = b(m, "noSmartStretch", false);
+        n.restLength = f(m, "restLength", 0);
+        n.circleHollow = b(m, "hollow", false);
+        n.circleOutline = b(m, "outline", false);
+        if (m.containsKey("outlineColor")) readProp(m, "outlineColor", n.outlineColor);
+        n.halfArc = i(m, "halfArc", 0);
+        n.polygonSides = i(m, "sides", 0);
+        n.trapezoidRatio = f(m, "trapezoidRatio", 1f);
+        n.trapezoidRoundStart = b(m, "roundStart", false);
+        n.trapezoidRoundEnd = b(m, "roundEnd", false);
+        n.angleLock = i(m, "angleLock", 0);
+        n.dragLock = i(m, "dragLock", 0);
         if (m.containsKey("gradient")) {
             Map<String, Object> gm = asMap(m.get("gradient"), "gradient");
             n.gradient = b(gm, "on", true);

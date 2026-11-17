@@ -183,7 +183,7 @@ Not done
   panel): waits for the user's screenshots so the layout matches the
   original. Markers exist in the model but have no edit commands yet.
 
-### Shapes against the original (core-first step 3, in progress)
+### Shapes against the original (core-first step 3, done 2026-11-17)
 - Curved segments: arcs (one strip, no double-blending) with the bulge
   fitted to the original's previews; Sparks now passes the strict IoU check
   (was the one known gap), Hit improved. Known-gaps list is empty.
@@ -197,8 +197,34 @@ Not done
   segments' gradients run the other way and keep their stored colour; the
   golden now applies the same stage-colour rule to both sides. Gradient
   clips are now part of the asserted golden (rules in NOTES.md).
-- Next in this step: node scale semantics, outlines,
-  hollow circles, trapezoids, polygons, smart-stretch, angle/drag locks.
+- Node scale: own length only (fitted on Action Lines, 0.37 -> 0.91/0.98).
+  Golden stage colour = the preview's most common colour (a corner pixel
+  can be content). Action Lines is now asserted; Snow stays reported only
+  (geometry and motion match; its thumbnails look stale, NOTES.md).
+- Node options in the model, saved (optional fields, defaults not written)
+  and mapped to/from legacy files byte-exactly: static, stretchy,
+  smart-stretch, do-not-smart-stretch, rest length, hollow / outlined
+  circles with an animatable outline colour, half arcs, polygon sides,
+  trapezoid ratio and round ends, angle lock, drag lock.
+- Drawn: hollow and outlined circles (ring primitive), half arcs,
+  trapezoids (optionally round-ended), regular polygons (radial gradients).
+  Type 2 circles confirmed filled (a ring scored worse on Ground Dust).
+  Golden: node_option_shapes.
+- Editor: static nodes have no handles while animating; smart-stretch
+  reshapes static details with the rule fitted to the original's own files
+  (Rain's stretched circle reproduced to 0.2 units); angle locks (absolute /
+  relative to the nearest moving ancestor) in pose and drag; drag lock to one
+  axis. All one undo step (NodeOptionsTest).
+- Polyfill edges along a curved segment follow the drawn arc (both
+  directions; test fails on the old straight edge).
+- Found by the fuzz test after the model grew: a fan of delayed links could
+  exhaust memory (exponential distinct times). Link lookups now have a
+  budget per evaluation (200k) with a RESOLVE_BUDGET diagnostic.
+- Unverified (no reference file uses them; recorded in NOTES.md): trapezoid
+  and polygon geometry, hollow/outline widths, half-arc side, the legacy
+  encoding of angle and drag locks (kept raw, not mapped), thickness under
+  node scale. Not yet: curved trapezoids, floaty tweening, creation-mode UI
+  for all of these (parity order step 3).
 
 ### Renderer foundation (2026-11-17, core-first step 2)
 - DrawList batches carry per-vertex colour, texture coordinates and a
