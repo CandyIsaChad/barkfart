@@ -90,8 +90,50 @@ public final class Evaluator {
             Work w = stack.pop();
             evalSymbol(project, w, r, scene, stack, onionOnly && w.path.up == null);
         }
+        if (!onionOnly) background(project, sym, t, r, root, applyCamera);
         if (applyCamera && !onionOnly) letterbox(project, root);
         return scene;
+    }
+
+    /** The topmost visible camera of the symbol at t, or null. */
+    public static Layer.CameraLayer activeCamera(Symbol sym, double t, PropertyResolver r) {
+        for (int i = sym.layers.size() - 1; i >= 0; i--) {
+            Layer l = sym.layers.get(i);
+            if (l instanceof Layer.CameraLayer && l.visible && r.b(l.shown, t)) return (Layer.CameraLayer) l;
+        }
+        return null;
+    }
+
+    /**
+     * The camera's shot background, behind everything: a solid colour or a
+     * top-to-bottom gradient over the shot (in stage space: the camera's
+     * view area).
+     */
+    private static void background(Project project, Symbol sym, double t, PropertyResolver r, Group root, boolean applyCamera) {
+        Layer.CameraLayer cam = activeCamera(sym, t, r);
+        if (cam == null) return;
+        app.barkfart.model.Color top = (app.barkfart.model.Color) r.resolve(cam.background, t);
+        if (top == null || !(top.a > 0)) return;
+        app.barkfart.model.Color bottom = (app.barkfart.model.Color) r.resolve(cam.background2, t);
+        float w = project.settings.width / 2f, h = project.settings.height / 2f;
+        float[] pts = {-w, -h, w, -h, w, h, -w, h};
+        float[] ends = {0, h, 0, -h};
+        if (!applyCamera) {
+            Affine inv = cameraOf(cam, t, r).inverse();
+            for (int i = 0; i < pts.length; i += 2) map(inv, pts, i);
+            for (int i = 0; i < ends.length; i += 2) map(inv, ends, i);
+        }
+        Shape.Polygon poly = new Shape.Polygon(pts, top, "background", true);
+        if (bottom != null && bottom.a > 0) poly.gradient = Shape.Gradient.linear(ends[0], ends[1], ends[2], ends[3], bottom);
+        Group g = new Group("background");
+        g.children.add(poly);
+        root.children.add(0, g);
+    }
+
+    private static void map(Affine m, float[] p, int i) {
+        double x = p[i], y = p[i + 1];
+        p[i] = (float) (m.a * x + m.c * y + m.tx);
+        p[i + 1] = (float) (m.b * x + m.d * y + m.ty);
     }
 
     /** Widescreen bars over the shot (Stick Nodes 2.2.0): black above and below to the set aspect ratio. */

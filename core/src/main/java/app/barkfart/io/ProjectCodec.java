@@ -215,6 +215,8 @@ public final class ProjectCodec {
             m.put("camY", prop(c.y, false));
             m.put("zoom", prop(c.zoom, false));
             m.put("camRotation", prop(c.rotation, false));
+            if (!c.background.track().isEmpty() || ((Color) c.background.value()).a > 0) m.put("background", prop(c.background, false));
+            if (!c.background2.track().isEmpty() || ((Color) c.background2.value()).a > 0) m.put("background2", prop(c.background2, false));
         }
         return m;
     }
@@ -321,6 +323,7 @@ public final class ProjectCodec {
                     km.add(Json.num(k.ease.y1));
                     km.add(Json.num(k.ease.x2));
                     km.add(Json.num(k.ease.y2));
+                    if (k.ease.kind != Ease.Kind.CUBIC) km.add(k.ease.kind.name());
                 }
                 keys.add(km);
             }
@@ -655,6 +658,8 @@ public final class ProjectCodec {
                 readProp(m, "camY", c.y);
                 readProp(m, "zoom", c.zoom);
                 readProp(m, "camRotation", c.rotation);
+                readProp(m, "background", c.background);
+                readProp(m, "background2", c.background2);
                 l = c;
             }
         }
@@ -780,6 +785,9 @@ public final class ProjectCodec {
             Ease ease = Ease.LINEAR;
             if (in == Interp.BEZIER) {
                 ease = new Ease(num(k.get(3), "x1").f(), num(k.get(4), "y1").f(), num(k.get(5), "x2").f(), num(k.get(6), "y2").f());
+                if (k.size() > 7 && k.get(7) instanceof String) {   // bounce / elastic (optional; unknown names stay cubic)
+                    for (Ease.Kind kind : Ease.Kind.values()) if (kind.name().equals(k.get(7))) ease = new Ease(kind);
+                }
             }
             p.track().put(new Key(time, v, in, ease));
         }

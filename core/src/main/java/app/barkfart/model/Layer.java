@@ -186,9 +186,17 @@ public abstract class Layer {
 
     public static final class CameraLayer extends Layer {
         public final Property x, y, zoom, rotation;
+        /**
+         * Shot background (Stick Nodes 1.0 frame background, 2.0.0 gradient):
+         * transparent = the project background; with background2 opaque, a
+         * gradient from background at the top to background2 at the bottom.
+         */
+        public final Property background, background2;
 
         public CameraLayer(String id, String name) {
             super(id, name);
+            background = new Property(id + "/cam/bg", ValueType.COLOR, new Color(0, 0, 0, 0));
+            background2 = new Property(id + "/cam/bg2", ValueType.COLOR, new Color(0, 0, 0, 0));
             x = new Property(id + "/cam/x", ValueType.FLOAT, 0f);
             y = new Property(id + "/cam/y", ValueType.FLOAT, 0f);
             zoom = new Property(id + "/cam/zoom", ValueType.FLOAT, 1f);
@@ -207,6 +215,8 @@ public abstract class Layer {
             out.add(y);
             out.add(zoom);
             out.add(rotation);
+            out.add(background);
+            out.add(background2);
             return out;
         }
     }

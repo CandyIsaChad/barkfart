@@ -18,13 +18,53 @@ public final class Ease {
     public static final Ease OVERSHOOT = new Ease(0.34f, 1.56f, 0.64f, 1f);
     public static final Ease ANTICIPATE_OVERSHOOT = new Ease(0.68f, -0.6f, 0.32f, 1.6f);
 
+    /**
+     * Curves a cubic cannot draw (Stick Nodes 2.5.6 camera easing: bounce,
+     * elastic). CUBIC uses the control points; the others ignore them.
+     */
+    public enum Kind { CUBIC, BOUNCE_OUT, BOUNCE_IN, ELASTIC_OUT, ELASTIC_IN }
+
+    public static final Ease BOUNCE_OUT = new Ease(Kind.BOUNCE_OUT);
+    public static final Ease BOUNCE_IN = new Ease(Kind.BOUNCE_IN);
+    public static final Ease ELASTIC_OUT = new Ease(Kind.ELASTIC_OUT);
+    public static final Ease ELASTIC_IN = new Ease(Kind.ELASTIC_IN);
+
     public final float x1, y1, x2, y2;
+    public final Kind kind;
 
     public Ease(float x1, float y1, float x2, float y2) {
         this.x1 = clamp01(x1);
         this.y1 = y1;
         this.x2 = clamp01(x2);
         this.y2 = y2;
+        this.kind = Kind.CUBIC;
+    }
+
+    public Ease(Kind kind) {
+        this.x1 = 0;
+        this.y1 = 0;
+        this.x2 = 1;
+        this.y2 = 1;
+        this.kind = kind == null ? Kind.CUBIC : kind;
+    }
+
+    static float bounceOut(float u) {
+        final float n = 7.5625f, d = 2.75f;
+        if (u < 1 / d) return n * u * u;
+        if (u < 2 / d) {
+            u -= 1.5f / d;
+            return n * u * u + 0.75f;
+        }
+        if (u < 2.5f / d) {
+            u -= 2.25f / d;
+            return n * u * u + 0.9375f;
+        }
+        u -= 2.625f / d;
+        return n * u * u + 0.984375f;
+    }
+
+    static float elasticOut(float u) {
+        return (float) (Math.pow(2, -10 * u) * Math.sin((u * 10 - 0.75) * (2 * Math.PI / 3)) + 1);
     }
 
     private static float clamp01(float v) {
@@ -35,6 +75,13 @@ public final class Ease {
     public float apply(float u) {
         if (u <= 0) return 0;
         if (u >= 1) return 1;
+        switch (kind) {
+            case BOUNCE_OUT: return bounceOut(u);
+            case BOUNCE_IN: return 1 - bounceOut(1 - u);
+            case ELASTIC_OUT: return elasticOut(u);
+            case ELASTIC_IN: return 1 - elasticOut(1 - u);
+            default: break;
+        }
         // Solve x(s) = u for s with Newton, falling back to bisection.
         float s = u;
         for (int i = 0; i < 8; i++) {
@@ -70,12 +117,12 @@ public final class Ease {
     public boolean equals(Object o) {
         if (!(o instanceof Ease)) return false;
         Ease e = (Ease) o;
-        return x1 == e.x1 && y1 == e.y1 && x2 == e.x2 && y2 == e.y2;
+        return kind == e.kind && x1 == e.x1 && y1 == e.y1 && x2 == e.x2 && y2 == e.y2;
     }
 
     @Override
     public int hashCode() {
         return Float.floatToIntBits(x1) ^ Float.floatToIntBits(y1) * 7 ^ Float.floatToIntBits(x2) * 13
-                ^ Float.floatToIntBits(y2) * 31;
+                ^ Float.floatToIntBits(y2) * 31 ^ kind.ordinal() * 101;
     }
 }

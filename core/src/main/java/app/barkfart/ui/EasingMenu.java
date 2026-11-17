@@ -44,6 +44,10 @@ public final class EasingMenu extends WidgetGroup {
         new Preset("Anticipate", Interp.BEZIER, Ease.ANTICIPATE),
         new Preset("Overshoot", Interp.BEZIER, Ease.OVERSHOOT),
         new Preset("Anticipate + overshoot", Interp.BEZIER, Ease.ANTICIPATE_OVERSHOOT),
+        new Preset("Bounce", Interp.BEZIER, Ease.BOUNCE_OUT),
+        new Preset("Bounce in", Interp.BEZIER, Ease.BOUNCE_IN),
+        new Preset("Elastic", Interp.BEZIER, Ease.ELASTIC_OUT),
+        new Preset("Elastic in", Interp.BEZIER, Ease.ELASTIC_IN),
     };
 
     /** Which preset a key's interpolation matches, or null. */
