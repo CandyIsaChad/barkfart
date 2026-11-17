@@ -175,4 +175,19 @@ class StructureEditsTest {
         d.undo();
         assertEquals(before, app.barkfart.io.ProjectCodec.encode(p));
     }
+
+    @Test
+    void canvasSizeAndBarsAreUndoable() {
+        app.barkfart.model.Project p = app.barkfart.Fixtures.empty();
+        Document d = new Document(p);
+        d.apply(StructureEdits.setCanvasSize(p, 720, 1280));
+        d.apply(StructureEdits.setLetterbox(p, 2.39f));
+        assertEquals(720, p.settings.width);
+        assertEquals(2.39f, p.settings.letterbox, 1e-6);
+        d.undo();
+        d.undo();
+        assertEquals(1280, p.settings.width);
+        assertEquals(0f, p.settings.letterbox);
+        assertThrows(IllegalArgumentException.class, () -> StructureEdits.setCanvasSize(p, 0, 100));
+    }
 }

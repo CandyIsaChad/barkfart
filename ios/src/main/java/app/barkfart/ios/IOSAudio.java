@@ -34,7 +34,10 @@ final class IOSAudio extends PumpOutput {
     protected String open() {
         if (engine != null) return null;
         try {
-            AVAudioSession.getSharedInstance().setCategory(AVAudioSessionCategory.Playback);
+            // Playback (sounds even with the silent switch on) that mixes with other apps' music
+            // instead of stopping it (Stick Nodes 2.2.4 "background music on iOS").
+            AVAudioSession.getSharedInstance().setCategory(AVAudioSessionCategory.Playback,
+                    org.robovm.apple.avfoundation.AVAudioSessionCategoryOptions.MixWithOthers);
             AVAudioSession.getSharedInstance().setActive(true);
         } catch (NSErrorException e) {
             // keep going: playback works without the category, just obeys the silent switch

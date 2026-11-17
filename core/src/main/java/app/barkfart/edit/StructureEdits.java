@@ -106,6 +106,43 @@ public final class StructureEdits {
         };
     }
 
+    /** Canvas presets: name, width, height (vertical video is Stick Nodes 4.0.3). */
+    public static final Object[][] CANVAS_PRESETS = {
+        {"16:9 HD", 1280, 720}, {"16:9 Full HD", 1920, 1080}, {"9:16 vertical", 720, 1280}, {"9:16 vertical Full HD", 1080, 1920},
+        {"1:1 square", 1080, 1080}, {"4:3", 1024, 768},
+    };
+
+    /** Sets the canvas (stage and export) size; also the camera frame. */
+    public static Command setCanvasSize(final Project p, final int w, final int h) {
+        if (w < 16 || h < 16 || w > 8192 || h > 8192) throw new IllegalArgumentException("canvas 16..8192");
+        final int ow = p.settings.width, oh = p.settings.height;
+        return new Named("Canvas size") {
+            public void apply() {
+                p.settings.width = w;
+                p.settings.height = h;
+            }
+
+            public void revert() {
+                p.settings.width = ow;
+                p.settings.height = oh;
+            }
+        };
+    }
+
+    /** Widescreen bars aspect (0 = none). */
+    public static Command setLetterbox(final Project p, final float aspect) {
+        final float old = p.settings.letterbox;
+        return new Named("Widescreen bars") {
+            public void apply() {
+                p.settings.letterbox = aspect;
+            }
+
+            public void revert() {
+                p.settings.letterbox = old;
+            }
+        };
+    }
+
     // ---- effects ----
 
     /** Appends an effect to the end of a layer's chain. */
