@@ -90,7 +90,20 @@ public final class Evaluator {
             Work w = stack.pop();
             evalSymbol(project, w, r, scene, stack, onionOnly && w.path.up == null);
         }
+        if (applyCamera && !onionOnly) letterbox(project, root);
         return scene;
+    }
+
+    /** Widescreen bars over the shot (Stick Nodes 2.2.0): black above and below to the set aspect ratio. */
+    private static void letterbox(Project project, Group root) {
+        float aspect = project.settings.letterbox, w = project.settings.width, h = project.settings.height;
+        if (!(aspect > 0) || !(w > 0) || !(h > 0) || aspect <= w / h) return;
+        float bar = (h - w / aspect) / 2, x0 = -w / 2, x1 = w / 2, y1 = h / 2;
+        Group g = new Group("letterbox");
+        app.barkfart.model.Color black = app.barkfart.model.Color.BLACK;
+        g.children.add(new Shape.Polygon(new float[] {x0, y1 - bar, x1, y1 - bar, x1, y1, x0, y1}, black, "letterbox"));
+        g.children.add(new Shape.Polygon(new float[] {x0, -y1, x1, -y1, x1, -y1 + bar, x0, -y1 + bar}, black, "letterbox"));
+        root.children.add(g);
     }
 
     /** View transform from the topmost visible camera layer of the evaluated symbol. */
@@ -98,13 +111,17 @@ public final class Evaluator {
         for (int i = sym.layers.size() - 1; i >= 0; i--) {
             Layer l = sym.layers.get(i);
             if (!(l instanceof Layer.CameraLayer) || !l.visible || !r.b(l.shown, t)) continue;
-            Layer.CameraLayer c = (Layer.CameraLayer) l;
-            double zoom = r.f(c.zoom, t);
-            if (!(zoom > 1e-6)) zoom = 1e-6;
-            return Affine.scale(zoom, zoom).mul(Affine.rotateDeg(-r.f(c.rotation, t)))
-                    .mul(Affine.translate(-r.f(c.x, t), -r.f(c.y, t)));
+            return cameraOf((Layer.CameraLayer) l, t, r);
         }
         return Affine.IDENTITY;
+    }
+
+    /** One camera's view transform (stage to shot). */
+    static Affine cameraOf(Layer.CameraLayer c, double t, PropertyResolver r) {
+        double zoom = r.f(c.zoom, t);
+        if (!(zoom > 1e-6)) zoom = 1e-6;
+        return Affine.scale(zoom, zoom).mul(Affine.rotateDeg(-r.f(c.rotation, t)))
+                .mul(Affine.translate(-r.f(c.x, t), -r.f(c.y, t)));
     }
 
     private static void evalSymbol(Project project, Work w, PropertyResolver r, Scene scene, ArrayDeque<Work> stack,
@@ -204,6 +221,12 @@ public final class Evaluator {
             if (!seen.add(p.id)) {
                 scene.diagnostics.add(new Diagnostic(Diagnostic.Kind.PARENT_CYCLE, l.id));
                 break;
+            }
+            if (p instanceof Layer.CameraLayer) {
+                // locked to the camera: undo the camera's view, so the layer keeps its place in the shot
+                acc = cameraOf((Layer.CameraLayer) p, t, r).inverse().mul(acc);
+                cur = p;
+                continue;
             }
             Affine joint = cur.parentNode == null ? null : nodeFrame(p, cur.parentNode, cur.parentNodeRotate, t, r, scene, cur.id);
             acc = local(p, t, r).mul(joint == null ? acc : joint.mul(acc));

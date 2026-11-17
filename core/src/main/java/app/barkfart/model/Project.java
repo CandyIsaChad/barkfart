@@ -12,6 +12,8 @@ public final class Project {
         public float fps = 30;
         public int width = 1280, height = 720;
         public Color background = Color.WHITE;
+        /** Widescreen bars: the shot's aspect ratio (e.g. 2.39), or 0 for none. */
+        public float letterbox;
     }
 
     public final Settings settings = new Settings();

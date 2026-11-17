@@ -58,6 +58,7 @@ public final class ProjectCodec {
         s.put("width", Json.num(p.settings.width));
         s.put("height", Json.num(p.settings.height));
         s.put("background", color(p.settings.background));
+        if (p.settings.letterbox != 0) s.put("letterbox", Json.num(p.settings.letterbox));
         m.put("settings", s);
         m.put("rootSymbol", p.rootSymbol);
         List<Object> lib = new ArrayList<Object>();
@@ -474,6 +475,7 @@ public final class ProjectCodec {
         p.settings.width = i(s, "width", defaults.width);
         p.settings.height = i(s, "height", defaults.height);
         p.settings.background = s.containsKey("background") ? parseColor(req(s, "background")) : defaults.background;
+        p.settings.letterbox = f(s, "letterbox", 0);
         p.rootSymbol = req(m, "rootSymbol");
         for (Object o : list(m, "assets")) {
             Map<String, Object> am = asMap(o, "asset");

@@ -33,6 +33,11 @@ public final class JoinOps {
         return change(p, s, child, target.id, nodeId, rotate, t, "Join to " + target.name);
     }
 
+    /** Gives a layer any parent (or none), keeping it in place (used for camera locks). */
+    static Command reparent(Project p, Symbol s, Layer child, String parentId, double t, String label) {
+        return change(p, s, child, parentId, null, true, t, label);
+    }
+
     /** Detach a layer from whatever it is joined to. */
     public static Command unjoin(Project p, Symbol s, Layer child, double t) {
         return change(p, s, child, null, null, true, t, "Unjoin " + child.name);
