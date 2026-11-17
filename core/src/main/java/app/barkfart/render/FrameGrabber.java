@@ -16,6 +16,8 @@ import java.nio.ByteBuffer;
  * Renders the project's shot (camera applied, effects included) at a time
  * into an offscreen buffer of the export size and reads it back as straight
  * RGBA8, rows top-down: over the project background, or transparent.
+ * Drawn at twice the size and averaged down by default, so edges are smooth
+ * (offscreen buffers have no multisampling).
  * GL thread only.
  */
 public final class FrameGrabber implements Disposable {
@@ -28,12 +30,25 @@ public final class FrameGrabber implements Disposable {
     private final ByteBuffer buf;
     private final byte[] raw;
 
+    /** Rendering scale: frames are drawn this many times larger and averaged down (smooth edges). */
+    public final int ss;
+    private final byte[] big;
+
     public FrameGrabber(Project p, int w, int h) {
+        this(p, w, h, 2);
+    }
+
+    /** supersample: 1 = as drawn, 2 = 4 samples per pixel (capped at 4096 px wide / high). */
+    public FrameGrabber(Project p, int w, int h, int supersample) {
         this.w = w;
         this.h = h;
-        fb = new FrameBuffer(Pixmap.Format.RGBA8888, w, h, false);
+        int k = Math.max(1, Math.min(4, supersample));
+        while (k > 1 && (w * k > 4096 || h * k > 4096)) k--;
+        ss = k;
+        fb = new FrameBuffer(Pixmap.Format.RGBA8888, w * ss, h * ss, false);
         textures = new AssetTextures(p);
-        buf = BufferUtils.newByteBuffer(w * h * 4);
+        buf = BufferUtils.newByteBuffer(w * ss * h * ss * 4);
+        big = new byte[w * ss * h * ss * 4];
         raw = new byte[w * h * 4];
     }
 
@@ -43,8 +58,9 @@ public final class FrameGrabber implements Disposable {
     }
 
     public byte[] grab(Project p, double t, boolean transparent) {
+        int bw = w * ss, bh = h * ss;
         fb.bind();
-        Gdx.gl.glViewport(0, 0, w, h);
+        Gdx.gl.glViewport(0, 0, bw, bh);
         Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
         Gdx.gl.glClearColor(0, 0, 0, 0);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
@@ -54,9 +70,33 @@ public final class FrameGrabber implements Disposable {
         fb.bind();   // the renderer restores the binding it found; be explicit before reading
         Gdx.gl.glPixelStorei(GL20.GL_PACK_ALIGNMENT, 1);
         buf.clear();
-        Gdx.gl.glReadPixels(0, 0, w, h, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, buf);
-        buf.get(raw);
+        Gdx.gl.glReadPixels(0, 0, bw, bh, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, buf);
+        buf.get(big);
         FrameBuffer.unbind();
+        if (ss == 1) System.arraycopy(big, 0, raw, 0, raw.length);
+        else {   // box filter over ss x ss samples (premultiplied, so edges average correctly)
+            int n = ss * ss;
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    int r = 0, g = 0, b = 0, a = 0;
+                    for (int dy = 0; dy < ss; dy++) {
+                        int row = ((y * ss + dy) * bw + x * ss) * 4;
+                        for (int dx = 0; dx < ss; dx++) {
+                            int o = row + dx * 4;
+                            r += big[o] & 0xff;
+                            g += big[o + 1] & 0xff;
+                            b += big[o + 2] & 0xff;
+                            a += big[o + 3] & 0xff;
+                        }
+                    }
+                    int o = (y * w + x) * 4;
+                    raw[o] = (byte) ((r + n / 2) / n);
+                    raw[o + 1] = (byte) ((g + n / 2) / n);
+                    raw[o + 2] = (byte) ((b + n / 2) / n);
+                    raw[o + 3] = (byte) ((a + n / 2) / n);
+                }
+            }
+        }
         byte[] out = new byte[w * h * 4];
         app.barkfart.model.Color bg = p.settings.background;
         int br = Math.round(bg.r * 255), bgG = Math.round(bg.g * 255), bb = Math.round(bg.b * 255);
