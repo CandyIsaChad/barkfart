@@ -59,6 +59,7 @@ public final class MovieclipMapper {
                     Node n = nodes.get(i);
                     key(n.rotation, t, MovieclipFormat.FrameFigure.nodeLocalAngle(r), interp);
                     key(n.length, t, MovieclipFormat.FrameFigure.nodeLength(r), interp);
+                    if (lib.get(i).i("useSegmentScale") != 0) key(n.scale, t, MovieclipFormat.FrameFigure.nodeScale(r), interp);
                     key(n.thickness, t, (float) MovieclipFormat.FrameFigure.nodeThickness(r), interp);
                     boolean own = lib.get(i).i("useSegmentColor") != 0;
                     Color c = own ? FigureMapper.color(MovieclipFormat.FrameFigure.nodeColor(r)) : figColor;

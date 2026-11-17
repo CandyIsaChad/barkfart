@@ -91,9 +91,21 @@ which matters for import scale (DESIGN Q4).
   @19, local angle @23, default world angle @27, colour @31, gradient @35,
   outline @39. All 12 local clips parse to EOF and round-trip byte for byte
   (Rain has 466 figure instances).
-- Open: Snow and Action Lines (several figures per frame) render with
-  figures in the wrong place (Snow: correct pattern shifted vertically).
-  Suspect a per-instance position or rotation field, or tweened timing.
+- Action Lines (resolved 2026-11-17): two causes. (1) The golden took the
+  top-left pixel as the stage colour; in its first preview that pixel is a
+  dark line. The stage is now the preview's most common colour (#f0f0f0).
+  (2) Node scale was not imported. Fit: a node's scale (when
+  useSegmentScale = 1, per-frame value @7 in movieclips) multiplies ONLY its
+  own length. Cumulative variants (scale passed down the subtree, with or
+  without the node's own) scored 0.34-0.46; own-only 0.91 / 0.98. Effect on
+  thickness: no evidence (the scaled node draws nothing); thickness is left
+  unscaled.
+- Snow (open): node positions equal the file's own cached offsets (0 of 359
+  differ), and the motion between previews matches ours exactly (best shift
+  p0->p1 and f0->f11 both (-10, 120) px). But the dot layout differs under
+  every shift, mirror and 180-degree turn tried (IoU <= 0.09), and no frame
+  matches any preview. Leading explanation: the stored thumbnails come from
+  an earlier version of the figure. Reported, not asserted.
 
 ## Shape semantics: current best fit against the original's previews (2026-11-16)
 - Ellipse (type 5): centred on the segment midpoint, major axis = segment

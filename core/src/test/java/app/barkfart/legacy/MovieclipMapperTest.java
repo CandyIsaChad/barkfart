@@ -69,7 +69,22 @@ class MovieclipMapperTest {
                 // The original renders onto an opaque stage background. A pixel counts as
                 // drawn when it differs from the stage colour by more than half of the
                 // clip's maximum contrast (handles pale content and anti-aliased edges).
-                int bg = pv.getRGB(0, 0);
+                // The stage colour is the preview's most common colour (a corner pixel
+                // can be content: Action Lines' first preview starts on a dark line).
+                java.util.HashMap<Integer, Integer> counts = new java.util.HashMap<Integer, Integer>();
+                int bg = pv.getRGB(0, 0), bgCount = 0;
+                for (int y = 0; y < h; y++) {
+                    for (int x = 0; x < w; x++) {
+                        int c = pv.getRGB(x, y);
+                        Integer k = counts.get(c);
+                        int nk = k == null ? 1 : k + 1;
+                        counts.put(c, nk);
+                        if (nk > bgCount) {
+                            bgCount = nk;
+                            bg = c;
+                        }
+                    }
+                }
                 int maxDiff = 0;
                 for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) maxDiff = Math.max(maxDiff, diff(pv.getRGB(x, y), bg));
                 int threshold = Math.max(4, maxDiff / 2);
@@ -191,12 +206,15 @@ class MovieclipMapperTest {
     static final java.util.Set<String> KNOWN_GAPS = new java.util.HashSet<String>(java.util.Arrays.asList("_Rain.nodemc"));
 
     /**
-     * Clips that parse exactly but render figures in the wrong place: reported,
-     * not asserted. Snow: correct pattern, shifted vertically; Action Lines:
-     * IoU 0.25. Both have several figures per frame. Cause open (NOTES.md).
+     * Clips whose preview we cannot reproduce: reported, not asserted. Snow:
+     * node positions equal the file's own cached offsets and the motion between
+     * previews matches ours exactly (same 120 px step), but the dot layout
+     * differs under every shift and mirror tried; a stale thumbnail is the
+     * leading explanation (NOTES.md). Action Lines left this list once node
+     * scale was imported (0.37 -> 0.91).
      */
     static final java.util.Set<String> RENDER_OPEN = new java.util.HashSet<String>(
-            java.util.Arrays.asList("_Snow Tho.nodemc", "_Action Lines.nodemc"));
+            java.util.Arrays.asList("_Snow Tho.nodemc"));
 
     /** Below this many drawn pixels IoU is dominated by edge pixels; such frames are reported only. */
     static final long MIN_AREA = 500;

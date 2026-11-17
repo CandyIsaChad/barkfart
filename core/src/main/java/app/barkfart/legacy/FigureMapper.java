@@ -48,6 +48,9 @@ public final class FigureMapper {
             n.drawOrder = ln.i("drawIndex");
             n.rotation.setValue(ln.f("localAngle"));
             n.length.setValue(ln.f("length"));
+            // Segment scale multiplies this node's own length only, not its children's
+            // (fitted on Action Lines, NOTES.md); ignored unless the node opts in.
+            if (ln.i("useSegmentScale") != 0) n.scale.setValue(ln.f("scale"));
             n.thickness.setValue((float) ln.i("thickness"));
             n.curve = ln.i("curveRadius");
             n.triangleUpsideDown = ln.i("triangleUpsideDown") != 0;
@@ -168,6 +171,14 @@ public final class FigureMapper {
             ln.fields.put("drawIndex", isRoot ? 0 : n.drawOrder);
             setIfChanged(ln, "localAngle", n.rotation.floatValue());
             setIfChanged(ln, "length", n.length.floatValue());
+            float sc = n.scale.floatValue();
+            if (ln.fields.containsKey("useSegmentScale")) {
+                if (ln.i("useSegmentScale") != 0) setIfChanged(ln, "scale", sc);
+                else if (sc != 1f) {
+                    ln.fields.put("useSegmentScale", 1);
+                    ln.fields.put("scale", sc);
+                }
+            }
             if (ln.fields.containsKey("curveRadius") && ln.i("curveRadius") != Math.round(n.curve)) {
                 ln.fields.put("curveRadius", Math.round(n.curve));
             }
