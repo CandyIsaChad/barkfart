@@ -451,6 +451,11 @@ public final class Evaluator {
         stack.push(new Work(target, local, xf, g, new Path(target.id, path)));
     }
 
+    /** The time an instance shows inside its symbol at parent time t (offset, speed, loop). */
+    public static double instanceTime(Layer.SymbolLayer l, Symbol target, double t, PropertyResolver r) {
+        return localTime(r.d(l.timeOffset, t) + SpeedIntegral.elapsed(l.speed, t, r), target.duration, l.loop);
+    }
+
     /** Applies the instance loop mode against the symbol duration. */
     public static double localTime(double lt, double duration, Layer.SymbolLayer.LoopMode mode) {
         if (Double.isNaN(lt) || Double.isInfinite(lt)) return 0;
