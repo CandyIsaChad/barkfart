@@ -5,7 +5,7 @@ Built by tools/make_parity.py from research/stick-nodes-features-raw.md (64 upda
 Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without UI, **[ ]** not yet, **(won't)** with the reason.
 
 
-**Totals (382 features):** 93 usable now, 108 partial or core-only, 147 not yet, 34 won't.
+**Totals (382 features):** 98 usable now, 118 partial or core-only, 132 not yet, 34 won't.
 
 
 ## Order of work (parity first, then our own additions)
@@ -114,7 +114,7 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [x] **Curved segments** (since 3.2.0): Segments and rounded segments can bend with a curve radius *Barkfart: arcs, bulge fitted to the original's renders.*
 - [ ] **Curve "circular" toggle** (since 4.1.0): Alternative circular curve behaviour
 - [~] **Trapezoid curves and rounded ends** (since 4.2.0): Trapezoids can curve, have rounded tips, easier thickness *Barkfart: round ends drawn; curved trapezoids not yet.*
-- [ ] **0-length segments visible** (since 3.2.1): Zero-length segments render
+- [x] **0-length segments visible** (since 3.2.1): Zero-length segments render *Barkfart: drawn as a dot.*
 - [x] **Polyfills** (since 2.3.0): Fill shapes defined by an ordered set of nodes (polynodes) *Barkfart: drawn (concave, ear-clipped) and round-trip; no creation UI.*
 - [~] **Finish polyfill** (since ≤2.4.9): Button to complete a polyfill definition *Barkfart: core: pick polynodes in order, finish makes the fill; no buttons.*
 - [ ] **Polyanchor outline** (since 2.3.2): Selecting a polyanchor highlights its polyfill
@@ -141,7 +141,7 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [ ] **Show only non-static nodes / show draw order** (since ≤4.0.0): Creation view toggles (moved to View Options in 4.0.0)
 - [ ] **Stickfigure auto-save** (since 3.3.0): Creation auto-saves every 5 min, with history browser (disable in settings)
 - [ ] **Default IK figure** (since 4.2.0): Ships a sample IK-rigged default stickfigure
-- [ ] **Node limit per figure** (since 2.3.6): Limits rose over time: 384 (2.3.6), 400 (4.0.2)
+- [x] **Node limit per figure** (since 2.3.6): Limits rose over time: 384 (2.3.6), 400 (4.0.2) *Barkfart: no fixed limit (scene budget only).*
 - [ ] **Name/ID on selection** (since 4.0.0): Optional brief display of figure name/ID
 
 ## Frames & timeline & tweening
@@ -159,11 +159,11 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [x] **Tween colors** (since 2.3.0): Per-figure checkbox to interpolate colors *Barkfart: colour tracks interpolate.*
 - [x] **Tween Mode per figure** (since 4.2.4): Linear, ease-in, ease-out or both per figure per frame *Barkfart: per key easing presets with curves.*
 - [~] **Frame delay** (since 2.0.0): Hold a frame for extra time *Barkfart: core: hold a frame for N frames.*
-- [ ] **Move camera during delay** (since 3.1.0): Camera keeps tweening during a frame delay
-- [ ] **Slow motion frame** (since 3.1.0): Per-frame checkbox that greatly increases tweening for that frame
+- [~] **Move camera during delay** (since 3.1.0): Camera keeps tweening during a frame delay *Barkfart: core: holds can leave the camera moving; no toggle.*
+- [~] **Slow motion frame** (since 3.1.0): Per-frame checkbox that greatly increases tweening for that frame *Barkfart: core: a frame's tween takes N times as many frames; no checkbox.*
 - [~] **Add tweened frame** (since 2.3.0): Generate a new in-between keyframe from neighbours *Barkfart: core: key the in-between pose (nothing moves).*
 - [~] **Add tweened frame percentages** (since 2.3.1–2.3.2): 10/25/50/75/90%, 50, 33/67 combo, 10/90 easing combo *Barkfart: core: any fraction between two keys.*
-- [ ] **Add many tweened frames** (since 3.1.0): Long-press to insert any number of tweened frames
+- [~] **Add many tweened frames** (since 3.1.0): Long-press to insert any number of tweened frames *Barkfart: core: insert any number of tweened frames; no long-press.*
 - [x] **Copy multiple frames** (since 2.2.2): Thumbnail menu to copy several frames (up to 25 in 3.0.0) *Barkfart: box/multi-select keys, copy, paste at playhead.*
 - [x] **Clear frame** (since 2.2.0): Delete everything in a frame *Barkfart: select keys at a frame and delete.*
 - [~] **Frame repeat** (since 3.3.0): Repeat a series of frames N times *Barkfart: loop modifier in the core; no UI.*
@@ -183,19 +183,19 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [x] **Onion skin** (since ≤1.1.4): Ghosts of neighbouring frames *Barkfart: from the evaluator, past red / future blue.*
 - [~] **Onion skin in front** (since 1.6.2): Show onion skin on top of figures *Barkfart: onion drawn in front or behind (saved in the view); no toggle.*
 - [~] **Onion skin frame count** (since 3.0.0): Past/future onion frame counts (0 allowed) *Barkfart: fixed 2 back / 1 forward; no setting yet.*
-- [ ] **Textfields in onion skin** (since 2.2.2): Text appears in onion skin
+- [x] **Textfields in onion skin** (since 2.2.2): Text appears in onion skin *Barkfart: text appears in the ghosts.*
 - [ ] **Camera in onion skin** (since 1.7.1): Camera box shown in onion skin
 - [~] **Visible in onion skin** (since 4.0.2): Per-figure toggle to leave out of onion skin (e.g. backgrounds) *Barkfart: per-layer flag in the model; no toggle UI yet.*
 - [ ] **View Options menu** (since 3.0.0): Popup by play/stop gathering view settings
 - [ ] **Segment outline in animation mode** (since 2.2.0): Outline segments while animating
 - [ ] **Guidelines** (since 2.2.0): On-stage guide lines for positioning (saved with project from 2.5.1)
 - [ ] **Camera gridline patterns** (since 4.2.4): Selectable grid patterns in the camera
-- [ ] **Show neighbor nodes** (since 3.1.0): Highlight nodes directly connected to the selection
-- [ ] **Neighbor nodes across joins** (since 4.1.3 / toggle 4.1.4): Neighbor lines include joined figures' nodes (toggle)
-- [ ] **Show only main nodes** (since ≤4.1.6): Show only main nodes (join anchors included from 4.1.6)
-- [ ] **Show all nodes of active figure** (since 4.2.4): Exception to main-nodes-only for the selected figure
-- [ ] **Hide locked nodes** (since 4.3.3): Hide locked nodes to reduce clutter
-- [ ] **Active-filter notification dot** (since 4.3.3): Dot warns when hide-locked or main-nodes-only is on
+- [~] **Show neighbor nodes** (since 3.1.0): Highlight nodes directly connected to the selection *Barkfart: core: connected joints listed; not highlighted yet.*
+- [~] **Neighbor nodes across joins** (since 4.1.3 / toggle 4.1.4): Neighbor lines include joined figures' nodes (toggle) *Barkfart: core: optional, both directions.*
+- [~] **Show only main nodes** (since ≤4.1.6): Show only main nodes (join anchors included from 4.1.6) *Barkfart: core: main nodes and join anchors only; no toggle.*
+- [~] **Show all nodes of active figure** (since 4.2.4): Exception to main-nodes-only for the selected figure *Barkfart: core: the active figure is the exception.*
+- [~] **Hide locked nodes** (since 4.3.3): Hide locked nodes to reduce clutter *Barkfart: core: pinned joints hidden; no toggle.*
+- [~] **Active-filter notification dot** (since 4.3.3): Dot warns when hide-locked or main-nodes-only is on *Barkfart: core: filtering() tells when joints are hidden; no dot.*
 - [x] **Remove stage outline** (since 4.0.3): Hide the default stage box outline *Barkfart: no outline by design.*
 - [ ] **Culling** (since 2.3.9): Skip drawing nodes outside the view
 - [ ] **Node style** (since 4.1.0): Selectable node/line rendering style
@@ -235,7 +235,7 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [ ] **MC playback camera offset** (since 3.1.7): Offset preview camera in MC editing
 - [ ] **Cache MC** (since 3.1.9): Rasterize single-frame MCs for faster rendering
 - (won't) **Default movieclips** (since 3.3.0): Bundled sample movieclips *Barkfart: cannot ship the original's bundled content; ours later.*
-- [ ] **MC limits** (since 4.0.0 / 4.0.2): Up to 256,000 nodes and 200 frames per MC
+- [x] **MC limits** (since 4.0.0 / 4.0.2): Up to 256,000 nodes and 200 frames per MC *Barkfart: no fixed limits (scene budget only).*
 - [x] **.nodemc files** (since 3.0.0 / send 3.1.0): Movieclip file format, sendable *Barkfart: import from the File panel (all 12 sample clips parse).*
 - [~] **Scaled/opacity MCs** (since ≤3.0.2): Movieclips support scale and opacity like figures *Barkfart: layer scale/opacity apply to symbol layers in the core.*
 - [ ] **Submission type prompt** (since ≤4.1.5): Asks whether a stickfigure submission should be a movieclip instead
@@ -265,7 +265,7 @@ Our own additions wait in ADDITIONS.md until this list is done.
 
 - [~] **Textfields** (since 1.5.0): Add text objects to frames (speech, titles) *Barkfart: text layers draw (Inter font, multi-line, accents); no add-text button yet.*
 - [x] **Text tweening** (since 1.7.6): Textfields interpolate between keyframes (new projects only) *Barkfart: text colour and transform keys interpolate.*
-- [ ] **Textfield limit** (since 1.7.6): Max per frame raised to 5 (1.7.6), then 10 (2.4.9)
+- [x] **Textfield limit** (since 1.7.6): Max per frame raised to 5 (1.7.6), then 10 (2.4.9) *Barkfart: no limit.*
 - [~] **Text pans with figures** (since 2.2.2): Panning mode also moves textfields *Barkfart: core: move-everything includes text.*
 - [~] **Lock text to corner** (since 2.2.0): Pin a textfield to a screen corner (name/watermark) *Barkfart: core: lock to the camera, aligned to a shot corner; no button.*
 - [ ] **Project-wide watermark** (since 2.4.4): Corner text applies to all frames or none
@@ -375,7 +375,7 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [~] **Joining** (since 1.7.4): Attach a figure's main node to any node of another figure *Barkfart: core: join to any joint (follows position and angle), unjoin, no jump; no button yet.*
 - [ ] **Join anchor list** (since 3.0.0): Selecting an anchor lists figures joined to it
 - [ ] **Joined-figure navigation** (since 4.0.0): Tap names to hop between joined figures; shows parent
-- [ ] **Joined scale option** (since 2.4.4): Joined figures scale together
+- [~] **Joined scale option** (since 2.4.4): Joined figures scale together *Barkfart: joined figures always scale with their parent; no option to turn it off.*
 - [~] **Copy with joins** (since 3.1.0): Long-press copy includes joined figures *Barkfart: core: duplicate keeps joined figures joined to the copy; no long-press.*
 - [ ] **Paste with layering** (since 3.1.0): Long-press paste tries to keep layer position
 - [~] **Copy all figure properties** (since 2.5.9): Copy scale, filters, position etc. onto another figure *Barkfart: core: transform, opacity, blend, effects; no buttons.*

@@ -239,6 +239,9 @@ Core operations with tests and Diagnostics checks; no buttons yet.
   corner and drawn above widescreen bars; linear gradients on round shapes.
 - Fixed: figure-edit undo did not restore the pinned flag.
 - Stage zoom up to 5000%.
+- Frames: add many tweened frames, slow motion, holds where the camera
+  keeps moving. View filters: main nodes only (active figure excepted),
+  hide pinned joints, neighbour joints (across joins optional).
 
 ### Core functions batch 2 (2026-11-17 night; user asleep, "implement as much as you can")
 Core operations with tests and a Diagnostics check per area; no buttons yet.

@@ -245,6 +245,21 @@ STATUS = {
     "Copy/paste polyfills": ("~", "core: duplicating a branch copies its polyfills"),
     "Segment length field": ("~", "core: length is a keyable property; no field"),
     "Tap knob to snap": ("~", "core: angle snapping; no knob"),
+    "Add many tweened frames": ("~", "core: insert any number of tweened frames; no long-press"),
+    "Slow motion frame": ("~", "core: a frame's tween takes N times as many frames; no checkbox"),
+    "Move camera during delay": ("~", "core: holds can leave the camera moving; no toggle"),
+    "0-length segments visible": ("x", "drawn as a dot"),
+    "Show only main nodes": ("~", "core: main nodes and join anchors only; no toggle"),
+    "Show all nodes of active figure": ("~", "core: the active figure is the exception"),
+    "Hide locked nodes": ("~", "core: pinned joints hidden; no toggle"),
+    "Active-filter notification dot": ("~", "core: filtering() tells when joints are hidden; no dot"),
+    "Show neighbor nodes": ("~", "core: connected joints listed; not highlighted yet"),
+    "Neighbor nodes across joins": ("~", "core: optional, both directions"),
+    "Joined scale option": ("~", "joined figures always scale with their parent; no option to turn it off"),
+    "Textfields in onion skin": ("x", "text appears in the ghosts"),
+    "Node limit per figure": ("x", "no fixed limit (scene budget only)"),
+    "Textfield limit": ("x", "no limit"),
+    "MC limits": ("x", "no fixed limits (scene budget only)"),
 }
 
 ROADMAP = """
