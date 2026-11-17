@@ -153,10 +153,19 @@ outlines or hollow circles.
 ## Triangles and gradients (fitted 2026-11-17)
 - triangleUpsideDown: apex at the parent, base at the node (small gains on
   Hit and SSJB Aura, no losses). rightTriangle -1/+1: right angle on one side.
-- Gradients: segment colour at the parent end, gradient colour at the node
-  end (reverse swaps); sideways = across the width; circles and ellipses are
-  radial (centre -> rim). Segments WITHOUT their own colour show the figure
-  colour at both ends (the stored gradient colour is ignored): with that rule
-  SSJ Aura's colour error is back to its no-gradient level (20) instead of
-  31-41. SSJ Aura's remaining gap (area 1.26x, colour 20) is elsewhere,
-  likely the large glow ellipse's sizing; open.
+- Gradients: sideways = across the width; circles and ellipses are radial
+  (centre -> rim); reverse swaps the ends. On LINES the original puts the
+  gradient colour at the PARENT end (our model puts it at the child end, so
+  line nodes import with reverse flipped, and export flips it back). The
+  stored gradient colour applies even when the segment follows the figure
+  colour. Revised 2026-11-17: the earlier "figure colour at both ends" rule
+  only looked right under an unfair comparison (below). Both rules together
+  take SSJ Aura's colour error 20 -> 9; each alone does not help. Only SSJ
+  Aura uses gradients on lines, so this rests on one clip; other shapes'
+  linear gradients are unverified.
+- Comparison fix: the original's previews sit on an opaque white stage, and a
+  preview pixel within half the clip's contrast of the stage counts as empty,
+  so SSJ Aura's white glow ellipse vanished there while ours counted. Our
+  render now gets the same rule. SSJ Aura's "hollow centre" was this
+  artifact, not a missing hole: IoU 0.79 -> 0.89, area 1.26 -> 1.11; no other
+  clip moved. The aura's polyfill is a simple loop around the flames.

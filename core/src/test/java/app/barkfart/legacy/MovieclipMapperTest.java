@@ -54,6 +54,7 @@ class MovieclipMapperTest {
                 hasGradients |= !nf.figure.polyfills.isEmpty();
             }
             BufferedImage[] previews = new BufferedImage[mc.previewCount];
+            int stageBg = 0, stageThreshold = 0;
             for (int i = 0; i < mc.previewCount; i++) {
                 BufferedImage pv = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
                 previews[i] = pv;
@@ -72,6 +73,10 @@ class MovieclipMapperTest {
                 int maxDiff = 0;
                 for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) maxDiff = Math.max(maxDiff, diff(pv.getRGB(x, y), bg));
                 int threshold = Math.max(4, maxDiff / 2);
+                if (i == 0) {
+                    stageBg = bg;
+                    stageThreshold = threshold;
+                }
                 for (int y = 0; y < h; y++) {
                     for (int x = 0; x < w; x++) if (diff(pv.getRGB(x, y), bg) <= threshold) pv.setRGB(x, y, 0xffdddddd);
                 }
@@ -85,6 +90,14 @@ class MovieclipMapperTest {
                 BufferedImage full = Raster.fill(Tessellator.tessellate(Evaluator.evaluate(q, q.rootSymbol, i / (double) mc.fps)),
                         w * 3, h * 3, 0x00000000);
                 oursAll[i] = downsample3(full, w, h);
+                // Same rule as the preview: content within the threshold of the stage
+                // colour is indistinguishable from it (a white shape on a white stage).
+                for (int y = 0; y < h; y++) {
+                    for (int x = 0; x < w; x++) {
+                        int c = oursAll[i].getRGB(x, y);
+                        if ((c & 0xffffff) != 0xdddddd && diff(c, stageBg) <= stageThreshold) oursAll[i].setRGB(x, y, 0xffdddddd);
+                    }
+                }
             }
             StringBuilder best = new StringBuilder();
             for (int pvi = 0; pvi < previews.length; pvi++) {

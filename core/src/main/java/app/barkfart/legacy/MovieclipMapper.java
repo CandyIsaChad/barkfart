@@ -64,8 +64,8 @@ public final class MovieclipMapper {
                     Color c = own ? FigureMapper.color(MovieclipFormat.FrameFigure.nodeColor(r)) : figColor;
                     n.color.track().put(new Key(t, c, interp));
                     if (n.gradient) {
-                        // Figure-coloured segments take the figure colour at both ends (fitted, NOTES.md).
-                        Color gc = own ? FigureMapper.color(MovieclipFormat.FrameFigure.nodeGradientColor(r)) : figColor;
+                        // The stored gradient colour applies even to figure-coloured segments (NOTES.md).
+                        Color gc = FigureMapper.color(MovieclipFormat.FrameFigure.nodeGradientColor(r));
                         n.gradientColor.track().put(new Key(t, gc, interp));
                     }
                 }

@@ -192,7 +192,12 @@ Not done
   transparent; per-frame gradient colours from movieclips; exact legacy
   export kept (a bug where gradient colours were lost on save was caught by
   the byte-exact test and fixed). New golden: gradient shapes.
-- Next in this step: node scale semantics, SSJ Aura's glow sizing, outlines,
+- SSJ Aura: IoU 0.79 -> 0.89, colour error 20 -> 9. Two causes: the
+  comparison treated the original's white glow on its white stage as empty
+  but counted ours (now the same rule on both sides), and line gradients sit
+  the other way round with the stored gradient colour always used (rules in
+  NOTES.md, fitted on this one clip).
+- Next in this step: node scale semantics, outlines,
   hollow circles, trapezoids, polygons, smart-stretch, angle/drag locks.
 
 ### Renderer foundation (2026-11-17, core-first step 2)

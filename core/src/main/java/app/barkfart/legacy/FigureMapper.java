@@ -53,13 +53,13 @@ public final class FigureMapper {
             n.triangleUpsideDown = ln.i("triangleUpsideDown") != 0;
             n.rightTriangle = Integer.signum(ln.i("rightTriangleDirection"));
             n.gradient = ln.i("gradient") != 0;
-            n.gradientReverse = ln.i("reverseGradient") != 0;
+            // The original puts a line's gradient colour at the parent end; ours puts it at
+            // the child end, so lines import with the flag flipped (fitted, NOTES.md).
+            n.gradientReverse = (ln.i("reverseGradient") != 0) ^ (n.shape == Node.Shape.LINE);
             n.gradientSideways = ln.i("gradientMode") == 1;
-            // Segments without their own colour follow the figure colour at both gradient ends
-            // (fitted against the original's previews, NOTES.md); the stored value is kept for export.
-            if (ln.fields.containsKey("gradientColor")) {
-                n.gradientColor.setValue(ln.i("useSegmentColor") != 0 ? color(ln.i("gradientColor")) : figColor);
-            }
+            // The stored gradient colour applies even when the segment follows the figure
+            // colour (fitted against the original's previews, NOTES.md).
+            if (ln.fields.containsKey("gradientColor")) n.gradientColor.setValue(color(ln.i("gradientColor")));
             n.color.setValue(ln.i("useSegmentColor") != 0 ? color(ln.i("color")) : figColor);
             for (Map.Entry<String, Object> e : ln.fields.entrySet()) {
                 if (!e.getKey().startsWith("~")) n.legacyExtras.put("L." + e.getKey(), e.getValue());
@@ -178,14 +178,15 @@ public final class FigureMapper {
                 ln.fields.put("rightTriangleDirection", n.rightTriangle);
             }
             if (ln.fields.containsKey("gradient") && (ln.i("gradient") != 0) != n.gradient) ln.fields.put("gradient", n.gradient ? 1 : 0);
-            if (ln.fields.containsKey("reverseGradient") && (ln.i("reverseGradient") != 0) != n.gradientReverse) {
-                ln.fields.put("reverseGradient", n.gradientReverse ? 1 : 0);
+            boolean legacyReverse = n.gradientReverse ^ (n.shape == Node.Shape.LINE);
+            if (ln.fields.containsKey("reverseGradient") && (ln.i("reverseGradient") != 0) != legacyReverse) {
+                ln.fields.put("reverseGradient", legacyReverse ? 1 : 0);
             }
             if (ln.fields.containsKey("gradientMode") && (ln.i("gradientMode") == 1) != n.gradientSideways) {
                 ln.fields.put("gradientMode", n.gradientSideways ? 1 : 0);
             }
             if (ln.fields.containsKey("gradientColor")) {
-                Color imported = ln.i("useSegmentColor") != 0 ? color(ln.i("gradientColor")) : figColorModel;
+                Color imported = color(ln.i("gradientColor"));
                 if (!imported.equals(n.gradientColor.value())) ln.fields.put("gradientColor", legacyColor((Color) n.gradientColor.value()));
             }
             int thick = Math.round(n.thickness.floatValue());
