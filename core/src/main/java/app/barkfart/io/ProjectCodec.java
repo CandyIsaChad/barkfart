@@ -199,6 +199,7 @@ public final class ProjectCodec {
                 cm.put("loop", c.loop);
                 cm.put("fadeIn", Json.num(c.fadeIn));
                 cm.put("fadeOut", Json.num(c.fadeOut));
+                if (c.pitch != 1) cm.put("pitch", Json.num(c.pitch));
                 cm.put("volume", prop(c.volume, false));
                 cm.put("pan", prop(c.pan, false));
                 clips.add(cm);
@@ -630,6 +631,7 @@ public final class ProjectCodec {
                 for (Object o : list(m, "clips")) {
                     Map<String, Object> cm = asMap(o, "clip");
                     Clip c = new Clip(id, req(cm, "id"), str(cm, "asset"), d(cm, "start", 0), d(cm, "in", 0), d(cm, "out", 0));
+                    c.pitch = d(cm, "pitch", 1);
                     c.loop = b(cm, "loop", false);
                     c.fadeIn = d(cm, "fadeIn", 0);
                     c.fadeOut = d(cm, "fadeOut", 0);

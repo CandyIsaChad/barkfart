@@ -7,6 +7,8 @@ public final class Clip {
     public double start, in, out;
     public boolean loop;
     public double fadeIn, fadeOut;
+    /** Playback rate: 2 = an octave up and twice as fast, 0.5 = an octave down and half speed (Stick Nodes 3.1.0). */
+    public double pitch = 1;
     public final Property volume, pan;
 
     public Clip(String layerId, String id, String asset, double start, double in, double out) {

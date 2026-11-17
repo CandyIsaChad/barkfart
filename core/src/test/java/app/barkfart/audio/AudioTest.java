@@ -221,4 +221,32 @@ class AudioTest {
             assertTrue(e.getMessage().contains("ogg is not supported"), e.getMessage());
         }
     }
+
+    @Test
+    void pitchChangesSpeedAndToneAndSoundsCopyWithTheirKeys() throws Exception {
+        Map<String, Pcm> m = new HashMap<String, Pcm>();
+        m.put("A", Mixer.tone(440, 1.0, RATE, 0.5f));
+        Clip c = new Clip("L", "c", "A", 0, 0, 0);
+        c.pitch = 2;
+        Project p = project(c, 3);
+        AudioPlan plan = AudioPlan.build(p, p.root(), sounds(m));
+        assertEquals(0.5, plan.entries.get(0).end, 1e-9, "twice as fast: half as long");
+        float[] a = mix(plan, 0.1, RATE / 4);
+        int crossings = 0;
+        for (int i = 1; i < RATE / 4; i++) if ((a[(i - 1) * 2] < 0) != (a[i * 2] < 0)) crossings++;
+        assertEquals(440, crossings, 4, "880 Hz: 440 crossings in a quarter second");
+        String s = app.barkfart.io.ProjectCodec.encode(p);
+        assertEquals(2.0, ((Layer.AudioLayer) app.barkfart.io.ProjectCodec.decode(s).root().layers.get(0)).clips.get(0).pitch, 1e-9);
+        // copy / paste a sound with a volume key, 2 s later
+        Layer.AudioLayer al = (Layer.AudioLayer) p.root().layers.get(0);
+        c.volume.track().put(new app.barkfart.model.Key(0.25, 0.5f, app.barkfart.model.Interp.LINEAR));
+        app.barkfart.edit.Document d = new app.barkfart.edit.Document(p);
+        d.apply(app.barkfart.edit.StructureEdits.pasteClip(p, al, c, 2.0));
+        Clip copy = al.clips.get(1);
+        assertEquals(2.0, copy.start, 1e-9);
+        assertEquals(2.25, copy.volume.track().get(0).time, 1e-9, "keys moved with it");
+        assertEquals(2.0, copy.pitch, 1e-9);
+        d.undo();
+        assertEquals(1, al.clips.size());
+    }
 }

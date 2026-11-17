@@ -28,10 +28,17 @@ public final class AudioPlan {
         public final double in, out;
         public final boolean loop;
         public final double fadeIn, fadeOut;
+        /** Source seconds played per timeline second. */
+        public final double pitch;
         /** Samples at start + k / CURVE_RATE. */
         public final float[] volume, pan;
 
         Entry(Pcm pcm, double start, double end, double in, double out, boolean loop, double fadeIn, double fadeOut, float[] volume, float[] pan) {
+            this(pcm, start, end, in, out, loop, fadeIn, fadeOut, volume, pan, 1);
+        }
+
+        Entry(Pcm pcm, double start, double end, double in, double out, boolean loop, double fadeIn, double fadeOut, float[] volume, float[] pan, double pitch) {
+            this.pitch = pitch;
             this.pcm = pcm;
             this.start = start;
             this.end = end;
@@ -92,7 +99,8 @@ public final class AudioPlan {
                 double o = finite(c.out) && c.out > 0 ? Math.min(c.out, src) : src;
                 if (!(o > in + 1e-6) || !finite(c.start) || Math.abs(c.start) > 1e6) continue;
                 double start = c.start;
-                double stop = c.loop ? Math.max(start, end) : start + (o - in);
+                double pitch = finite(c.pitch) ? Math.max(0.25, Math.min(4, c.pitch)) : 1;
+                double stop = c.loop ? Math.max(start, end) : start + (o - in) / pitch;
                 if (!(stop > start)) continue;
                 int n = (int) Math.min(CURVE_RATE * 3600L, (long) Math.ceil((stop - start) * CURVE_RATE) + 1);
                 float[] vol = new float[Math.max(1, n)], pan = new float[Math.max(1, n)];
@@ -104,7 +112,7 @@ public final class AudioPlan {
                     pan[k] = pn == pn ? Math.max(-1, Math.min(1, pn)) : 0;
                 }
                 out.add(new Entry(pcm, start, stop, in, o, c.loop, finite(c.fadeIn) ? Math.max(0, c.fadeIn) : 0,
-                        finite(c.fadeOut) ? Math.max(0, c.fadeOut) : 0, vol, pan));
+                        finite(c.fadeOut) ? Math.max(0, c.fadeOut) : 0, vol, pan, pitch));
             }
         }
         return new AudioPlan(out, end, diags);

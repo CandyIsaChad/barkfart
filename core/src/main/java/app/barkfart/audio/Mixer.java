@@ -24,8 +24,8 @@ public final class Mixer {
             int i0 = (int) Math.max(0, Math.ceil((e.start - t0) * rate - 1e-9));
             int i1 = (int) Math.min(frames, Math.ceil((e.end - t0) * rate - 1e-9));
             for (int i = i0; i < i1; i++) {
-                double t = t0 + i * dt, local = t - e.start;
-                double srcT = e.loop ? e.in + (local % len) : e.in + local;
+                double t = t0 + i * dt, local = t - e.start, played = local * e.pitch;
+                double srcT = e.loop ? e.in + (played % len) : e.in + played;
                 if (srcT >= e.out || srcT < e.in) continue;
                 double pos = srcT * p.rate;
                 int k = (int) pos;

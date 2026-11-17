@@ -76,6 +76,36 @@ public final class StructureEdits {
         };
     }
 
+    /**
+     * Copy / paste a sound (Stick Nodes 2.3.0): a copy of a clip starting at
+     * time `at`, with its trims, fades, loop, pitch, and volume / pan (keys
+     * moved along with it). Goes on the same audio layer.
+     */
+    public static Command pasteClip(final Project p, final Layer.AudioLayer l, final app.barkfart.model.Clip src, final double at) {
+        final app.barkfart.model.Clip c = new app.barkfart.model.Clip(l.id, p.newId("C"), src.asset, at, src.in, src.out);
+        c.loop = src.loop;
+        c.fadeIn = src.fadeIn;
+        c.fadeOut = src.fadeOut;
+        c.pitch = src.pitch;
+        double dt = at - src.start;
+        for (int i = 0; i < 2; i++) {
+            Property from = i == 0 ? src.volume : src.pan, to = i == 0 ? c.volume : c.pan;
+            to.setValue(from.value());
+            for (app.barkfart.model.Key k : from.track().keys()) to.track().put(k.withTime(k.time + dt));
+        }
+        return new Named("Paste sound") {
+            public void apply() {
+                l.clips.add(c);
+                p.invalidateIndex();
+            }
+
+            public void revert() {
+                l.clips.remove(c);
+                p.invalidateIndex();
+            }
+        };
+    }
+
     // ---- effects ----
 
     /** Appends an effect to the end of a layer's chain. */
