@@ -226,6 +226,30 @@ Not done
   node scale. Not yet: curved trapezoids, floaty tweening, creation-mode UI
   for all of these (parity order step 3).
 
+### Export (core-first step 6, 2026-11-17)
+- Export screen (sidebar Export, nothing selected): Video (MP4 with sound,
+  iPad), GIF, PNG frames (zip); Full / Half / Small size (even dimensions);
+  transparent background for GIF and PNG. Renders the camera shot frame by
+  frame through the same GL path as the editor (effects included) at
+  export size, 25 ms of work per render tick (the app stays responsive),
+  Cancel deletes the partial file, then the share sheet opens (Save Video,
+  AirDrop, Files). Files go to the Barkfart folder.
+- Core: PNG encoder, GIF writer (6x7x6 palette + 4x4 ordered dither,
+  transparency, LZW, delays with carried rounding: 30 fps = 3,3,4), the
+  ExportJob, and Bounce (the timeline's sound mixed to a WAV).
+- iOS video: AVAssetWriter H.264 from BGRA pixel buffers (pool), AAC audio
+  read from the soundtrack WAV with AVAssetReader and interleaved half a
+  second ahead of the video; never blocks the render thread. Info.plist has
+  the photo-library text so "Save Video" works.
+- Checks: EncodersTest (PNG and GIF decoded by Java's own readers; GIF
+  timing exact); desktop exports decoded with an independent decoder
+  (24 frames, 0.8 s, transparency). Diagnostics on the device exports a
+  GIF, PNG frames and an MP4 with a tone and reopens them (size, length,
+  video and audio tracks). MP4 is compile-only here: only the device check
+  confirms it.
+- Not done: frame range, adaptive GIF palette, canvas size / vertical
+  video setting, watermark option, export of a selection.
+
 ### Diagnostics screen and sounds in the dope sheet (2026-11-17)
 - User request: stop the build-test-report loop per feature. The app now
   has a Diagnostics screen (sidebar button, or tap the launch message):

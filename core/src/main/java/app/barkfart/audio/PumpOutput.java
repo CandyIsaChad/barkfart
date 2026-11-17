@@ -90,7 +90,7 @@ public abstract class PumpOutput implements AudioBackend {
         return problem;
     }
 
-    public String check() {
+    public synchronized String check() {
         String err;
         try {
             err = open();

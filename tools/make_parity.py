@@ -113,6 +113,16 @@ STATUS = {
     "Multi-select sound import": ("x", "the Files picker imports several at once"),
     "Sound pan": ("~", "per-clip pan track in the mixer; no control yet"),
     "Bundled sound library": ("-", "cannot ship the original's sounds; our own later"),
+    # Export
+    "GIF export": ("x", "Export: GIF (looping, exact timing, transparency), no watermark"),
+    "GIF >256-color handling": ("~", "fixed 252-colour palette with ordered dither; an adaptive palette is not done yet"),
+    "MP4 export": ("x", "Export: Video, H.264 with the timeline's sound (iPad; checked by Diagnostics on the device)"),
+    "Fast hardware MP4": ("x", "AVAssetWriter hardware encoder"),
+    "PNG export": ("x", "Export: PNG frames (zip), optional transparent background"),
+    "Better quality blur": ("x", "exports always use full-quality effects"),
+    "Low-quality blur export": ("-", "not needed: exports always use full quality"),
+    "Export frame range": (" ", "whole timeline only for now"),
+    "1080p MP4": ("~", "Full = project size (1280x720 by default); a canvas-size setting is not in the UI yet"),
     # Files
     "Save/open projects": ("x", "File panel: new, open, save, rename, duplicate, delete with undo; autosave"),
     "Save/import stickfigures": ("x", "import from the folder or the Files picker; export .nodes byte-exact + share"),

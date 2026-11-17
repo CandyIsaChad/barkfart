@@ -149,7 +149,7 @@ public final class EditorState {
 
     /** Latest results of every check (null while running); opener and runner set by the screen / app. */
     public app.barkfart.selftest.SelfTest.Result diagnostics;
-    public Runnable diagnosticsOpener, diagnosticsRunner;
+    public Runnable diagnosticsOpener, diagnosticsRunner, exportOpener;
 
     /** Sound output (set by the screen from the platform). */
     public app.barkfart.audio.AudioBackend audio = app.barkfart.audio.AudioBackend.NONE;

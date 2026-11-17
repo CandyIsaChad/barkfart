@@ -5,7 +5,7 @@ Built by tools/make_parity.py from research/stick-nodes-features-raw.md (64 upda
 Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without UI, **[ ]** not yet, **(won't)** with the reason.
 
 
-**Totals (382 features):** 68 usable now, 37 partial or core-only, 245 not yet, 32 won't.
+**Totals (382 features):** 73 usable now, 39 partial or core-only, 237 not yet, 33 won't.
 
 
 ## Order of work (parity first, then our own additions)
@@ -321,18 +321,18 @@ Our own additions wait in ADDITIONS.md until this list is done.
 
 ## Export & sharing
 
-- [ ] **GIF export** (since 1.0): Animated GIF output (Free adds watermark)
-- [ ] **GIF >256-color handling** (since 1.4.0): Better color quantization for image-heavy GIFs
-- [ ] **MP4 export** (since 1.2.3): Video export
-- [ ] **Fast hardware MP4** (since 1.7.0): Faster, higher-quality MP4 encoding
+- [x] **GIF export** (since 1.0): Animated GIF output (Free adds watermark) *Barkfart: Export: GIF (looping, exact timing, transparency), no watermark.*
+- [~] **GIF >256-color handling** (since 1.4.0): Better color quantization for image-heavy GIFs *Barkfart: fixed 252-colour palette with ordered dither; an adaptive palette is not done yet.*
+- [x] **MP4 export** (since 1.2.3): Video export *Barkfart: Export: Video, H.264 with the timeline's sound (iPad; checked by Diagnostics on the device).*
+- [x] **Fast hardware MP4** (since 1.7.0): Faster, higher-quality MP4 encoding *Barkfart: AVAssetWriter hardware encoder.*
 - [ ] **Old MP4 method button** (since 1.7.3): Fallback encoder; **REMOVED 4.0.3**
-- [ ] **1080p MP4** (since 3.0.5): Max 1920×1080 output
-- [ ] **PNG export** (since 2.5.1): Single-image export
+- [~] **1080p MP4** (since 3.0.5): Max 1920×1080 output *Barkfart: Full = project size (1280x720 by default); a canvas-size setting is not in the UI yet.*
+- [x] **PNG export** (since 2.5.1): Single-image export *Barkfart: Export: PNG frames (zip), optional transparent background.*
 - [ ] **4K PNG** (since 3.3.0): PNG at 4K
-- [ ] **Export frame range** (since 2.3.0): Choose start/end frames (single frame allowed)
+- [ ] **Export frame range** (since 2.3.0): Choose start/end frames (single frame allowed) *Barkfart: whole timeline only for now.*
 - [ ] **Anti-aliasing** (since 2.3.6): Smooth-lines export option (GIF unlocked at any size 2.4.1)
-- [ ] **Low-quality blur export** (since 3.0.0): Export using preview-quality blur
-- [ ] **Better quality blur** (since 3.3.0): Experimental higher-quality blur/glow export
+- (won't) **Low-quality blur export** (since 3.0.0): Export using preview-quality blur *Barkfart: not needed: exports always use full quality.*
+- [x] **Better quality blur** (since 3.3.0): Experimental higher-quality blur/glow export *Barkfart: exports always use full-quality effects.*
 - [ ] **Vertical video** (since 4.0.3): Portrait export toggle (Project Tools)
 - [ ] **Export size slider** (since 4.0.3): Size slider on GIF and PNG export windows
 - [ ] **Non-blocking export** (since 1.6.0): Exporting no longer freezes the device

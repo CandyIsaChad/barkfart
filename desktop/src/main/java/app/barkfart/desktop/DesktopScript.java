@@ -5,7 +5,10 @@ import app.barkfart.edit.DopeRows;
 import app.barkfart.files.Importer;
 import app.barkfart.audio.Mixer;
 import app.barkfart.audio.Wav;
+import app.barkfart.export.ExportJob;
 import app.barkfart.fx.EffectScene;
+import app.barkfart.model.Project;
+import app.barkfart.render.FrameGrabber;
 import app.barkfart.fx.EffectTypes;
 import app.barkfart.model.EffectNode;
 import app.barkfart.model.ValueType;
@@ -81,6 +84,31 @@ final class DesktopScript {
             } else if (step.equals("frame10")) {
                 st.doc.apply(StructureEdits.setDuration(st.project().root(), 60 / st.editor.fps()));
                 st.setFrame(10);
+            } else if (step.equals("exportboth")) {
+                // the real exporter, run to completion here (GL thread): GIF, and PNG frames with transparency
+                for (ExportJob.Format fm : new ExportJob.Format[] {ExportJob.Format.GIF, ExportJob.Format.PNG}) {
+                    try {
+                        final Project proj = st.project();
+                        final FrameGrabber g = new FrameGrabber(proj, 320, 180);
+                        final boolean clear = fm == ExportJob.Format.PNG;
+                        java.io.File out = new java.io.File(System.getProperty("barkfart.docs"), clear ? "test.zip" : "test.gif");
+                        ExportJob job = new ExportJob(fm, out, 320, 180, st.frames.frameCount(), st.editor.fps(), clear, new ExportJob.Frames() {
+                            public byte[] grab(double t) {
+                                return g.grab(proj, t, clear);
+                            }
+
+                            public void dispose() {
+                            }
+                        }, null);
+                        while (job.state() == ExportJob.State.RUNNING) job.step();
+                        System.out.println("[script] export " + fm + " " + job.state() + " " + out.length() + " bytes " + (job.problem() == null ? "" : job.problem()));
+                        g.dispose();
+                    } catch (Exception e) {
+                        System.out.println("[script] export " + e);
+                    }
+                }
+            } else if (step.equals("exportpanel")) {
+                if (st.exportOpener != null) st.exportOpener.run();
             } else if (step.equals("diag")) {
                 if (st.diagnosticsOpener != null) st.diagnosticsOpener.run();
             } else if (step.equals("play")) {

@@ -159,7 +159,12 @@ public final class EffectRenderer implements Disposable {
      * pixels even on Retina screens, where scene2d works in points.
      */
     public void draw(DrawList dl, Matrix4 projection, MeshRenderer.Textures tex) {
-        if (!ok || dl.root == null || !hasIsolates(dl.root)) {
+        draw(dl, projection, tex, false);
+    }
+
+    /** offscreen: always go through a premultiplied buffer (export: correct alpha on a transparent target). */
+    public void draw(DrawList dl, Matrix4 projection, MeshRenderer.Textures tex, boolean offscreen) {
+        if (!ok || dl.root == null || (!offscreen && !hasIsolates(dl.root))) {
             meshes.draw(dl, projection, tex);
             return;
         }

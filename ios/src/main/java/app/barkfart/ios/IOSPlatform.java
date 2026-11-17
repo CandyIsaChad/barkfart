@@ -90,6 +90,35 @@ final class IOSPlatform implements Platform {
         return audio;
     }
 
+    public String verifyVideo(File f, int w, int h, double seconds, boolean audio) {
+        try {
+            if (!f.exists() || f.length() == 0) return "no file written";
+            org.robovm.apple.avfoundation.AVURLAsset a = new org.robovm.apple.avfoundation.AVURLAsset(new NSURL(f), null);
+            NSArray<org.robovm.apple.avfoundation.AVAssetTrack> v = a.getTracksWithType(org.robovm.apple.avfoundation.AVMediaType.Video);
+            if (v == null || v.size() == 0) return "no video track";
+            org.robovm.apple.coregraphics.CGSize sz = v.get(0).getNaturalSize();
+            if (Math.round(sz.getWidth()) != w || Math.round(sz.getHeight()) != h) return "video is " + sz.getWidth() + "x" + sz.getHeight() + ", expected " + w + "x" + h;
+            double d = a.getDuration().getSeconds();
+            if (Math.abs(d - seconds) > 0.25) return "duration " + d + " s, expected " + seconds + " s";
+            NSArray<org.robovm.apple.avfoundation.AVAssetTrack> au = a.getTracksWithType(org.robovm.apple.avfoundation.AVMediaType.Audio);
+            if (audio && (au == null || au.size() == 0)) return "no audio track";
+            return null;
+        } catch (Exception e) {
+            return String.valueOf(e);
+        }
+    }
+
+    public boolean canEncodeVideo() {
+        return true;
+    }
+
+    public app.barkfart.export.VideoSink openVideo(File out, int w, int h, double fps, File wav) {
+        String[] why = new String[1];
+        app.barkfart.export.VideoSink v = IOSVideo.open(out, w, h, fps, wav, why);
+        if (v == null) Gdx.app.error("Barkfart", "video: " + why[0]);
+        return v;
+    }
+
     public boolean canShare() {
         return true;
     }

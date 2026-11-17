@@ -22,6 +22,7 @@ public final class EditorScreen implements Disposable {
     private final app.barkfart.platform.Platform platform;
     private final app.barkfart.files.Session session;
     private FilePanel filePanel;
+    private ExportPanel exportPanel;
     private float autosaveTimer;
     public static final float AUTOSAVE_SECONDS = 30;
     /** Logical screen units per point from the platform (1 on iOS; the desktop preview passes its own). */
@@ -290,6 +291,27 @@ public final class EditorScreen implements Disposable {
             }
         });
         stage.addActor(diag);
+        if (exportPanel != null) exportPanel.cancel();   // a UI rebuild (size change) ends a running export cleanly
+        exportPanel = new ExportPanel(theme, new ExportPanel.Host() {
+            public EditorState state() {
+                return state;
+            }
+
+            public app.barkfart.files.Session session() {
+                return session;
+            }
+
+            public app.barkfart.platform.Platform platform() {
+                return platform;
+            }
+        });
+        stage.addActor(exportPanel);
+        state.exportOpener = new Runnable() {
+            public void run() {
+                exportPanel.setBounds(0, 0, stage.getWidth(), stage.getHeight());
+                exportPanel.open();
+            }
+        };
         state.diagnosticsOpener = new Runnable() {
             public void run() {
                 diag.setBounds(0, 0, stage.getWidth(), stage.getHeight());
@@ -339,6 +361,7 @@ public final class EditorScreen implements Disposable {
 
     public void render(float dt) {
         state.update(dt);
+        if (exportPanel != null) exportPanel.tick();
         autosaveTimer += dt;
         if (autosaveTimer >= AUTOSAVE_SECONDS && !state.playing && !state.doc.inTransaction()) {
             autosaveTimer = 0;

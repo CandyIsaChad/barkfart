@@ -39,6 +39,18 @@ public interface Platform {
     /** Sound decoding and output. */
     app.barkfart.audio.AudioBackend audio();
 
+    /**
+     * Opens an H.264 .mp4 writer (with an AAC track from wav when not null), or
+     * null when this platform cannot encode video.
+     */
+    app.barkfart.export.VideoSink openVideo(File out, int w, int h, double fps, File wav);
+
+    /** True when openVideo can work here (iOS). */
+    boolean canEncodeVideo();
+
+    /** Reopens a written video and checks size, duration and tracks; null when it matches. */
+    String verifyVideo(File f, int w, int h, double seconds, boolean audio);
+
     /** Default: no picker or sharing, documents in ~/Barkfart (desktop, tests). */
     class Basic implements Platform {
         private final File docs;
@@ -71,6 +83,18 @@ public interface Platform {
         public app.barkfart.audio.AudioBackend audio() {
             if (audio == null) audio = new app.barkfart.audio.GdxAudio();
             return audio;
+        }
+
+        public app.barkfart.export.VideoSink openVideo(File out, int w, int h, double fps, File wav) {
+            return null;   // desktop: PNG frames and GIF only
+        }
+
+        public boolean canEncodeVideo() {
+            return false;
+        }
+
+        public String verifyVideo(File f, int w, int h, double seconds, boolean audio) {
+            return "no video support on this platform";
         }
     }
 }

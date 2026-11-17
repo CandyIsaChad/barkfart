@@ -220,7 +220,11 @@ public final class Sidebar extends WidgetGroup {
             panel.add(note("Frame rate: " + Math.round(st.editor.fps()) + " fps")).colspan(2).width(innerW).padBottom(4).row();
             row(new UiButton(theme, "−", UiButton.Style.NORMAL, fps(-1)), new UiButton(theme, "+", UiButton.Style.NORMAL, fps(1)));
             soundsSection(innerW);
-            full(new UiButton(theme, "Diagnostics", UiButton.Style.NORMAL, new Runnable() {
+            row(new UiButton(theme, "Export", UiButton.Style.NORMAL, new Runnable() {
+                public void run() {
+                    if (st.exportOpener != null) st.exportOpener.run();
+                }
+            }), new UiButton(theme, "Diagnostics", UiButton.Style.NORMAL, new Runnable() {
                 public void run() {
                     if (st.diagnosticsOpener != null) st.diagnosticsOpener.run();
                 }
