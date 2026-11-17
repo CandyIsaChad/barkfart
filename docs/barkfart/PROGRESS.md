@@ -226,6 +226,20 @@ Not done
   node scale. Not yet: curved trapezoids, floaty tweening, creation-mode UI
   for all of these (parity order step 3).
 
+### Core functions batch 3 (2026-11-17 night)
+Core operations with tests and Diagnostics checks; no buttons yet.
+- Shot backgrounds on the camera: solid or top-to-bottom gradient, keyable
+  per frame, in the dope sheet; covers the camera's area in the editor.
+- Bounce and elastic easing (in the easing menu; saved as an optional
+  curve name on the key, older readers fall back to the cubic).
+- Parallax for camera-locked layers (move, turn, zoom by a fraction).
+- Pinned joints: hold their stage position while the figure or other
+  joints are dragged (two-bone solve, same bend side).
+- Join-anchor flip; sprite distort (bilinear grid); text locked to a shot
+  corner and drawn above widescreen bars; linear gradients on round shapes.
+- Fixed: figure-edit undo did not restore the pinned flag.
+- Stage zoom up to 5000%.
+
 ### Core functions batch 2 (2026-11-17 night; user asleep, "implement as much as you can")
 Core operations with tests and a Diagnostics check per area; no buttons yet.
 - Files: natural / name / date sort, name filter, ZIP packs (mixed kinds,

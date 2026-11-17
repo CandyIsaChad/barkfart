@@ -5,7 +5,7 @@ Built by tools/make_parity.py from research/stick-nodes-features-raw.md (64 upda
 Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without UI, **[ ]** not yet, **(won't)** with the reason.
 
 
-**Totals (382 features):** 89 usable now, 94 partial or core-only, 165 not yet, 34 won't.
+**Totals (382 features):** 93 usable now, 108 partial or core-only, 147 not yet, 34 won't.
 
 
 ## Order of work (parity first, then our own additions)
@@ -41,22 +41,22 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [~] **Per-figure and per-segment color** (since 1.0): Recolor whole figures or single segments while animating *Barkfart: colour tracks in the model and import; no picker UI.*
 - [x] **Pinch zoom on stage** (since 1.0): Pinch to zoom the stage view
 - [x] **Zoom out below 100% and move stage** (since 1.2.6): Zoom out to 50% and drag the stage to place figures off-frame
-- [ ] **Max zoom increases** (since 1.7.0): Max zoom went 500% → 800% (1.7.0) → 2000% (2.3.2) → 5000% (3.2.0)
+- [x] **Max zoom increases** (since 1.7.0): Max zoom went 500% → 800% (1.7.0) → 2000% (2.3.2) → 5000% (3.2.0) *Barkfart: stage zoom up to 5000%.*
 - [x] **Smoother zoom** (since 2.4.4): Zoom made far more responsive
 - [~] **Panning mode** (since 1.1.3): Drag the canvas to move every figure on the current frame at once *Barkfart: core: move every figure on the frame at once (one undo step); no toggle UI.*
 - [~] **Lock stickfigure** (since 1.2.6): Lock button freezes a figure in place to prevent accidental moves *Barkfart: layer lock in the model and undo; no button yet.*
 - [x] **Locked figures hide nodes** (since 2.5.1): A locked figure hides all its nodes except the main node (later: regardless of joins) *Barkfart: locked layers show no handles.*
 - [~] **Pinch-rotate figure** (since 1.2.8): Two-finger pinch-rotate rotates the selected stickfigure *Barkfart: core: rotate a figure about its main node; no gesture yet.*
 - [ ] **Rotation knobs** (since ≤2.1.0 (improved)): Knob controls for angles that preview rotation in real time
-- [ ] **Tap knob to snap** (since 3.2.2): Tapping the rotate knob snaps to 0/90/180/270
+- [~] **Tap knob to snap** (since 3.2.2): Tapping the rotate knob snaps to 0/90/180/270 *Barkfart: core: angle snapping; no knob.*
 - [~] **45° snap on angle fields** (since 4.1.6): Quick button on every angle field to snap to 45° steps *Barkfart: core: angle snapping to any step; no field button.*
 - [ ] **Figure rotation indicator** (since 4.2.0): Main node shows a line for the figure's rotation; rotation editable numerically
 - [ ] **Segment angle +/-** (since 2.2.2): Set segment angle with increment buttons
 - [~] **Axis lock while dragging** (since 2.2.0): Dragging a figure, textfield or camera in a straight line locks to that axis (toggle in settings) *Barkfart: core: figure drags lock to the dominant axis; no settings toggle.*
 - [~] **Flip figure (X/Y)** (since ≤1.7.8): Flip a stickfigure horizontally/vertically *Barkfart: core: mirror a figure (scale sign, keys included).*
 - [~] **Flip segments in Animation Mode** (since 2.3.7): Flip individual segments while animating, not just in creation *Barkfart: core: same branch flip, works on animated figures.*
-- [ ] **Join-anchor flip** (since 4.2.3): Long-press flip to mirror joined figures around the join anchor axis
-- [ ] **Individual node lock** (since 2.4.8): Pin a single node so it stays in world position while other nodes move (e.g. planted foot)
+- [~] **Join-anchor flip** (since 4.2.3): Long-press flip to mirror joined figures around the join anchor axis *Barkfart: core: mirror figures joined at a joint across its axis; no long-press.*
+- [~] **Individual node lock** (since 2.4.8): Pin a single node so it stays in world position while other nodes move (e.g. planted foot) *Barkfart: core: pinned joints hold their stage position during drags (two-bone); no button.*
 - [~] **Angle Lock (node)** (since 4.2.0): Keep a node at a fixed angle, absolute or relative to the nearest non-static parent *Barkfart: absolute and relative locks in pose and drag; legacy encoding not mapped; no UI.*
 - [~] **Drag Lock (node)** (since 4.2.0): Constrain a node's drag to a specific axis *Barkfart: horizontal / vertical drag lock; legacy encoding not mapped; no UI.*
 - [ ] **Floaty stretchy nodes** (since 4.2.0): Alternate tween behaviour for stretchy nodes
@@ -73,7 +73,7 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [x] **Keep selection while dragging stage** (since 4.0.3): Dragging the stage no longer clears selection
 - [ ] **Drag off stage stays responsive** (since 4.1.6): Dragging continues to track when the finger leaves the stage
 - [x] **Selection kept across pan/camera mode** (since 4.3.3): Entering/leaving pan or camera mode keeps the selected node
-- [ ] **Max figure scale** (since 4.1.0): Max scale raised from 10x to 20x
+- [x] **Max figure scale** (since 4.1.0): Max scale raised from 10x to 20x *Barkfart: no scale cap.*
 
 ## Stickfigure creation (segments, shapes, nodes, polyfills, connectors, smart stretch, locks)
 
@@ -102,7 +102,7 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [x] **Segment color gradients** (since 1.7.6): Two-color gradient along a segment *Barkfart: along the segment, figure-colour rule fitted.*
 - [x] **Radial circle gradients** (since 2.5.6): Circle gradients radiate from center; separate circle outline color
 - [x] **Sideways gradients** (since 4.1.0): Gradient direction toggle "sideways" for segments and trapezoids; triangles in 4.3.0
-- [ ] **Circle gradient horizontal/vertical** (since 4.2.4): Linear gradients on circles
+- [~] **Circle gradient horizontal/vertical** (since 4.2.4): Linear gradients on circles *Barkfart: core: linear gradients along or across round shapes; no toggle.*
 - [x] **Polygon radial gradient** (since 4.2.6): Radial gradient on polygons *Barkfart: polygons take radial gradients.*
 - [x] **Reverse gradient** (since ≤4.2.2): Swap gradient direction
 - [x] **Shapes: ellipse, trapezoid, right-triangle, polygon** (since 2.5.6): New shape types with Shape Tools menu *Barkfart: all drawn and imported; trapezoid and polygon geometry unverified (no reference file).*
@@ -118,7 +118,7 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [x] **Polyfills** (since 2.3.0): Fill shapes defined by an ordered set of nodes (polynodes) *Barkfart: drawn (concave, ear-clipped) and round-trip; no creation UI.*
 - [~] **Finish polyfill** (since ≤2.4.9): Button to complete a polyfill definition *Barkfart: core: pick polynodes in order, finish makes the fill; no buttons.*
 - [ ] **Polyanchor outline** (since 2.3.2): Selecting a polyanchor highlights its polyfill
-- [ ] **Copy/paste polyfills** (since 3.1.0): Polyfills copy with segments when all polynodes are included
+- [~] **Copy/paste polyfills** (since 3.1.0): Polyfills copy with segments when all polynodes are included *Barkfart: core: duplicating a branch copies its polyfills.*
 - [x] **Polyfills follow curves** (since 4.1.0): Polyfill edges follow curved segments; curve precision setting *Barkfart: fill edges follow the drawn arc.*
 - [ ] **Polyfill Precise mode** (since 4.2.4): Easier node picking, view/adjust polynode order
 - [x] **Smart-Stretch** (since 2.4.8): Stretching a node proportionally squashes/stretches its static child detail nodes *Barkfart: stretching a smart-stretch joint reshapes its static details (rule fitted to the original's own files).*
@@ -131,7 +131,7 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [~] **Modify Branch** (since 2.3.7): Mass-edit a node and all children: static, thickness, length, colors (replace), draw order *Barkfart: core: static, thickness, colour, shape, length scale for a whole branch.*
 - [~] **Modify Branch: limb type** (since 2.4.2): Change segment type for a whole branch *Barkfart: core: shape for a branch.*
 - [~] **Modify Branch: segment length** (since 3.1.0): Length field in Modify Branch *Barkfart: core: length scale for a branch.*
-- [ ] **Segment length field** (since 3.0.5): Length visible/editable in Segment Tools
+- [~] **Segment length field** (since 3.0.5): Length visible/editable in Segment Tools *Barkfart: core: length is a keyable property; no field.*
 - [ ] **Paste segment preserves angle** (since 2.5.6 / toggle 2.5.7): Pasted segments keep direction; toggle to preserve visual angle
 - [~] **Copy/paste keeps draw order** (since 2.3.0): Pasted segments remember draw order *Barkfart: core: duplicated branches keep their relative layering.*
 - [~] **Push branch back/forward** (since 4.1.6): Move a whole branch's draw order at once *Barkfart: core: whole-branch layering keeps its own order.*
@@ -170,7 +170,7 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [ ] **New-frame indicator** (since 2.3.2 / 3.1.0): Blue flash/indicator on newly added frames
 - [ ] **Selected-frame direction indicators** (since 3.1.9): Timeline arrows show where the current frame is; delete no longer jumps
 - [ ] **Frame number backgrounds** (since 2.4.0): Background behind frame numbers for readability
-- [ ] **Custom playback range** (since 4.1.6): Play button options to play only a range
+- [~] **Custom playback range** (since 4.1.6): Play button options to play only a range *Barkfart: core: playback range start / end; no play-button options.*
 - [x] **Frame skipping under lag** (since 3.3.0): Playback drops frames to keep timing (sound sync) *Barkfart: playback clock is time-based.*
 - [x] **Preserve selection across frames** (since 4.1.6): Keep the same figure/node selected while changing frames (setting)
 - (won't) **Frame node limit** (since 2.3.6): Per-frame cap (40 figures/6400 nodes in 2.3.6; nodes only 6400 in 3.0.0; 12,800 in 4.0.0) *Barkfart: no artificial limits (budgets only guard runaway recursion).*
@@ -215,9 +215,9 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [~] **Camera wobble/shake** (since 2.3.0): Automatic camera wobble with settings (improved 3.1.0; higher max 3.1.9) *Barkfart: wiggle modifier in the core; no UI.*
 - [~] **Widescreen bars** (since 2.2.0): Letterbox effect *Barkfart: core: letterbox setting drawn over the shot and export; no setting UI yet.*
 - [~] **Auto-Camera** (since 2.3.7): Choose start/end frames; camera tweens smoothly between, adapting to inserted frames *Barkfart: core: camera follows a layer over a frame range, keys thinned.*
-- [ ] **Auto-camera easing** (since 2.5.6): Ease in/out plus bounce, swing, elastic
+- [x] **Auto-camera easing** (since 2.5.6): Ease in/out plus bounce, swing, elastic *Barkfart: bounce and elastic curves in the easing menu (any key, camera included).*
 - [~] **Lock figure to camera** (since 2.3.7): Figures follow the camera (HUD/background) *Barkfart: core: locked layers stay put in the shot, no jump; no button yet.*
-- [ ] **Parallax** (since 2.3.7 / 2.4.4): Parallax factor for camera-locked figures; applies to camera scale
+- [~] **Parallax** (since 2.3.7 / 2.4.4): Parallax factor for camera-locked figures; applies to camera scale *Barkfart: core: camera-locked layers follow the camera by a fraction; no slider.*
 - [x] **Copy/paste camera** (since 3.1.0 / 4.0.0): Copy/paste camera lock bundles, wobble properties, frame camera (cross-project) *Barkfart: camera keys copy/paste in the dope sheet.*
 - [x] **Stay in camera mode on frame tap** (since 4.0.2): Tapping frames stays in Camera Mode
 
@@ -242,8 +242,8 @@ Our own additions wait in ADDITIONS.md until this list is done.
 
 ## Sprites & images
 
-- [ ] **Frame background color** (since 1.0): Per-frame solid background color via color chooser
-- [ ] **Gradient frame background** (since 2.0.0): Frame backgrounds can be two-color gradients
+- [~] **Frame background color** (since 1.0): Per-frame solid background color via color chooser *Barkfart: core: the camera's background colour, keyable per frame; no picker.*
+- [~] **Gradient frame background** (since 2.0.0): Frame backgrounds can be two-color gradients *Barkfart: core: top-to-bottom gradient background on the camera; no picker.*
 - [~] **Background images** (since 1.4.0): Load an image from the device as the frame background *Barkfart: an image layer at the bottom works; no dedicated background option yet.*
 - [ ] **Background image scaling** (since 1.7.0): Scale background image independently in x and y, beyond stage bounds
 - [ ] **Higher-res background loading** (since 2.5.3): Background images loaded at higher quality
@@ -257,7 +257,7 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [ ] **SpriteGroups** (since ≤4.1.6): Named groups of sprites; next name auto-numbered
 - [x] **Mass image import** (since 4.2.7): Import many images as sprites at once *Barkfart: the Files picker imports several images at once.*
 - [x] **GIF import** (since 4.2.7): Animated GIF imported as a movieclip *Barkfart: animated GIFs import as a looping movieclip, one sprite per frame; single frames as sprites.*
-- [ ] **Sprite distort / skew** (since 4.3.0): Toggle a distort mode to warp, skew and squash sprites
+- [~] **Sprite distort / skew** (since 4.3.0): Toggle a distort mode to warp, skew and squash sprites *Barkfart: core: keyable corner offsets, drawn without texture kinks; no handles.*
 - [~] **Separate X/Y sprite scale** (since 4.3.0): Independent axis scale controls for sprites *Barkfart: separate x/y scale in the model; no control yet.*
 - [~] **Negative import scale** (since 4.3.0): Internal scale at import can be negative (baked-in flip) *Barkfart: flip figure works on sprites (negative scale).*
 
@@ -266,8 +266,8 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [~] **Textfields** (since 1.5.0): Add text objects to frames (speech, titles) *Barkfart: text layers draw (Inter font, multi-line, accents); no add-text button yet.*
 - [x] **Text tweening** (since 1.7.6): Textfields interpolate between keyframes (new projects only) *Barkfart: text colour and transform keys interpolate.*
 - [ ] **Textfield limit** (since 1.7.6): Max per frame raised to 5 (1.7.6), then 10 (2.4.9)
-- [ ] **Text pans with figures** (since 2.2.2): Panning mode also moves textfields
-- [ ] **Lock text to corner** (since 2.2.0): Pin a textfield to a screen corner (name/watermark)
+- [~] **Text pans with figures** (since 2.2.2): Panning mode also moves textfields *Barkfart: core: move-everything includes text.*
+- [~] **Lock text to corner** (since 2.2.0): Pin a textfield to a screen corner (name/watermark) *Barkfart: core: lock to the camera, aligned to a shot corner; no button.*
 - [ ] **Project-wide watermark** (since 2.4.4): Corner text applies to all frames or none
 - [x] **Text rotation** (since 2.3.7): Rotate textfields *Barkfart: layer rotation applies to text.*
 - [x] **Text transparency** (since 2.3.7): Fade textfields *Barkfart: layer opacity applies to text.*
@@ -279,7 +279,7 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [ ] **Text scale up to 10** (since 2.5.9): Raised textfield scale limit
 - [ ] **Lock textfield** (since 3.1.0): Lock a textfield against edits/moves
 - [~] **Text lock to camera** (since 3.1.0): Text follows the camera *Barkfart: same camera lock works for text layers.*
-- [ ] **Draw above widescreen bars** (since ≤3.1.3): Option to draw text over letterbox bars
+- [~] **Draw above widescreen bars** (since ≤3.1.3): Option to draw text over letterbox bars *Barkfart: core: per-text option; no toggle.*
 - [ ] **Paste external text** (since 3.1.9): Paste button pastes clipboard text from other apps
 - [ ] **Copy/paste textfields across projects** (since 4.0.0): Text clipboard persists through opening projects
 
@@ -329,7 +329,7 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [~] **1080p MP4** (since 3.0.5): Max 1920×1080 output *Barkfart: Full = project size (1280x720 by default); a canvas-size setting is not in the UI yet.*
 - [x] **PNG export** (since 2.5.1): Single-image export *Barkfart: Export: PNG frames (zip), optional transparent background.*
 - [ ] **4K PNG** (since 3.3.0): PNG at 4K
-- [ ] **Export frame range** (since 2.3.0): Choose start/end frames (single frame allowed) *Barkfart: whole timeline only for now.*
+- [x] **Export frame range** (since 2.3.0): Choose start/end frames (single frame allowed) *Barkfart: export uses the playback range (start / end frames).*
 - [x] **Anti-aliasing** (since 2.3.6): Smooth-lines export option (GIF unlocked at any size 2.4.1) *Barkfart: exports are rendered at 2x and averaged down.*
 - (won't) **Low-quality blur export** (since 3.0.0): Export using preview-quality blur *Barkfart: not needed: exports always use full quality.*
 - [x] **Better quality blur** (since 3.3.0): Experimental higher-quality blur/glow export *Barkfart: exports always use full-quality effects.*

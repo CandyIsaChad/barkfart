@@ -595,5 +595,86 @@ final class FeatureChecks {
                 SelfTest.expect(Math.abs(alpha(im, 10, 0) - Math.round(o.opacity * 255)) <= 2, "ghost overlap");
             }
         });
+
+        r.group = "Backgrounds, easing, parallax";
+        SelfTest.check(r, "shot background, bounce, parallax", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                p.settings.width = 60;
+                p.settings.height = 40;
+                Layer.CameraLayer cam = new Layer.CameraLayer(p.newId("L"), "cam");
+                cam.background.setValue(Color.rgba8888(0x00ff00ff));
+                p.root().layers.add(cam);
+                Image im = render(p, 60, 40);
+                SelfTest.expect(Compositor.rgba(im, 30, 20) == 0x00ff00ff, "solid background");
+                cam.background2.setValue(Color.rgba8888(0x000000ff));
+                im = render(p, 60, 40);
+                SelfTest.expect((Compositor.rgba(im, 30, 1) >>> 16 & 0xff) > 230 && (Compositor.rgba(im, 30, 38) >>> 16 & 0xff) < 25, "gradient");
+                SelfTest.expect(Math.abs(app.barkfart.model.Ease.BOUNCE_OUT.apply(1 / 2.75f) - 1) < 1e-4 && app.barkfart.model.Ease.BOUNCE_OUT.apply(0.5f) < 1, "bounce");
+                Layer.FigureLayer f = figure(p);
+                f.parent = cam.id;
+                f.parallax = 0.5f;
+                cam.x.setValue(100f);
+                p.invalidateIndex();
+                SelfTest.expect(Math.abs(Evaluator.layerView(p, p.root(), f, 0).mapX(0, 0) + 50) < 1e-3, "parallax");
+            }
+        });
+
+        r.group = "Joints, sprites, text";
+        SelfTest.check(r, "pinned joint, joined flip, distort, linear circle gradient, text over bars", new SelfTest.Check() {
+            public void run() {
+                Project p = project();
+                Layer.FigureLayer leg = figure(p);
+                node(leg, "knee", "r", Node.Shape.LINE, -60, 50, 4);
+                Node foot = node(leg, "foot", "knee", Node.Shape.LINE, -60, 50, 4);
+                p.invalidateIndex();
+                Document d = new Document(p);
+                d.apply(app.barkfart.edit.FigureOps.setPinned(leg, "foot", true));
+                FigurePose p0 = FigurePose.compute(leg, 0, resolver(p));
+                int fi = leg.figure.indexOf("foot");
+                double fx = p0.x[fi], fy = p0.y[fi];
+                CanvasTools tools = new CanvasTools(new Editor(d));
+                tools.begin(new CanvasTools.Hit(leg, leg.figure.root(), 0, 0), 0, 0, 0);
+                tools.move(15, 5, 0);
+                tools.end();
+                FigurePose p1 = FigurePose.compute(leg, 0, resolver(p));
+                SelfTest.expect(Math.abs(p1.x[fi] + 15 - fx) < 1e-3 && Math.abs(p1.y[fi] + 5 - fy) < 1e-3, "foot held on stage");
+                Layer.FigureLayer sword = figure(p);
+                node(sword, "tip", "r", Node.Shape.LINE, 40, 30, 4);
+                p.invalidateIndex();
+                d.apply(app.barkfart.edit.JoinOps.join(p, p.root(), sword, leg, "knee", true, 0));
+                float y0 = resolver(p).f(sword.transform.rotation, 0);
+                d.apply(app.barkfart.edit.JoinOps.flipJoined(p.root(), leg, "knee"));
+                SelfTest.expect(Math.abs(resolver(p).f(sword.transform.rotation, 0) + y0) < 1e-4, "joined flip");
+                Layer.SpriteLayer sp = new Layer.SpriteLayer(p.newId("L"), "s");
+                sp.asset = "img";
+                sp.width = 10;
+                sp.height = 10;
+                sp.distort[4].setValue(5f);
+                p.root().layers.add(sp);
+                p.invalidateIndex();
+                int verts = 0;
+                for (DrawList.Batch b : Tessellator.tessellate(Evaluator.evaluate(p, p.rootSymbol, 0)).batches) if ("img".equals(b.texture)) verts += b.vertexCount();
+                SelfTest.expect(verts > 6, "distorted sprite drawn as a grid");
+                Project q = project();
+                Layer.FigureLayer c = figure(q);
+                Node cn = node(c, "c", "r", Node.Shape.CIRCLE, 0, 40, 4);
+                cn.color.setValue(Color.rgba8888(0x000000ff));
+                cn.gradient = true;
+                cn.gradientLinear = true;
+                c.transform.x.setValue(-20f);
+                Image im = render(q, 60, 60);
+                int left = Compositor.rgba(im, 12, 30) >>> 24, right = Compositor.rgba(im, 48, 30) >>> 24;
+                SelfTest.expect(left < 40 && right > 215, "linear circle gradient " + left + " " + right);
+                q.settings.letterbox = 3f;
+                Layer.TextLayer tl = new Layer.TextLayer(q.newId("L"), "t");
+                tl.text = "x";
+                tl.aboveBars = true;
+                q.root().layers.add(tl);
+                q.invalidateIndex();
+                Group root = Evaluator.evaluate(q, q.rootSymbol, 0).root;
+                SelfTest.expect(((Group) root.children.get(root.children.size() - 1)).source.endsWith(tl.id), "text above bars");
+            }
+        });
     }
 }

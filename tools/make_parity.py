@@ -226,6 +226,25 @@ STATUS = {
     "Copy with joins": ("~", "core: duplicate keeps joined figures joined to the copy; no long-press"),
     "Copy all figure properties": ("~", "core: transform, opacity, blend, effects; no buttons"),
     "Properties include layer": ("~", "core: optional stack position; no buttons"),
+    # Core batch 3 (2026-11-17 night)
+    "Frame background color": ("~", "core: the camera's background colour, keyable per frame; no picker"),
+    "Gradient frame background": ("~", "core: top-to-bottom gradient background on the camera; no picker"),
+    "Auto-camera easing": ("x", "bounce and elastic curves in the easing menu (any key, camera included)"),
+    "Parallax": ("~", "core: camera-locked layers follow the camera by a fraction; no slider"),
+    "Individual node lock": ("~", "core: pinned joints hold their stage position during drags (two-bone); no button"),
+    "Join-anchor flip": ("~", "core: mirror figures joined at a joint across its axis; no long-press"),
+    "Sprite distort / skew": ("~", "core: keyable corner offsets, drawn without texture kinks; no handles"),
+    "Max zoom increases": ("x", "stage zoom up to 5000%"),
+    "Lock text to corner": ("~", "core: lock to the camera, aligned to a shot corner; no button"),
+    "Draw above widescreen bars": ("~", "core: per-text option; no toggle"),
+    "Text pans with figures": ("~", "core: move-everything includes text"),
+    "Circle gradient horizontal/vertical": ("~", "core: linear gradients along or across round shapes; no toggle"),
+    "Export frame range": ("x", "export uses the playback range (start / end frames)"),
+    "Custom playback range": ("~", "core: playback range start / end; no play-button options"),
+    "Max figure scale": ("x", "no scale cap"),
+    "Copy/paste polyfills": ("~", "core: duplicating a branch copies its polyfills"),
+    "Segment length field": ("~", "core: length is a keyable property; no field"),
+    "Tap knob to snap": ("~", "core: angle snapping; no knob"),
 }
 
 ROADMAP = """
