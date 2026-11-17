@@ -27,7 +27,7 @@ public final class ExportJob {
 
     public final Format format;
     public final File out;
-    public final int w, h, frameCount;
+    public final int w, h, frameCount, startFrame;
     public final double fps;
     private final Frames frames;
     private final VideoSink video;
@@ -40,6 +40,12 @@ public final class ExportJob {
     private volatile String problem;
 
     public ExportJob(Format format, File out, int w, int h, int frameCount, double fps, boolean transparent, Frames frames, VideoSink video) throws IOException {
+        this(format, out, w, h, 0, frameCount, fps, transparent, frames, video);
+    }
+
+    /** Exports frameCount frames starting at startFrame (an export range); the file starts at time 0. */
+    public ExportJob(Format format, File out, int w, int h, int startFrame, int frameCount, double fps, boolean transparent, Frames frames, VideoSink video) throws IOException {
+        this.startFrame = Math.max(0, startFrame);
         this.format = format;
         this.out = out;
         this.w = w;
@@ -84,7 +90,7 @@ public final class ExportJob {
                 finish();
                 return;
             }
-            byte[] px = pending != null ? pending : frames.grab(next / fps);
+            byte[] px = pending != null ? pending : frames.grab((startFrame + next) / fps);
             pending = null;
             switch (format) {
                 case PNG: {

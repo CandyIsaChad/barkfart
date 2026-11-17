@@ -6,10 +6,11 @@ public interface AudioBackend {
     Pcm decode(String name, byte[] bytes);
 
     /**
-     * Plays the plan from timeline time t, looping at loopEnd seconds when
-     * loopEnd > 0. Replaces anything playing. Returns null, or why not.
+     * Plays the plan from timeline time t, looping back to loopStart at loopEnd
+     * seconds when loopEnd > loopStart. Replaces anything playing. Returns null,
+     * or why not.
      */
-    String play(AudioPlan plan, double t, double loopEnd);
+    String play(AudioPlan plan, double t, double loopStart, double loopEnd);
 
     void stop();
 
@@ -22,7 +23,7 @@ public interface AudioBackend {
             return Wav.decode(bytes);
         }
 
-        public String play(AudioPlan plan, double t, double loopEnd) {
+        public String play(AudioPlan plan, double t, double loopStart, double loopEnd) {
             return "no audio output on this platform";
         }
 

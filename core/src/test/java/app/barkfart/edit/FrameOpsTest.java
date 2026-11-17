@@ -86,4 +86,52 @@ class FrameOpsTest {
         assertEquals(1, f.frameCount());
         assertFalse(f.delete(0));
     }
+
+    @Test
+    void keyingTheTweenedPoseChangesNothingAndHoldFreezesAFrame() {
+        app.barkfart.model.Project p = app.barkfart.Fixtures.empty();
+        p.root().duration = 1;
+        app.barkfart.model.Layer.FigureLayer man = app.barkfart.Fixtures.stickman(p, "man");
+        app.barkfart.model.Property arm = man.figure.node("armR1").rotation;
+        arm.track().put(new app.barkfart.model.Key(0, -80f, app.barkfart.model.Interp.LINEAR));
+        arm.track().put(new app.barkfart.model.Key(1, 60f, app.barkfart.model.Interp.LINEAR));
+        p.root().layers.add(man);
+        p.invalidateIndex();
+        Document d = new Document(p);
+        Editor ed = new Editor(d);
+        FrameOps ops = new FrameOps(ed);
+        java.util.List<String> before = SymbolOpsTest.frame(p, 0.37);
+        assertEquals(1, ops.keyPoseBetween(null, 0, 1, 0.25));
+        assertTrue(arm.track().indexOf(0.25) >= 0, "a key at 25%");
+        assertEquals(-45f, (Float) arm.keyValue(0.25), 1e-4);
+        SymbolOpsTest.sameFrame(before, SymbolOpsTest.frame(p, 0.37), "nothing moves");
+        d.undo();
+        assertTrue(arm.track().indexOf(0.25) < 0);
+        // hold frame 6 (0.2 s) for 4 frames at 30 fps
+        double fps = ed.fps(), t = 6 / fps;
+        float at = (Float) arm.keyValue(t), later = (Float) arm.keyValue(0.6);
+        ops.hold(6, 4);
+        for (int k = 0; k <= 4; k++) assertEquals(at, (Float) arm.keyValue(t + k / fps), 1e-4, "held at frame " + (6 + k));
+        assertEquals(later, (Float) arm.keyValue(0.6 + 4 / fps), 1e-4, "the rest moved back 4 frames");
+        assertEquals(1 + 4 / fps, p.root().duration, 1e-9);
+    }
+
+    @Test
+    void exportAsksForExactlyTheRangesFrames() throws Exception {
+        final java.util.List<Double> asked = new java.util.ArrayList<Double>();
+        java.io.File out = java.io.File.createTempFile("range", ".gif");
+        app.barkfart.export.ExportJob job = new app.barkfart.export.ExportJob(app.barkfart.export.ExportJob.Format.GIF, out, 4, 4, 5, 3, 10,
+                false, new app.barkfart.export.ExportJob.Frames() {
+                    public byte[] grab(double t) {
+                        asked.add(t);
+                        return new byte[4 * 4 * 4];
+                    }
+
+                    public void dispose() {
+                    }
+                }, null);
+        while (job.state() == app.barkfart.export.ExportJob.State.RUNNING) job.step();
+        assertEquals(java.util.Arrays.asList(0.5, 0.6, 0.7), asked);
+        out.delete();
+    }
 }

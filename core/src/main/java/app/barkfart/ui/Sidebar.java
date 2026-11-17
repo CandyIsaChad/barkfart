@@ -305,7 +305,7 @@ public final class Sidebar extends WidgetGroup {
             }
         }), new UiButton(theme, "Test tone", UiButton.Style.NORMAL, new Runnable() {
             public void run() {
-                String err = st.audio.play(app.barkfart.audio.AudioPlan.single(app.barkfart.audio.Mixer.tone(440, 0.6, 44100, 0.4f)), 0, 0);
+                String err = st.audio.play(app.barkfart.audio.AudioPlan.single(app.barkfart.audio.Mixer.tone(440, 0.6, 44100, 0.4f)), 0, 0, 0);
                 st.flash(err == null ? "Playing a test tone (440 Hz). If you hear nothing, check the volume and the silent switch." : "Sound off: " + err, null, 6);
             }
         }));

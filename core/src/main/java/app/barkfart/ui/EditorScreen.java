@@ -99,7 +99,7 @@ public final class EditorScreen implements Disposable {
     /** The Diagnostics screen's "try it yourself" actions. */
     private void diagnosticsTry(int i) {
         if (i == 0) {
-            String err = state.audio.play(app.barkfart.audio.AudioPlan.single(app.barkfart.audio.Mixer.tone(440, 0.6, 44100, 0.4f)), 0, 0);
+            String err = state.audio.play(app.barkfart.audio.AudioPlan.single(app.barkfart.audio.Mixer.tone(440, 0.6, 44100, 0.4f)), 0, 0, 0);
             state.flash(err == null ? "Playing a test tone (440 Hz)" : "Sound off: " + err, null, 6);
         } else if (i == 1) {
             app.barkfart.model.Symbol root = state.project().root();

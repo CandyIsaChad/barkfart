@@ -183,15 +183,27 @@ public final class EditorState {
         };
     }
 
+    /** Playback range in frames (inclusive), or -1 for the whole timeline (Stick Nodes 4.1.6). */
+    public int rangeStart = -1, rangeEnd = -1;
+
+    /** The range played, in seconds: {start, end}. Also used by export. */
+    public double[] playRange() {
+        int n = frames.frameCount();
+        int a = rangeStart < 0 ? 0 : Math.min(rangeStart, n - 1);
+        int b = rangeEnd < 0 ? n - 1 : Math.max(a, Math.min(rangeEnd, n - 1));
+        return new double[] {frames.time(a), frames.time(b + 1)};
+    }
+
     public void play() {
         if (playing) return;
         playStartFrame = frame;
+        double[] range = playRange();
         playTime = frames.time(frame);
+        if (playTime < range[0] || playTime >= range[1]) playTime = range[0];
         playing = true;
-        double dur = frames.frameCount() / editor.fps();
         app.barkfart.audio.AudioPlan plan = app.barkfart.audio.AudioPlan.build(project(), project().root(), sounds());
         if (!plan.entries.isEmpty()) {
-            String err = audio.play(plan, playTime, dur);
+            String err = audio.play(plan, playTime, range[0], range[1]);
             if (err != null) flash("Sound off: " + err, null, 6);
         }
         fire();
@@ -213,9 +225,9 @@ public final class EditorState {
             fire();
         }
         if (!playing) return;
-        double dur = frames.frameCount() / editor.fps();
+        double[] range = playRange();
         playTime += dt;
-        if (playTime >= dur) playTime %= dur;
+        if (playTime >= range[1] || playTime < range[0]) playTime = range[0] + Math.max(0, playTime - range[0]) % Math.max(1e-6, range[1] - range[0]);
     }
 
     public int playingFrame() {

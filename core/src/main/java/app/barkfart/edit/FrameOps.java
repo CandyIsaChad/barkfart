@@ -103,6 +103,63 @@ public final class FrameOps {
         if (!sel.isEmpty()) editor.setInterp(sel, tween ? Interp.LINEAR : Interp.HOLD, null);
     }
 
+    /**
+     * "Add tweened frame": keys every animated property (all layers, or one)
+     * at time t with the value it already has there, so the in-between pose
+     * becomes a key you can edit. Nothing moves. Returns the keys added.
+     */
+    public int keyPose(Layer only, double t) {
+        int added = 0;
+        editor.doc.begin("Add tweened frame");
+        try {
+            for (Layer l : sym().layers) {
+                if (only != null && l != only) continue;
+                for (Property p : l.properties()) {
+                    if (p.track().isEmpty() || p.track().indexOf(t) >= 0) continue;
+                    Track out = new Track(p.type);
+                    for (Key k : p.track().keys()) out.put(k);
+                    out.put(new Key(t, p.keyValue(t), interpAt(p.track(), t)));
+                    editor.doc.apply(Edits.setKeys(p, out.keys(), "Add tweened frame"));
+                    added++;
+                }
+            }
+        } finally {
+            editor.doc.commit();
+        }
+        return added;
+    }
+
+    /** The tweened pose a fraction (0..1) of the way from time t0 to t1, as keys (Stick Nodes' 10-90% buttons). */
+    public int keyPoseBetween(Layer only, double t0, double t1, double fraction) {
+        double f = Math.max(0, Math.min(1, fraction));
+        return keyPose(only, t0 + (t1 - t0) * f);
+    }
+
+    /**
+     * Holds the pose of a frame for `frames` more frames: later keys move back
+     * and the pose is keyed at both ends of the hold (Stick Nodes' frame delay).
+     */
+    public void hold(int frame, int frames) {
+        if (frames <= 0) return;
+        double t = time(frame), dt = frames / fps(), eps = 0.25 / fps();
+        editor.doc.begin("Hold frame");
+        try {
+            editor.doc.apply(StructureEdits.setDuration(sym(), (frameCount() + frames) / fps()));
+            for (Property p : props()) {
+                if (p.track().isEmpty()) continue;
+                Object v = p.keyValue(t);
+                Interp in = interpAt(p.track(), t);
+                Track out = new Track(p.type);
+                for (Key k : p.track().keys()) out.put(k.time > t + eps ? k.withTime(k.time + dt) : k);
+                if (out.indexOf(t) < 0) out.put(new Key(t, v, in));
+                out.put(new Key(t + dt, v, in));
+                editor.doc.apply(Edits.setKeys(p, out.keys(), "Hold frame"));
+            }
+        } finally {
+            editor.doc.commit();
+        }
+    }
+
     private static Interp interpAt(Track tr, double t) {
         if (tr.isEmpty()) return Interp.LINEAR;
         int i = tr.indexOf(t);

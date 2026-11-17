@@ -156,8 +156,9 @@ public final class ExportPanel extends WidgetGroup {
         go.enabled = !busy;
         close.setText(busy ? "Cancel" : "Close");
         int[] d = dims();
-        int frames = st.frames.frameCount();
-        info.setText(frames + " frames · " + String.format("%.2f s", frames / st.editor.fps()) + " at " + Math.round(st.editor.fps()) + " fps · "
+        double[] range = st.playRange();
+        int frames = Math.max(1, (int) Math.round((range[1] - range[0]) * st.editor.fps()));
+        info.setText((st.rangeStart >= 0 || st.rangeEnd >= 0 ? "Playback range: " : "") + frames + " frames · " + String.format("%.2f s", frames / st.editor.fps()) + " at " + Math.round(st.editor.fps()) + " fps · "
                 + d[0] + " × " + d[1] + " · camera shot"
                 + (format == ExportJob.Format.VIDEO ? " · with sound" : "")
                 + (canVideo ? "" : " · Video export needs the iPad app (this build: GIF and PNG)"));
@@ -187,9 +188,10 @@ public final class ExportPanel extends WidgetGroup {
                 }
             };
             app.barkfart.export.VideoSink video = null;
+            double[] range = st.playRange();
+            int first = (int) Math.round(range[0] * st.editor.fps()), count = Math.max(1, (int) Math.round((range[1] - range[0]) * st.editor.fps()));
             if (format == ExportJob.Format.VIDEO) {
-                double seconds = st.frames.frameCount() / st.editor.fps();
-                byte[] wav = app.barkfart.audio.Bounce.wav(app.barkfart.audio.AudioPlan.build(p, p.root(), st.sounds()), seconds);
+                byte[] wav = app.barkfart.audio.Bounce.wav(app.barkfart.audio.AudioPlan.build(p, p.root(), st.sounds()), range[0], range[1] - range[0]);
                 File wf = null;
                 if (wav != null) {
                     wf = File.createTempFile("soundtrack", ".wav");
@@ -208,7 +210,7 @@ public final class ExportPanel extends WidgetGroup {
                     return;
                 }
             }
-            job = new ExportJob(format, out, d[0], d[1], st.frames.frameCount(), st.editor.fps(), tr, frames, video);
+            job = new ExportJob(format, out, d[0], d[1], first, count, st.editor.fps(), tr, frames, video);
             progress.setText("Starting…");
         } catch (Exception e) {
             progress.setText("Could not start: " + e.getMessage());

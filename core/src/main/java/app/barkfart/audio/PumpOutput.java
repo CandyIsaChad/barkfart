@@ -30,7 +30,7 @@ public abstract class PumpOutput implements AudioBackend {
         return null;
     }
 
-    public synchronized String play(final AudioPlan plan, final double t, final double loopEnd) {
+    public synchronized String play(final AudioPlan plan, final double t, final double loopStart, final double loopEnd) {
         stop();
         String err;
         try {
@@ -48,10 +48,11 @@ public abstract class PumpOutput implements AudioBackend {
                 for (AudioPlan.Entry e : plan.entries) last = Math.max(last, e.end);
                 try {
                     while (running) {
-                        if (loopEnd <= 0 && time > last + 0.3) break;
-                        if (loopEnd > 0 && time >= loopEnd) time %= loopEnd;
+                        boolean looping = loopEnd > loopStart;
+                        if (!looping && time > last + 0.3) break;
+                        if (looping && time >= loopEnd) time = loopStart + (time - loopStart) % (loopEnd - loopStart);
                         int n = BLOCK;
-                        if (loopEnd > 0) n = (int) Math.max(1, Math.min(BLOCK, Math.ceil((loopEnd - time) * RATE)));   // split at the loop point
+                        if (looping) n = (int) Math.max(1, Math.min(BLOCK, Math.ceil((loopEnd - time) * RATE)));   // split at the loop point
                         Mixer.mix(plan, time, n, RATE, buf);
                         if (!running || !write(buf, n)) break;
                         time += n / (double) RATE;
