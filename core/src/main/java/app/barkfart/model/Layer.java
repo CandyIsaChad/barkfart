@@ -121,6 +121,15 @@ public abstract class Layer {
         public String font;
         public float size = 32;
         public final Property color;
+        /**
+         * Which point of the text block sits at the layer origin: 0 centre,
+         * else a corner (Stick Nodes 2.2.0 lock to corner): lines align to
+         * that side.
+         */
+        public int corner;
+        public static final int CENTRE = 0, TOP_LEFT = 1, TOP_RIGHT = 2, BOTTOM_LEFT = 3, BOTTOM_RIGHT = 4;
+        /** Drawn over the widescreen bars (Stick Nodes 3.1.3), e.g. a watermark. */
+        public boolean aboveBars;
 
         public TextLayer(String id, String name) {
             super(id, name);

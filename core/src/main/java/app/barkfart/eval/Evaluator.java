@@ -91,7 +91,21 @@ public final class Evaluator {
             evalSymbol(project, w, r, scene, stack, onionOnly && w.path.up == null);
         }
         if (!onionOnly) background(project, sym, t, r, root, applyCamera);
-        if (applyCamera && !onionOnly) letterbox(project, root);
+        if (applyCamera && !onionOnly && letterbox(project, root)) {
+            // text marked "above the bars" moves on top of them
+            for (Layer l : sym.layers) {
+                if (!(l instanceof Layer.TextLayer) || !((Layer.TextLayer) l).aboveBars) continue;
+                String src = sym.id + "/" + l.id;
+                for (int i = 0; i < root.children.size(); i++) {
+                    Object o = root.children.get(i);
+                    if (o instanceof Group && src.equals(((Group) o).source)) {
+                        root.children.remove(i);
+                        root.children.add(o);
+                        break;
+                    }
+                }
+            }
+        }
         return scene;
     }
 
@@ -137,15 +151,16 @@ public final class Evaluator {
     }
 
     /** Widescreen bars over the shot (Stick Nodes 2.2.0): black above and below to the set aspect ratio. */
-    private static void letterbox(Project project, Group root) {
+    private static boolean letterbox(Project project, Group root) {
         float aspect = project.settings.letterbox, w = project.settings.width, h = project.settings.height;
-        if (!(aspect > 0) || !(w > 0) || !(h > 0) || aspect <= w / h) return;
+        if (!(aspect > 0) || !(w > 0) || !(h > 0) || aspect <= w / h) return false;
         float bar = (h - w / aspect) / 2, x0 = -w / 2, x1 = w / 2, y1 = h / 2;
         Group g = new Group("letterbox");
         app.barkfart.model.Color black = app.barkfart.model.Color.BLACK;
         g.children.add(new Shape.Polygon(new float[] {x0, y1 - bar, x1, y1 - bar, x1, y1, x0, y1}, black, "letterbox"));
         g.children.add(new Shape.Polygon(new float[] {x0, -y1, x1, -y1, x1, -y1 + bar, x0, -y1 + bar}, black, "letterbox"));
         root.children.add(g);
+        return true;
     }
 
     /** View transform from the topmost visible camera layer of the evaluated symbol. */
@@ -226,7 +241,9 @@ public final class Evaluator {
                     w.into.children.add(g);
                     Layer.TextLayer tl = (Layer.TextLayer) l;
                     if (tl.text != null && !tl.text.isEmpty() && tl.size > 0 && spend(scene, l.id)) {
-                        g.children.add(new Shape.Text(tl.text, tl.font, Math.min(tl.size, 10000), xf, (Color) r.resolve(tl.color, t), l.id));
+                        Shape.Text st = new Shape.Text(tl.text, tl.font, Math.min(tl.size, 10000), xf, (Color) r.resolve(tl.color, t), l.id);
+                        st.corner = tl.corner;
+                        g.children.add(st);
                     }
                     break;
                 }

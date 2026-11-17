@@ -190,6 +190,8 @@ public final class ProjectCodec {
             m.put("font", s.font);
             m.put("size", Json.num(s.size));
             m.put("color", prop(s.color, false));
+            if (s.corner != 0) m.put("corner", Json.num(s.corner));
+            if (s.aboveBars) m.put("aboveBars", true);
         } else if (l instanceof Layer.SymbolLayer) {
             Layer.SymbolLayer s = (Layer.SymbolLayer) l;
             m.put("symbol", s.symbol);
@@ -638,6 +640,8 @@ public final class ProjectCodec {
                 s.font = str(m, "font");
                 s.size = f(m, "size", s.size);
                 readProp(m, "color", s.color);
+                s.corner = Math.max(0, Math.min(4, i(m, "corner", 0)));
+                s.aboveBars = b(m, "aboveBars", false);
                 l = s;
                 break;
             }

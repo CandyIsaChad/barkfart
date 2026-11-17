@@ -55,6 +55,9 @@ public final class Tessellator {
         float k = tx.size / gs.basePx(), lh = gs.lineHeight();
         String[] lines = tx.text.split("\n", -1);
         float total = lines.length * lh;
+        int corner = tx.corner;
+        boolean left = corner == 1 || corner == 3, right = corner == 2 || corner == 4;
+        float top = corner == 1 || corner == 2 ? 0 : corner == 3 || corner == 4 ? total : total / 2;
         for (int li = 0; li < lines.length && li < 500; li++) {
             String line = lines[li];
             float width = 0;
@@ -62,7 +65,7 @@ public final class Tessellator {
                 GlyphSource.Glyph g = gs.glyph(line.charAt(i));
                 width += g == null ? lh * 0.3f : g.advance;
             }
-            float pen = -width / 2, base = total / 2 - (li + 1) * lh + lh * 0.25f;
+            float pen = left ? 0 : right ? -width : -width / 2, base = top - (li + 1) * lh + lh * 0.25f;
             for (int i = 0; i < line.length() && i < 10000; i++) {
                 GlyphSource.Glyph g = gs.glyph(line.charAt(i));
                 if (g == null) {

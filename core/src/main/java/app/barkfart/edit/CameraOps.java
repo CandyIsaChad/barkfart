@@ -84,4 +84,44 @@ public final class CameraOps {
     public static Command lock(Project p, Symbol s, Layer l, Layer.CameraLayer cam, boolean on, double t) {
         return JoinOps.reparent(p, s, l, on ? cam.id : null, t, on ? "Lock to camera" : "Unlock from camera");
     }
+
+    /**
+     * Lock text to a corner of the shot (Stick Nodes 2.2.0, a name or
+     * watermark): locks it to the camera, aligns the text block to that
+     * corner and places it there, margin in from the edges, unturned. One undo step.
+     */
+    public static void pinToCorner(Editor editor, Symbol s, final Layer.TextLayer l, Layer.CameraLayer cam, final int corner, float margin, double t) {
+        if (corner < 1 || corner > 4) throw new IllegalArgumentException("corner 1..4");
+        Project p = editor.doc.project;
+        editor.doc.begin("Lock text to corner");
+        try {
+            if (!cam.id.equals(l.parent)) editor.doc.apply(lock(p, s, l, cam, true, t));
+            final int old = l.corner;
+            final float oldPar = l.parallax;
+            editor.doc.apply(new Command() {
+                public void apply() {
+                    l.corner = corner;
+                    l.parallax = 0;
+                }
+
+                public void revert() {
+                    l.corner = old;
+                    l.parallax = oldPar;
+                }
+
+                public String label() {
+                    return "Align text";
+                }
+            });
+            float w = p.settings.width / 2f - margin, h = p.settings.height / 2f - margin;
+            boolean leftSide = corner == Layer.TextLayer.TOP_LEFT || corner == Layer.TextLayer.BOTTOM_LEFT;
+            boolean topSide = corner == Layer.TextLayer.TOP_LEFT || corner == Layer.TextLayer.TOP_RIGHT;
+            editor.change(l.transform.x, leftSide ? -w : w, t);
+            editor.change(l.transform.y, topSide ? h : -h, t);
+            editor.change(l.transform.rotation, 0f, t);
+        } finally {
+            editor.doc.commit();
+        }
+    }
+
 }

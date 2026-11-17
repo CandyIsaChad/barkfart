@@ -165,6 +165,8 @@ public abstract class Shape {
         public final String text, font;
         public final float size;
         public final Affine xf;
+        /** Layer.TextLayer.corner: which point of the block is at the origin. */
+        public int corner;
 
         public Text(String text, String font, float size, Affine xf, Color color, String source) {
             super(color, source);
