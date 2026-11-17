@@ -72,6 +72,8 @@ public final class CanvasTools {
     private float startLayerX, startLayerY;
     /** Lengths at drag start, used as rest lengths where a node has none (smart-stretch). */
     private final java.util.Map<Node, Float> startLength = new java.util.HashMap<Node, Float>();
+    /** Stage positions of pinned joints at drag start. */
+    private final java.util.Map<Node, double[]> pins = new java.util.LinkedHashMap<Node, double[]>();
 
     public CanvasTools(Editor editor) {
         this.editor = editor;
@@ -218,6 +220,64 @@ public final class CanvasTools {
         for (Node n : hit.layer.figure.nodes()) startLength.put(n, r0.f(n.length, t));
         editor.doc.begin(hit.node.parent == null ? "Move figure" : "Pose node");
         pinKeys(hit, t);
+        pins.clear();
+        FigurePose p0 = FigurePose.compute(hit.layer, t, r0);
+        Affine stage = Evaluator.layerStage(editor.doc.project, symbol(), hit.layer, t);
+        List<Node> ns = hit.layer.figure.nodes();
+        for (int i = 0; i < ns.size(); i++) {
+            Node n = ns.get(i);
+            if (!n.pinned || n.parent == null || n == hit.node) continue;
+            pins.put(n, new double[] {stage.mapX(p0.x[i], p0.y[i]), stage.mapY(p0.x[i], p0.y[i])});
+        }
+    }
+
+    /**
+     * Turns each pinned joint and its parent (two-bone, keeping the bend's
+     * side) so the joint stays where it was on the stage; out of reach, the
+     * limb points at it. The dragged joint itself is never moved.
+     */
+    private void holdPins(double t) {
+        if (pins.isEmpty()) return;
+        Layer.FigureLayer layer = drag.layer;
+        List<Node> ns = layer.figure.nodes();
+        for (java.util.Map.Entry<Node, double[]> e : pins.entrySet()) {
+            PropertyResolver r = new PropertyResolver(editor.doc.project, new ArrayList<Diagnostic>());
+            FigurePose pose = FigurePose.compute(layer, t, r);
+            Affine inv = Evaluator.layerStage(editor.doc.project, symbol(), layer, t).inverse();
+            double tx = inv.mapX(e.getValue()[0], e.getValue()[1]), ty = inv.mapY(e.getValue()[0], e.getValue()[1]);
+            Node n = e.getKey();
+            int j = layer.figure.indexOf(n.id), pj = pose.parent[j];
+            if (j < 0 || pj < 0) continue;
+            Node pn = ns.get(pj);
+            int a = pose.parent[pj];
+            boolean twoBone = a >= 0 && pn != drag.node && !pn.pinned;
+            double lj = Math.hypot(pose.x[j] - pose.x[pj], pose.y[j] - pose.y[pj]);
+            if (twoBone) {
+                double lp = Math.hypot(pose.x[pj] - pose.x[a], pose.y[pj] - pose.y[a]);
+                double ax = pose.x[a], ay = pose.y[a];
+                double d = Math.hypot(tx - ax, ty - ay);
+                if (lp > 1e-9 && d > 1e-9) {
+                    double dc = Math.max(Math.abs(lp - lj) + 1e-9, Math.min(lp + lj - 1e-9, d));
+                    double cosA = (lp * lp + dc * dc - lj * lj) / (2 * lp * dc);
+                    double alpha = Math.acos(Math.max(-1, Math.min(1, cosA)));
+                    double phi = Math.atan2(ty - ay, tx - ax);
+                    double side = (tx - ax) * (pose.y[pj] - ay) - (ty - ay) * (pose.x[pj] - ax);
+                    double elbow = phi + (side >= 0 ? alpha : -alpha);
+                    setWorldAngle(layer, pose, pj, Math.toDegrees(elbow), r, t);
+                    pose = FigurePose.compute(layer, t, r = new PropertyResolver(editor.doc.project, new ArrayList<Diagnostic>()));
+                }
+            }
+            double world = Math.toDegrees(Math.atan2(ty - pose.y[pj], tx - pose.x[pj]));
+            if (lj > 1e-9) setWorldAngle(layer, pose, j, world, r, t);
+        }
+    }
+
+    private void setWorldAngle(Layer.FigureLayer layer, FigurePose pose, int i, double world, PropertyResolver r, double t) {
+        Node n = layer.figure.nodes().get(i);
+        double rel = world - pose.baseAngle(layer.figure.nodes(), i);
+        double current = r.f(n.rotation, t);
+        rel += 360 * Math.round((current - rel) / 360);
+        editor.change(n.rotation, (float) rel, t);
     }
 
     private Affine view(Symbol s, Layer l, double t) {
@@ -271,6 +331,7 @@ public final class CanvasTools {
             double dyp = local.b * (nx - ox) + local.d * (ny - oy);
             editor.change(drag.layer.transform.x, (float) (startLayerX + dxp), t);
             editor.change(drag.layer.transform.y, (float) (startLayerY + dyp), t);
+            holdPins(t);
             return;
         }
         PropertyResolver r = new PropertyResolver(editor.doc.project, new ArrayList<Diagnostic>());
@@ -294,6 +355,7 @@ public final class CanvasTools {
                 if (n.smartStretch) smartStretch(drag.layer, pose, i, len, t);
             }
         }
+        holdPins(t);
     }
 
     /**

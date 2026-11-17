@@ -185,6 +185,7 @@ public final class SymbolOps {
             m.trapezoidRoundEnd = n.trapezoidRoundEnd;
             m.angleLock = n.angleLock;
             m.dragLock = n.dragLock;
+            m.pinned = n.pinned;
             Property[] from = n.properties(), to = m.properties();
             for (int i = 0; i < from.length; i++) to[i].setValue(r.resolve(from[i], t));
             c.figure.add(m);

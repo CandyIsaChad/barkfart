@@ -75,6 +75,12 @@ public final class Node {
     public int angleLock;
     /** DRAG_HORIZONTAL / DRAG_VERTICAL: drags of this joint move along one stage axis only. */
     public int dragLock;
+    /**
+     * Pinned (Stick Nodes 2.4.8 individual node lock): while other joints or
+     * the whole figure are dragged, this joint keeps its place on the stage
+     * (its own and its parent's angles turn to reach it, like a planted foot).
+     */
+    public boolean pinned;
     /** Legacy fields not yet understood, kept for faithful re-export. */
     public final Map<String, Object> legacyExtras = new LinkedHashMap<String, Object>();
 

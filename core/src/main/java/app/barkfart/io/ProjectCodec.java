@@ -246,6 +246,7 @@ public final class ProjectCodec {
         if (n.trapezoidRoundEnd) m.put("roundEnd", true);
         if (n.angleLock != 0) m.put("angleLock", Json.num(n.angleLock));
         if (n.dragLock != 0) m.put("dragLock", Json.num(n.dragLock));
+        if (n.pinned) m.put("pinned", true);
         // Saved whenever it carries information, even with the gradient off (exact legacy export).
         boolean gradColourSet = !n.gradientColor.track().isEmpty() || !app.barkfart.model.Color.WHITE.equals(n.gradientColor.value());
         if (n.gradient || n.gradientReverse || n.gradientSideways || gradColourSet) {
@@ -709,6 +710,7 @@ public final class ProjectCodec {
         n.trapezoidRoundEnd = b(m, "roundEnd", false);
         n.angleLock = i(m, "angleLock", 0);
         n.dragLock = i(m, "dragLock", 0);
+        n.pinned = b(m, "pinned", false);
         if (m.containsKey("gradient")) {
             Map<String, Object> gm = asMap(m.get("gradient"), "gradient");
             n.gradient = b(gm, "on", true);

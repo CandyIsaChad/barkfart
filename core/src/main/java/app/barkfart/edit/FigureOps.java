@@ -505,4 +505,15 @@ public final class FigureOps {
         }
         return true;
     }
+
+    /** Pins or unpins one joint (it keeps its stage position while others are dragged). One undo step. */
+    public static Command setPinned(final Layer.FigureLayer l, final String nodeId, final boolean on) {
+        return edit(on ? "Pin joint" : "Unpin joint", l, new Runnable() {
+            public void run() {
+                Node n = l.figure.node(nodeId);
+                if (n != null) n.pinned = on;
+            }
+        });
+    }
+
 }
