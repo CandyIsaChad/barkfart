@@ -62,6 +62,20 @@ public final class StructureEdits {
         };
     }
 
+    /** Points a sprite at another image asset. */
+    public static Command setSpriteAsset(final Layer.SpriteLayer l, final String assetId) {
+        final String old = l.asset;
+        return new Named("Change image") {
+            public void apply() {
+                l.asset = assetId;
+            }
+
+            public void revert() {
+                l.asset = old;
+            }
+        };
+    }
+
     // ---- effects ----
 
     /** Appends an effect to the end of a layer's chain. */

@@ -262,7 +262,7 @@ public final class FilePanel extends WidgetGroup {
                         File f = host.session().store.addCopy(p.name, p.bytes);
                         ProjectStore.Kind k = ProjectStore.kindOf(f.getName());
                         if (k == ProjectStore.Kind.PROJECT) openMe = f;
-                        else if (k == ProjectStore.Kind.FIGURE || k == ProjectStore.Kind.MOVIECLIP || k == ProjectStore.Kind.SOUND) {
+                        else if (k == ProjectStore.Kind.FIGURE || k == ProjectStore.Kind.MOVIECLIP || k == ProjectStore.Kind.SOUND || k == ProjectStore.Kind.IMAGE) {
                             Importer.importFile(host.state().doc, f, host.platform().audio(), host.state().frames.time(host.state().frame));
                             imported++;
                         }

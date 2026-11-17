@@ -143,6 +143,29 @@ public final class Importer {
                 }
                 return new Result(al, String.format("Added sound %s (%.1f s) at %.2f s", name, pcm.seconds(), start), new java.util.ArrayList<String>());
             }
+            case IMAGE: {
+                int[] size = app.barkfart.image.ImageInfo.size(bytes);
+                if (size == null || size[0] <= 0 || size[1] <= 0) throw new Unsupported("Can't read " + f.getName() + " (use png or jpg).");
+                String ext = f.getName().substring(f.getName().lastIndexOf('.')).toLowerCase();
+                String aid = p.newId("A");
+                app.barkfart.model.Asset a = new app.barkfart.model.Asset(aid, app.barkfart.model.Asset.Kind.IMAGE, "assets/" + aid + ext);
+                Layer.SpriteLayer sl = new Layer.SpriteLayer(p.newId("L"), name);
+                sl.asset = aid;
+                // keep the picture's pixel size, but fit it within 60% of the stage
+                float fit = Math.min(1f, Math.min(p.settings.width * 0.6f / size[0], p.settings.height * 0.6f / size[1]));
+                sl.width = size[0] * fit;
+                sl.height = size[1] * fit;
+                sl.transform.anchorX.setValue(sl.width / 2);
+                sl.transform.anchorY.setValue(sl.height / 2);
+                doc.begin("Add image " + name);
+                try {
+                    doc.apply(StructureEdits.addAsset(p, a, bytes));
+                    doc.apply(StructureEdits.addLayer(root, sl, root.layers.size()));
+                } finally {
+                    doc.commit();
+                }
+                return new Result(sl, "Added image " + name + " (" + size[0] + " × " + size[1] + ")", new java.util.ArrayList<String>());
+            }
             case PIVOT:
                 throw new Unsupported("Pivot figures (.stk) cannot be imported yet");
             default:

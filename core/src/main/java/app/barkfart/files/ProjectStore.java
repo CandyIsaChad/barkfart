@@ -18,7 +18,7 @@ import java.util.List;
 public final class ProjectStore {
     public static final String EXT = ".bark";
 
-    public enum Kind { PROJECT, FIGURE, MOVIECLIP, LEGACY_PROJECT, PIVOT, SOUND, OTHER }
+    public enum Kind { PROJECT, FIGURE, MOVIECLIP, LEGACY_PROJECT, PIVOT, SOUND, IMAGE, OTHER }
 
     public static final class Entry {
         public final File file;
@@ -54,6 +54,7 @@ public final class ProjectStore {
         if (n.endsWith(".stknds")) return Kind.LEGACY_PROJECT;
         if (n.endsWith(".stk")) return Kind.PIVOT;
         for (String e : SOUND_EXTENSIONS) if (n.endsWith(e)) return Kind.SOUND;
+        if (n.endsWith(".png") || n.endsWith(".jpg") || n.endsWith(".jpeg")) return Kind.IMAGE;
         return Kind.OTHER;
     }
 
