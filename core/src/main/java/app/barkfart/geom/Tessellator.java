@@ -46,7 +46,21 @@ public final class Tessellator {
             } else if (s instanceof Shape.Polygon) {
                 Shape.Polygon pg = (Shape.Polygon) s;
                 float[] q = pg.points;
-                if (pg.convex) {
+                if (pg.convex && s.gradient != null && s.gradient.radial) {
+                    // fan from the centre so the ramp has an interior vertex (a rim fan is flat)
+                    float cx = 0, cy = 0;
+                    int n = q.length / 2;
+                    for (int i = 0; i < n; i++) {
+                        cx += q[i * 2];
+                        cy += q[i * 2 + 1];
+                    }
+                    cx /= n;
+                    cy /= n;
+                    for (int i = 0; i < n; i++) {
+                        int j = (i + 1) % n;
+                        tri(batch, cx, cy, q[i * 2], q[i * 2 + 1], q[j * 2], q[j * 2 + 1], rgba);
+                    }
+                } else if (pg.convex) {
                     for (int i = 2; i + 3 < q.length; i += 2) tri(batch, q[0], q[1], q[i], q[i + 1], q[i + 2], q[i + 3], rgba);
                 } else {
                     int[] idx = EarClip.triangulate(q);

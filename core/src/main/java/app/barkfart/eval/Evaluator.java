@@ -317,10 +317,11 @@ public final class Evaluator {
             if (gEnd != null && g.children.size() > before) {
                 Shape added = (Shape) g.children.get(g.children.size() - 1);
                 float mx = (ax + bx) / 2, my = (ay + by) / 2;
-                if (node.shape == Node.Shape.CIRCLE || node.shape == Node.Shape.ELLIPSE) {
-                    float rad = node.shape == Node.Shape.CIRCLE ? (float) (Math.hypot(bx - ax, by - ay) / 2)
-                            : (float) Math.max(Math.hypot(bx - ax, by - ay) / 2, w / 2);
-                    added.gradient = Shape.Gradient.radial(mx, my, rad, gEnd);
+                if (node.shape == Node.Shape.CIRCLE) {
+                    added.gradient = Shape.Gradient.radial(mx, my, (float) (Math.hypot(bx - ax, by - ay) / 2), gEnd);
+                } else if (node.shape == Node.Shape.ELLIPSE) {
+                    // follows the ellipse: rim colour on the whole outline, both axes
+                    added.gradient = Shape.Gradient.elliptical(mx, my, (bx - ax) / 2, (by - ay) / 2, w / 2, gEnd);
                 } else if (node.gradientSideways) {
                     float len = (float) Math.max(1e-6, Math.hypot(bx - ax, by - ay));
                     float nx = -(by - ay) / len * w / 2, ny = (bx - ax) / len * w / 2;

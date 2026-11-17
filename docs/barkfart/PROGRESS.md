@@ -153,10 +153,10 @@ What works
   k x floor(frames / previews)). Metric: F1 with 1-pixel tolerance, drawn =
   more than half the clip's contrast from the stage colour; asserted >= 0.9
   for clips using only shapes we draw, on frames with >= 500 drawn pixels.
-  Passing: Fire, Sparks, Hit, Speed Zoom, Ground Dust (F1 0.97-1.00).
-  Reported only (use gradients, not drawn yet): Forcefield 1.00, SSJB Aura
-  0.98, SSJ Aura 0.90, Electricity 0.44-0.48 (its polyfill outline lands in
-  the wrong place; suspect a node option such as stretchy positioning; open).
+  Asserted (IoU >= 0.85 and F1): Fire, Forcefield, Sparks, Hit, SSJB Aura,
+  SSJ Aura, Electricity, Speed Zoom, Ground Dust (IoU 0.89-0.99). Rain:
+  F1 1.00 asserted, IoU 0.70-0.82 known gap (1-3 px raindrops). Gradient
+  clips are asserted since 2026-11-17.
 - Shapes now drawn natively: round segment, square segment, circle, ellipse,
   isosceles triangle, polyfills (concave, ear-clipped, drawn just before the
   anchor). Trapezoid, polygon, gradients and curves still approximate.
@@ -192,11 +192,11 @@ Not done
   transparent; per-frame gradient colours from movieclips; exact legacy
   export kept (a bug where gradient colours were lost on save was caught by
   the byte-exact test and fixed). New golden: gradient shapes.
-- SSJ Aura: IoU 0.79 -> 0.89, colour error 20 -> 9. Two causes: the
-  comparison treated the original's white glow on its white stage as empty
-  but counted ours (now the same rule on both sides), and line gradients sit
-  the other way round with the stored gradient colour always used (rules in
-  NOTES.md, fitted on this one clip).
+- SSJ Aura: IoU 0.79 -> 0.99, colour error 20 -> 0. Ellipse gradients were
+  drawn flat (fan from a rim vertex) and are now radial on both axes; round
+  segments' gradients run the other way and keep their stored colour; the
+  golden now applies the same stage-colour rule to both sides. Gradient
+  clips are now part of the asserted golden (rules in NOTES.md).
 - Next in this step: node scale semantics, outlines,
   hollow circles, trapezoids, polygons, smart-stretch, angle/drag locks.
 

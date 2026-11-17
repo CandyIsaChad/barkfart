@@ -13,16 +13,19 @@ public abstract class Shape {
     /** Linear (from p0 to p1) or radial (centre p0, radius r) colour ramp, view space. */
     public static final class Gradient {
         public final boolean radial;
-        public final float x0, y0, x1, y1, r;
+        /** Linear: ramp from (x0, y0) to (x1, y1). Radial: centre (x0, y0), (x1, y1) the end of the first axis. */
+        public final float x0, y0, x1, y1;
+        /** Radial: radius across the first axis. */
+        public final float r2;
         public final Color end;
 
-        private Gradient(boolean radial, float x0, float y0, float x1, float y1, float r, Color end) {
+        private Gradient(boolean radial, float x0, float y0, float x1, float y1, float r2, Color end) {
             this.radial = radial;
             this.x0 = x0;
             this.y0 = y0;
             this.x1 = x1;
             this.y1 = y1;
-            this.r = r;
+            this.r2 = r2;
             this.end = end;
         }
 
@@ -31,16 +34,27 @@ public abstract class Shape {
         }
 
         public static Gradient radial(float cx, float cy, float r, Color end) {
-            return new Gradient(true, cx, cy, cx, cy, r, end);
+            return new Gradient(true, cx, cy, cx + r, cy, r, end);
+        }
+
+        /** Elliptical: (ax, ay) is the vector from the centre to the end of the first axis; rb the other radius. */
+        public static Gradient elliptical(float cx, float cy, float ax, float ay, float rb, Color end) {
+            return new Gradient(true, cx, cy, cx + ax, cy + ay, rb, end);
         }
 
         /** Ramp position 0..1 at a point. */
         public float at(float x, float y) {
             float t;
+            float dx = x1 - x0, dy = y1 - y0, l2 = dx * dx + dy * dy;
             if (radial) {
-                t = r <= 0 ? 0 : (float) (Math.hypot(x - x0, y - y0) / r);
+                if (l2 <= 0 || r2 <= 0) {
+                    t = 0;
+                } else {
+                    double u = ((x - x0) * dx + (y - y0) * dy) / l2;                       // along, in first-axis radii
+                    double v = (-(x - x0) * dy + (y - y0) * dx) / Math.sqrt(l2) / r2;      // across, in second-axis radii
+                    t = (float) Math.hypot(u, v);
+                }
             } else {
-                float dx = x1 - x0, dy = y1 - y0, l2 = dx * dx + dy * dy;
                 t = l2 <= 0 ? 0 : ((x - x0) * dx + (y - y0) * dy) / l2;
             }
             return t < 0 ? 0 : (t > 1 ? 1 : t);

@@ -114,6 +114,32 @@ class GoldenTest {
     }
 
     @Test
+    void ellipseRadialGradientHasItsCentreColour() {
+        // An ellipse fanned from a rim vertex has no interior vertex, so a radial
+        // gradient came out flat at the rim colour (SSJ Aura's glow, NOTES.md).
+        Project p = Fixtures.empty();
+        Layer.FigureLayer l = new Layer.FigureLayer(p.newId("L"), "g");
+        l.figure.add(new Node(l.id, "r", null, Node.Shape.NONE));
+        Node e = Fixtures.add(l, "e", "r", Node.Shape.ELLIPSE, 0, 160);
+        e.thickness.setValue(60f);
+        e.color.setValue(Color.rgba8888(0xffffffff));
+        e.gradient = true;
+        e.gradientColor.setValue(Color.rgba8888(0x0000ffff));
+        p.root().layers.add(l);
+        DrawList dl = Tessellator.tessellate(Evaluator.evaluate(p, p.rootSymbol, 0));
+        boolean centre = false, rim = false;
+        for (DrawList.Batch b : dl.batches) {
+            for (int i = 0; i < b.vertices; i++) {
+                int red = b.rgba(i) >>> 24;                       // RGBA8888: white has red 255, blue 0
+                centre |= red >= 0xf0;
+                rim |= red <= 0x0f;
+            }
+        }
+        assertTrue(centre, "a vertex carries the centre colour");
+        assertTrue(rim, "the outline carries the rim colour");
+    }
+
+    @Test
     void perVertexColourGradient() throws IOException {
         DrawList dl = new DrawList();
         DrawList.Batch b = dl.batch(Layer.Blend.NORMAL, null);

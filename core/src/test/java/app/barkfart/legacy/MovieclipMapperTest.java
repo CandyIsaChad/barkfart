@@ -130,7 +130,7 @@ class MovieclipMapperTest {
                 ious.append(String.format(" f%d: IoU %.3f F1 %.3f area %.2f dCol %.0f (%dpx);", fi, iou, f1, ac[0], ac[1], area));
                 // Golden vs the ORIGINAL renderer (local only): clips that use only
                 // shapes we draw natively must match the original's silhouette.
-                if (rep.approximations.isEmpty() && !hasGradients && area >= MIN_AREA && !RENDER_OPEN.contains(f.getName())) {
+                if (rep.approximations.isEmpty() && area >= MIN_AREA && !RENDER_OPEN.contains(f.getName())) {
                     boolean knownGap = KNOWN_GAPS.contains(f.getName());
                     if (!knownGap && iou < GOLDEN_IOU) goldenFailures.add(f.getName() + " frame " + fi + " IoU " + String.format("%.3f", iou));
                     if (f1 < GOLDEN_F1) goldenFailures.add(f.getName() + " frame " + fi + " F1 " + String.format("%.3f", f1));
@@ -138,7 +138,7 @@ class MovieclipMapperTest {
             }
             System.out.println("[mc-golden] " + f.getName() + ":" + ious
                     + (RENDER_OPEN.contains(f.getName()) ? "  (NOT asserted: multi-figure render gap, open)" : "")
-                    + (rep.approximations.isEmpty() && !hasGradients && !RENDER_OPEN.contains(f.getName()) ? "  (asserted IoU >= " + GOLDEN_IOU + (KNOWN_GAPS.contains(f.getName()) ? " [known gap: F1 only]" : "") + " where >= " + MIN_AREA + "px)"
+                    + (rep.approximations.isEmpty() && !RENDER_OPEN.contains(f.getName()) ? "  (asserted IoU >= " + GOLDEN_IOU + (KNOWN_GAPS.contains(f.getName()) ? " [known gap: F1 only]" : "") + " where >= " + MIN_AREA + "px)"
                     : "  (not asserted: approximations " + rep.approximations + (hasGradients ? ", gradients/polyfills" : "") + ")"));
             g.dispose();
             ImageIO.write(sheet, "png", new File(outDir, "mc_" + f.getName().replaceAll("[^A-Za-z0-9]+", "_") + ".png"));
@@ -184,10 +184,11 @@ class MovieclipMapperTest {
     }
     /**
      * Clips that fall short of the strict IoU for a known, open reason. They are
-     * still held to the edge-tolerant F1. Empty since curved segments landed
-     * (Sparks was 0.82; curves were the cause).
+     * still held to the edge-tolerant F1. Sparks left when curved segments
+     * landed. Rain: hundreds of 1-3 px raindrops; F1 1.00 (every edge within a
+     * pixel) but sub-pixel offsets dominate IoU on shapes that thin (0.70-0.82).
      */
-    static final java.util.Set<String> KNOWN_GAPS = new java.util.HashSet<String>();
+    static final java.util.Set<String> KNOWN_GAPS = new java.util.HashSet<String>(java.util.Arrays.asList("_Rain.nodemc"));
 
     /**
      * Clips that parse exactly but render figures in the wrong place: reported,

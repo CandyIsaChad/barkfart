@@ -153,19 +153,26 @@ outlines or hollow circles.
 ## Triangles and gradients (fitted 2026-11-17)
 - triangleUpsideDown: apex at the parent, base at the node (small gains on
   Hit and SSJB Aura, no losses). rightTriangle -1/+1: right angle on one side.
-- Gradients: sideways = across the width; circles and ellipses are radial
-  (centre -> rim); reverse swaps the ends. On LINES the original puts the
-  gradient colour at the PARENT end (our model puts it at the child end, so
-  line nodes import with reverse flipped, and export flips it back). The
-  stored gradient colour applies even when the segment follows the figure
-  colour. Revised 2026-11-17: the earlier "figure colour at both ends" rule
-  only looked right under an unfair comparison (below). Both rules together
-  take SSJ Aura's colour error 20 -> 9; each alone does not help. Only SSJ
-  Aura uses gradients on lines, so this rests on one clip; other shapes'
-  linear gradients are unverified.
-- Comparison fix: the original's previews sit on an opaque white stage, and a
-  preview pixel within half the clip's contrast of the stage counts as empty,
-  so SSJ Aura's white glow ellipse vanished there while ours counted. Our
-  render now gets the same rule. SSJ Aura's "hollow centre" was this
-  artifact, not a missing hole: IoU 0.79 -> 0.89, area 1.26 -> 1.11; no other
-  clip moved. The aura's polyfill is a simple loop around the flames.
+- Gradients: sideways = across the width; circles are radial (centre ->
+  rim); ellipses are radial along BOTH axes (the rim colour sits on the whole
+  outline); reverse swaps the ends. On round segments (legacy type 0) the
+  original puts the gradient colour at the PARENT end; our model puts it at
+  the child end, so type-0 nodes import with reverse flipped and export flips
+  it back. The stored gradient colour applies even when the segment follows
+  the figure colour. Square segments, triangles and the other shapes are not
+  covered by any bundled clip, so their direction is unverified.
+- Evidence (SSJ Aura, the only bundled clip with these gradients): all rules
+  together give IoU 0.99, colour error 0. Taking one away: no flip -> IoU 0.69;
+  figure colour instead of the stored gradient colour -> 0.79. The earlier
+  "figure colour at both ends" rule (revised 2026-11-17) only looked right
+  while the ellipse was drawn flat.
+- Two bugs found on the way: (1) convex polygons were fanned from a rim
+  vertex, so a radial gradient on an ellipse had no interior vertex and came
+  out flat at the rim colour; gradient polygons now fan from the centre
+  (unit test added). (2) The golden comparison treated the original's white
+  glow on its white stage as empty but counted ours; our render now gets the
+  same "within half the contrast of the stage colour = empty" rule (no other
+  clip moved; part of SSJ Aura's 0.79 -> 0.89 step was this measurement fix).
+- Compatibility: a .bark saved before this change with imported round
+  segments that use gradients now exports reverseGradient flipped. Pre-release,
+  so no migration.
