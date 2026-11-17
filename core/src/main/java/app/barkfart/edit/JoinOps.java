@@ -156,4 +156,52 @@ public final class JoinOps {
             default: return (float) sy;
         }
     }
+
+    /**
+     * Join-anchor flip (Stick Nodes 4.2.3): mirrors every figure joined at
+     * the anchor (a joint of the figure, or null for the figure itself)
+     * across the anchor's axis: in the anchor's frame y, rotation and y scale
+     * change sign, keys included; what is joined to them follows. One undo step.
+     */
+    public static Command flipJoined(final Symbol s, final Layer.FigureLayer anchorLayer, final String nodeId) {
+        final List<app.barkfart.model.Property> props = new java.util.ArrayList<app.barkfart.model.Property>();
+        for (Layer l : s.layers) {
+            if (!anchorLayer.id.equals(l.parent)) continue;
+            if (nodeId == null ? l.parentNode != null : !nodeId.equals(l.parentNode)) continue;
+            props.add(l.transform.y);
+            props.add(l.transform.rotation);
+            props.add(l.transform.scaleY);
+        }
+        if (props.isEmpty()) throw new IllegalArgumentException("nothing is joined there");
+        final List<Object> values = new java.util.ArrayList<Object>();
+        final List<List<app.barkfart.model.Key>> keys = new java.util.ArrayList<List<app.barkfart.model.Key>>();
+        for (app.barkfart.model.Property q : props) {
+            values.add(q.value());
+            keys.add(new java.util.ArrayList<app.barkfart.model.Key>(q.track().keys()));
+        }
+        return new Command() {
+            public void apply() {
+                for (int i = 0; i < props.size(); i++) {
+                    app.barkfart.model.Property q = props.get(i);
+                    q.setValue(-(Float) values.get(i));
+                    q.track().clear();
+                    for (app.barkfart.model.Key k : keys.get(i)) q.track().put(new app.barkfart.model.Key(k.time, -(Float) k.value, k.interp, k.ease));
+                }
+            }
+
+            public void revert() {
+                for (int i = 0; i < props.size(); i++) {
+                    app.barkfart.model.Property q = props.get(i);
+                    q.setValue(values.get(i));
+                    q.track().clear();
+                    for (app.barkfart.model.Key k : keys.get(i)) q.track().put(k);
+                }
+            }
+
+            public String label() {
+                return "Flip joined figures";
+            }
+        };
+    }
+
 }
