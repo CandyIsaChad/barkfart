@@ -495,7 +495,17 @@ public final class Evaluator {
             if (gEnd != null && g.children.size() > before) {
                 Shape added = (Shape) g.children.get(before);   // the fill, not an outline drawn over it
                 float mx = (ax + bx) / 2, my = (ay + by) / 2;
-                if (node.shape == Node.Shape.CIRCLE || node.shape == Node.Shape.POLYGON) {
+                boolean round = node.shape == Node.Shape.CIRCLE || node.shape == Node.Shape.POLYGON || node.shape == Node.Shape.ELLIPSE;
+                if (round && node.gradientLinear) {   // straight across the shape: along the segment, or across it
+                    float len = (float) Math.max(1e-6, Math.hypot(bx - ax, by - ay));
+                    float half = node.shape == Node.Shape.ELLIPSE ? w / 2 : len / 2;
+                    if (node.gradientSideways) {
+                        float nx = -(by - ay) / len * half, ny = (bx - ax) / len * half;
+                        added.gradient = Shape.Gradient.linear(mx - nx, my - ny, mx + nx, my + ny, gEnd);
+                    } else {
+                        added.gradient = Shape.Gradient.linear(ax, ay, bx, by, gEnd);
+                    }
+                } else if (node.shape == Node.Shape.CIRCLE || node.shape == Node.Shape.POLYGON) {
                     added.gradient = Shape.Gradient.radial(mx, my, (float) (Math.hypot(bx - ax, by - ay) / 2), gEnd);
                 } else if (node.shape == Node.Shape.ELLIPSE) {
                     // follows the ellipse: rim colour on the whole outline, both axes

@@ -171,6 +171,7 @@ public final class SymbolOps {
             m.gradient = n.gradient;
             m.gradientReverse = n.gradientReverse;
             m.gradientSideways = n.gradientSideways;
+            m.gradientLinear = n.gradientLinear;
             m.isStatic = n.isStatic;
             m.stretchy = n.stretchy;
             m.smartStretch = n.smartStretch;

@@ -47,6 +47,11 @@ public final class Node {
     public int rightTriangle;
     /** Gradient from color to gradientColor: along the segment, across it (sideways), or radial for round shapes. */
     public boolean gradient, gradientReverse, gradientSideways;
+    /**
+     * Circles, polygons and ellipses (Stick Nodes 4.2.4): a linear gradient
+     * instead of the radial one: along the segment, or across it with sideways.
+     */
+    public boolean gradientLinear;
     public final Property gradientColor;
     /** A detail node: drawn, but not dragged while animating; moves only with its parent. */
     public boolean isStatic;

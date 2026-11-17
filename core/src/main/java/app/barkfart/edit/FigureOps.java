@@ -34,7 +34,7 @@ public final class FigureOps {
         final Node.Shape shape;
         final int drawOrder, rightTriangle, halfArc, polygonSides, angleLock, dragLock;
         final float curve, restLength, trapezoidRatio;
-        final boolean upsideDown, gradient, gradientReverse, gradientSideways, isStatic, stretchy, smartStretch, noSmartStretch,
+        final boolean upsideDown, gradient, gradientReverse, gradientSideways, gradientLinear, pinned, isStatic, stretchy, smartStretch, noSmartStretch,
                 hollow, outline, roundStart, roundEnd;
         final Object[] values;
         final List<List<Key>> keys = new ArrayList<List<Key>>();
@@ -55,6 +55,8 @@ public final class FigureOps {
             gradient = n.gradient;
             gradientReverse = n.gradientReverse;
             gradientSideways = n.gradientSideways;
+            gradientLinear = n.gradientLinear;
+            pinned = n.pinned;
             isStatic = n.isStatic;
             stretchy = n.stretchy;
             smartStretch = n.smartStretch;
@@ -87,6 +89,8 @@ public final class FigureOps {
             n.gradient = gradient;
             n.gradientReverse = gradientReverse;
             n.gradientSideways = gradientSideways;
+            n.gradientLinear = gradientLinear;
+            n.pinned = pinned;
             n.isStatic = isStatic;
             n.stretchy = stretchy;
             n.smartStretch = smartStretch;
@@ -174,6 +178,7 @@ public final class FigureOps {
         to.gradient = from.gradient;
         to.gradientReverse = from.gradientReverse;
         to.gradientSideways = from.gradientSideways;
+        to.gradientLinear = from.gradientLinear;
         to.circleHollow = from.circleHollow;
         to.circleOutline = from.circleOutline;
         to.halfArc = from.halfArc;

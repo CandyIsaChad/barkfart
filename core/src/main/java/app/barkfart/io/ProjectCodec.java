@@ -256,11 +256,12 @@ public final class ProjectCodec {
         if (n.pinned) m.put("pinned", true);
         // Saved whenever it carries information, even with the gradient off (exact legacy export).
         boolean gradColourSet = !n.gradientColor.track().isEmpty() || !app.barkfart.model.Color.WHITE.equals(n.gradientColor.value());
-        if (n.gradient || n.gradientReverse || n.gradientSideways || gradColourSet) {
+        if (n.gradient || n.gradientReverse || n.gradientSideways || n.gradientLinear || gradColourSet) {
             Map<String, Object> gm = obj();
             gm.put("on", n.gradient);
             gm.put("reverse", n.gradientReverse);
             gm.put("sideways", n.gradientSideways);
+            if (n.gradientLinear) gm.put("linear", true);
             gm.put("color", prop(n.gradientColor, false));
             m.put("gradient", gm);
         }
@@ -735,6 +736,7 @@ public final class ProjectCodec {
             n.gradient = b(gm, "on", true);
             n.gradientReverse = b(gm, "reverse", false);
             n.gradientSideways = b(gm, "sideways", false);
+            n.gradientLinear = b(gm, "linear", false);
             readProp(gm, "color", n.gradientColor);
         }
         readProp(m, "rotation", n.rotation);
