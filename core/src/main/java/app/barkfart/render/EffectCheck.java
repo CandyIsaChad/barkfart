@@ -41,18 +41,26 @@ public final class EffectCheck {
             mesh = new MeshRenderer();
             fx = new EffectRenderer(mesh);
             if (fx.problem() != null) return fx.problem();
-            target = new FrameBuffer(Pixmap.Format.RGBA8888, w, h, false);
+            // Like the editor: the scene drawn in a viewport offset inside a larger
+            // target, with the scissor on (the stage area). Catches clip areas and
+            // pixel mappings in the wrong coordinate space (points vs pixels).
+            int ox = 37, oy = 23;
+            target = new FrameBuffer(Pixmap.Format.RGBA8888, w + 2 * ox, h + 2 * oy, false);
             target.bind();
-            Gdx.gl.glViewport(0, 0, w, h);
             Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
+            Gdx.gl.glViewport(0, 0, w + 2 * ox, h + 2 * oy);
             Gdx.gl.glClearColor(0, 0, 0, 0);
             Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+            Gdx.gl.glViewport(ox, oy, w, h);
+            Gdx.gl.glEnable(GL20.GL_SCISSOR_TEST);
+            Gdx.gl.glScissor(ox, oy, w, h);
             Matrix4 proj = new Matrix4().setToOrtho2D(-w / 2f, -h / 2f, w, h);
-            fx.draw(dl, proj, null, 0, 0, w, h);
+            fx.draw(dl, proj, null);
+            Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
             if (fx.problem() != null) return fx.problem();
             ByteBuffer buf = BufferUtils.newByteBuffer(w * h * 4);
             Gdx.gl.glPixelStorei(GL20.GL_PACK_ALIGNMENT, 1);
-            Gdx.gl.glReadPixels(0, 0, w, h, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, buf);
+            Gdx.gl.glReadPixels(ox, oy, w, h, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, buf);
             byte[] px = new byte[w * h * 4];
             buf.get(px);
             lastGl = px;
@@ -60,6 +68,7 @@ public final class EffectCheck {
         } catch (RuntimeException e) {
             return "effect check: " + e;
         } finally {
+            Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
             FrameBuffer.unbind();
             if (target != null) target.dispose();
             if (fx != null) fx.dispose();

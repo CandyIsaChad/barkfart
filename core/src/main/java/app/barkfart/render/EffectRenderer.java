@@ -154,10 +154,11 @@ public final class EffectRenderer implements Disposable {
 
     /**
      * Draws dl with the given projection (view space to clip space of the
-     * current viewport). clipX..clipH (viewport pixels) bounds the offscreen
-     * work, e.g. the visible stage area.
+     * current viewport). Offscreen work is limited to the current scissor box
+     * (or the viewport): both are read from GL, so they are in framebuffer
+     * pixels even on Retina screens, where scene2d works in points.
      */
-    public void draw(DrawList dl, Matrix4 projection, MeshRenderer.Textures tex, int clipX, int clipY, int clipW, int clipH) {
+    public void draw(DrawList dl, Matrix4 projection, MeshRenderer.Textures tex) {
         if (!ok || dl.root == null || !hasIsolates(dl.root)) {
             meshes.draw(dl, projection, tex);
             return;
@@ -176,8 +177,15 @@ public final class EffectRenderer implements Disposable {
         textures = tex;
         float[] m = projection.val;
         pxPerUnit = (float) Math.hypot(m[Matrix4.M00], m[Matrix4.M10]) * vw / 2f;
-        int cx0 = Math.max(vx, clipX), cy0 = Math.max(vy, clipY);
-        int cx1 = Math.min(vx + vw, clipX + clipW), cy1 = Math.min(vy + vh, clipY + clipH);
+        int cx0 = vx, cy0 = vy, cx1 = vx + vw, cy1 = vy + vh;
+        if (scissor) {
+            IntBuffer sb = BufferUtils.newIntBuffer(16);
+            Gdx.gl.glGetIntegerv(GL20.GL_SCISSOR_BOX, sb);
+            cx0 = Math.max(cx0, sb.get(0));
+            cy0 = Math.max(cy0, sb.get(1));
+            cx1 = Math.min(cx1, sb.get(0) + sb.get(2));
+            cy1 = Math.min(cy1, sb.get(1) + sb.get(3));
+        }
         Target root = null;
         try {
             Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);

@@ -398,15 +398,13 @@ public final class StageView extends Actor {
         boolean shot = st.playing || st.previewCamera;
         Scene scene = Evaluator.evaluate(p, p.rootSymbol, t, false, shot);
         boolean shotClip = false;
-        Rectangle work = clip;
         if (shot) {   // the shot is what export sees: clip to the stage rectangle
             Rectangle sc = new Rectangle();
             ScissorStack.calculateScissors(getStage().getCamera(), batch.getTransformMatrix(), new Rectangle(sx, sy, sw, sh), sc);
             shotClip = ScissorStack.pushScissors(sc);
-            work = sc;
         }
         // groups with effects or translucency draw offscreen; everything else draws as before
-        effects.draw(Tessellator.layered(scene), m, textures, (int) Math.floor(work.x), (int) Math.floor(work.y), (int) Math.ceil(work.width), (int) Math.ceil(work.height));
+        effects.draw(Tessellator.layered(scene), m, textures);   // limited to the scissor set above
         if (shotClip) ScissorStack.popScissors();
         if (!shot) {
             drawCameraFrame(o);

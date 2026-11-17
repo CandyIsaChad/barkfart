@@ -265,6 +265,12 @@ Not done
   Add: Blur, Glow, Shadow, Tint, Grey (colour adjust), Invert. Changes key
   the current frame and undo like any edit (StructureEditsTest). Colours,
   shadow offset and hue have no controls yet.
+- Fixed after the user's iPad test (2026-11-17): effects only drew inside
+  the lower-left quarter of the screen. The stage's clip area came from
+  scene2d in points while GL works in pixels (2x on Retina; equal on this
+  desktop, so it never showed here). The renderer now reads the scissor box
+  from GL. The launch check now renders into an offset viewport with the
+  scissor on, like the editor; with the bug simulated it reports FAIL.
 - The status line wraps (up to four lines) and the launch result stays 12 s,
   results first: "Self-test PASS n/n · Effects OK · v...". Onion-skin ghosts are drawn flat,
   so translucent overlaps show in the ghosts. Effect ids and node ids of
