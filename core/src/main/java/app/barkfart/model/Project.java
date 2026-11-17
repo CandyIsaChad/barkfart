@@ -22,9 +22,12 @@ public final class Project {
     public static final class View {
         public float zoom = 1, panX, panY;
         public int frame;
+        /** Onion skin: ghost frames before / after, drawn in front of the figures (Stick Nodes 1.6.2). */
+        public int onionBefore = 2, onionAfter = 1;
+        public boolean onionInFront;
 
         public boolean isDefault() {
-            return zoom == 1 && panX == 0 && panY == 0 && frame == 0;
+            return zoom == 1 && panX == 0 && panY == 0 && frame == 0 && onionBefore == 2 && onionAfter == 1 && !onionInFront;
         }
     }
 

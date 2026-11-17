@@ -66,6 +66,9 @@ public final class ProjectCodec {
             v.put("panX", Json.num(p.view.panX));
             v.put("panY", Json.num(p.view.panY));
             v.put("frame", Json.num(p.view.frame));
+            v.put("onionBefore", Json.num(p.view.onionBefore));
+            v.put("onionAfter", Json.num(p.view.onionAfter));
+            if (p.view.onionInFront) v.put("onionInFront", true);
             m.put("view", v);
         }
         m.put("rootSymbol", p.rootSymbol);
@@ -530,6 +533,9 @@ public final class ProjectCodec {
             p.view.panX = f(vw, "panX", 0);
             p.view.panY = f(vw, "panY", 0);
             p.view.frame = i(vw, "frame", 0);
+            p.view.onionBefore = Math.max(0, Math.min(10, i(vw, "onionBefore", 2)));
+            p.view.onionAfter = Math.max(0, Math.min(10, i(vw, "onionAfter", 1)));
+            p.view.onionInFront = b(vw, "onionInFront", false);
         }
         p.rootSymbol = req(m, "rootSymbol");
         for (Object o : list(m, "assets")) {

@@ -394,7 +394,12 @@ public final class StageView extends Actor {
             textures = new AssetTextures(p);
             texturesFor = p;
         }
-        if (st.onion && !st.playing && !st.previewCamera) renderer.draw(onion.build(p, p.rootSymbol, t), m, null);
+        boolean ghosts = st.onion && !st.playing && !st.previewCamera;
+        if (ghosts) {
+            onion.before = p.view.onionBefore;
+            onion.after = p.view.onionAfter;
+        }
+        if (ghosts && !p.view.onionInFront) effects.draw(onion.buildLayered(p, p.rootSymbol, t), m, null);
         // Editing shows the stage; the camera is a frame on it. Play shows the camera's shot.
         boolean shot = st.playing || st.previewCamera;
         Scene scene = Evaluator.evaluate(p, p.rootSymbol, t, false, shot);
@@ -407,6 +412,7 @@ public final class StageView extends Actor {
         // groups with effects or translucency draw offscreen; everything else draws as before
         effects.draw(Tessellator.layered(scene, glyphs), m, glyphs.with(textures));   // limited to the scissor set above
         if (shotClip) ScissorStack.popScissors();
+        if (ghosts && p.view.onionInFront) effects.draw(onion.buildLayered(p, p.rootSymbol, t), m, null);
         if (!shot) {
             drawCameraFrame(o);
             if (st.mode != EditorState.Mode.CAMERA) drawHandles(o);
