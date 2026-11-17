@@ -28,6 +28,11 @@ public final class Node {
     /** Draw order within the figure: lower draws behind. Independent of hierarchy. */
     public int drawOrder = UNASSIGNED;
     public final Property rotation, length, thickness, scale, color, shown;
+    /**
+     * Bend of the segment (legacy "curve radius" units; 0 = straight): a
+     * circular arc whose bulge height is curve x Shape.CURVE_SAGITTA.
+     */
+    public float curve;
     /** Legacy fields not yet understood, kept for faithful re-export. */
     public final Map<String, Object> legacyExtras = new LinkedHashMap<String, Object>();
 

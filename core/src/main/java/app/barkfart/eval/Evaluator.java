@@ -281,9 +281,18 @@ public final class Evaluator {
             float bx = (float) xf.mapX(px[i], py[i]), by = (float) xf.mapY(px[i], py[i]);
             float w = (float) (Math.abs(r.f(node.thickness, t)) * sf);
             switch (node.shape) {
-                case LINE:
-                    g.children.add(new Shape.Line(ax, ay, bx, by, w, c, src));
+                case LINE: {
+                    // a mirrored transform flips the bend's direction
+                    // curve = bulge height (sagitta); turning angle theta = 4 atan(2h / chord)
+                    float bend = 0;
+                    if (node.curve != 0) {
+                        double chord = Math.hypot(bx - ax, by - ay), h = node.curve * Shape.CURVE_SAGITTA * sf;
+                        bend = chord < 1e-6 ? 0 : (float) Math.toDegrees(4 * Math.atan(2 * h / chord));
+                        if (xf.a * xf.d - xf.b * xf.c < 0) bend = -bend;   // mirrored transforms flip the bulge
+                    }
+                    g.children.add(new Shape.Line(ax, ay, bx, by, w, bend, c, src));
                     break;
+                }
                 case CIRCLE: {
                     float cx = (ax + bx) / 2, cy = (ay + by) / 2;
                     float rad2 = (float) (Math.hypot(bx - ax, by - ay) / 2);

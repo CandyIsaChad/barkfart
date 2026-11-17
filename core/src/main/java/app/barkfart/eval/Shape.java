@@ -13,17 +13,30 @@ public abstract class Shape {
         this.source = source;
     }
 
-    /** A segment with round caps. */
+    /**
+     * Bulge height (sagitta) of a curved segment per unit of Node.curve, in
+     * figure units. Fitted against the original's movieclip previews
+     * (NOTES.md): Sparks IoU 0.82 -> 0.91, Hit 0.81 -> 0.85; positive bulges
+     * to the left of the parent-to-node direction.
+     */
+    public static final float CURVE_SAGITTA = 0.9f;
+
+    /** A segment with round caps; bend (degrees, + = counter-clockwise bulge) makes it a circular arc. */
     public static final class Line extends Shape {
-        public final float x1, y1, x2, y2, width;
+        public final float x1, y1, x2, y2, width, bend;
 
         public Line(float x1, float y1, float x2, float y2, float width, Color color, String source) {
+            this(x1, y1, x2, y2, width, 0, color, source);
+        }
+
+        public Line(float x1, float y1, float x2, float y2, float width, float bend, Color color, String source) {
             super(color, source);
             this.x1 = x1;
             this.y1 = y1;
             this.x2 = x2;
             this.y2 = y2;
             this.width = width;
+            this.bend = bend;
         }
     }
 

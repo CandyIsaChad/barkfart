@@ -171,10 +171,10 @@ class MovieclipMapperTest {
     }
     /**
      * Clips that fall short of the strict IoU for a known, open reason. They are
-     * still held to the edge-tolerant F1. Sparks: ellipse-heavy, IoU 0.82 with
-     * our drawn area 87-98% of the original's; cause open (NOTES.md).
+     * still held to the edge-tolerant F1. Empty since curved segments landed
+     * (Sparks was 0.82; curves were the cause).
      */
-    static final java.util.Set<String> KNOWN_GAPS = new java.util.HashSet<String>(java.util.Arrays.asList("_Sparks.nodemc"));
+    static final java.util.Set<String> KNOWN_GAPS = new java.util.HashSet<String>();
 
     /**
      * Clips that parse exactly but render figures in the wrong place: reported,

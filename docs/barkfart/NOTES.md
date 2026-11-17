@@ -137,3 +137,15 @@ Colour difference is 0 on every clip without gradients.
   for >= 400). Next attempt starts there.
 - Import today: the project's figure library comes in as layers, side by
   side, with an honest status message; the animation does not yet.
+
+## Curved segments (fitted 2026-11-17)
+`curveRadius` (small ints, -6..8 in the samples) is a bulge height, not an
+angle: the segment is a circular arc with sagitta = curve x 0.9 figure units,
+bulging to the left of the parent-to-node direction for positive values.
+Fit against the original's previews (like-for-like IoU): angle-per-unit
+models peaked at Sparks 0.87 / Hit 0.84 with different best angles; the
+sagitta model gives Sparks 0.82 -> 0.91 and Hit 0.81 -> 0.85 with one
+constant. Feature usage in the bundled content: curves 346 nodes (Hit,
+Sparks), upside-down triangles (Forcefield, Hit, SSJB Aura), gradients (SSJ
+Aura, Gradient Ball), node scale != 1 (4 files); no trapezoids, polygons,
+outlines or hollow circles.

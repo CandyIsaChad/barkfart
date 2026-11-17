@@ -49,6 +49,7 @@ public final class FigureMapper {
             n.rotation.setValue(ln.f("localAngle"));
             n.length.setValue(ln.f("length"));
             n.thickness.setValue((float) ln.i("thickness"));
+            n.curve = ln.i("curveRadius");
             n.color.setValue(ln.i("useSegmentColor") != 0 ? color(ln.i("color")) : figColor);
             for (Map.Entry<String, Object> e : ln.fields.entrySet()) {
                 if (!e.getKey().startsWith("~")) n.legacyExtras.put("L." + e.getKey(), e.getValue());
@@ -157,6 +158,9 @@ public final class FigureMapper {
             ln.fields.put("drawIndex", isRoot ? 0 : n.drawOrder);
             setIfChanged(ln, "localAngle", n.rotation.floatValue());
             setIfChanged(ln, "length", n.length.floatValue());
+            if (ln.fields.containsKey("curveRadius") && ln.i("curveRadius") != Math.round(n.curve)) {
+                ln.fields.put("curveRadius", Math.round(n.curve));
+            }
             int thick = Math.round(n.thickness.floatValue());
             if (ln.i("thickness") != thick) ln.fields.put("thickness", thick);
             Color c = (Color) n.color.value();

@@ -78,6 +78,10 @@ public final class Tessellator {
     private static void line(Shape.Line l, int c, DrawList.Batch b) {
         float hw = l.width / 2;
         if (hw <= 0) return;
+        if (Math.abs(l.bend) > 0.01f) {
+            arc(l, hw, c, b);
+            return;
+        }
         float dx = l.x2 - l.x1, dy = l.y2 - l.y1;
         float len = (float) Math.sqrt(dx * dx + dy * dy);
         if (len < 1e-6f) {
@@ -90,6 +94,51 @@ public final class Tessellator {
         float a = (float) Math.atan2(ny, nx);
         fan(l.x1, l.y1, hw, a, (float) Math.PI, c, b);              // cap at start
         fan(l.x2, l.y2, hw, a + (float) Math.PI, (float) Math.PI, c, b);  // cap at end
+    }
+
+    /**
+     * A thick circular arc from (x1,y1) to (x2,y2) turning `bend` degrees, as
+     * one triangle strip (no overlaps, so translucent arcs blend once) plus
+     * round caps. Positive bend bulges to the left of the travel direction.
+     */
+    private static void arc(Shape.Line l, float hw, int c, DrawList.Batch b) {
+        double dx = l.x2 - l.x1, dy = l.y2 - l.y1, chord = Math.sqrt(dx * dx + dy * dy);
+        if (chord < 1e-6) {
+            fan(l.x1, l.y1, hw, 0, (float) (2 * Math.PI), c, b);
+            return;
+        }
+        double theta = Math.toRadians(Math.max(-350, Math.min(350, l.bend)));
+        double r = chord / (2 * Math.sin(Math.abs(theta) / 2));
+        double mx = (l.x1 + l.x2) / 2, my = (l.y1 + l.y2) / 2;
+        double nx = -dy / chord, ny = dx / chord;                    // left normal
+        double h = r * Math.cos(theta / 2);                          // centre offset from the chord
+        double sgn = theta > 0 ? -1 : 1;                             // centre is opposite the bulge
+        double cx = mx + sgn * nx * h, cy = my + sgn * ny * h;
+        double a0 = Math.atan2(l.y1 - cy, l.x1 - cx);
+        // positive bend bulges left: the centre is on the right, so the sweep runs clockwise
+        double sweep = theta > 0 ? -Math.abs(theta) : Math.abs(theta);
+        int n = Math.max(6, Math.min(96, segments((float) (r + hw), (float) Math.abs(theta))));
+        float px0 = 0, py0 = 0, px1 = 0, py1 = 0;
+        for (int i = 0; i <= n; i++) {
+            double a = a0 + sweep * i / n;
+            double ux = Math.cos(a), uy = Math.sin(a);
+            float ox = (float) (cx + (r + hw) * ux), oy = (float) (cy + (r + hw) * uy);
+            float ix = (float) (cx + (r - hw) * ux), iy = (float) (cy + (r - hw) * uy);
+            if (i > 0) {
+                tri(b, px0, py0, ox, oy, ix, iy, c);
+                tri(b, px0, py0, ix, iy, px1, py1, c);
+            }
+            px0 = ox;
+            py0 = oy;
+            px1 = ix;
+            py1 = iy;
+        }
+        // caps: half discs facing away along the tangents
+        double t0 = a0 + (sweep > 0 ? -Math.PI / 2 : Math.PI / 2);
+        double a1 = a0 + sweep;
+        double t1 = a1 + (sweep > 0 ? Math.PI / 2 : -Math.PI / 2);
+        fan(l.x1, l.y1, hw, (float) (t0 - Math.PI / 2), (float) Math.PI, c, b);
+        fan(l.x2, l.y2, hw, (float) (t1 - Math.PI / 2), (float) Math.PI, c, b);
     }
 
     private static void fan(float cx, float cy, float r, float start, float span, int c, DrawList.Batch b) {

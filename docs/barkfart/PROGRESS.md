@@ -183,6 +183,11 @@ Not done
   panel): waits for the user's screenshots so the layout matches the
   original. Markers exist in the model but have no edit commands yet.
 
+### Shapes against the original (core-first step 3, in progress)
+- Curved segments: arcs (one strip, no double-blending) with the bulge
+  fitted to the original's previews; Sparks now passes the strict IoU check
+  (was the one known gap), Hit improved. Known-gaps list is empty.
+
 ### Renderer foundation (2026-11-17, core-first step 2)
 - DrawList batches carry per-vertex colour, texture coordinates and a
   texture (asset id); sprite quads are textured.

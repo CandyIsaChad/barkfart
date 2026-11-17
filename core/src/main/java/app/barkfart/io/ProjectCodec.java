@@ -209,6 +209,7 @@ public final class ProjectCodec {
         m.put("parent", n.parent);
         m.put("shape", n.shape.name());
         m.put("draw", Json.num(n.drawOrder));
+        if (n.curve != 0) m.put("curve", Json.num(n.curve));
         m.put("rotation", prop(n.rotation, false));
         m.put("length", prop(n.length, false));
         m.put("thickness", prop(n.thickness, false));
@@ -586,6 +587,7 @@ public final class ProjectCodec {
     private static Node node(String layerId, Map<String, Object> m) {
         Node n = new Node(layerId, req(m, "id"), str(m, "parent"), en(m, "shape", Node.Shape.class, Node.Shape.LINE));
         n.drawOrder = i(m, "draw", Node.UNASSIGNED);
+        n.curve = f(m, "curve", 0);
         readProp(m, "rotation", n.rotation);
         readProp(m, "length", n.length);
         readProp(m, "thickness", n.thickness);
