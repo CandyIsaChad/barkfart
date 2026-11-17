@@ -123,8 +123,8 @@ How it was tested
   user.
 Not tested
 - The self-test on a real device (needs the user's LiveContainer run).
-- Effects are resolved in the scene but not rendered (M6). Text layers render
-  nothing yet (M5). Group opacity is per-shape alpha (overlaps show) until M6.
+- Text layers render nothing yet (M5). (Effects and translucent groups now
+  render; see "Effects pipeline".)
 
 ### M3b Legacy .nodes import and export (done 2026-11-16)
 What works
@@ -225,6 +225,44 @@ Not done
   encoding of angle and drag locks (kept raw, not mapped), thickness under
   node scale. Not yet: curved trapezoids, floaty tweening, creation-mode UI
   for all of these (parity order step 3).
+
+### Effects pipeline (core-first step 4, 2026-11-17)
+- Isolates: Tessellator.layered() marks every group with an enabled effect,
+  an adjustment layer, or opacity below 1 as an isolate (DrawList.Isolate
+  tree). The flat tessellate() is unchanged, so the locked v1 fixture still
+  renders exactly as recorded; its effects through the new path are a
+  separate golden (v1_effects).
+- Effect types (fx.EffectTypes; lengths in project pixels, clamped, NaN =
+  default): blur.gaussian (radius), glow (radius, colour, strength),
+  shadow.drop (dx, dy, radius, colour), invert, color.adjust (hue,
+  saturation, brightness), tint (colour, amount); mix blends input and
+  output. Unknown types pass through. Adjustment layers apply their
+  effects to everything below them in the symbol, mixed by their opacity.
+- Reference renderer in core (fx.Kernels, fx.Compositor): premultiplied
+  float buffers, one sample per pixel centre like GL; it defines the
+  effects and can serve export later. No textures in the reference yet.
+- GL (render.EffectRenderer): pooled framebuffers per isolate sized to its
+  bounds plus effect padding, its own framebuffer stack (restores whatever
+  was bound, which on iOS is not 0), GLES2 shaders mirroring the kernels
+  (49-tap separable blur with a stride above sigma 8). Any shader or pass
+  failure turns effects off and draws flat instead of crashing.
+- Checked: EffectsTest (no overlap seams in translucent groups, blur reach
+  and coverage, shadow direction, glow colour, invert and mix, adjustment
+  layers, colour adjust and tint, bad parameters); the fuzz test now adds
+  random effect stacks with extreme values and runs the layered path and
+  the reference. GL matched the reference on this machine (desktop
+  --fxcheck: mean channel difference under 2) and in the editor (desktop
+  screenshot, translucent overlap exactly the predicted colour).
+- On the iPad: the launch line now ends with "effects OK" or the reason;
+  that runs the same GL-vs-reference check on the device's GPU. iOS GL is
+  unverified until that line is read.
+- Not done (tracked): effect masks (saved, ignored when drawing), scoped
+  effects, output caching, half-resolution preview, motion / one-direction
+  blur, pixelate, outline filter, textures in the reference renderer, an
+  effects panel (no UI adds effects yet). Onion-skin ghosts are drawn flat,
+  so translucent overlaps show in the ghosts. Effect ids and node ids of
+  one layer share a property-id namespace (layer/id/name); generated ids
+  never collide, but hand-made ids could (found by a test).
 
 ### Renderer foundation (2026-11-17, core-first step 2)
 - DrawList batches carry per-vertex colour, texture coordinates and a
@@ -361,8 +399,9 @@ M3 is split (recorded per the brief's rule; nothing cut):
   Sparks is a known gap (IoU 0.82). Gradients, trapezoids, polygons, curves,
   right/upside-down triangles, node scale and smart-stretch/angle/drag locks
   are not applied in rendering.
-- Effects resolve but do not render (M6). Text layers draw nothing (M5).
-  Group opacity is per-shape alpha until M6.
+- Text layers draw nothing (M5). Effects: see "Effects pipeline" for what
+  is not done yet (masks, scoped effects, caching, half-resolution preview,
+  effects panel).
 - No touch UI exists yet, so the only manual checklist is the device check
   below.
 

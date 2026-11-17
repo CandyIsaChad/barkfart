@@ -3,6 +3,7 @@ package app.barkfart.desktop;
 import app.barkfart.BarkfartApp;
 import app.barkfart.edit.DopeRows;
 import app.barkfart.files.Importer;
+import app.barkfart.fx.EffectScene;
 import app.barkfart.edit.StructureEdits;
 import app.barkfart.model.Asset;
 import app.barkfart.model.Layer;
@@ -39,7 +40,12 @@ final class DesktopScript {
                 cam.y.setValue(40f);
                 st.doc.apply(StructureEdits.addLayer(st.project().root(), cam, st.project().root().layers.size()));
                 st.fire();
-            } else if (step.equals("deselect")) st.select(null, null);
+            } else if (step.equals("fxscene")) {
+                // the effect check scene, three times larger, added with this project's ids
+                EffectScene.addTo(st.project(), st.project().root(), 3);
+                st.fire();
+            } else if (step.equals("noonion")) st.onion = false;
+            else if (step.equals("deselect")) st.select(null, null);
             else if (step.equals("easing")) {
                 EasingMenu.Preset cur = EasingMenu.PRESETS[2];
                 st.easingOpener.open(200, 300, cur, null);

@@ -23,6 +23,50 @@ public final class Tessellator {
         return out;
     }
 
+    /**
+     * Like tessellate, plus the isolate tree (DrawList.root): every group with an
+     * enabled effect, an adjustment group, or opacity below 1 becomes an isolate,
+     * drawn offscreen and composited once (no overlap seams). Shapes inside an
+     * isolate carry no group opacity in their vertex alpha.
+     */
+    public static DrawList layered(Scene scene) {
+        DrawList out = new DrawList();
+        out.open(scene.root.source, 1f, Layer.Blend.NORMAL, false, java.util.Collections.<app.barkfart.eval.ResolvedEffect>emptyList());
+        layeredWalk(scene.root, 1f, Layer.Blend.NORMAL, out, true);
+        out.close();
+        return out;
+    }
+
+    static boolean isolates(Group g) {
+        if (g.adjustment) return true;
+        if (g.opacity < 1f) return true;
+        for (app.barkfart.eval.ResolvedEffect e : g.effects) if (e.mix > 0) return true;
+        return false;
+    }
+
+    private static void layeredWalk(Group g, float opacity, Layer.Blend blend, DrawList out, boolean isRoot) {
+        if (!isRoot && isolates(g)) {
+            float gop = g.opacity;
+            if (!(gop > 0)) return;
+            java.util.List<app.barkfart.eval.ResolvedEffect> fx = new java.util.ArrayList<app.barkfart.eval.ResolvedEffect>();
+            for (app.barkfart.eval.ResolvedEffect e : g.effects) if (e.mix > 0) fx.add(e);
+            out.open(g.source, Math.min(1f, gop * opacity), g.blend, g.adjustment, fx);
+            for (Object o : g.children) {
+                if (o instanceof Group) layeredWalk((Group) o, 1f, Layer.Blend.NORMAL, out, false);
+                else emit((Shape) o, 1f, Layer.Blend.NORMAL, null, out);
+            }
+            out.close();
+            return;
+        }
+        float op = opacity * (isRoot ? 1f : g.opacity);
+        if (op <= 0) return;
+        Layer.Blend b = g.blend != Layer.Blend.NORMAL ? g.blend : blend;
+        for (Object o : g.children) {
+            if (o instanceof Group) layeredWalk((Group) o, op, b, out, false);
+            else emit((Shape) o, op, b, null, out);
+        }
+    }
+
     private static void walk(Group g, float opacity, Layer.Blend blend, String fx, DrawList out) {
         float op = opacity * g.opacity;
         if (op <= 0) return;
@@ -33,57 +77,61 @@ public final class Tessellator {
                 walk((Group) o, op, b, effects, out);
                 continue;
             }
-            Shape s = (Shape) o;
-            DrawList.Batch batch = s instanceof Shape.Quad ? out.batch(b, effects, ((Shape.Quad) s).asset) : out.batch(b, effects);
-            int first = batch.vertices;
-            Color c = s.color;
-            int rgba = new Color(c.r, c.g, c.b, c.a * op).toRgba8888();
-            if ((rgba & 0xff) == 0 && s.gradient == null) continue;   // invisible unless a gradient fades in
-            if (s instanceof Shape.Line) line((Shape.Line) s, rgba, batch);
-            else if (s instanceof Shape.Circle) {
-                Shape.Circle ci = (Shape.Circle) s;
-                fan(ci.cx, ci.cy, ci.r, ci.start, ci.span, rgba, batch);
-            } else if (s instanceof Shape.Ring) {
-                Shape.Ring ri = (Shape.Ring) s;
-                ring(ri, rgba, batch);
-            } else if (s instanceof Shape.Polygon) {
-                Shape.Polygon pg = (Shape.Polygon) s;
-                float[] q = pg.points;
-                if (pg.convex && s.gradient != null && s.gradient.radial) {
-                    // fan from the centre so the ramp has an interior vertex (a rim fan is flat)
-                    float cx = 0, cy = 0;
-                    int n = q.length / 2;
-                    for (int i = 0; i < n; i++) {
-                        cx += q[i * 2];
-                        cy += q[i * 2 + 1];
-                    }
-                    cx /= n;
-                    cy /= n;
-                    for (int i = 0; i < n; i++) {
-                        int j = (i + 1) % n;
-                        tri(batch, cx, cy, q[i * 2], q[i * 2 + 1], q[j * 2], q[j * 2 + 1], rgba);
-                    }
-                } else if (pg.convex) {
-                    for (int i = 2; i + 3 < q.length; i += 2) tri(batch, q[0], q[1], q[i], q[i + 1], q[i + 2], q[i + 3], rgba);
-                } else {
-                    int[] idx = EarClip.triangulate(q);
-                    for (int i = 0; i + 2 < idx.length; i += 3) {
-                        tri(batch, q[idx[i] * 2], q[idx[i] * 2 + 1], q[idx[i + 1] * 2], q[idx[i + 1] * 2 + 1],
-                                q[idx[i + 2] * 2], q[idx[i + 2] * 2 + 1], rgba);
-                    }
-                }
-            } else if (s instanceof Shape.Quad) {
-                // corners BL, BR, TR, TL; image v runs downward
-                float[] q = ((Shape.Quad) s).corners;
-                batch.add(q[0], q[1], rgba, 0, 1);
-                batch.add(q[2], q[3], rgba, 1, 1);
-                batch.add(q[4], q[5], rgba, 1, 0);
-                batch.add(q[0], q[1], rgba, 0, 1);
-                batch.add(q[4], q[5], rgba, 1, 0);
-                batch.add(q[6], q[7], rgba, 0, 0);
-            }
-            if (s.gradient != null) recolor(batch, first, c, s.gradient, op);
+            emit((Shape) o, op, b, effects, out);
         }
+    }
+
+    /** Appends one shape's triangles to the current batch for (blend, effect group, texture). */
+    private static void emit(Shape s, float op, Layer.Blend b, String effects, DrawList out) {
+        DrawList.Batch batch = s instanceof Shape.Quad ? out.batch(b, effects, ((Shape.Quad) s).asset) : out.batch(b, effects);
+        int first = batch.vertices;
+        Color c = s.color;
+        int rgba = new Color(c.r, c.g, c.b, c.a * op).toRgba8888();
+        if ((rgba & 0xff) == 0 && s.gradient == null) return;   // invisible unless a gradient fades in
+        if (s instanceof Shape.Line) line((Shape.Line) s, rgba, batch);
+        else if (s instanceof Shape.Circle) {
+            Shape.Circle ci = (Shape.Circle) s;
+            fan(ci.cx, ci.cy, ci.r, ci.start, ci.span, rgba, batch);
+        } else if (s instanceof Shape.Ring) {
+            Shape.Ring ri = (Shape.Ring) s;
+            ring(ri, rgba, batch);
+        } else if (s instanceof Shape.Polygon) {
+            Shape.Polygon pg = (Shape.Polygon) s;
+            float[] q = pg.points;
+            if (pg.convex && s.gradient != null && s.gradient.radial) {
+                // fan from the centre so the ramp has an interior vertex (a rim fan is flat)
+                float cx = 0, cy = 0;
+                int n = q.length / 2;
+                for (int i = 0; i < n; i++) {
+                    cx += q[i * 2];
+                    cy += q[i * 2 + 1];
+                }
+                cx /= n;
+                cy /= n;
+                for (int i = 0; i < n; i++) {
+                    int j = (i + 1) % n;
+                    tri(batch, cx, cy, q[i * 2], q[i * 2 + 1], q[j * 2], q[j * 2 + 1], rgba);
+                }
+            } else if (pg.convex) {
+                for (int i = 2; i + 3 < q.length; i += 2) tri(batch, q[0], q[1], q[i], q[i + 1], q[i + 2], q[i + 3], rgba);
+            } else {
+                int[] idx = EarClip.triangulate(q);
+                for (int i = 0; i + 2 < idx.length; i += 3) {
+                    tri(batch, q[idx[i] * 2], q[idx[i] * 2 + 1], q[idx[i + 1] * 2], q[idx[i + 1] * 2 + 1],
+                            q[idx[i + 2] * 2], q[idx[i + 2] * 2 + 1], rgba);
+                }
+            }
+        } else if (s instanceof Shape.Quad) {
+            // corners BL, BR, TR, TL; image v runs downward
+            float[] q = ((Shape.Quad) s).corners;
+            batch.add(q[0], q[1], rgba, 0, 1);
+            batch.add(q[2], q[3], rgba, 1, 1);
+            batch.add(q[4], q[5], rgba, 1, 0);
+            batch.add(q[0], q[1], rgba, 0, 1);
+            batch.add(q[4], q[5], rgba, 1, 0);
+            batch.add(q[6], q[7], rgba, 0, 0);
+        }
+        if (s.gradient != null) recolor(batch, first, c, s.gradient, op);
     }
 
     /** Recomputes vertex colours [first, end) from a gradient (straight RGBA, group opacity applied). */

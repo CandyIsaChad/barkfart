@@ -75,6 +75,17 @@ class EvaluatorFuzzTest {
                     default:
                         l = new Layer.CameraLayer(p.newId("L"), "c");
                 }
+                int nfx = r.nextInt(4) == 0 ? 1 + r.nextInt(3) : 0;
+                for (int q = 0; q < nfx; q++) {
+                    String type = r.nextInt(8) == 0 ? "no.such" : app.barkfart.fx.EffectTypes.ALL[r.nextInt(app.barkfart.fx.EffectTypes.ALL.length)];
+                    app.barkfart.model.EffectNode e = new app.barkfart.model.EffectNode(l.id, "fx" + q, type);
+                    for (String name : new String[] {"radius", "dx", "dy", "strength", "hue", "saturation", "brightness", "amount"}) {
+                        if (r.nextBoolean()) e.param(l.id, name, app.barkfart.model.ValueType.FLOAT, r.nextInt(3) == 0 ? EXTREMES[r.nextInt(EXTREMES.length)] : (float) (r.nextGaussian() * 50));
+                    }
+                    if (r.nextBoolean()) e.mix.setValue(r.nextInt(3) == 0 ? EXTREMES[r.nextInt(EXTREMES.length)] : r.nextFloat());
+                    l.effects.append(e);
+                }
+                if (r.nextInt(5) == 0) l.opacity.setValue(r.nextInt(3) == 0 ? EXTREMES[r.nextInt(EXTREMES.length)] : r.nextFloat());
                 l.solo = r.nextInt(10) == 0;
                 l.visible = r.nextInt(12) != 0;
                 s.layers.add(l);
@@ -124,6 +135,8 @@ class EvaluatorFuzzTest {
             Scene s = Evaluator.evaluate(p, p.rootSymbol, t);
             assertTrue(s.primitives <= Evaluator.PRIMITIVE_BUDGET, "budget, iter " + iter);
             Tessellator.tessellate(s);
+            app.barkfart.geom.DrawList dl = Tessellator.layered(s);
+            app.barkfart.fx.Compositor.render(dl, new app.barkfart.fx.Image(48, 27, -960, 540, 0.025f));
         }
     }
 

@@ -11,7 +11,7 @@ import com.badlogic.gdx.Gdx;
 
 /** Barkfart: opens straight into the editor with a new project (UI-SPEC "Missing states"). */
 public class BarkfartApp extends ApplicationAdapter {
-    public static final String VERSION = "0.1.0-m4ui";
+    public static final String VERSION = "0.1.0-fx";
 
     private final float uiScale;
     private final app.barkfart.platform.Platform platform;
@@ -40,6 +40,9 @@ public class BarkfartApp extends ApplicationAdapter {
     @Override
     public void create() {
         editor = new EditorScreen(platform, uiScale);
+        // GL effects against the reference renderer, on this device's GPU (GL thread, a few ms).
+        final String fx = app.barkfart.render.EffectCheck.run();
+        System.out.println("[Barkfart] effects " + (fx == null ? "OK" : fx));
         Thread st = new Thread(new Runnable() {
             public void run() {
                 final SelfTest.Result r = SelfTest.run(platform.documents());
@@ -48,7 +51,8 @@ public class BarkfartApp extends ApplicationAdapter {
                 Gdx.app.postRunnable(new Runnable() {
                     public void run() {
                         editor.state.flash("Barkfart " + VERSION + " · self-test " + r.summary()
-                                + (r.ok() ? "" : " · " + r.failures.get(0)), null);
+                                + (r.ok() ? "" : " · " + r.failures.get(0))
+                                + " · effects " + (fx == null ? "OK" : "FAIL: " + fx), null);
                     }
                 });
             }

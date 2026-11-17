@@ -30,6 +30,7 @@ public final class StageView extends Actor {
     private final Theme theme;
     private final EditorState st;
     private final MeshRenderer renderer = new MeshRenderer();
+    private final app.barkfart.render.EffectRenderer effects = new app.barkfart.render.EffectRenderer(renderer);
     private AssetTextures textures;
     private Project texturesFor;
     private final ShapeRenderer shapes = new ShapeRenderer();
@@ -397,12 +398,15 @@ public final class StageView extends Actor {
         boolean shot = st.playing || st.previewCamera;
         Scene scene = Evaluator.evaluate(p, p.rootSymbol, t, false, shot);
         boolean shotClip = false;
+        Rectangle work = clip;
         if (shot) {   // the shot is what export sees: clip to the stage rectangle
             Rectangle sc = new Rectangle();
             ScissorStack.calculateScissors(getStage().getCamera(), batch.getTransformMatrix(), new Rectangle(sx, sy, sw, sh), sc);
             shotClip = ScissorStack.pushScissors(sc);
+            work = sc;
         }
-        renderer.draw(Tessellator.tessellate(scene), m, textures);
+        // groups with effects or translucency draw offscreen; everything else draws as before
+        effects.draw(Tessellator.layered(scene), m, textures, (int) Math.floor(work.x), (int) Math.floor(work.y), (int) Math.ceil(work.width), (int) Math.ceil(work.height));
         if (shotClip) ScissorStack.popScissors();
         if (!shot) {
             drawCameraFrame(o);
@@ -514,6 +518,7 @@ public final class StageView extends Actor {
     }
 
     public void dispose() {
+        effects.dispose();
         renderer.dispose();
         if (textures != null) textures.dispose();
         shapes.dispose();

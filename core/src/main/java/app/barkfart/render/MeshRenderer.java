@@ -48,8 +48,11 @@ public final class MeshRenderer implements Disposable {
             + "varying vec4 v_color;\n"
             + "varying vec2 v_uv;\n"
             + "uniform sampler2D u_texture;\n"
+            + "uniform float u_premul;\n"
             + "void main() {\n"
-            + "  gl_FragColor = v_color * texture2D(u_texture, v_uv);\n"
+            + "  vec4 c = v_color * texture2D(u_texture, v_uv);\n"
+            + "  if (u_premul > 0.5) c.rgb *= c.a;\n"
+            + "  gl_FragColor = c;\n"
             + "}\n";
 
     private final ShaderProgram shader;
@@ -73,33 +76,63 @@ public final class MeshRenderer implements Disposable {
     }
 
     public void draw(DrawList dl, Matrix4 projection, Textures textures) {
+        begin(projection, false);
+        for (DrawList.Batch b : dl.batches) batch(b, textures, false);
+        end();
+    }
+
+    /** Starts drawing batches; premultiplied = into an offscreen (premultiplied) buffer. */
+    void begin(Matrix4 projection, boolean premultiplied) {
         Gdx.gl.glEnable(GL20.GL_BLEND);
         shader.bind();
         shader.setUniformMatrix("u_projTrans", projection);
         shader.setUniformi("u_texture", 0);
-        for (DrawList.Batch b : dl.batches) {
-            Texture t = b.texture == null || textures == null ? null : textures.get(b.texture);
-            (t == null ? white : t).bind(0);
-            blend(b.blend);
-            int n = b.vertexCount(), at = 0;
-            while (at < n) {
-                int count = Math.min(MAX_VERTS, n - at);
-                int k = 0;
-                for (int i = at; i < at + count; i++) {
-                    int c = b.rgba(i);
-                    int abgr = ((c & 0xff) << 24) | (((c >>> 8) & 0xff) << 16) | (((c >>> 16) & 0xff) << 8) | ((c >>> 24) & 0xff);
-                    verts[k++] = b.x(i);
-                    verts[k++] = b.y(i);
-                    verts[k++] = NumberUtils.intToFloatColor(abgr);
-                    verts[k++] = b.u(i);
-                    verts[k++] = b.v(i);
-                }
-                mesh.setVertices(verts, 0, k);
-                mesh.render(shader, GL20.GL_TRIANGLES, 0, count);
-                at += count;
+        shader.setUniformf("u_premul", premultiplied ? 1f : 0f);
+    }
+
+    void batch(DrawList.Batch b, Textures textures, boolean premultiplied) {
+        Texture t = b.texture == null || textures == null ? null : textures.get(b.texture);
+        (t == null ? white : t).bind(0);
+        if (premultiplied) premultipliedBlend(b.blend);
+        else blend(b.blend);
+        int n = b.vertexCount(), at = 0;
+        while (at < n) {
+            int count = Math.min(MAX_VERTS, n - at);
+            int k = 0;
+            for (int i = at; i < at + count; i++) {
+                int c = b.rgba(i);
+                int abgr = ((c & 0xff) << 24) | (((c >>> 8) & 0xff) << 16) | (((c >>> 16) & 0xff) << 8) | ((c >>> 24) & 0xff);
+                verts[k++] = b.x(i);
+                verts[k++] = b.y(i);
+                verts[k++] = NumberUtils.intToFloatColor(abgr);
+                verts[k++] = b.u(i);
+                verts[k++] = b.v(i);
             }
+            mesh.setVertices(verts, 0, k);
+            mesh.render(shader, GL20.GL_TRIANGLES, 0, count);
+            at += count;
         }
+    }
+
+    void end() {
         Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+    }
+
+    /** Blending for a premultiplied source into a premultiplied buffer (matches fx.Compositor). */
+    static void premultipliedBlend(Layer.Blend mode) {
+        switch (mode == null ? Layer.Blend.NORMAL : mode) {
+            case ADD:
+                Gdx.gl.glBlendFunc(GL20.GL_ONE, GL20.GL_ONE);
+                break;
+            case MULTIPLY:
+                Gdx.gl.glBlendFuncSeparate(GL20.GL_DST_COLOR, GL20.GL_ONE_MINUS_SRC_ALPHA, GL20.GL_ONE, GL20.GL_ONE_MINUS_SRC_ALPHA);
+                break;
+            case SCREEN:
+                Gdx.gl.glBlendFuncSeparate(GL20.GL_ONE, GL20.GL_ONE_MINUS_SRC_COLOR, GL20.GL_ONE, GL20.GL_ONE_MINUS_SRC_ALPHA);
+                break;
+            default:
+                Gdx.gl.glBlendFunc(GL20.GL_ONE, GL20.GL_ONE_MINUS_SRC_ALPHA);
+        }
     }
 
     private static void blend(Layer.Blend mode) {

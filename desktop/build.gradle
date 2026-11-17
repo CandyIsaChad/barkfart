@@ -11,3 +11,7 @@ application { mainClass = 'app.barkfart.desktop.DesktopLauncher' }
 
 // Shared assets (fonts) live in /assets; run from there so relative paths resolve.
 tasks.named('run') { workingDir = rootProject.file('assets') }
+// Pass -Dbarkfart.* from the gradle command line through to the app (docs folder, debug flags).
+tasks.named('run') {
+    System.properties.each { k, v -> if (k.toString().startsWith('barkfart.')) systemProperty k.toString(), v.toString() }
+}

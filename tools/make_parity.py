@@ -96,7 +96,17 @@ STATUS = {
     "Default movieclips": ("-", "cannot ship the original's bundled content; ours later"),
     "Scaled/opacity MCs": ("~", "layer scale/opacity apply to symbol layers in the core"),
     # Filters
-    "Transparency": ("~", "layer opacity in the core; no slider"),
+    "Transparency": ("~", "layer opacity drawn correctly (one composite, no overlap seams); no slider yet"),
+    "Invert colors": ("~", "rendered (GL + reference); no effects panel yet"),
+    "Tint": ("~", "rendered; no effects panel yet"),
+    "Saturation": ("~", "colour adjust: saturation, hue, brightness; no effects panel yet"),
+    "Hue shift": ("~", "colour adjust hue rotation; no effects panel yet"),
+    "Blur": ("~", "Gaussian blur rendered; horizontal-only / vertical-only not yet; no panel"),
+    "Glow": ("~", "rendered (colour, radius, strength); no panel"),
+    "Glow intensity": ("~", "strength 0-4; no panel"),
+    "Drop shadow": ("~", "offset, radius, colour; no panel"),
+    "Blur/glow max 2.0": ("x", "radius up to 400 px, strength up to 4"),
+    "Low in-app quality": (" ", "effects render at full resolution for now; half-resolution preview not yet"),
     # Files
     "Save/open projects": ("x", "File panel: new, open, save, rename, duplicate, delete with undo; autosave"),
     "Save/import stickfigures": ("x", "import from the folder or the Files picker; export .nodes byte-exact + share"),
