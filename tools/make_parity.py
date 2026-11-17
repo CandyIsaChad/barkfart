@@ -122,6 +122,10 @@ STATUS = {
     "Better quality blur": ("x", "exports always use full-quality effects"),
     "Low-quality blur export": ("-", "not needed: exports always use full quality"),
     "Export frame range": (" ", "whole timeline only for now"),
+    "Non-blocking export": ("x", "exports run a frame per tick with progress and Cancel"),
+    "Exports to gallery": ("x", "share sheet after export: Save Video / Save Image to Photos"),
+    "Export size slider": ("~", "Full / Half / Small presets, no slider"),
+    "Free watermark": ("-", "no watermark (no free/pro split)"),
     "1080p MP4": ("~", "Full = project size (1280x720 by default); a canvas-size setting is not in the UI yet"),
     # Files
     "Save/open projects": ("x", "File panel: new, open, save, rename, duplicate, delete with undo; autosave"),

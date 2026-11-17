@@ -5,7 +5,7 @@ Built by tools/make_parity.py from research/stick-nodes-features-raw.md (64 upda
 Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without UI, **[ ]** not yet, **(won't)** with the reason.
 
 
-**Totals (382 features):** 73 usable now, 39 partial or core-only, 237 not yet, 33 won't.
+**Totals (382 features):** 75 usable now, 40 partial or core-only, 233 not yet, 34 won't.
 
 
 ## Order of work (parity first, then our own additions)
@@ -334,10 +334,10 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - (won't) **Low-quality blur export** (since 3.0.0): Export using preview-quality blur *Barkfart: not needed: exports always use full quality.*
 - [x] **Better quality blur** (since 3.3.0): Experimental higher-quality blur/glow export *Barkfart: exports always use full-quality effects.*
 - [ ] **Vertical video** (since 4.0.3): Portrait export toggle (Project Tools)
-- [ ] **Export size slider** (since 4.0.3): Size slider on GIF and PNG export windows
-- [ ] **Non-blocking export** (since 1.6.0): Exporting no longer freezes the device
-- [ ] **Exports to gallery** (since 1.2.3): iOS camera roll; Android Pictures/Movies (3.3.0)
-- [ ] **Free watermark** (since 1.0): Free version stamps exports
+- [~] **Export size slider** (since 4.0.3): Size slider on GIF and PNG export windows *Barkfart: Full / Half / Small presets, no slider.*
+- [x] **Non-blocking export** (since 1.6.0): Exporting no longer freezes the device *Barkfart: exports run a frame per tick with progress and Cancel.*
+- [x] **Exports to gallery** (since 1.2.3): iOS camera roll; Android Pictures/Movies (3.3.0) *Barkfart: share sheet after export: Save Video / Save Image to Photos.*
+- (won't) **Free watermark** (since 1.0): Free version stamps exports *Barkfart: no watermark (no free/pro split).*
 - [x] **Send files** (since 2.1.0): Email/share projects, figures, sounds, MCs *Barkfart: share sheet for projects and exported figures.*
 - [ ] **Auto-ZIP send** (since 4.0.0): Sending >5 files bundles a ZIP
 
