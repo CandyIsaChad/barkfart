@@ -145,6 +145,7 @@ public final class ProjectCodec {
         if (l.parentNode != null) m.put("parentNode", l.parentNode);
         if (!l.parentNodeRotate) m.put("parentNodeRotate", false);
         if (l.inheritEffects) m.put("inheritEffects", true);
+        if (l.parallax != 0) m.put("parallax", Json.num(l.parallax));
         m.put("shown", prop(l.shown, false));
         m.put("opacity", prop(l.opacity, false));
         Map<String, Object> t = obj();
@@ -672,6 +673,7 @@ public final class ProjectCodec {
         l.parentNode = str(m, "parentNode");
         l.parentNodeRotate = b(m, "parentNodeRotate", true);
         l.inheritEffects = b(m, "inheritEffects", false);
+        l.parallax = f(m, "parallax", 0f);
         readProp(m, "shown", l.shown);
         readProp(m, "opacity", l.opacity);
         Map<String, Object> t = m.containsKey("transform") ? asMap(m.get("transform"), "transform") : new LinkedHashMap<String, Object>();

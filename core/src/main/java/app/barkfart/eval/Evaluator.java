@@ -158,6 +158,20 @@ public final class Evaluator {
         return Affine.IDENTITY;
     }
 
+    /**
+     * The part of the camera's view a camera-locked layer undoes: all of it
+     * at parallax 0, none at 1 (move, turn and zoom scaled by 1 - parallax).
+     */
+    static Affine lockView(Layer.CameraLayer c, float parallax, double t, PropertyResolver r) {
+        if (parallax == 0) return cameraOf(c, t, r);
+        double k = 1 - parallax;
+        double zoom = r.f(c.zoom, t);
+        if (!(zoom > 1e-6)) zoom = 1e-6;
+        zoom = Math.pow(zoom, k);   // geometric, so zooming in and out are symmetric
+        return Affine.scale(zoom, zoom).mul(Affine.rotateDeg(-r.f(c.rotation, t) * k))
+                .mul(Affine.translate(-r.f(c.x, t) * k, -r.f(c.y, t) * k));
+    }
+
     /** One camera's view transform (stage to shot). */
     static Affine cameraOf(Layer.CameraLayer c, double t, PropertyResolver r) {
         double zoom = r.f(c.zoom, t);
@@ -294,7 +308,7 @@ public final class Evaluator {
             }
             if (p instanceof Layer.CameraLayer) {
                 // locked to the camera: undo the camera's view, so the layer keeps its place in the shot
-                acc = cameraOf((Layer.CameraLayer) p, t, r).inverse().mul(acc);
+                acc = lockView((Layer.CameraLayer) p, cur.parallax, t, r).inverse().mul(acc);
                 cur = p;
                 continue;
             }

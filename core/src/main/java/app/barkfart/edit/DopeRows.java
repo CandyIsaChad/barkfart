@@ -102,6 +102,8 @@ public final class DopeRows {
                 cp.add(c.y);
                 cp.add(c.zoom);
                 cp.add(c.rotation);
+                cp.add(c.background);
+                cp.add(c.background2);
                 all.addAll(cp);
                 body.add(new Row(Kind.CAMERA, "Camera", 0, l, cp));
             } else if (l instanceof Layer.AudioLayer) {

@@ -176,6 +176,20 @@ public final class StructureEdits {
         };
     }
 
+    /** Parallax of a camera-locked layer, clamped to 0..1 (0 fixed in the shot, 1 moves with the world). */
+    public static Command setParallax(final Layer l, float v) {
+        final float old = l.parallax, now = Math.max(0, Math.min(1, v));
+        return new Named("Parallax") {
+            public void apply() {
+                l.parallax = now;
+            }
+
+            public void revert() {
+                l.parallax = old;
+            }
+        };
+    }
+
     /** Appends an effect to the end of a layer's chain. */
     public static Command addEffect(final Layer l, final app.barkfart.model.EffectNode e) {
         final String oldOutput = l.effects.output;

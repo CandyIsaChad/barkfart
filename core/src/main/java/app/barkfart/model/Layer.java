@@ -27,6 +27,12 @@ public abstract class Layer {
     public boolean parentNodeRotate = true;
     /** Also apply the parent layer's effects (Stick Nodes 3.1.0 "use parent's filters"), before its own. */
     public boolean inheritEffects;
+    /**
+     * For layers locked to the camera (Stick Nodes 2.3.7 / 2.4.4 parallax):
+     * 0 stays fixed in the shot, 1 moves with the world, between follows the
+     * camera's move, turn and zoom by that fraction (distant backgrounds).
+     */
+    public float parallax;
     public final Transform transform;
     public final EffectStack effects = new EffectStack();
 
