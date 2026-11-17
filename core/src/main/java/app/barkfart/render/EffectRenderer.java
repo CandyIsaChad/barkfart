@@ -83,13 +83,49 @@ public final class EffectRenderer implements Disposable {
     private static final String TINT = HEAD
             + "uniform vec4 u_color;\nuniform float u_amount;\n"
             + "void main() { vec4 c = texture2D(u_tex, v_uv); gl_FragColor = vec4(c.rgb + (u_color.rgb * c.a - c.rgb) * u_amount, c.a); }\n";
+    /** Pixelate (Kernels.pixelate): block centres in view units, sampled at their texel. */
+    private static final String PIXELATE = "#ifdef GL_ES\n#ifdef GL_FRAGMENT_PRECISION_HIGH\nprecision highp float;\n#else\nprecision mediump float;\n#endif\n#endif\n"
+            + "varying vec2 v_uv;\nuniform sampler2D u_tex;\nuniform vec2 u_max;\nuniform vec2 u_vo;\nuniform float u_upt;\nuniform float u_size;\nuniform vec2 u_fb;\n"
+            + "void main() {\n"
+            + "  vec2 view = u_vo + gl_FragCoord.xy * u_upt;\n"
+            + "  vec2 c = (floor(view / u_size) + 0.5) * u_size;\n"
+            + "  vec2 texel = floor((c - u_vo) / u_upt) + 0.5;\n"
+            + "  vec2 uv = texel / u_fb;\n"
+            + "  vec4 s = texture2D(u_tex, uv);\n"
+            + "  if (uv.x < 0.0 || uv.y < 0.0 || uv.x > u_max.x || uv.y > u_max.y) s = vec4(0.0);\n"
+            + "  gl_FragColor = s;\n"
+            + "}\n";
+    /** Outline (Kernels.outline): max alpha over 32 ring taps, coloured, under the source. */
+    private static final String OUTLINE = HEAD
+            + "uniform vec2 u_off[32];\nuniform vec2 u_px;\nuniform vec4 u_color;\n"
+            + "void main() {\n"
+            + "  vec4 src = texture2D(u_tex, v_uv);\n"
+            + "  float a = src.a;\n"
+            + "  for (int k = 0; k < 32; k++) {\n"
+            + "    vec2 uv = v_uv + u_off[k] * u_px;\n"
+            + "    if (uv.x >= 0.0 && uv.y >= 0.0 && uv.x <= u_max.x && uv.y <= u_max.y) a = max(a, texture2D(u_tex, uv).a);\n"
+            + "  }\n"
+            + "  float sa = a * u_color.a;\n"
+            + "  gl_FragColor = vec4(src.rgb + u_color.rgb * sa * (1.0 - src.a), src.a + sa * (1.0 - src.a));\n"
+            + "}\n";
+    /** Motion blur (Kernels.smear): the average of 16 taps along a line. */
+    private static final String MOTION = HEAD
+            + "uniform vec2 u_off[16];\nuniform vec2 u_px;\n"
+            + "void main() {\n"
+            + "  vec4 acc = vec4(0.0);\n"
+            + "  for (int k = 0; k < 16; k++) {\n"
+            + "    vec2 uv = v_uv + u_off[k] * u_px;\n"
+            + "    if (uv.x >= 0.0 && uv.y >= 0.0 && uv.x <= u_max.x && uv.y <= u_max.y) acc += texture2D(u_tex, uv);\n"
+            + "  }\n"
+            + "  gl_FragColor = acc / 16.0;\n"
+            + "}\n";
     private static final String LERP = HEAD
             + "uniform sampler2D u_tex2;\nuniform float u_t;\n"
             + "void main() { gl_FragColor = mix(texture2D(u_tex, v_uv), texture2D(u_tex2, v_uv), u_t); }\n";
 
     private final MeshRenderer meshes;
     private final BufferPool pool = new BufferPool();
-    private ShaderProgram copy, blur, shift, under, invert, adjust, tint, lerp;
+    private ShaderProgram copy, blur, shift, under, invert, adjust, tint, lerp, pixelate, outline, motion;
     private Mesh quad;
     private final float[] q = new float[16];
     /** False once anything failed: draw() then falls back to flat drawing. */
@@ -108,6 +144,9 @@ public final class EffectRenderer implements Disposable {
             adjust = compile(ADJUST, false);
             tint = compile(TINT, false);
             lerp = compile(LERP, false);
+            pixelate = compile(PIXELATE, false);
+            outline = compile(OUTLINE, true);
+            motion = compile(MOTION, true);
             quad = new Mesh(false, 4, 0,
                     new VertexAttribute(VertexAttributes.Usage.Position, 2, ShaderProgram.POSITION_ATTRIBUTE),
                     new VertexAttribute(VertexAttributes.Usage.TextureCoordinates, 2, ShaderProgram.TEXCOORD_ATTRIBUTE + "0"));
@@ -364,6 +403,41 @@ public final class EffectRenderer implements Disposable {
             pool.release(soft.fb);
             return out;
         }
+        if (EffectTypes.PIXELATE.equals(e.type)) {
+            Target out = blank(src);
+            pixelate.bind();
+            pixelate.setUniformi("u_tex", 0);
+            setMax(pixelate, src);
+            float[] vo = toView(src.x, src.y);
+            pixelate.setUniformf("u_vo", vo[0], vo[1]);
+            pixelate.setUniformf("u_upt", 1f / s);
+            pixelate.setUniformf("u_size", EffectTypes.f(e, "size", 8, 1, EffectTypes.MAX_LENGTH));
+            pixelate.setUniformf("u_fb", src.fb.getWidth(), src.fb.getHeight());
+            src.fb.getColorBufferTexture().bind(0);
+            drawQuad(pixelate, out, src, out);
+            return out;
+        }
+        if (EffectTypes.OUTLINE.equals(e.type) || EffectTypes.MOTION.equals(e.type)) {
+            boolean ol = EffectTypes.OUTLINE.equals(e.type);
+            int[] o = ol ? Kernels.ringOffsets(EffectTypes.f(e, "width", 4, 0, 64) * s)
+                    : Kernels.smearOffsets(EffectTypes.f(e, "angle", 0, -3600, 3600), EffectTypes.f(e, "distance", 30, 0, EffectTypes.MAX_LENGTH) * s);
+            float[] f = new float[o.length];
+            for (int i = 0; i < o.length; i++) f[i] = o[i];
+            ShaderProgram p = ol ? outline : motion;
+            Target out = blank(src);
+            p.bind();
+            p.setUniformi("u_tex", 0);
+            setMax(p, src);
+            p.setUniform2fv("u_off[0]", f, 0, f.length);
+            p.setUniformf("u_px", 1f / src.fb.getWidth(), 1f / src.fb.getHeight());
+            if (ol) {
+                Color c = EffectTypes.c(e, "color", Color.BLACK);
+                p.setUniformf("u_color", c.r, c.g, c.b, c.a);
+            }
+            src.fb.getColorBufferTexture().bind(0);
+            drawQuad(p, out, src, out);
+            return out;
+        }
         Target out = blank(src);
         ShaderProgram p;
         if (EffectTypes.INVERT.equals(e.type)) {
@@ -421,6 +495,14 @@ public final class EffectRenderer implements Disposable {
         float nx = m[Matrix4.M00] * x + m[Matrix4.M01] * y + m[Matrix4.M03];
         float ny = m[Matrix4.M10] * x + m[Matrix4.M11] * y + m[Matrix4.M13];
         return new float[] {vx + (nx + 1) / 2 * vw, vy + (ny + 1) / 2 * vh};
+    }
+
+    /** View coordinates of a viewport pixel corner (inverse of toPixels). */
+    private float[] toView(float px, float py) {
+        float[] m = proj.val;
+        double nx = (px - vx) / (double) vw * 2 - 1 - m[Matrix4.M03], ny = (py - vy) / (double) vh * 2 - 1 - m[Matrix4.M13];
+        double a = m[Matrix4.M00], b = m[Matrix4.M01], c = m[Matrix4.M10], d = m[Matrix4.M11], det = a * d - b * c;
+        return new float[] {(float) ((d * nx - b * ny) / det), (float) ((-c * nx + a * ny) / det)};
     }
 
     /** Projection mapping view space onto a target's rectangle (its own viewport). */
@@ -512,7 +594,7 @@ public final class EffectRenderer implements Disposable {
     @Override
     public void dispose() {
         pool.dispose();
-        for (ShaderProgram p : new ShaderProgram[] {copy, blur, shift, under, invert, adjust, tint, lerp}) if (p != null) p.dispose();
+        for (ShaderProgram p : new ShaderProgram[] {copy, blur, shift, under, invert, adjust, tint, lerp, pixelate, outline, motion}) if (p != null) p.dispose();
         if (quad != null) quad.dispose();
     }
 }

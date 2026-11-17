@@ -13,8 +13,8 @@ public final class EffectTypes {
     private EffectTypes() {}
 
     public static final String BLUR = "blur.gaussian", GLOW = "glow", SHADOW = "shadow.drop", INVERT = "invert",
-            ADJUST = "color.adjust", TINT = "tint";
-    public static final String[] ALL = {BLUR, GLOW, SHADOW, INVERT, ADJUST, TINT};
+            ADJUST = "color.adjust", TINT = "tint", PIXELATE = "pixelate", OUTLINE = "outline", MOTION = "blur.motion";
+    public static final String[] ALL = {BLUR, GLOW, SHADOW, INVERT, ADJUST, TINT, PIXELATE, OUTLINE, MOTION};
 
     /** Largest radius or offset accepted, in project pixels. */
     public static final float MAX_LENGTH = 400;
@@ -36,6 +36,8 @@ public final class EffectTypes {
         if (SHADOW.equals(e.type)) {
             return 1.5f * f(e, "radius", 6, 0, MAX_LENGTH) + Math.max(Math.abs(f(e, "dx", 8, -MAX_LENGTH, MAX_LENGTH)), Math.abs(f(e, "dy", -8, -MAX_LENGTH, MAX_LENGTH)));
         }
+        if (OUTLINE.equals(e.type)) return f(e, "width", 4, 0, 64) + 1;
+        if (MOTION.equals(e.type)) return f(e, "distance", 30, 0, MAX_LENGTH) / 2 + 1;
         return 0;
     }
 
@@ -58,6 +60,13 @@ public final class EffectTypes {
             Kernels.invert(out);
         } else if (ADJUST.equals(e.type)) {
             Kernels.adjust(out, f(e, "hue", 0, -3600, 3600), f(e, "saturation", 1, 0, 4), f(e, "brightness", 0, -1, 1));
+        } else if (PIXELATE.equals(e.type)) {
+            out = Kernels.pixelate(in, f(e, "size", 8, 1, MAX_LENGTH));
+        } else if (OUTLINE.equals(e.type)) {
+            Color c = c(e, "color", Color.BLACK);
+            out = Kernels.outline(in, f(e, "width", 4, 0, 64) * s, c.r, c.g, c.b, c.a);
+        } else if (MOTION.equals(e.type)) {
+            out = Kernels.smear(in, f(e, "angle", 0, -3600, 3600), f(e, "distance", 30, 0, MAX_LENGTH) * s);
         } else if (TINT.equals(e.type)) {
             Color c = c(e, "color", new Color(1, 0, 0, 1));
             Kernels.tint(out, c.r, c.g, c.b, f(e, "amount", 0.5f, 0, 1) * c.a);

@@ -175,6 +175,44 @@ class EffectsTest {
     }
 
     @Test
+    void pixelateGridStaysOnTheStageOutlineGrowsMotionSmears() {
+        Project p = Fixtures.empty();
+        Layer.FigureLayer l = square(p, "a", 0, 0, 0xffffffff);
+        EffectNode px = fx(l, "px", EffectTypes.PIXELATE);
+        px.param(l.id, "size", ValueType.FLOAT, 8f);
+        Image a = render(p);
+        // every 8x8 stage block is one colour
+        for (int by = -24; by < 24; by += 8) {
+            for (int bx = -24; bx < 24; bx += 8) {
+                int c = at(a, bx + 0.5f, by + 0.5f);
+                assertEquals(c, at(a, bx + 7.5f, by + 7.5f), "block " + bx + "," + by);
+            }
+        }
+        // moving the layer by a fraction of a block does not move the grid
+        l.transform.x.setValue(l.transform.x.floatValue() + 3);
+        Image b = render(p);
+        for (int bx = -24; bx < 24; bx += 8) assertEquals(at(b, bx + 0.5f, 0.5f), at(b, bx + 7.5f, 0.5f));
+        l.transform.x.setValue(l.transform.x.floatValue() - 3);
+        l.effects.nodes.clear();
+        l.effects.output = null;
+        EffectNode o = fx(l, "ol", EffectTypes.OUTLINE);
+        o.param(l.id, "width", ValueType.FLOAT, 5f);
+        o.param(l.id, "color", ValueType.COLOR, Color.rgba8888(0xff0000ff));
+        Image c = render(p);
+        assertEquals(0xff0000ff, at(c, 23, 0), "outline just outside the edge");
+        assertEquals(0, alpha(at(c, 27, 0)), "and no further than its width");
+        assertEquals(0xffffffff, at(c, 0, 0), "the shape stays on top");
+        l.effects.nodes.clear();
+        l.effects.output = null;
+        EffectNode m = fx(l, "mb", EffectTypes.MOTION);
+        m.param(l.id, "angle", ValueType.FLOAT, 0f);
+        m.param(l.id, "distance", ValueType.FLOAT, 20f);
+        Image d = render(p);
+        assertTrue(alpha(at(d, 27, 0)) > 20, "smears sideways");
+        assertEquals(0, alpha(at(d, 0, 27)), "not up");
+    }
+
+    @Test
     void badParametersFallBackAndUnknownTypesPassThrough() {
         ResolvedEffect e = new ResolvedEffect(EffectTypes.BLUR, Float.NaN);
         e.params.put("radius", Float.NaN);

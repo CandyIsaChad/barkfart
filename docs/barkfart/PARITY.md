@@ -5,7 +5,7 @@ Built by tools/make_parity.py from research/stick-nodes-features-raw.md (64 upda
 Legend: **[x]** usable in Barkfart now, **[~]** partial or in the core without UI, **[ ]** not yet, **(won't)** with the reason.
 
 
-**Totals (382 features):** 75 usable now, 40 partial or core-only, 233 not yet, 34 won't.
+**Totals (382 features):** 75 usable now, 43 partial or core-only, 230 not yet, 34 won't.
 
 
 ## Order of work (parity first, then our own additions)
@@ -310,9 +310,9 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [~] **Glow intensity** (since 2.4.2): Strength control for glow *Barkfart: strength 0-4 in the core; no control yet.*
 - [~] **Hue shift** (since 3.0.4): Rotate a figure's hues *Barkfart: colour adjust hue in the core; no control yet.*
 - [~] **Drop shadow** (since 3.3.0): Offset shadow, also usable as edge glow *Barkfart: sidebar Shadow with softness; offset and colour fixed for now.*
-- [ ] **Pixelate** (since 4.0.3): Pixelation filter
-- [ ] **Motion blur** (since 4.0.3): Directional motion-blur toggle (incl. one direction) in blur
-- [ ] **Outline** (since 4.1.6): Outline filter around a figure
+- [~] **Pixelate** (since 4.0.3): Pixelation filter *Barkfart: rendered (GPU + reference), grid anchored to the stage; no panel button yet.*
+- [~] **Motion blur** (since 4.0.3): Directional motion-blur toggle (incl. one direction) in blur *Barkfart: directional smear with angle and distance; no panel button yet.*
+- [~] **Outline** (since 4.1.6): Outline filter around a figure *Barkfart: coloured outline of a set width; no panel button yet.*
 - [x] **Blur/glow max 2.0** (since 3.0.5): Raised maximum strength *Barkfart: radius up to 400 px, strength up to 4.*
 - [ ] **Low in-app quality** (since 2.2.0): Filters preview at lower quality, full quality on export *Barkfart: effects render at full resolution for now; half-resolution preview not yet.*
 - [ ] **Copy/paste/clear filters** (since 2.3.0): Filter clipboard and clear button

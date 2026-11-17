@@ -127,6 +127,9 @@ STATUS = {
     "Export size slider": ("~", "Full / Half / Small presets, no slider"),
     "Free watermark": ("-", "no watermark (no free/pro split)"),
     "1080p MP4": ("~", "Full = project size (1280x720 by default); a canvas-size setting is not in the UI yet"),
+    "Pixelate": ("~", "rendered (GPU + reference), grid anchored to the stage; no panel button yet"),
+    "Motion blur": ("~", "directional smear with angle and distance; no panel button yet"),
+    "Outline": ("~", "coloured outline of a set width; no panel button yet"),
     # Files
     "Save/open projects": ("x", "File panel: new, open, save, rename, duplicate, delete with undo; autosave"),
     "Save/import stickfigures": ("x", "import from the folder or the Files picker; export .nodes byte-exact + share"),

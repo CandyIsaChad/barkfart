@@ -180,6 +180,115 @@ public final class Kernels {
         }
     }
 
+    /** Premultiplied pixel at integer (x, y) (rows down), transparent outside. */
+    static void at(Image im, int x, int y, float[] out) {
+        if (x < 0 || y < 0 || x >= im.w || y >= im.h) {
+            out[0] = out[1] = out[2] = out[3] = 0;
+            return;
+        }
+        int o = (y * im.w + x) * 4;
+        out[0] = im.px[o];
+        out[1] = im.px[o + 1];
+        out[2] = im.px[o + 2];
+        out[3] = im.px[o + 3];
+    }
+
+    /**
+     * Pixelate: blocks of size view units anchored to the view origin (so the
+     * grid does not crawl when the layer moves); each block takes the colour
+     * of the pixel at its centre.
+     */
+    public static Image pixelate(Image im, float size) {
+        Image out = im.blank();
+        if (!(size * im.scale >= 1.5f)) return im.copy();
+        float[] c = new float[4];
+        for (int j = 0; j < im.h; j++) {
+            for (int i = 0; i < im.w; i++) {
+                double vx = im.x0 + (i + 0.5) / im.scale, vy = im.y0 - (j + 0.5) / im.scale;
+                double cx = (Math.floor(vx / size) + 0.5) * size, cy = (Math.floor(vy / size) + 0.5) * size;
+                int si = (int) Math.floor((cx - im.x0) * im.scale), sj = (int) Math.floor((im.y0 - cy) * im.scale);
+                at(im, si, sj, c);
+                int o = (j * im.w + i) * 4;
+                out.px[o] = c[0];
+                out.px[o + 1] = c[1];
+                out.px[o + 2] = c[2];
+                out.px[o + 3] = c[3];
+            }
+        }
+        return out;
+    }
+
+    /** Offsets (pixels, rows down) the outline samples: 16 directions at r and r / 2, rounded. */
+    public static int[] ringOffsets(float r) {
+        int[] o = new int[64];
+        for (int k = 0; k < 32; k++) {
+            double rad = k < 16 ? r : r / 2, a = 2 * Math.PI * (k % 16) / 16;
+            o[k * 2] = (int) Math.floor(Math.cos(a) * rad + 0.5);
+            o[k * 2 + 1] = (int) Math.floor(Math.sin(a) * rad + 0.5);
+        }
+        return o;
+    }
+
+    /** Outline: the shape grown by r pixels, in a straight colour, under the source. */
+    public static Image outline(Image src, float r, float cr, float cg, float cb, float ca) {
+        Image out = src.blank();
+        int[] off = ringOffsets(r);
+        for (int y = 0; y < src.h; y++) {
+            for (int x = 0; x < src.w; x++) {
+                int o = (y * src.w + x) * 4;
+                float a = src.px[o + 3];
+                for (int k = 0; k < 32; k++) {
+                    int sx = x + off[k * 2], sy = y - off[k * 2 + 1];   // offsets are y-up
+                    if (sx < 0 || sy < 0 || sx >= src.w || sy >= src.h) continue;
+                    a = Math.max(a, src.px[(sy * src.w + sx) * 4 + 3]);
+                }
+                float sa = a * ca, top = src.px[o + 3];
+                out.px[o] = src.px[o] + cr * sa * (1 - top);
+                out.px[o + 1] = src.px[o + 1] + cg * sa * (1 - top);
+                out.px[o + 2] = src.px[o + 2] + cb * sa * (1 - top);
+                out.px[o + 3] = top + sa * (1 - top);
+            }
+        }
+        return out;
+    }
+
+    /** Taps of the motion blur: 16 offsets (pixels, y up) spread over distance along the angle, centred. */
+    public static int[] smearOffsets(float angleDeg, float distance) {
+        int[] o = new int[32];
+        double a = Math.toRadians(angleDeg);
+        for (int k = 0; k < 16; k++) {
+            double d = distance * (k / 15.0 - 0.5);
+            o[k * 2] = (int) Math.floor(Math.cos(a) * d + 0.5);
+            o[k * 2 + 1] = (int) Math.floor(Math.sin(a) * d + 0.5);
+        }
+        return o;
+    }
+
+    /** Motion blur: the average of 16 copies spread along a direction. */
+    public static Image smear(Image src, float angleDeg, float distance) {
+        Image out = src.blank();
+        int[] off = smearOffsets(angleDeg, distance);
+        float[] c = new float[4];
+        for (int y = 0; y < src.h; y++) {
+            for (int x = 0; x < src.w; x++) {
+                float r = 0, g = 0, b = 0, a = 0;
+                for (int k = 0; k < 16; k++) {
+                    at(src, x + off[k * 2], y - off[k * 2 + 1], c);
+                    r += c[0];
+                    g += c[1];
+                    b += c[2];
+                    a += c[3];
+                }
+                int o = (y * src.w + x) * 4;
+                out.px[o] = r / 16;
+                out.px[o + 1] = g / 16;
+                out.px[o + 2] = b / 16;
+                out.px[o + 3] = a / 16;
+            }
+        }
+        return out;
+    }
+
     static float clamp01(float v) {
         return v < 0 ? 0 : (v > 1 ? 1 : v);
     }
