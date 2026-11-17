@@ -134,4 +134,40 @@ class FrameOpsTest {
         assertEquals(java.util.Arrays.asList(0.5, 0.6, 0.7), asked);
         out.delete();
     }
+
+    private float at(app.barkfart.model.Property q, double t) {
+        return new app.barkfart.eval.PropertyResolver(p, new java.util.ArrayList<app.barkfart.eval.Diagnostic>()).f(q, t);
+    }
+
+    @Test
+    void tweenedFramesSlowMotionAndCameraMovingThroughAHold() {
+        setUp();
+        poseArm(0, 0);
+        poseArm(2, 90);
+        Node arm = man.figure.node("armR1");
+        int before = f.frameCount();
+        f.insertTweened(0, 3);
+        assertEquals(before + 3, f.frameCount());
+        assertEquals(90f, at(arm.rotation, f.time(5)), 1e-3, "the key moved 3 frames back");
+        assertEquals(36f, at(arm.rotation, f.time(2)), 1e-3, "2 of 5 frames: 36 degrees");
+        d.undo();
+        assertEquals(before, f.frameCount(), "one undo step");
+        assertEquals(90f, at(arm.rotation, f.time(2)), 1e-3);
+        assertEquals(6, f.slowMotion(0, 4), "a 2-frame tween becomes 8 frames");
+        assertEquals(90f, at(arm.rotation, f.time(8)), 1e-3);
+        assertEquals(0, f.slowMotion(8, 4), "nothing keyed after the last key");
+        d.undo();
+        // the camera keeps moving through a hold when asked
+        Layer.CameraLayer cam = new Layer.CameraLayer(p.newId("L"), "cam");
+        cam.x.track().put(new Key(0, 0f, Interp.LINEAR));
+        cam.x.track().put(new Key(f.time(2), 100f, Interp.LINEAR));
+        p.root().layers.add(cam);
+        p.invalidateIndex();
+        f.hold(0, 2, true);
+        assertEquals(0f, at(arm.rotation, f.time(2)), 1e-3, "the figure holds");
+        assertEquals(50f, at(cam.x, f.time(2)), 1e-3, "the camera is halfway through its longer move");
+        d.undo();
+        f.hold(0, 2, false);
+        assertEquals(0f, at(cam.x, f.time(2)), 1e-3, "a plain hold holds the camera too");
+    }
 }
