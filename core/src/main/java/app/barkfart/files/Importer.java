@@ -144,9 +144,16 @@ public final class Importer {
                 return new Result(al, String.format("Added sound %s (%.1f s) at %.2f s", name, pcm.seconds(), start), new java.util.ArrayList<String>());
             }
             case IMAGE: {
+                if (bytes.length > 6 && bytes[0] == 'G' && bytes[1] == 'I' && bytes[2] == 'F') {
+                    app.barkfart.image.GifDecoder.Result gif = app.barkfart.image.GifDecoder.decode(bytes);
+                    if (gif == null) throw new Unsupported("Can't read " + f.getName() + ".");
+                    if (gif.frames.size() > 1) return importGif(doc, name, gif);
+                    // one frame: an ordinary picture, stored as PNG
+                    bytes = app.barkfart.export.Png.encode(gif.frames.get(0).rgba, gif.w, gif.h, true);
+                }
                 int[] size = app.barkfart.image.ImageInfo.size(bytes);
                 if (size == null || size[0] <= 0 || size[1] <= 0) throw new Unsupported("Can't read " + f.getName() + " (use png or jpg).");
-                String ext = f.getName().substring(f.getName().lastIndexOf('.')).toLowerCase();
+                String ext = f.getName().toLowerCase().endsWith(".gif") ? ".png" : f.getName().substring(f.getName().lastIndexOf('.')).toLowerCase();
                 String aid = p.newId("A");
                 app.barkfart.model.Asset a = new app.barkfart.model.Asset(aid, app.barkfart.model.Asset.Kind.IMAGE, "assets/" + aid + ext);
                 Layer.SpriteLayer sl = new Layer.SpriteLayer(p.newId("L"), name);
@@ -170,6 +177,49 @@ public final class Importer {
                 throw new Unsupported("Pivot figures (.stk) cannot be imported yet");
             default:
                 throw new Unsupported(f.getName() + " is not a file Barkfart can import");
+        }
+    }
+
+    /**
+     * An animated GIF as a movieclip (Stick Nodes 4.2.7): one sprite per
+     * frame, each shown only during its own time, looping with the GIF's
+     * timing. One undo step.
+     */
+    static Result importGif(Document doc, String name, app.barkfart.image.GifDecoder.Result gif) {
+        Project p = doc.project;
+        Symbol root = p.root();
+        float fit = Math.min(1f, Math.min(p.settings.width * 0.6f / gif.w, p.settings.height * 0.6f / gif.h));
+        double total = 0;
+        for (app.barkfart.image.GifDecoder.Frame fr : gif.frames) total += fr.delay;
+        Symbol sym = new Symbol(p.newId("S"), name, total);
+        doc.begin("Add GIF " + name);
+        try {
+            double at = 0;
+            int k = 0;
+            for (app.barkfart.image.GifDecoder.Frame fr : gif.frames) {
+                String aid = p.newId("A");
+                app.barkfart.model.Asset a = new app.barkfart.model.Asset(aid, app.barkfart.model.Asset.Kind.IMAGE, "assets/" + aid + ".png");
+                doc.apply(StructureEdits.addAsset(p, a, app.barkfart.export.Png.encode(fr.rgba, gif.w, gif.h, true)));
+                Layer.SpriteLayer sl = new Layer.SpriteLayer(p.newId("L"), name + " " + (++k));
+                sl.asset = aid;
+                sl.width = gif.w * fit;
+                sl.height = gif.h * fit;
+                sl.transform.anchorX.setValue(sl.width / 2);
+                sl.transform.anchorY.setValue(sl.height / 2);
+                sl.shown.setValue(Boolean.FALSE);
+                if (at > 0) sl.shown.track().put(new app.barkfart.model.Key(0, Boolean.FALSE, app.barkfart.model.Interp.HOLD));
+                sl.shown.track().put(new app.barkfart.model.Key(at, Boolean.TRUE, app.barkfart.model.Interp.HOLD));
+                if (at + fr.delay < total - 1e-9) sl.shown.track().put(new app.barkfart.model.Key(at + fr.delay, Boolean.FALSE, app.barkfart.model.Interp.HOLD));
+                sym.layers.add(sl);
+                at += fr.delay;
+            }
+            doc.apply(StructureEdits.addSymbol(p, sym));
+            Layer.SymbolLayer inst = new Layer.SymbolLayer(p.newId("L"), name, sym.id);
+            inst.loop = Layer.SymbolLayer.LoopMode.LOOP;
+            doc.apply(StructureEdits.addLayer(root, inst, root.layers.size()));
+            return new Result(inst, String.format("Added GIF %s (%d frames, %.2f s, as a movieclip)", name, gif.frames.size(), total), new java.util.ArrayList<String>());
+        } finally {
+            doc.commit();
         }
     }
 

@@ -54,7 +54,7 @@ public final class ProjectStore {
         if (n.endsWith(".stknds")) return Kind.LEGACY_PROJECT;
         if (n.endsWith(".stk")) return Kind.PIVOT;
         for (String e : SOUND_EXTENSIONS) if (n.endsWith(e)) return Kind.SOUND;
-        if (n.endsWith(".png") || n.endsWith(".jpg") || n.endsWith(".jpeg")) return Kind.IMAGE;
+        if (n.endsWith(".png") || n.endsWith(".jpg") || n.endsWith(".jpeg") || n.endsWith(".gif")) return Kind.IMAGE;
         if (n.endsWith(".zip")) return Kind.ZIP;
         return Kind.OTHER;
     }
