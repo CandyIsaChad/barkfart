@@ -143,7 +143,7 @@ public final class Evaluator {
             float op = r.f(l.opacity, t);
             g.opacity = op < 0 ? 0 : (op > 1 ? 1 : op);
             g.blend = l.blend;
-            resolveEffects(l, t, r, g);
+            resolveEffects(l, sym, t, r, g);
             Affine xf = w.xf.mul(layerChain(sym, l, t, r, scene));
             if (!xf.isFinite()) {
                 scene.diagnostics.add(new Diagnostic(Diagnostic.Kind.BAD_VALUE, l.id + "/transform"));
@@ -181,6 +181,27 @@ public final class Evaluator {
     }
 
     private static void resolveEffects(Layer l, double t, PropertyResolver r, Group g) {
+        resolveEffects(l, null, t, r, g);
+    }
+
+    /** With sym, a layer that inherits effects gets its parents' first (outermost first, cycles stopped). */
+    private static void resolveEffects(Layer l, Symbol sym, double t, PropertyResolver r, Group g) {
+        if (sym != null && l.inheritEffects && l.parent != null) {
+            java.util.List<Layer> chain = new java.util.ArrayList<Layer>();
+            HashSet<String> seen = new HashSet<String>();
+            seen.add(l.id);
+            for (Layer cur = l; cur.inheritEffects && cur.parent != null; ) {
+                Layer p = sym.layer(cur.parent);
+                if (p == null || !seen.add(p.id)) break;
+                chain.add(0, p);
+                cur = p;
+            }
+            for (Layer p : chain) resolveOwn(p, t, r, g);
+        }
+        resolveOwn(l, t, r, g);
+    }
+
+    private static void resolveOwn(Layer l, double t, PropertyResolver r, Group g) {
         if (l.effects.isEmpty()) return;
         for (EffectNode e : l.effects.chain()) {
             if (!e.enabled) continue;

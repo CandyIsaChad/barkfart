@@ -88,4 +88,32 @@ class LayerOpsTest {
         d.undo();
         assertEquals(before.replaceAll("\"idCounter\": \\d+", ""), ProjectCodec.encode(p).replaceAll("\"idCounter\": \\d+", ""));
     }
+
+    @Test
+    void inheritedClearedEffectsAndHeldTweens() {
+        setUp();
+        EffectNode glow = new EffectNode(man.id, "FXg", "glow");
+        man.effects.append(glow);
+        EffectNode blur = new EffectNode(hat.id, "FXb", "blur.gaussian");
+        hat.effects.append(blur);
+        d.apply(StructureEdits.setInheritEffects(hat, true));
+        app.barkfart.eval.Scene sc = app.barkfart.eval.Evaluator.evaluate(p, p.rootSymbol, 0);
+        app.barkfart.eval.Group hatGroup = null;
+        for (Object o : sc.root.children) if (o instanceof app.barkfart.eval.Group && ((app.barkfart.eval.Group) o).source.endsWith(hat.id)) hatGroup = (app.barkfart.eval.Group) o;
+        assertNotNull(hatGroup);
+        assertEquals(2, hatGroup.effects.size(), "parent's glow, then its own blur");
+        assertEquals("glow", hatGroup.effects.get(0).type);
+        d.apply(StructureEdits.clearEffects(man));
+        assertTrue(man.effects.isEmpty());
+        d.undo();
+        assertEquals(1, man.effects.chain().size());
+        app.barkfart.model.Property arm = man.figure.node("armR1").rotation;
+        arm.track().put(new Key(0, 0f, Interp.LINEAR));
+        arm.track().put(new Key(1, 90f, Interp.LINEAR));
+        Editor ed = new Editor(d);
+        LayerOps.setTweening(ed, man, false);
+        assertEquals(0f, (Float) arm.keyValue(0.5), 1e-6, "holds the pose until the next key");
+        LayerOps.setTweening(ed, man, true);
+        assertEquals(45f, (Float) arm.keyValue(0.5), 1e-4);
+    }
 }

@@ -145,6 +145,37 @@ public final class StructureEdits {
 
     // ---- effects ----
 
+    /** Removes all of a layer's effects (Stick Nodes 2.3.0 "clear filters"). */
+    public static Command clearEffects(final Layer l) {
+        final java.util.LinkedHashMap<String, app.barkfart.model.EffectNode> before = new java.util.LinkedHashMap<String, app.barkfart.model.EffectNode>(l.effects.nodes);
+        final String out = l.effects.output;
+        return new Named("Clear effects") {
+            public void apply() {
+                l.effects.nodes.clear();
+                l.effects.output = null;
+            }
+
+            public void revert() {
+                l.effects.nodes.putAll(before);
+                l.effects.output = out;
+            }
+        };
+    }
+
+    /** Use (or stop using) the parent's effects too. */
+    public static Command setInheritEffects(final Layer l, final boolean on) {
+        final boolean old = l.inheritEffects;
+        return new Named(on ? "Use parent's effects" : "Own effects only") {
+            public void apply() {
+                l.inheritEffects = on;
+            }
+
+            public void revert() {
+                l.inheritEffects = old;
+            }
+        };
+    }
+
     /** Appends an effect to the end of a layer's chain. */
     public static Command addEffect(final Layer l, final app.barkfart.model.EffectNode e) {
         final String oldOutput = l.effects.output;

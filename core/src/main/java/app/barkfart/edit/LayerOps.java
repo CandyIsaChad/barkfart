@@ -206,4 +206,15 @@ public final class LayerOps {
             doc.commit();
         }
     }
+
+    /**
+     * "Keep during tween" (Stick Nodes 1.8.0): off makes every key of the
+     * layer (its figure's joints included) hold until the next key, so the
+     * figure jumps from pose to pose; on makes them tween again. One undo step.
+     */
+    public static void setTweening(Editor editor, Layer l, boolean tween) {
+        List<KeyRef> keys = new ArrayList<KeyRef>();
+        for (Property q : l.properties()) for (Key k : q.track().keys()) keys.add(new KeyRef(q, k.time));
+        if (!keys.isEmpty()) editor.setInterp(keys, tween ? app.barkfart.model.Interp.LINEAR : app.barkfart.model.Interp.HOLD, null);
+    }
 }

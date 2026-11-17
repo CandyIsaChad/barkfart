@@ -25,6 +25,8 @@ public abstract class Layer {
      */
     public String parentNode;
     public boolean parentNodeRotate = true;
+    /** Also apply the parent layer's effects (Stick Nodes 3.1.0 "use parent's filters"), before its own. */
+    public boolean inheritEffects;
     public final Transform transform;
     public final EffectStack effects = new EffectStack();
 
