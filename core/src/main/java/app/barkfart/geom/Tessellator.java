@@ -34,7 +34,7 @@ public final class Tessellator {
                 continue;
             }
             Shape s = (Shape) o;
-            DrawList.Batch batch = out.batch(b, effects);
+            DrawList.Batch batch = s instanceof Shape.Quad ? out.batch(b, effects, ((Shape.Quad) s).asset) : out.batch(b, effects);
             Color c = s.color;
             int rgba = new Color(c.r, c.g, c.b, c.a * op).toRgba8888();
             if ((rgba & 0xff) == 0) continue;
@@ -55,9 +55,14 @@ public final class Tessellator {
                     }
                 }
             } else if (s instanceof Shape.Quad) {
+                // corners BL, BR, TR, TL; image v runs downward
                 float[] q = ((Shape.Quad) s).corners;
-                tri(batch, q[0], q[1], q[2], q[3], q[4], q[5], rgba);
-                tri(batch, q[0], q[1], q[4], q[5], q[6], q[7], rgba);
+                batch.add(q[0], q[1], rgba, 0, 1);
+                batch.add(q[2], q[3], rgba, 1, 1);
+                batch.add(q[4], q[5], rgba, 1, 0);
+                batch.add(q[0], q[1], rgba, 0, 1);
+                batch.add(q[4], q[5], rgba, 1, 0);
+                batch.add(q[6], q[7], rgba, 0, 0);
             }
         }
     }

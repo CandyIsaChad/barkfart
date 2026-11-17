@@ -84,9 +84,50 @@ class GoldenTest {
         check("translucent_shapes", p, 0);
     }
 
+    @Test
+    void perVertexColourGradient() throws IOException {
+        DrawList dl = new DrawList();
+        DrawList.Batch b = dl.batch(Layer.Blend.NORMAL, null);
+        b.add(-120, -90, 0xff0000ff);
+        b.add(120, -90, 0x00ff00ff);
+        b.add(0, 100, 0x0000ff80);
+        BufferedImage img = Raster.fill(dl, W, H, 0xffffffff);
+        compare("gradient_triangle", img);
+        // centre pixel is a mix of all three corners, not one flat colour
+        int c = img.getRGB(W / 2, H / 2 + 20);
+        assertTrue(((c >> 16) & 0xff) > 20 && ((c >> 8) & 0xff) > 20 && (c & 0xff) > 20, Integer.toHexString(c));
+    }
+
+    @Test
+    void texturedSprite() throws IOException {
+        Project p = Fixtures.empty();
+        p.assets.put("A1", new app.barkfart.model.Asset("A1", app.barkfart.model.Asset.Kind.IMAGE, "assets/A1.png"));
+        Layer.SpriteLayer sp = new Layer.SpriteLayer(p.newId("L"), "checker");
+        sp.asset = "A1";
+        sp.width = 120;
+        sp.height = 90;
+        sp.transform.x.setValue(-60f);
+        sp.transform.y.setValue(-45f);
+        sp.transform.rotation.setValue(12f);
+        sp.tint.setValue(Color.rgba8888(0xffffffc0));
+        p.root().layers.add(sp);
+        BufferedImage tex = new BufferedImage(4, 4, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++) tex.setRGB(x, y, y < 2 ? 0xff0a84ff : ((x + y) % 2 == 0 ? 0xffff9f0a : 0xff30d158));
+        java.util.Map<String, BufferedImage> texs = new java.util.HashMap<String, BufferedImage>();
+        texs.put("A1", tex);
+        BufferedImage img = Raster.fill(Tessellator.tessellate(Evaluator.evaluate(p, p.rootSymbol, 0)), W, H, 0xffffffff, texs);
+        compare("textured_sprite", img);
+        // top of the sprite shows the image's top rows (blue), i.e. not flipped
+        int top = img.getRGB(W / 2 - 10, H / 2 - 30);
+        assertTrue((top & 0xff) > ((top >> 16) & 0xff), "blue on top: " + Integer.toHexString(top));
+    }
+
     private static void check(String name, Project p, double t) throws IOException {
         Scene s = Evaluator.evaluate(p, p.rootSymbol, t);
-        BufferedImage img = Raster.fill(Tessellator.tessellate(s), W, H, 0xffffffff);
+        compare(name, Raster.fill(Tessellator.tessellate(s), W, H, 0xffffffff));
+    }
+
+    private static void compare(String name, BufferedImage img) throws IOException {
         File dir = new File(System.getProperty("barkfart.root", ".."), "core/src/test/resources/golden");
         File f = new File(dir, name + ".png");
         if (Boolean.getBoolean("barkfart.updateGoldens") || !f.exists()) {

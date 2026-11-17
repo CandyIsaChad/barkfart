@@ -183,6 +183,19 @@ Not done
   panel): waits for the user's screenshots so the layout matches the
   original. Markers exist in the model but have no edit commands yet.
 
+### Renderer foundation (2026-11-17, core-first step 2)
+- DrawList batches carry per-vertex colour, texture coordinates and a
+  texture (asset id); sprite quads are textured.
+- MeshRenderer (one dynamic mesh + one shader: vertex colour x texture, four
+  blend modes) replaces the per-triangle ShapeRenderer path; AssetTextures
+  decodes image assets once per project; BufferPool provides pooled
+  offscreen buffers for the effects step.
+- Test rasterizer: Java2D for flat triangles (older goldens byte-stable),
+  barycentric fill for gradients and textures; new goldens: gradient
+  triangle, textured rotated sprite (orientation asserted).
+- Checked on desktop: the editor renders as before; a generated sprite
+  shows the right way up. Not tested on device yet.
+
 ### Format lock (2026-11-17)
 - FORMAT.md rules; v1 fixture + reference render that every build must load
   and match; loader treats every non-identity field as optional with the

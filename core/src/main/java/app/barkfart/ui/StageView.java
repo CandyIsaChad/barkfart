@@ -8,7 +8,8 @@ import app.barkfart.geom.OnionSkin;
 import app.barkfart.geom.Tessellator;
 import app.barkfart.model.Layer;
 import app.barkfart.model.Project;
-import app.barkfart.render.DrawListRenderer;
+import app.barkfart.render.AssetTextures;
+import app.barkfart.render.MeshRenderer;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
@@ -28,7 +29,9 @@ import java.util.List;
 public final class StageView extends Actor {
     private final Theme theme;
     private final EditorState st;
-    private final DrawListRenderer renderer = new DrawListRenderer();
+    private final MeshRenderer renderer = new MeshRenderer();
+    private AssetTextures textures;
+    private Project texturesFor;
     private final ShapeRenderer shapes = new ShapeRenderer();
     private final OnionSkin onion = new OnionSkin();
 
@@ -384,7 +387,12 @@ public final class StageView extends Actor {
 
         Matrix4 m = new Matrix4(batch.getProjectionMatrix()).translate(o.x + getWidth() / 2 + st.panX, o.y + getHeight() / 2 + st.panY, 0).scale(s, s, 1);
         double t = st.time();
-        if (st.onion && !st.playing && !st.previewCamera) renderer.draw(onion.build(p, p.rootSymbol, t), m);
+        if (texturesFor != p) {
+            if (textures != null) textures.dispose();
+            textures = new AssetTextures(p);
+            texturesFor = p;
+        }
+        if (st.onion && !st.playing && !st.previewCamera) renderer.draw(onion.build(p, p.rootSymbol, t), m, null);
         // Editing shows the stage; the camera is a frame on it. Play shows the camera's shot.
         boolean shot = st.playing || st.previewCamera;
         Scene scene = Evaluator.evaluate(p, p.rootSymbol, t, false, shot);
@@ -394,7 +402,7 @@ public final class StageView extends Actor {
             ScissorStack.calculateScissors(getStage().getCamera(), batch.getTransformMatrix(), new Rectangle(sx, sy, sw, sh), sc);
             shotClip = ScissorStack.pushScissors(sc);
         }
-        renderer.draw(Tessellator.tessellate(scene), m);
+        renderer.draw(Tessellator.tessellate(scene), m, textures);
         if (shotClip) ScissorStack.popScissors();
         if (!shot) {
             drawCameraFrame(o);
@@ -507,6 +515,7 @@ public final class StageView extends Actor {
 
     public void dispose() {
         renderer.dispose();
+        if (textures != null) textures.dispose();
         shapes.dispose();
         if (labels != null) labels.dispose();
     }

@@ -4,6 +4,7 @@ import app.barkfart.BarkfartApp;
 import app.barkfart.edit.DopeRows;
 import app.barkfart.files.Importer;
 import app.barkfart.edit.StructureEdits;
+import app.barkfart.model.Asset;
 import app.barkfart.model.Layer;
 import app.barkfart.model.Node;
 import app.barkfart.ui.EasingMenu;
@@ -54,6 +55,32 @@ final class DesktopScript {
                     }
                 }
                 st.fire();
+            } else if (step.equals("sprite")) {
+                com.badlogic.gdx.graphics.Pixmap pm = new com.badlogic.gdx.graphics.Pixmap(64, 64, com.badlogic.gdx.graphics.Pixmap.Format.RGBA8888);
+                for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
+                    boolean c = ((x / 8) + (y / 8)) % 2 == 0;
+                    pm.drawPixel(x, y, c ? 0xff9f0aff : (y < 32 ? 0x0a84ffff : 0x30d158ff));
+                }
+                java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+                try {
+                    com.badlogic.gdx.graphics.PixmapIO.PNG png = new com.badlogic.gdx.graphics.PixmapIO.PNG();
+                    png.setFlipY(false);   // the encoder flips by default (meant for screenshots)
+                    png.write(bo, pm);
+                } catch (java.io.IOException e) {
+                    throw new RuntimeException(e);
+                }
+                pm.dispose();
+                String id = st.project().newId("A");
+                st.project().assets.put(id, new Asset(id, Asset.Kind.IMAGE, "assets/" + id + ".png"));
+                st.project().assetData.put(id, bo.toByteArray());
+                Layer.SpriteLayer sp = new Layer.SpriteLayer(st.project().newId("L"), "Checker");
+                sp.asset = id;
+                sp.width = 160;
+                sp.height = 160;
+                sp.transform.x.setValue(-420f);
+                sp.transform.y.setValue(-100f);
+                sp.transform.rotation.setValue(15f);
+                st.doc.apply(StructureEdits.addLayer(st.project().root(), sp, 0));
             } else if (step.equals("files")) {
                 st.fileOpener.run();
             } else if (step.equals("preview")) {
