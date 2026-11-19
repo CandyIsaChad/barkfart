@@ -4,6 +4,8 @@
 //! that changes the project. One begin/commit is one undo step.
 
 pub mod editor;
+pub mod figure_ops;
+pub mod structure;
 
 use crate::model::Project;
 use indexmap::IndexMap;

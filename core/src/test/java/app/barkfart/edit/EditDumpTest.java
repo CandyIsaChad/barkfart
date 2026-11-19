@@ -56,12 +56,63 @@ class EditDumpTest {
         return out;
     }
 
+    private static Layer.FigureLayer man(Project p) {
+        return (Layer.FigureLayer) p.root().layers.get(0);
+    }
+
+    private void figureScenarios() throws Exception {
+        scenario("add-segment", (d, e, p) -> d.apply(FigureOps.addSegment(man(p), "armR2", 30f, 20f, null)));
+        scenario("add-segment-root", (d, e, p) -> d.apply(FigureOps.addSegment(man(p), "hip", -45f, 33f, null)));
+        scenario("split-3", (d, e, p) -> d.apply(FigureOps.split(man(p), "armR1", 3)));
+        scenario("split-curved", (d, e, p) -> {
+            d.apply(FigureOps.edit("Curve", man(p), () -> man(p).figure.node("legL1").curve = 12f));
+            d.apply(FigureOps.split(man(p), "legL1", 4));
+        });
+        scenario("duplicate-branch", (d, e, p) -> d.apply(FigureOps.duplicateBranch(man(p), "armL1", null)));
+        scenario("duplicate-branch-fill", (d, e, p) -> d.apply(FigureOps.duplicateBranch(man(p), "torso", null)));
+        scenario("flip-branch-h", (d, e, p) -> d.apply(FigureOps.flipBranch(p, man(p), "armR1", true, 0.6)));
+        scenario("flip-branch-v", (d, e, p) -> d.apply(FigureOps.flipBranch(p, man(p), "legL1", false, 0)));
+        scenario("flip-figure", (d, e, p) -> d.apply(FigureOps.flipFigure(man(p), true)));
+        scenario("modify-thickness", (d, e, p) -> d.apply(FigureOps.modifyBranch(man(p), "torso", "Thickness", FigureOps.setThickness(7f))));
+        scenario("modify-color", (d, e, p) -> d.apply(FigureOps.modifyBranch(man(p), "armL1", "Colour", FigureOps.setColor(app.barkfart.model.Color.rgba8888(0x336699ff)))));
+        scenario("modify-shape", (d, e, p) -> d.apply(FigureOps.modifyBranch(man(p), "legR1", "Shape", FigureOps.setShape(app.barkfart.model.Node.Shape.TRIANGLE))));
+        scenario("modify-scale", (d, e, p) -> d.apply(FigureOps.modifyBranch(man(p), "hip", "Scale", FigureOps.scaleLength(1.5f))));
+        scenario("modify-static", (d, e, p) -> d.apply(FigureOps.modifyBranch(man(p), "armR1", "Static", FigureOps.setStatic(true))));
+        scenario("push-back", (d, e, p) -> d.apply(FigureOps.pushBranch(man(p), "armL1", false)));
+        scenario("push-forward", (d, e, p) -> d.apply(FigureOps.pushBranch(man(p), "legL1", true)));
+        scenario("pin", (d, e, p) -> d.apply(FigureOps.setPinned(man(p), "legR2", true)));
+        // structure
+        scenario("remove-node", (d, e, p) -> d.apply(StructureEdits.removeNode(man(p), "armL1")));
+        scenario("remove-layer", (d, e, p) -> d.apply(StructureEdits.removeLayer(p.root(), p.root().layers.get(2))));
+        scenario("move-layer", (d, e, p) -> d.apply(StructureEdits.moveLayer(p.root(), p.root().layers.get(0), 4)));
+        scenario("set-parent", (d, e, p) -> d.apply(StructureEdits.setParent(p.root(), p.root().layers.get(3), "L2")));
+        scenario("remove-effect", (d, e, p) -> d.apply(StructureEdits.removeEffect(man(p), man(p).effects.nodes.get("fx1"))));
+        scenario("clear-effects", (d, e, p) -> d.apply(StructureEdits.clearEffects(man(p))));
+        scenario("paste-clip", (d, e, p) -> {
+            Layer.AudioLayer a = (Layer.AudioLayer) p.root().layer("Lb");
+            d.apply(StructureEdits.pasteClip(p, a, a.clips.get(0), 1.3));
+        });
+        scenario("canvas-size", (d, e, p) -> d.apply(StructureEdits.setCanvasSize(p, 720, 1280)));
+        scenario("parallax", (d, e, p) -> d.apply(StructureEdits.setParallax(p.root().layers.get(3), 7f)));
+        scenario("copy-layer", (d, e, p) -> {
+            Map<String, String> ids = new LinkedHashMap<String, String>();
+            ids.put("L2", p.newId("L"));
+            Layer c = app.barkfart.io.ProjectCodec.copyLayer(man(p), ids);
+            d.apply(StructureEdits.addLayer(p.root(), c, 1));
+        });
+    }
+
     @Test
     void dump() throws Exception {
         String d0 = System.getProperty("barkfart.editdump", "");
         Assumptions.assumeTrue(!d0.isEmpty(), "edit dump not requested");
         dir = new File(d0, "editor");
         dir.mkdirs();
+        java.io.File editorDir = dir;
+        dir = new File(d0, "figure");
+        dir.mkdirs();
+        figureScenarios();
+        dir = editorDir;
         scenario("change-autokey", (d, e, p) -> e.change(p.property("L2/armR1/rotation"), 33f, 0.5));
         scenario("change-static", (d, e, p) -> {
             e.autoKey = false;

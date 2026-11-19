@@ -789,6 +789,96 @@ impl Figure {
         self.nodes.iter().map(|n| n.draw_order).max().unwrap_or(i32::MIN)
     }
 
+    /// The node and its descendants, in figure order.
+    pub fn subtree(&self, id: &str) -> Vec<String> {
+        let mut ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        if self.node(id).is_none() {
+            return out;
+        }
+        ids.insert(id.to_string());
+        for n in &self.nodes {
+            if n.id == id || n.parent.as_ref().is_some_and(|p| ids.contains(p)) {
+                ids.insert(n.id.clone());
+                out.push(n.id.clone());
+            }
+        }
+        out
+    }
+
+    fn reindex(&mut self) {
+        self.index.clear();
+        for (i, n) in self.nodes.iter().enumerate() {
+            self.index.insert(n.id.clone(), i);
+        }
+    }
+
+    /// Removes a non-root node and its descendants.
+    pub fn remove_subtree(&mut self, id: &str) -> Result<(), String> {
+        match self.node(id) {
+            Some(n) if n.parent.is_some() => {}
+            _ => return Err(format!("cannot remove {id}")),
+        }
+        let sub: std::collections::HashSet<String> = self.subtree(id).into_iter().collect();
+        self.nodes.retain(|n| !sub.contains(&n.id));
+        self.reindex();
+        Ok(())
+    }
+
+    /// Replaces the node list (parents first, unique ids).
+    pub fn set_nodes(&mut self, list: Vec<Node>) -> Result<(), String> {
+        let mut seen = std::collections::HashSet::new();
+        for (i, n) in list.iter().enumerate() {
+            let ok = if i == 0 { n.parent.is_none() } else { n.parent.as_ref().is_some_and(|p| seen.contains(p)) };
+            if !ok {
+                return Err(format!("node order: {}", n.id));
+            }
+            if !seen.insert(n.id.clone()) {
+                return Err(format!("duplicate node id {}", n.id));
+            }
+        }
+        self.nodes = list;
+        self.reindex();
+        Ok(())
+    }
+
+    /// Inserts a node at a position (after the root at the earliest).
+    pub fn insert(&mut self, pos: usize, mut n: Node) -> Result<(), String> {
+        if n.draw_order == UNASSIGNED {
+            n.draw_order = self.max_draw_order() + 1;
+        }
+        let mut l = self.nodes.clone();
+        l.insert(pos.clamp(1, l.len()), n);
+        self.set_nodes(l)
+    }
+
+    /// Moves a node under another (the parent must come earlier, no cycles).
+    pub fn reparent(&mut self, id: &str, parent: &str) -> Result<(), String> {
+        let (Some(i), Some(pi)) = (self.index_of(id), self.index_of(parent)) else { return Err(format!("reparent {id} -> {parent}")) };
+        if pi >= i || self.subtree(id).iter().any(|x| x == parent) {
+            return Err(format!("reparent {id} -> {parent}"));
+        }
+        self.nodes[i].parent = Some(parent.to_string());
+        Ok(())
+    }
+
+    /// An unused node id: prefix + the first free number from the node count.
+    pub fn free_id(&self, prefix: &str) -> String {
+        let mut i = self.nodes.len();
+        loop {
+            let id = format!("{prefix}{i}");
+            if !self.index.contains_key(&id) {
+                return id;
+            }
+            i += 1;
+        }
+    }
+
+    pub fn node_mut(&mut self, id: &str) -> Option<&mut Node> {
+        let i = self.index_of(id)?;
+        Some(&mut self.nodes[i])
+    }
+
     /// Node indices in draw order (draw order, then position).
     pub fn draw_sequence(&self) -> Vec<usize> {
         let mut idx: Vec<usize> = (0..self.nodes.len()).collect();
