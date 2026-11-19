@@ -510,3 +510,35 @@ fn bark_files_round_trip_with_their_assets() {
     assert_eq!(barkfart_core::codec::encode(&again.project), barkfart_core::codec::encode(&b.project));
     assert_eq!(again.assets, b.assets);
 }
+
+#[test]
+fn gif_decoding_matches_an_independent_decoder() {
+    // our reference GIF (made by the Java writer) and the gif crate as a second opinion
+    let bytes = std::fs::read(ref_dir().join("export.gif")).unwrap();
+    let ours = barkfart_core::image::decode_gif(&bytes).unwrap();
+    assert_eq!((ours.w, ours.h, ours.frames.len()), (37, 23, 7));
+    let mut opts = gif::DecodeOptions::new();
+    opts.set_color_output(gif::ColorOutput::RGBA);
+    let mut d = opts.read_info(std::io::Cursor::new(&bytes)).unwrap();
+    let mut screen = vec![0u8; 37 * 23 * 4];
+    let mut k = 0;
+    while let Some(f) = d.read_next_frame().unwrap() {
+        // full-canvas frames: copy with transparency like a browser
+        for (i, px) in f.buffer.chunks_exact(4).enumerate() {
+            let (x, y) = (f.left as usize + i % f.width as usize, f.top as usize + i / f.width as usize);
+            if px[3] > 0 {
+                screen[(y * 37 + x) * 4..(y * 37 + x) * 4 + 4].copy_from_slice(px);
+            }
+        }
+        let a = &ours.frames[k].rgba;
+        let same = a.chunks_exact(4).zip(screen.chunks_exact(4)).all(|(p, q)| p[3] == 0 || p == q);
+        assert!(same, "frame {k} differs");
+        assert!((ours.frames[k].delay - f.delay as f64 / 100.0).abs() < 1e-9 || f.delay <= 1);
+        if f.dispose == gif::DisposalMethod::Background {
+            screen.fill(0);
+        }
+        k += 1;
+    }
+    assert_eq!(k, 7);
+    assert!(barkfart_core::image::decode_gif(b"GIF89a broken").is_none());
+}

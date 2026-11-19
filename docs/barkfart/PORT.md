@@ -67,8 +67,16 @@ Decision and reasons: PROGRESS.md, 2026-11-19.
   Files app). Checked: 480x270, 60 frames, 2.0 s soundtrack.
 - iOS still to do: AVAudioSession "mix with others" (the Java version had
   it), video export (AVAssetWriter), then Android (MediaCodec).
-- Next: legacy import (.nodes, .nodemc, .stknds, GIF/WAV import), saving
-  (.bark writer), editing operations, then the interface.
+- Saving: project.json identical to the Java writer's text on all 113
+  reference projects (Java number spelling, ties to even); .bark writer.
+- Import: .nodes (read and write byte for byte), .nodemc, .stknds figure
+  libraries, sounds, images and animated GIFs (as movieclips); identical
+  project text to the Java importer on 12 synthetic samples (committed,
+  engine/testdata/legacy/synthetic) and 45 originals (local only,
+  engine/testdata/legacy/local, made by LegacyDumpTest; never committed).
+  The GIF decoder agrees with the gif crate.
+- Next: the editing operations (edit/ package: undo document, editor,
+  figure/join/symbol/layer/frame ops, canvas tools), then the interface.
 
 ## Notes from device tests
 - 2026-11-19, iPad: first Barkfart Next IPA works; 2.9 ms per render.

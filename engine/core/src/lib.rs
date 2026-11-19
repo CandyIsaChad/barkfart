@@ -9,6 +9,7 @@ pub mod audio;
 pub mod codec;
 pub mod eval;
 pub mod export;
+pub mod files;
 pub mod fx;
 pub mod image;
 pub mod import;

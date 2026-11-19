@@ -1,0 +1,368 @@
+{
+  "format": "barkfart",
+  "formatVersion": 1,
+  "idCounter": 14,
+  "settings": {
+    "fps": 30.0,
+    "width": 1280,
+    "height": 720,
+    "background": "#ffffffff"
+  },
+  "rootSymbol": "S1",
+  "library": [
+    {
+      "id": "S1",
+      "name": "Root",
+      "duration": 2.0,
+      "layers": [
+        {
+          "id": "Ld",
+          "name": "anim5",
+          "type": "SYMBOL",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0
+            },
+            "y": {
+              "v": 0.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "symbol": "S2",
+          "timeOffset": {
+            "v": 0.0
+          },
+          "speed": {
+            "v": 1.0
+          },
+          "loop": "LOOP",
+          "recursionLimit": 8
+        }
+      ],
+      "markers": [],
+      "scopedEffects": []
+    },
+    {
+      "id": "S2",
+      "name": "anim5",
+      "duration": 0.41000000000000003,
+      "layers": [
+        {
+          "id": "L4",
+          "name": "anim5 1",
+          "type": "SPRITE",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": false,
+            "k": [[0.0, true, "H"], [0.08, false, "H"]]
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0
+            },
+            "y": {
+              "v": 0.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 6.0
+            },
+            "anchorY": {
+              "v": 4.5
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "asset": "A3",
+          "width": 12.0,
+          "height": 9.0,
+          "tint": {
+            "v": "#ffffffff"
+          }
+        },
+        {
+          "id": "L6",
+          "name": "anim5 2",
+          "type": "SPRITE",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": false,
+            "k": [[0.0, false, "H"], [0.08, true, "H"], [0.16, false, "H"]]
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0
+            },
+            "y": {
+              "v": 0.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 6.0
+            },
+            "anchorY": {
+              "v": 4.5
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "asset": "A5",
+          "width": 12.0,
+          "height": 9.0,
+          "tint": {
+            "v": "#ffffffff"
+          }
+        },
+        {
+          "id": "L8",
+          "name": "anim5 3",
+          "type": "SPRITE",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": false,
+            "k": [[0.0, false, "H"], [0.16, true, "H"], [0.25, false, "H"]]
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0
+            },
+            "y": {
+              "v": 0.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 6.0
+            },
+            "anchorY": {
+              "v": 4.5
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "asset": "A7",
+          "width": 12.0,
+          "height": 9.0,
+          "tint": {
+            "v": "#ffffffff"
+          }
+        },
+        {
+          "id": "La",
+          "name": "anim5 4",
+          "type": "SPRITE",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": false,
+            "k": [[0.0, false, "H"], [0.25, true, "H"], [0.33, false, "H"]]
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0
+            },
+            "y": {
+              "v": 0.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 6.0
+            },
+            "anchorY": {
+              "v": 4.5
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "asset": "A9",
+          "width": 12.0,
+          "height": 9.0,
+          "tint": {
+            "v": "#ffffffff"
+          }
+        },
+        {
+          "id": "Lc",
+          "name": "anim5 5",
+          "type": "SPRITE",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": false,
+            "k": [[0.0, false, "H"], [0.33, true, "H"]]
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0
+            },
+            "y": {
+              "v": 0.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 6.0
+            },
+            "anchorY": {
+              "v": 4.5
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "asset": "Ab",
+          "width": 12.0,
+          "height": 9.0,
+          "tint": {
+            "v": "#ffffffff"
+          }
+        }
+      ],
+      "markers": [],
+      "scopedEffects": []
+    }
+  ],
+  "assets": [
+    {
+      "id": "A3",
+      "kind": "IMAGE",
+      "path": "assets/A3.png"
+    },
+    {
+      "id": "A5",
+      "kind": "IMAGE",
+      "path": "assets/A5.png"
+    },
+    {
+      "id": "A7",
+      "kind": "IMAGE",
+      "path": "assets/A7.png"
+    },
+    {
+      "id": "A9",
+      "kind": "IMAGE",
+      "path": "assets/A9.png"
+    },
+    {
+      "id": "Ab",
+      "kind": "IMAGE",
+      "path": "assets/Ab.png"
+    }
+  ],
+  "nodeSets": []
+}

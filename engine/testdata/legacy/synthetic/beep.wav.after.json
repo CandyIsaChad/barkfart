@@ -1,0 +1,93 @@
+{
+  "format": "barkfart",
+  "formatVersion": 1,
+  "idCounter": 5,
+  "settings": {
+    "fps": 30.0,
+    "width": 1280,
+    "height": 720,
+    "background": "#ffffffff"
+  },
+  "rootSymbol": "S1",
+  "library": [
+    {
+      "id": "S1",
+      "name": "Root",
+      "duration": 2.0,
+      "layers": [
+        {
+          "id": "L3",
+          "name": "beep",
+          "type": "AUDIO",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0
+            },
+            "y": {
+              "v": 0.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "clips": [
+            {
+              "id": "C4",
+              "asset": "A2",
+              "start": 0.0,
+              "in": 0.0,
+              "out": 0.25002267573696146,
+              "loop": false,
+              "fadeIn": 0.0,
+              "fadeOut": 0.0,
+              "volume": {
+                "v": 1.0
+              },
+              "pan": {
+                "v": 0.0
+              }
+            }
+          ]
+        }
+      ],
+      "markers": [],
+      "scopedEffects": []
+    }
+  ],
+  "assets": [
+    {
+      "id": "A2",
+      "kind": "AUDIO",
+      "path": "assets/A2.wav"
+    }
+  ],
+  "nodeSets": []
+}

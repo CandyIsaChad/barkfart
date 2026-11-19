@@ -33,6 +33,33 @@ class LegacyDumpTest {
             write(f, bytes);
             dumpImport(f, syn);
         }
+        // media: a sound, a picture, an animated GIF and a one-frame GIF
+        File wav = new File(syn, "beep.wav");
+        write(wav, app.barkfart.audio.Wav.encode(app.barkfart.audio.Mixer.tone(660, 0.25, 22050, 0.4f)));
+        dumpImport(wav, syn);
+        byte[] px = new byte[12 * 9 * 4];
+        for (int k = 0; k < 12 * 9; k++) {
+            px[k * 4] = (byte) (k * 7);
+            px[k * 4 + 1] = (byte) 200;
+            px[k * 4 + 2] = (byte) (k * 3);
+            px[k * 4 + 3] = (byte) 255;
+        }
+        File png = new File(syn, "picture.png");
+        write(png, app.barkfart.export.Png.encode(px, 12, 9, true));
+        dumpImport(png, syn);
+        for (int frames : new int[] {1, 5}) {
+            java.io.ByteArrayOutputStream gb = new java.io.ByteArrayOutputStream();
+            app.barkfart.export.Gif g = new app.barkfart.export.Gif(gb, 12, 9, 12, true);
+            for (int f = 0; f < frames; f++) {
+                byte[] q = px.clone();
+                for (int k = 0; k < 12 * 9; k++) q[k * 4 + 1] = (byte) (f * 50);
+                g.frame(q);
+            }
+            g.finish();
+            File gf = new File(syn, "anim" + frames + ".gif");
+            write(gf, gb.toByteArray());
+            dumpImport(gf, syn);
+        }
         File ref = new File(System.getProperty("barkfart.root", ".."), "main");
         if (!ref.isDirectory()) return;
         File local = new File(dir, "local");

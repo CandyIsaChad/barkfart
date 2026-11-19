@@ -12,7 +12,7 @@ fn check_dir(dir: &Path) -> (usize, Vec<String>) {
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| {
             let n = p.file_name().unwrap().to_string_lossy().to_lowercase();
-            (n.ends_with(".nodes") || n.ends_with(".nodemc") || n.ends_with(".stknds")) && !n.contains(".export")
+            [".nodes", ".nodemc", ".stknds", ".wav", ".png", ".gif"].iter().any(|e| n.ends_with(e)) && !n.contains(".export")
         })
         .collect();
     inputs.sort();
