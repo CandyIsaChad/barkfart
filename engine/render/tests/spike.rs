@@ -96,3 +96,21 @@ fn matches_the_locked_v1_reference_render() {
     assert!(bad < 320 * 240 / 50, "{bad} pixels differ from the v1 reference");
     eprintln!("{bad} of {} pixels differ (edges)", 320 * 240);
 }
+
+#[test]
+#[ignore] // timing with gaps between frames, like 24 fps playback
+fn timing_spaced() {
+    let r = Renderer::headless_default().unwrap();
+    let p = kitchen_sink();
+    shot(&r, &p, 0.0, 1280, 720);
+    for gap in [0u64, 10, 40] {
+        let mut total = 0.0;
+        for i in 0..15 {
+            std::thread::sleep(std::time::Duration::from_millis(gap));
+            let t = std::time::Instant::now();
+            shot(&r, &p, i as f64 / 20.0, 1280, 720);
+            total += t.elapsed().as_secs_f64();
+        }
+        eprintln!("gap {gap} ms: {:.1} ms per frame", total * 1000.0 / 15.0);
+    }
+}

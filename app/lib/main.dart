@@ -6,8 +6,8 @@ import 'dart:ui' as ui;
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 
 import 'engine.dart';
 
@@ -39,7 +39,13 @@ class _SpikePageState extends State<SpikePage> with SingleTickerProviderStateMix
   String _status = 'Starting the engine…';
   ProjectInfo? _info;
   ui.Image? _frame;
+  /// Display-synced (paused by Flutter in the background); drawing happens
+  /// only when the project frame changes.
   late final Ticker _ticker;
+  int _lastFrame = -1;
+  Size _lastSize = Size.zero;
+  /// Frame-rate cap; null plays at the project's own fps (options menu later).
+  double? maxFps;
   bool _busy = false;
   Size _size = Size.zero;
   double _dpr = 1;
@@ -89,7 +95,13 @@ class _SpikePageState extends State<SpikePage> with SingleTickerProviderStateMix
     _busy = true;
     final sw = Stopwatch()..start();
     final secs = _clock.elapsedMicroseconds / 1e6;
-    final t = info.duration > 0 ? secs % info.duration : 0.0;
+    final fps = (maxFps ?? info.fps).clamp(1.0, 240.0);
+    final frame = (secs * fps).floor();
+    if (frame == _lastFrame && _size == _lastSize) return;
+    if (Platform.environment['BARKFART_TRACE'] != null) debugPrint('tick frame=$frame secs=${secs.toStringAsFixed(3)} size=$_size');
+    _lastFrame = frame;
+    _lastSize = _size;
+    final t = info.duration > 0 ? (frame / fps) % info.duration : 0.0;
     final px = e.render(t, w, h);
     final renderMs = e.lastMicros / 1000.0;
     sw.stop();
@@ -100,8 +112,8 @@ class _SpikePageState extends State<SpikePage> with SingleTickerProviderStateMix
     }
     if (_frames == 0) debugPrint('rendered ${w}x$h in ${renderMs.toStringAsFixed(1)} ms');
     ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, (img) {
+      if (Platform.environment['BARKFART_TRACE'] != null) debugPrint('decoded mounted=$mounted');
       if (!mounted) return;
-      if (_frames == 0) debugPrint('first image decoded');
       setState(() {
         _frame?.dispose();
         _frame = img;
@@ -151,7 +163,7 @@ class _SpikePageState extends State<SpikePage> with SingleTickerProviderStateMix
               color: const Color(0xFF222222),
               padding: const EdgeInsets.all(8),
               child: Text(
-                '$_status · ${_info == null ? 'no project' : 'v1 kitchen sink ${_info!.width}x${_info!.height}'} · frame $_frames · ${_ms.toStringAsFixed(1)} ms per frame in the engine',
+                '$_status · ${_info == null ? 'no project' : 'v1 kitchen sink ${_info!.width}x${_info!.height} at ${(maxFps ?? _info!.fps).round()} fps'} · frame $_frames · ${_ms.toStringAsFixed(1)} ms per frame in the engine',
                 style: const TextStyle(color: Colors.white, fontSize: 13),
               ),
             ),
