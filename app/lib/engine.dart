@@ -8,9 +8,13 @@ import 'package:ffi/ffi.dart';
 typedef _NewC = Pointer<Void> Function();
 typedef _FreeC = Void Function(Pointer<Void>);
 typedef _FreeD = void Function(Pointer<Void>);
-typedef _AdapterC = Pointer<Utf8> Function(Pointer<Void>);
-typedef _RenderC = Int32 Function(Pointer<Void>, Float, Uint32, Uint32, Pointer<Uint8>);
-typedef _RenderD = int Function(Pointer<Void>, double, int, int, Pointer<Uint8>);
+typedef _StrC = Pointer<Utf8> Function(Pointer<Void>);
+typedef _LoadC = Int32 Function(Pointer<Void>, Pointer<Uint8>, IntPtr);
+typedef _LoadD = int Function(Pointer<Void>, Pointer<Uint8>, int);
+typedef _InfoC = Int32 Function(Pointer<Void>, Pointer<Double>);
+typedef _InfoD = int Function(Pointer<Void>, Pointer<Double>);
+typedef _RenderC = Int32 Function(Pointer<Void>, Double, Uint32, Uint32, Pointer<Uint8>, Pointer<Uint32>);
+typedef _RenderD = int Function(Pointer<Void>, double, int, int, Pointer<Uint8>, Pointer<Uint32>);
 
 DynamicLibrary _open() {
   final override = Platform.environment['BARKFART_ENGINE'];
@@ -25,13 +29,22 @@ DynamicLibrary _open() {
   throw UnsupportedError('no engine library for ${Platform.operatingSystem}');
 }
 
+/// Facts about the loaded project.
+class ProjectInfo {
+  final double duration, fps;
+  final int width, height;
+  const ProjectInfo(this.duration, this.fps, this.width, this.height);
+}
+
 class Engine {
   final DynamicLibrary _lib;
   final Pointer<Void> _handle;
-  late final _RenderD _render = _lib.lookupFunction<_RenderC, _RenderD>('bf_render_demo');
+  late final _RenderD _render = _lib.lookupFunction<_RenderC, _RenderD>('bf_render_frame');
   late final _FreeD _free = _lib.lookupFunction<_FreeC, _FreeD>('bf_engine_free');
+  late final _StrC _error = _lib.lookupFunction<_StrC, _StrC>('bf_engine_error');
   Pointer<Uint8> _buf = nullptr;
   int _bufLen = 0;
+  final Pointer<Uint32> _micros = calloc<Uint32>();
 
   Engine._(this._lib, this._handle);
 
@@ -45,25 +58,48 @@ class Engine {
 
   /// "GPU name via backend".
   String get adapter {
-    final p = _lib.lookupFunction<_AdapterC, _AdapterC>('bf_engine_adapter')(_handle);
+    final p = _lib.lookupFunction<_StrC, _StrC>('bf_engine_adapter')(_handle);
     return p == nullptr ? '?' : p.toDartString();
   }
 
-  /// The demo figure at time t, as straight RGBA rows (w * h * 4 bytes).
-  Uint8List? renderDemo(double t, int w, int h) {
+  String get lastError => _error(_handle).toDartString();
+
+  /// Loads a .bark file (or project.json); null on success, else the reason.
+  String? load(Uint8List bytes) {
+    final p = calloc<Uint8>(bytes.length);
+    p.asTypedList(bytes.length).setAll(0, bytes);
+    final r = _lib.lookupFunction<_LoadC, _LoadD>('bf_project_load')(_handle, p, bytes.length);
+    calloc.free(p);
+    return r == 0 ? null : lastError;
+  }
+
+  ProjectInfo? get info {
+    final out = calloc<Double>(4);
+    final r = _lib.lookupFunction<_InfoC, _InfoD>('bf_project_info')(_handle, out);
+    final i = r == 0 ? ProjectInfo(out[0], out[1], out[2].round(), out[3].round()) : null;
+    calloc.free(out);
+    return i;
+  }
+
+  /// Microseconds the last frame took in the engine.
+  int get lastMicros => _micros.value;
+
+  /// The shot at time t, as straight RGBA rows (w * h * 4 bytes).
+  Uint8List? render(double t, int w, int h) {
     final need = w * h * 4;
     if (need > _bufLen) {
       if (_buf != nullptr) calloc.free(_buf);
       _buf = calloc<Uint8>(need);
       _bufLen = need;
     }
-    if (_render(_handle, t, w, h, _buf) != 0) return null;
+    if (_render(_handle, t, w, h, _buf, _micros) != 0) return null;
     return Uint8List.fromList(_buf.asTypedList(need));
   }
 
   void dispose() {
     if (_buf != nullptr) calloc.free(_buf);
     _buf = nullptr;
+    calloc.free(_micros);
     _free(_handle);
   }
 }

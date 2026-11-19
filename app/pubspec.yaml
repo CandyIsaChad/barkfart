@@ -1,5 +1,5 @@
 name: barkfart
-description: "A new Flutter project."
+description: "Barkfart: a stick-figure animation app (Flutter interface over the Rust engine)."
 publish_to: 'none'
 version: 0.1.0+1
 
@@ -19,3 +19,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/demo.bark
