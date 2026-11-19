@@ -11,6 +11,8 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 pub struct Engine {
     renderer: Renderer,
+    /// Decoded sounds of the current project (for the soundtrack export).
+    plan: Option<barkfart_core::audio::AudioPlan>,
     player: barkfart_audio::Player,
     audio_label: Vec<u8>,
     glyphs: GlyphAtlas,
@@ -41,7 +43,7 @@ pub extern "C" fn bf_engine_new() -> *mut Engine {
             let player = barkfart_audio::Player::new();
             let mut audio_label = if player.available() { format!("{} at {} Hz", player.device, player.rate) } else { player.device.clone() }.into_bytes();
             audio_label.push(0);
-            Box::into_raw(Box::new(Engine { renderer, player, audio_label, glyphs, images: Vec::new(), label, project: None, error: vec![0] }))
+            Box::into_raw(Box::new(Engine { renderer, plan: None, player, audio_label, glyphs, images: Vec::new(), label, project: None, error: vec![0] }))
         }
         _ => std::ptr::null_mut(),
     }
@@ -116,7 +118,8 @@ pub extern "C" fn bf_project_load(e: *mut Engine, data: *const u8, len: usize) -
             if let Some(root) = p.root() {
                 let plan = barkfart_core::audio::AudioPlan::build(&p, root, &|id: &str| sounds.get(id).cloned());
                 engine.player.stop();
-                engine.player.set_plan(plan);
+                engine.player.set_plan(plan.clone());
+                engine.plan = Some(plan);
             }
             engine.project = Some(p);
             engine.set_error("");
@@ -231,4 +234,186 @@ pub extern "C" fn bf_playback_time(e: *const Engine) -> f64 {
         return -1.0;
     }
     engine.player.position().unwrap_or(-1.0)
+}
+
+// ---------------------------------------------------------------- export
+
+enum Writer {
+    Gif(barkfart_core::export::Gif<std::io::BufWriter<std::fs::File>>),
+    Png(barkfart_core::export::PngZip<std::io::BufWriter<std::fs::File>>),
+}
+
+/// An export in progress: bf_export_step renders and writes one frame.
+pub struct Export {
+    writer: Option<Writer>,
+    path: std::path::PathBuf,
+    w: u32,
+    h: u32,
+    start: u32,
+    count: u32,
+    next: u32,
+    transparent: bool,
+    error: Vec<u8>,
+}
+
+fn cstr(p: *const c_char) -> Option<String> {
+    if p.is_null() {
+        return None;
+    }
+    // SAFETY: the caller passes a NUL-terminated string
+    unsafe { std::ffi::CStr::from_ptr(p) }.to_str().ok().map(str::to_string)
+}
+
+/// Starts exporting the loaded project to `path`: format 0 = GIF, 1 = PNG
+/// frames in a ZIP. Frames [start, start + count) at the project fps
+/// (count 0 = to the end). Returns null on failure (see bf_engine_error).
+#[no_mangle]
+pub extern "C" fn bf_export_begin(e: *mut Engine, format: i32, path: *const c_char, w: u32, h: u32, start: u32, count: u32, transparent: i32) -> *mut Export {
+    if e.is_null() {
+        return std::ptr::null_mut();
+    }
+    // SAFETY: live handle
+    let engine = unsafe { &mut *e };
+    let r = (|| -> Result<Export, String> {
+        let p = engine.project.as_ref().ok_or("no project")?;
+        let path = std::path::PathBuf::from(cstr(path).ok_or("no file name")?);
+        if w == 0 || h == 0 || w > 4096 || h > 4096 {
+            return Err(format!("size {w}x{h} is not allowed"));
+        }
+        let fps = p.settings.fps.max(1.0) as f64;
+        let total = ((p.root().map(|s| s.duration).unwrap_or(0.0) * fps).round() as u32).max(1);
+        let start = start.min(total - 1);
+        let count = if count == 0 { total - start } else { count.min(total - start) };
+        let file = std::io::BufWriter::new(std::fs::File::create(&path).map_err(|e| e.to_string())?);
+        let writer = match format {
+            0 => Writer::Gif(barkfart_core::export::Gif::new(file, w as u16, h as u16, fps, true).map_err(|e| e.to_string())?),
+            1 => Writer::Png(barkfart_core::export::PngZip::new(file, w, h, transparent != 0)),
+            _ => return Err(format!("unknown export format {format}")),
+        };
+        Ok(Export { writer: Some(writer), path, w, h, start, count, next: 0, transparent: transparent != 0, error: vec![0] })
+    })();
+    match r {
+        Ok(x) => Box::into_raw(Box::new(x)),
+        Err(err) => {
+            engine.set_error(err);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Renders and writes the next frame. Returns frames done so far, or -1
+/// when finished (file complete), -2 on failure (see bf_export_error).
+#[no_mangle]
+pub extern "C" fn bf_export_step(e: *const Engine, x: *mut Export) -> i32 {
+    if e.is_null() || x.is_null() {
+        return -2;
+    }
+    // SAFETY: live handles
+    let (engine, job) = unsafe { (&*e, &mut *x) };
+    let Some(p) = &engine.project else { return -2 };
+    let r = catch_unwind(AssertUnwindSafe(|| -> Result<bool, String> {
+        if job.next >= job.count {
+            match job.writer.take() {
+                Some(Writer::Gif(g)) => {
+                    use std::io::Write;
+                    g.finish().map_err(|e| e.to_string())?.flush().map_err(|e| e.to_string())?;
+                }
+                Some(Writer::Png(z)) => {
+                    use std::io::Write;
+                    z.finish().map_err(|e| e.to_string())?.flush().map_err(|e| e.to_string())?;
+                }
+                None => {}
+            }
+            return Ok(true);
+        }
+        let fps = p.settings.fps.max(1.0) as f64;
+        let t = barkfart_core::export::frame_time(job.start, job.next, fps);
+        let scene = eval::evaluate(p, &p.root_symbol, t);
+        let list = tess::layered(&scene, Some(&engine.glyphs));
+        let (hw, hh) = (p.settings.width as f32 / 2.0, p.settings.height as f32 / 2.0);
+        let bg = p.settings.background;
+        let view = View { x0: -hw, y0: -hh, x1: hw, y1: hh, background: [bg.r, bg.g, bg.b, bg.a] };
+        let transparent = job.transparent && matches!(job.writer, Some(Writer::Png(_)));
+        let px = engine.renderer.render_export(&list, job.w, job.h, view, 2, transparent);
+        match job.writer.as_mut() {
+            Some(Writer::Gif(g)) => g.frame(&px).map_err(|e| e.to_string())?,
+            Some(Writer::Png(z)) => z.frame(&px).map_err(|e| e.to_string())?,
+            None => return Err("export already finished".into()),
+        }
+        job.next += 1;
+        Ok(false)
+    }));
+    match r {
+        Ok(Ok(true)) => -1,
+        Ok(Ok(false)) => job.next as i32,
+        Ok(Err(err)) => {
+            job.error = format!("{err}\0").into_bytes();
+            job.writer = None;
+            let _ = std::fs::remove_file(&job.path);
+            -2
+        }
+        Err(_) => {
+            job.error = b"export failed (internal error)\0".to_vec();
+            job.writer = None;
+            let _ = std::fs::remove_file(&job.path);
+            -2
+        }
+    }
+}
+
+/// Frames the export will write.
+#[no_mangle]
+pub extern "C" fn bf_export_count(x: *const Export) -> i32 {
+    if x.is_null() {
+        return 0;
+    }
+    // SAFETY: live handle
+    unsafe { (*x).count as i32 }
+}
+
+#[no_mangle]
+pub extern "C" fn bf_export_error(x: *const Export) -> *const c_char {
+    if x.is_null() {
+        return std::ptr::null();
+    }
+    // SAFETY: live handle
+    unsafe { (*x).error.as_ptr() as *const c_char }
+}
+
+/// Frees the job; an unfinished export is cancelled and its file removed.
+#[no_mangle]
+pub extern "C" fn bf_export_free(x: *mut Export) {
+    if x.is_null() {
+        return;
+    }
+    // SAFETY: made by bf_export_begin, freed once
+    let job = unsafe { Box::from_raw(x) };
+    if job.writer.is_some() {
+        drop(job.writer);
+        let _ = std::fs::remove_file(&job.path);
+    }
+}
+
+/// Writes the project's soundtrack for frames [start, start + count) as a
+/// stereo 44.1 kHz WAV. Returns 0 on success, 1 when there is no sound.
+#[no_mangle]
+pub extern "C" fn bf_export_soundtrack(e: *mut Engine, path: *const c_char, start: u32, count: u32) -> i32 {
+    if e.is_null() {
+        return 2;
+    }
+    // SAFETY: live handle
+    let engine = unsafe { &mut *e };
+    let (Some(p), Some(plan)) = (&engine.project, &engine.plan) else { return 2 };
+    let fps = p.settings.fps.max(1.0) as f64;
+    let total = ((p.root().map(|s| s.duration).unwrap_or(0.0) * fps).round() as u32).max(1);
+    let count = if count == 0 { total.saturating_sub(start) } else { count };
+    let Some(wav) = barkfart_core::audio::bounce(plan, start as f64 / fps, count as f64 / fps) else { return 1 };
+    let Some(path) = cstr(path) else { return 2 };
+    match std::fs::write(&path, wav) {
+        Ok(()) => 0,
+        Err(err) => {
+            engine.set_error(err);
+            2
+        }
+    }
 }

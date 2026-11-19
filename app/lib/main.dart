@@ -9,6 +9,8 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
+import 'package:path_provider/path_provider.dart';
+
 import 'engine.dart';
 
 void main() => runApp(const BarkfartApp());
@@ -66,7 +68,54 @@ class _SpikePageState extends State<SpikePage> with SingleTickerProviderStateMix
     _loadDemo();
     _ticker = createTicker((_) => _tick())..start();
     final shot = Platform.environment['BARKFART_SCREENSHOT'];
+    if (Platform.environment['BARKFART_EXPORT_DIR'] != null) Timer(const Duration(seconds: 2), _startExport);
     if (shot != null) Timer(Duration(seconds: int.tryParse(Platform.environment['BARKFART_SHOT_AFTER'] ?? '') ?? 6), () => _saveShot(shot));
+  }
+
+  ExportJob? _export;
+  String _exportStatus = '';
+
+  /// Long-press: GIF (and the soundtrack as WAV) into Documents/Barkfart Exports.
+  Future<void> _startExport() async {
+    final e = _engine;
+    final info = _info;
+    if (e == null || info == null || _export != null) return;
+    final docs = Platform.environment['BARKFART_EXPORT_DIR'] ?? (await getApplicationDocumentsDirectory()).path;
+    final dir = Directory('$docs/Barkfart Exports')..createSync(recursive: true);
+    final stamp = DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
+    final w = 480, h = (480 * info.height / info.width).round();
+    final job = e.export(0, '${dir.path}/barkfart-$stamp.gif', w, h);
+    if (job == null) {
+      setState(() => _exportStatus = 'export failed: ${e.lastError}');
+      return;
+    }
+    final sound = e.exportSoundtrack('${dir.path}/barkfart-$stamp.wav');
+    setState(() {
+      _export = job;
+      _exportStatus = 'exporting to ${dir.path}${sound ? ' (with soundtrack)' : ''}…';
+    });
+  }
+
+  /// A few export frames per tick, within ~25 ms, so playback stays responsive.
+  void _exportSome() {
+    final job = _export;
+    if (job == null) return;
+    final sw = Stopwatch()..start();
+    try {
+      while (sw.elapsedMilliseconds < 25) {
+        final n = job.step();
+        if (n == null) {
+          _export = null;
+          setState(() => _exportStatus = 'export done');
+          if (Platform.environment['BARKFART_TRACE'] != null) debugPrint('export done');
+          return;
+        }
+        _exportStatus = 'exporting frame $n of ${job.count}';
+      }
+    } catch (err) {
+      _export = null;
+      setState(() => _exportStatus = 'export failed: $err');
+    }
   }
 
   static const _demos = ['assets/sound-demo.bark', 'assets/demo.bark'];
@@ -94,6 +143,7 @@ class _SpikePageState extends State<SpikePage> with SingleTickerProviderStateMix
   }
 
   void _tick() {
+    _exportSome();
     final e = _engine;
     final info = _info;
     if (e == null || info == null || _busy || _size.isEmpty) return;
@@ -166,6 +216,7 @@ class _SpikePageState extends State<SpikePage> with SingleTickerProviderStateMix
                   _demo++;
                   _loadDemo();
                 },
+                onLongPress: _startExport,
                 child: LayoutBuilder(builder: (context, c) {
                 _size = c.biggest;
                 return SizedBox.expand(
@@ -179,7 +230,7 @@ class _SpikePageState extends State<SpikePage> with SingleTickerProviderStateMix
               color: const Color(0xFF222222),
               padding: const EdgeInsets.all(8),
               child: Text(
-                '$_status · sound: ${_engine?.audioDevice ?? '-'} · ${_info == null ? 'no project' : '${_info!.width}x${_info!.height} at ${(maxFps ?? _info!.fps).round()} fps'} · frame $_frames · ${_ms.toStringAsFixed(1)} ms per frame in the engine',
+                '${_exportStatus.isEmpty ? '' : '$_exportStatus · '}$_status · sound: ${_engine?.audioDevice ?? '-'} · ${_info == null ? 'no project' : '${_info!.width}x${_info!.height} at ${(maxFps ?? _info!.fps).round()} fps'} · frame $_frames · ${_ms.toStringAsFixed(1)} ms per frame in the engine',
                 style: const TextStyle(color: Colors.white, fontSize: 13),
               ),
             ),

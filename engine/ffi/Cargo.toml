@@ -10,4 +10,7 @@ barkfart-core = { version = "0.1.0", path = "../core" }
 barkfart-render = { version = "0.1.0", path = "../render" }
 
 [lib]
-crate-type = ["cdylib", "staticlib"]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dev-dependencies]
+zip = { version = "9.7.3", default-features = false, features = ["deflate"] }

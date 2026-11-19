@@ -58,9 +58,17 @@ Decision and reasons: PROGRESS.md, 2026-11-19.
   onion skin (ghost isolates match Java); audio (plan, mixer, bounce match
   the Java soundtrack within one sample step); export writers (GIF identical
   byte for byte, PNG frames in a ZIP) and supersampled export frames.
-- Next: playback audio output (cpal), export through the C interface and
-  in the app, video (per platform), legacy import (.nodes, .nodemc,
-  .stknds, GIF/WAV import), editing operations, then the interface.
+- Sound: assets decode on every platform (WAV exactly; MP3, AAC/M4A,
+  OGG Vorbis, FLAC via symphonia 0.5); engine/audio plays the plan on the
+  device (cpal) and the picture follows the sound's clock.
+- Export through the C interface as a job stepped one frame at a time
+  (GIF, PNG frames in a ZIP, soundtrack WAV); in the app a long-press on
+  the stage exports into Documents/Barkfart Exports (visible in the iOS
+  Files app). Checked: 480x270, 60 frames, 2.0 s soundtrack.
+- iOS still to do: AVAudioSession "mix with others" (the Java version had
+  it), video export (AVAssetWriter), then Android (MediaCodec).
+- Next: legacy import (.nodes, .nodemc, .stknds, GIF/WAV import), saving
+  (.bark writer), editing operations, then the interface.
 
 ## Notes from device tests
 - 2026-11-19, iPad: first Barkfart Next IPA works; 2.9 ms per render.

@@ -17,6 +17,14 @@ typedef _PlayC = Void Function(Pointer<Void>, Double, Double, Double);
 typedef _PlayD = void Function(Pointer<Void>, double, double, double);
 typedef _TimeC = Double Function(Pointer<Void>);
 typedef _TimeD = double Function(Pointer<Void>);
+typedef _ExBeginC = Pointer<Void> Function(Pointer<Void>, Int32, Pointer<Utf8>, Uint32, Uint32, Uint32, Uint32, Int32);
+typedef _ExBeginD = Pointer<Void> Function(Pointer<Void>, int, Pointer<Utf8>, int, int, int, int, int);
+typedef _ExStepC = Int32 Function(Pointer<Void>, Pointer<Void>);
+typedef _ExStepD = int Function(Pointer<Void>, Pointer<Void>);
+typedef _ExCountC = Int32 Function(Pointer<Void>);
+typedef _ExCountD = int Function(Pointer<Void>);
+typedef _SoundC = Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Uint32);
+typedef _SoundD = int Function(Pointer<Void>, Pointer<Utf8>, int, int);
 typedef _RenderC = Int32 Function(Pointer<Void>, Double, Uint32, Uint32, Pointer<Uint8>, Pointer<Uint32>);
 typedef _RenderD = int Function(Pointer<Void>, double, int, int, Pointer<Uint8>, Pointer<Uint32>);
 
@@ -121,11 +129,58 @@ class Engine {
     return Uint8List.fromList(_buf.asTypedList(need));
   }
 
+  /// Starts an export (0 = GIF, 1 = PNG frames in a ZIP); null with the reason in [lastError].
+  ExportJob? export(int format, String path, int w, int h, {int start = 0, int count = 0, bool transparent = false}) {
+    final p = path.toNativeUtf8();
+    final j = _lib.lookupFunction<_ExBeginC, _ExBeginD>('bf_export_begin')(_handle, format, p, w, h, start, count, transparent ? 1 : 0);
+    calloc.free(p);
+    return j == nullptr ? null : ExportJob._(this, j);
+  }
+
+  /// Writes the soundtrack as WAV; false when the project has no sound.
+  bool exportSoundtrack(String path, {int start = 0, int count = 0}) {
+    final p = path.toNativeUtf8();
+    final r = _lib.lookupFunction<_SoundC, _SoundD>('bf_export_soundtrack')(_handle, p, start, count);
+    calloc.free(p);
+    return r == 0;
+  }
+
   void dispose() {
     stop();
     if (_buf != nullptr) calloc.free(_buf);
     _buf = nullptr;
     calloc.free(_micros);
     _free(_handle);
+  }
+}
+
+/// An export in progress: call [step] until it returns null (done) or throws.
+class ExportJob {
+  final Engine _e;
+  Pointer<Void> _job;
+  ExportJob._(this._e, this._job);
+
+  int get count => _e._lib.lookupFunction<_ExCountC, _ExCountD>('bf_export_count')(_job);
+
+  /// Renders one frame; frames done so far, or null when the file is complete.
+  int? step() {
+    final r = _e._lib.lookupFunction<_ExStepC, _ExStepD>('bf_export_step')(_e._handle, _job);
+    if (r == -1) {
+      free();
+      return null;
+    }
+    if (r == -2) {
+      final why = _e._lib.lookupFunction<_StrC, _StrC>('bf_export_error')(_job).toDartString();
+      free();
+      throw StateError(why);
+    }
+    return r;
+  }
+
+  /// Cancels (an unfinished file is removed).
+  void free() {
+    if (_job == nullptr) return;
+    _e._lib.lookupFunction<_FreeC, _FreeD>('bf_export_free')(_job);
+    _job = nullptr;
   }
 }
