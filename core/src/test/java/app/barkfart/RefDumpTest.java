@@ -129,6 +129,25 @@ class RefDumpTest {
             index.add(entry);
         }
         write(new File(out, "index.json"), Json.write(index));
+        // audio: projects with test tones, their plans' soundtrack bounced to WAV
+        final app.barkfart.audio.Pcm mono = app.barkfart.audio.Mixer.tone(440, 1.0, 22050, 0.5f);
+        final app.barkfart.audio.Pcm high = app.barkfart.audio.Mixer.tone(660, 0.6, 44100, 0.4f);
+        app.barkfart.audio.AudioPlan.Sounds sounds = new app.barkfart.audio.AudioPlan.Sounds() {
+            public app.barkfart.audio.Pcm pcm(String id) {
+                return "tone440".equals(id) ? mono : "tone660".equals(id) ? high : null;
+            }
+        };
+        File ad = new File(out, "audio");
+        ad.mkdirs();
+        Random ar = new Random(777);
+        for (int i = 0; i < 6; i++) {
+            Project p = audio(ar);
+            write(new File(ad, "audio-" + i + ".json"), ProjectCodec.encode(p));
+            byte[] wav = app.barkfart.audio.Bounce.wav(app.barkfart.audio.AudioPlan.build(p, p.root(), sounds), 0.1 * i, 2.5);
+            java.util.zip.GZIPOutputStream gz = new java.util.zip.GZIPOutputStream(new FileOutputStream(new File(ad, "audio-" + i + ".wav.gz")));
+            gz.write(wav == null ? new byte[0] : wav);
+            gz.close();
+        }
     }
 
     private static void write(File f, String s) throws Exception {
@@ -308,6 +327,37 @@ class RefDumpTest {
             inst.opacity.setValue(0.7f);
             inst.transform.x.setValue((float) (r.nextInt(60) - 30));
             p.root().layers.add(inst);
+        }
+        p.invalidateIndex();
+        return p;
+    }
+
+    private static Project audio(Random r) {
+        Project p = Fixtures.empty();
+        p.root().duration = 2 + r.nextInt(2);
+        for (int li = 0; li < 1 + r.nextInt(3); li++) {
+            Layer.AudioLayer al = new Layer.AudioLayer(p.newId("L"), "a" + li);
+            for (int ci = 0; ci < 1 + r.nextInt(3); ci++) {
+                app.barkfart.model.Clip c = new app.barkfart.model.Clip(al.id, "c" + ci, r.nextInt(6) == 0 ? "missing" : (r.nextBoolean() ? "tone440" : "tone660"),
+                        r.nextDouble() * 1.5 - 0.2, r.nextInt(3) == 0 ? r.nextDouble() * 0.3 : 0, r.nextInt(3) == 0 ? 0.3 + r.nextDouble() * 0.5 : 0);
+                c.loop = r.nextInt(3) == 0;
+                c.fadeIn = r.nextBoolean() ? r.nextDouble() * 0.3 : 0;
+                c.fadeOut = r.nextBoolean() ? r.nextDouble() * 0.3 : 0;
+                c.pitch = new double[] {1, 1, 0.5, 2, 1.37}[r.nextInt(5)];
+                if (r.nextBoolean()) {
+                    c.volume.track().put(new Key(0.2, 1f, Interp.LINEAR));
+                    c.volume.track().put(new Key(1.4, 0.2f + r.nextFloat(), Interp.BEZIER, Ease.EASE_IN_OUT));
+                } else c.volume.setValue(0.3f + r.nextFloat());
+                if (r.nextBoolean()) {
+                    c.pan.track().put(new Key(0.0, -1f, Interp.LINEAR));
+                    c.pan.track().put(new Key(1.8, 1f, Interp.LINEAR));
+                } else c.pan.setValue(r.nextFloat() * 2 - 1);
+                al.clips.add(c);
+            }
+            if (r.nextInt(3) == 0) al.opacity.setValue(0.5f);
+            if (r.nextInt(5) == 0) al.solo = true;
+            if (r.nextInt(6) == 0) al.visible = false;
+            p.root().layers.add(al);
         }
         p.invalidateIndex();
         return p;

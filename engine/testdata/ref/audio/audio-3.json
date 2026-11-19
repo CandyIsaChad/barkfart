@@ -1,0 +1,104 @@
+{
+  "format": "barkfart",
+  "formatVersion": 1,
+  "idCounter": 3,
+  "settings": {
+    "fps": 30.0,
+    "width": 1280,
+    "height": 720,
+    "background": "#ffffffff"
+  },
+  "rootSymbol": "S1",
+  "library": [
+    {
+      "id": "S1",
+      "name": "Root",
+      "duration": 2.0,
+      "layers": [
+        {
+          "id": "L2",
+          "name": "a0",
+          "type": "AUDIO",
+          "visible": false,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0
+            },
+            "y": {
+              "v": 0.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "clips": [
+            {
+              "id": "c0",
+              "asset": "tone660",
+              "start": 0.7474036634749066,
+              "in": 0.20559234096664186,
+              "out": 0.0,
+              "loop": false,
+              "fadeIn": 0.2884576263233095,
+              "fadeOut": 0.12211573438421891,
+              "volume": {
+                "v": 0.38362217
+              },
+              "pan": {
+                "v": 0.0,
+                "k": [[0.0, -1.0, "L"], [1.8, 1.0, "L"]]
+              }
+            },
+            {
+              "id": "c1",
+              "asset": "tone440",
+              "start": 0.2776053124656732,
+              "in": 0.0,
+              "out": 0.6581924445265794,
+              "loop": false,
+              "fadeIn": 0.0,
+              "fadeOut": 0.14143325826588438,
+              "volume": {
+                "v": 1.0885813
+              },
+              "pan": {
+                "v": 0.34164536
+              }
+            }
+          ]
+        }
+      ],
+      "markers": [],
+      "scopedEffects": []
+    }
+  ],
+  "assets": [],
+  "nodeSets": []
+}

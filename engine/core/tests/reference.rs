@@ -378,3 +378,38 @@ fn onion_skins_match_the_java_ghosts() {
     }
     assert!(failures.is_empty(), "{} of {checked} onion skins differ:\n{}", failures.len(), failures.iter().take(5).cloned().collect::<Vec<_>>().join("\n"));
 }
+
+#[test]
+fn bounced_soundtracks_match_the_java_mixer() {
+    use barkfart_core::audio::{self, AudioPlan};
+    use std::sync::Arc;
+    let mono = Arc::new(audio::tone(440.0, 1.0, 22050, 0.5));
+    let high = Arc::new(audio::tone(660.0, 0.6, 44100, 0.4));
+    let sounds = |id: &str| match id {
+        "tone440" => Some(mono.clone()),
+        "tone660" => Some(high.clone()),
+        _ => None,
+    };
+    let dir = ref_dir().join("audio");
+    for i in 0..6 {
+        let p = barkfart_core::codec::decode(&std::fs::read_to_string(dir.join(format!("audio-{i}.json"))).unwrap()).unwrap();
+        let plan = AudioPlan::build(&p, p.root().unwrap(), &sounds);
+        let want = read_gz_bytes(&dir.join(format!("audio-{i}.wav.gz")));
+        let got = audio::bounce(&plan, 0.1 * i as f64, 2.5).unwrap_or_default();
+        assert_eq!(want.len(), got.len(), "audio-{i}: length");
+        if want.is_empty() {
+            continue; // silent plan on both sides
+        }
+        let (mut worst, mut off) = (0i32, 0usize);
+        for k in (44..want.len()).step_by(2) {
+            let a = i16::from_le_bytes([want[k], want[k + 1]]) as i32;
+            let b = i16::from_le_bytes([got[k], got[k + 1]]) as i32;
+            worst = worst.max((a - b).abs());
+            if (a - b).abs() > 1 {
+                off += 1;
+            }
+        }
+        assert!(off == 0, "audio-{i}: {off} samples off by more than 1 (worst {worst})");
+        assert_eq!(&want[..44], &got[..44], "audio-{i}: header");
+    }
+}

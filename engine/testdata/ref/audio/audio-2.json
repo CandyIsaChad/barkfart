@@ -1,0 +1,171 @@
+{
+  "format": "barkfart",
+  "formatVersion": 1,
+  "idCounter": 4,
+  "settings": {
+    "fps": 30.0,
+    "width": 1280,
+    "height": 720,
+    "background": "#ffffffff"
+  },
+  "rootSymbol": "S1",
+  "library": [
+    {
+      "id": "S1",
+      "name": "Root",
+      "duration": 2.0,
+      "layers": [
+        {
+          "id": "L2",
+          "name": "a0",
+          "type": "AUDIO",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 0.5
+          },
+          "transform": {
+            "x": {
+              "v": 0.0
+            },
+            "y": {
+              "v": 0.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "clips": [
+            {
+              "id": "c0",
+              "asset": "tone440",
+              "start": 0.4951796146803848,
+              "in": 0.0,
+              "out": 0.763755123051036,
+              "loop": false,
+              "fadeIn": 0.0,
+              "fadeOut": 0.0,
+              "pitch": 0.5,
+              "volume": {
+                "v": 1.0,
+                "k": [[0.2, 1.0, "L"], [1.4, 0.41045058, "B", 0.42, 0.0, 0.58, 1.0]]
+              },
+              "pan": {
+                "v": 0.8119849
+              }
+            }
+          ]
+        },
+        {
+          "id": "L3",
+          "name": "a1",
+          "type": "AUDIO",
+          "visible": false,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0
+            },
+            "y": {
+              "v": 0.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "clips": [
+            {
+              "id": "c0",
+              "asset": "tone660",
+              "start": 1.224303851801248,
+              "in": 0.0,
+              "out": 0.0,
+              "loop": false,
+              "fadeIn": 0.0,
+              "fadeOut": 0.1810033380677766,
+              "pitch": 1.37,
+              "volume": {
+                "v": 1.0,
+                "k": [[0.2, 1.0, "L"], [1.4, 0.35419685, "B", 0.42, 0.0, 0.58, 1.0]]
+              },
+              "pan": {
+                "v": 0.0,
+                "k": [[0.0, -1.0, "L"], [1.8, 1.0, "L"]]
+              }
+            },
+            {
+              "id": "c1",
+              "asset": "tone440",
+              "start": 0.8303410712639681,
+              "in": 0.0,
+              "out": 0.576535895333702,
+              "loop": false,
+              "fadeIn": 0.2150361777180266,
+              "fadeOut": 0.15525089613799037,
+              "pitch": 1.37,
+              "volume": {
+                "v": 0.79390526
+              },
+              "pan": {
+                "v": -0.40040326
+              }
+            }
+          ]
+        }
+      ],
+      "markers": [],
+      "scopedEffects": []
+    }
+  ],
+  "assets": [],
+  "nodeSets": []
+}

@@ -5,6 +5,7 @@
 //! version (git tag `java-reference`), which stays the reference until this
 //! crate matches its outputs.
 
+pub mod audio;
 pub mod codec;
 pub mod eval;
 pub mod fx;

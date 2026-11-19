@@ -1,0 +1,124 @@
+{
+  "format": "barkfart",
+  "formatVersion": 1,
+  "idCounter": 3,
+  "settings": {
+    "fps": 30.0,
+    "width": 1280,
+    "height": 720,
+    "background": "#ffffffff"
+  },
+  "rootSymbol": "S1",
+  "library": [
+    {
+      "id": "S1",
+      "name": "Root",
+      "duration": 2.0,
+      "layers": [
+        {
+          "id": "L2",
+          "name": "a0",
+          "type": "AUDIO",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0
+            },
+            "y": {
+              "v": 0.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "clips": [
+            {
+              "id": "c0",
+              "asset": "tone660",
+              "start": 0.017240278571443723,
+              "in": 0.0,
+              "out": 0.5737138192032823,
+              "loop": false,
+              "fadeIn": 0.2489615212200358,
+              "fadeOut": 0.01977665881372227,
+              "volume": {
+                "v": 1.0,
+                "k": [[0.2, 1.0, "L"], [1.4, 0.854522, "B", 0.42, 0.0, 0.58, 1.0]]
+              },
+              "pan": {
+                "v": 0.0,
+                "k": [[0.0, -1.0, "L"], [1.8, 1.0, "L"]]
+              }
+            },
+            {
+              "id": "c1",
+              "asset": "tone440",
+              "start": 0.2776129109193701,
+              "in": 0.0,
+              "out": 0.0,
+              "loop": false,
+              "fadeIn": 0.1575386870368785,
+              "fadeOut": 0.0,
+              "pitch": 1.37,
+              "volume": {
+                "v": 0.9773514
+              },
+              "pan": {
+                "v": 0.0,
+                "k": [[0.0, -1.0, "L"], [1.8, 1.0, "L"]]
+              }
+            },
+            {
+              "id": "c2",
+              "asset": "tone660",
+              "start": 1.2360683503900038,
+              "in": 0.1036270252275942,
+              "out": 0.0,
+              "loop": false,
+              "fadeIn": 0.26298753150998444,
+              "fadeOut": 0.27968424705278544,
+              "volume": {
+                "v": 1.2283504
+              },
+              "pan": {
+                "v": 0.0,
+                "k": [[0.0, -1.0, "L"], [1.8, 1.0, "L"]]
+              }
+            }
+          ]
+        }
+      ],
+      "markers": [],
+      "scopedEffects": []
+    }
+  ],
+  "assets": [],
+  "nodeSets": []
+}
