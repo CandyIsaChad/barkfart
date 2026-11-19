@@ -245,3 +245,137 @@ fn frame_operations_match_java() {
     check(g, "insert-tweened", |d, _| step(d, |s| fr::insert_tweened(s, 10, 3)));
     check(g, "slow-motion", |d, _| step(d, |s| fr::slow_motion(s, 0, 2).map(|_| ())));
 }
+
+use barkfart_core::edit::canvas::{CanvasTools, Handle, KeyScope};
+
+fn tools(e: &Editor) -> CanvasTools {
+    CanvasTools::new(e.clone())
+}
+
+fn handle(c: &CanvasTools, d: &Document, node: &str, t: f64) -> Handle {
+    c.handles(d.project(), t).into_iter().find(|h| h.node == node).expect("handle")
+}
+
+#[allow(clippy::too_many_arguments)]
+fn drag(c: &mut CanvasTools, d: &mut Document, node: &str, t: f64, dx1: f32, dy1: f32, dx2: f32, dy2: f32) {
+    let h = handle(c, d, node, t);
+    c.begin(d, &h, h.x + 2.0, h.y - 1.0, t);
+    c.move_to(d, h.x + 2.0 + dx1, h.y - 1.0 + dy1, t).unwrap();
+    c.move_to(d, h.x + 2.0 + dx2, h.y - 1.0 + dy2, t).unwrap();
+    c.end(d);
+}
+
+#[test]
+fn canvas_tools_match_java() {
+    use barkfart_core::edit::figure_ops::set_pinned;
+    let g = "canvas";
+    check(g, "drag-joint", |d, e| drag(&mut tools(e), d, "armR2", 0.5, 15.0, -20.0, 25.0, -10.0));
+    check(g, "drag-unkeyed-time", |d, e| drag(&mut tools(e), d, "armL2", 0.33, -12.0, 30.0, -18.0, 22.0));
+    check(g, "drag-stretch", |d, e| {
+        let mut c = tools(e);
+        c.stretch = true;
+        drag(&mut c, d, "legR2", 0.4, 10.0, -10.0, 40.0, -35.0);
+    });
+    check(g, "drag-snap", |d, e| {
+        let mut c = tools(e);
+        c.snap_degrees = 45.0;
+        drag(&mut c, d, "armL1", 0.2, 5.0, 5.0, 31.0, -17.0);
+    });
+    check(g, "drag-figure-scope", |d, e| {
+        e.default_interp = Interp::Hold;
+        let mut c = tools(e);
+        c.key_scope = KeyScope::Figure;
+        drag(&mut c, d, "head", 0.66, 8.0, 3.0, 14.0, 9.0);
+    });
+    check(g, "drag-root", |d, e| drag(&mut tools(e), d, "hip", 0.5, 30.0, 8.0, 44.0, -13.0));
+    check(g, "drag-root-axis", |d, e| {
+        let mut c = tools(e);
+        c.axis_lock = true;
+        drag(&mut c, d, "hip", 0.5, 30.0, 8.0, 5.0, -40.0);
+    });
+    check(g, "drag-root-axis-x", |d, e| {
+        let mut c = tools(e);
+        c.axis_lock = true;
+        drag(&mut c, d, "hip", 0.5, 4.0, -30.0, 41.0, 17.0);
+    });
+    check(g, "drag-root-rotated", |d, e| {
+        let mut c = tools(e);
+        c.rotate_figure(d, "L2", 35.0, 0.5).unwrap();
+        drag(&mut c, d, "hip", 0.5, 30.0, 8.0, 44.0, -13.0);
+    });
+    check(g, "drag-smart-stretch", |d, e| {
+        // set outside the undo history, like the Java scenario
+        let l = d.state.project.layer_mut("S1", "L2").unwrap();
+        let LayerKind::Figure(f) = &mut l.kind else { panic!() };
+        f.node_mut("legR1").unwrap().smart_stretch = true;
+        step(d, |s| barkfart_core::edit::figure_ops::modify_branch(s, "S1", "L2", "legR2", &barkfart_core::edit::figure_ops::BranchChange::Static(true)));
+        let mut c = tools(e);
+        c.stretch = true;
+        drag(&mut c, d, "legR1", 0.4, 10.0, -10.0, 30.0, -25.0);
+    });
+    check(g, "drag-pinned", |d, e| {
+        step(d, |s| set_pinned(s, "S1", "L2", "legR2", true));
+        step(d, |s| set_pinned(s, "S1", "L2", "armL2", true));
+        drag(&mut tools(e), d, "hip", 0.5, 20.0, 25.0, 26.0, 31.0);
+    });
+    check(g, "drag-pinned-joint", |d, e| {
+        step(d, |s| set_pinned(s, "S1", "L2", "armR2", true));
+        drag(&mut tools(e), d, "torso", 0.5, -15.0, -6.0, -22.0, -9.0);
+    });
+    check(g, "drag-cancel", |d, e| {
+        let mut c = tools(e);
+        e.change(d, "L2/x", Value::F(3.0), 0.5).unwrap();
+        let h = handle(&c, d, "armR1", 0.5);
+        c.begin(d, &h, h.x, h.y, 0.5);
+        c.move_to(d, h.x + 20.0, h.y + 20.0, 0.5).unwrap();
+        c.cancel(d);
+    });
+    check(g, "rotate-figure", |d, e| tools(e).rotate_figure(d, "L2", 30.0, 0.5).unwrap());
+    check(g, "move-all", |d, e| tools(e).move_all(d, 12.0, -7.0, 0.4).unwrap());
+}
+
+#[test]
+fn canvas_picking_matches_java() {
+    let want = std::fs::read_to_string(dir("canvas").join("picking.txt")).unwrap();
+    let before = std::fs::read_to_string(dir("canvas").join("drag-joint.before.json")).unwrap();
+    let d = Document::new(decode(&before).unwrap());
+    let p = d.project();
+    let mut c = CanvasTools::default();
+    let mut got = Vec::new();
+    for pass in 0..3 {
+        c.show_static = pass == 1;
+        c.main_nodes_only = pass == 2;
+        got.push(format!("pass {pass}"));
+        for h in c.handles(p, 0.5) {
+            got.push(format!("{} {} {} {} {}", h.layer, h.node, h.x, h.y, h.root));
+        }
+    }
+    c.show_static = false;
+    c.main_nodes_only = false;
+    let hip = handle(&c, &d, "hip", 0.5);
+    let mut prev: Option<String> = None;
+    for _ in 0..5 {
+        let h = c.pick_cycling(p, hip.x + 3.0, hip.y + 2.0, 70.0, 0.5, None, prev.as_deref().map(|n| ("L2", n))).unwrap();
+        got.push(format!("dig {}", h.node));
+        prev = Some(h.node);
+    }
+    let h = c.pick_cycling(p, hip.x + 3.0, hip.y + 2.0, 70.0, 0.5, Some(("L2", "legL1")), None).unwrap();
+    got.push(format!("selected {}", h.node));
+    got.push(format!("pick {}", c.pick(p, hip.x + 3.0, hip.y + 2.0, 70.0, 0.5).unwrap().node));
+    for n in c.neighbours(p, "L2", "torso", true, 0.5) {
+        got.push(format!("neighbour {}", n.node));
+    }
+    // positions: equal to a few float ulps (Java prints the shortest float spelling)
+    let want: Vec<&str> = want.lines().collect();
+    assert_eq!(want.len(), got.len(), "line count");
+    for (w, g) in want.iter().zip(&got) {
+        let (ws, gs): (Vec<&str>, Vec<&str>) = (w.split(' ').collect(), g.split(' ').collect());
+        assert_eq!(ws.len(), gs.len(), "{w} / {g}");
+        for (a, b) in ws.iter().zip(&gs) {
+            match (a.parse::<f32>(), b.parse::<f32>()) {
+                (Ok(x), Ok(y)) => assert!((x - y).abs() <= 1e-4 * (1.0 + x.abs()), "{w} / {g}"),
+                _ => assert_eq!(a, b, "{w} / {g}"),
+            }
+        }
+    }
+}

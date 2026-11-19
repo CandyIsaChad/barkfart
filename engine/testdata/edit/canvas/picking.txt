@@ -1,0 +1,37 @@
+pass 0
+L2 hip -50.0 0.0 true
+L2 torso -54.41914 59.83704 false
+L2 head -58.101757 109.70124 false
+L2 armL1 -90.6879 86.47493 false
+L2 armL2 -133.88008 99.101715 false
+L2 armR1 -87.04029 90.834785 false
+L2 armR2 -107.0923 131.12022 false
+L2 legL1 -68.81111 -51.683094 false
+L2 legL2 -78.361755 -105.84752 false
+L2 legR1 -31.188892 -51.683094 false
+L2 legR2 -21.638243 -105.84752 false
+pass 1
+L2 hip -50.0 0.0 true
+L2 torso -54.41914 59.83704 false
+L2 head -58.101757 109.70124 false
+L2 armL1 -90.6879 86.47493 false
+L2 armL2 -133.88008 99.101715 false
+L2 armR1 -87.04029 90.834785 false
+L2 armR2 -107.0923 131.12022 false
+L2 legL1 -68.81111 -51.683094 false
+L2 legL2 -78.361755 -105.84752 false
+L2 legR1 -31.188892 -51.683094 false
+L2 legR2 -21.638243 -105.84752 false
+pass 2
+L2 hip -50.0 0.0 true
+dig hip
+dig legR1
+dig legL1
+dig torso
+dig hip
+selected legL1
+pick hip
+neighbour hip
+neighbour head
+neighbour armL1
+neighbour armR1

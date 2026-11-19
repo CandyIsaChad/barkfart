@@ -157,6 +157,112 @@ class EditDumpTest {
         scenario("slow-motion", (d, e, p) -> new FrameOps(e).slowMotion(0, 2));
     }
 
+    private static app.barkfart.canvas.CanvasTools.Hit hit(app.barkfart.canvas.CanvasTools c, String node, double t) {
+        for (app.barkfart.canvas.CanvasTools.Handle h : c.handles(t))
+            if (h.node.id.equals(node)) return new app.barkfart.canvas.CanvasTools.Hit(h.layer, h.node, h.x, h.y);
+        throw new IllegalStateException(node);
+    }
+
+    /** Drags a joint (or the main node) of the man by (dx1, dy1) then (dx2, dy2) view units. */
+    private static void drag(app.barkfart.canvas.CanvasTools c, String node, double t, float dx1, float dy1, float dx2, float dy2) {
+        app.barkfart.canvas.CanvasTools.Hit h = hit(c, node, t);
+        c.begin(h, h.x + 2, h.y - 1, t);
+        c.move(h.x + 2 + dx1, h.y - 1 + dy1, t);
+        c.move(h.x + 2 + dx2, h.y - 1 + dy2, t);
+        c.end();
+    }
+
+    private void canvasScenarios() throws Exception {
+        scenario("drag-joint", (d, e, p) -> drag(new app.barkfart.canvas.CanvasTools(e), "armR2", 0.5, 15, -20, 25, -10));
+        scenario("drag-unkeyed-time", (d, e, p) -> drag(new app.barkfart.canvas.CanvasTools(e), "armL2", 0.33, -12, 30, -18, 22));
+        scenario("drag-stretch", (d, e, p) -> {
+            app.barkfart.canvas.CanvasTools c = new app.barkfart.canvas.CanvasTools(e);
+            c.stretch = true;
+            drag(c, "legR2", 0.4, 10, -10, 40, -35);
+        });
+        scenario("drag-snap", (d, e, p) -> {
+            app.barkfart.canvas.CanvasTools c = new app.barkfart.canvas.CanvasTools(e);
+            c.snapDegrees = 45;
+            drag(c, "armL1", 0.2, 5, 5, 31, -17);
+        });
+        scenario("drag-figure-scope", (d, e, p) -> {
+            app.barkfart.canvas.CanvasTools c = new app.barkfart.canvas.CanvasTools(e);
+            c.keyScope = app.barkfart.canvas.CanvasTools.KeyScope.FIGURE;
+            e.defaultInterp = Interp.HOLD;
+            drag(c, "head", 0.66, 8, 3, 14, 9);
+        });
+        scenario("drag-root", (d, e, p) -> drag(new app.barkfart.canvas.CanvasTools(e), "hip", 0.5, 30, 8, 44, -13));
+        scenario("drag-root-axis", (d, e, p) -> {
+            app.barkfart.canvas.CanvasTools c = new app.barkfart.canvas.CanvasTools(e);
+            c.axisLock = true;
+            drag(c, "hip", 0.5, 30, 8, 5, -40);
+        });
+        scenario("drag-root-axis-x", (d, e, p) -> {
+            app.barkfart.canvas.CanvasTools c = new app.barkfart.canvas.CanvasTools(e);
+            c.axisLock = true;
+            drag(c, "hip", 0.5, 4, -30, 41, 17);
+        });
+        scenario("drag-root-rotated", (d, e, p) -> {
+            app.barkfart.canvas.CanvasTools c = new app.barkfart.canvas.CanvasTools(e);
+            c.rotateFigure(man(p), 35, 0.5);
+            drag(c, "hip", 0.5, 30, 8, 44, -13);
+        });
+        scenario("drag-smart-stretch", (d, e, p) -> {
+            man(p).figure.node("legR1").smartStretch = true;
+            d.apply(FigureOps.modifyBranch(man(p), "legR2", "Static", FigureOps.setStatic(true)));
+            app.barkfart.canvas.CanvasTools c = new app.barkfart.canvas.CanvasTools(e);
+            c.stretch = true;
+            drag(c, "legR1", 0.4, 10, -10, 30, -25);
+        });
+        scenario("drag-pinned", (d, e, p) -> {
+            d.apply(FigureOps.setPinned(man(p), "legR2", true));
+            d.apply(FigureOps.setPinned(man(p), "armL2", true));
+            drag(new app.barkfart.canvas.CanvasTools(e), "hip", 0.5, 20, 25, 26, 31);
+        });
+        scenario("drag-pinned-joint", (d, e, p) -> {
+            d.apply(FigureOps.setPinned(man(p), "armR2", true));
+            drag(new app.barkfart.canvas.CanvasTools(e), "torso", 0.5, -15, -6, -22, -9);
+        });
+        scenario("drag-cancel", (d, e, p) -> {
+            app.barkfart.canvas.CanvasTools c = new app.barkfart.canvas.CanvasTools(e);
+            e.change(p.property("L2/x"), 3f, 0.5);
+            app.barkfart.canvas.CanvasTools.Hit h = hit(c, "armR1", 0.5);
+            c.begin(h, h.x, h.y, 0.5);
+            c.move(h.x + 20, h.y + 20, 0.5);
+            c.cancel();
+        });
+        scenario("rotate-figure", (d, e, p) -> new app.barkfart.canvas.CanvasTools(e).rotateFigure(man(p), 30, 0.5));
+        scenario("move-all", (d, e, p) -> new app.barkfart.canvas.CanvasTools(e).moveAll(12, -7, 0.4));
+        // picking: handles and digging sequences as text
+        Project p = Fixtures.kitchenSink();
+        Editor e = new Editor(new Document(p));
+        app.barkfart.canvas.CanvasTools c = new app.barkfart.canvas.CanvasTools(e);
+        StringBuilder b = new StringBuilder();
+        for (int pass = 0; pass < 3; pass++) {
+            c.showStatic = pass == 1;
+            c.mainNodesOnly = pass == 2;
+            b.append("pass ").append(pass).append('\n');
+            for (app.barkfart.canvas.CanvasTools.Handle h : c.handles(0.5))
+                b.append(h.layer.id).append(' ').append(h.node.id).append(' ').append(h.x).append(' ').append(h.y).append(' ').append(h.root).append('\n');
+        }
+        c.showStatic = false;
+        c.mainNodesOnly = false;
+        app.barkfart.canvas.CanvasTools.Hit hip = hit(c, "hip", 0.5);
+        app.barkfart.model.Node prev = null;
+        for (int i = 0; i < 5; i++) {
+            app.barkfart.canvas.CanvasTools.Hit h = c.pickCycling(hip.x + 3, hip.y + 2, 70, 0.5, null, prev);
+            b.append("dig ").append(h.node.id).append('\n');
+            prev = h.node;
+        }
+        app.barkfart.canvas.CanvasTools.Hit h = c.pickCycling(hip.x + 3, hip.y + 2, 70, 0.5, man(p).figure.node("legL1"), null);
+        b.append("selected ").append(h.node.id).append('\n');
+        h = c.pick(hip.x + 3, hip.y + 2, 70, 0.5);
+        b.append("pick ").append(h.node.id).append('\n');
+        for (app.barkfart.canvas.CanvasTools.Handle n : c.neighbours(man(p), man(p).figure.node("torso"), true, 0.5))
+            b.append("neighbour ").append(n.node.id).append('\n');
+        write("picking.txt", b.toString());
+    }
+
     @Test
     void dump() throws Exception {
         String d0 = System.getProperty("barkfart.editdump", "");
@@ -173,6 +279,9 @@ class EditDumpTest {
         dir = new File(d0, "frames");
         dir.mkdirs();
         frameScenarios();
+        dir = new File(d0, "canvas");
+        dir.mkdirs();
+        canvasScenarios();
         dir = editorDir;
         scenario("change-autokey", (d, e, p) -> e.change(p.property("L2/armR1/rotation"), 33f, 0.5));
         scenario("change-static", (d, e, p) -> {

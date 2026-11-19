@@ -75,8 +75,15 @@ Decision and reasons: PROGRESS.md, 2026-11-19.
   engine/testdata/legacy/synthetic) and 45 originals (local only,
   engine/testdata/legacy/local, made by LegacyDumpTest; never committed).
   The GIF decoder agrees with the gif crate.
-- Next: the editing operations (edit/ package: undo document, editor,
-  figure/join/symbol/layer/frame ops, canvas tools), then the interface.
+- Editing (engine/core/src/edit): snapshot undo document (nested steps,
+  cancel, saved marker, 200 steps), editor (keying, posing, retime, scale,
+  stagger, copy/paste keys, easing), figure, structure, join, layer,
+  symbol, camera and frame operations, and the canvas tools (handles,
+  picking with digging, joint and figure drags with stretch, snap, axis
+  lock, smart-stretch and pinned joints, turning a figure, panning).
+  Checked by EditDumpTest: 85 scenarios give the Java project text after
+  the edit and after undo, plus handle positions and pick order.
+- Next: wire editing into the C interface, then the interface itself.
 
 ## Notes from device tests
 - 2026-11-19, iPad: first Barkfart Next IPA works; 2.9 ms per render.
