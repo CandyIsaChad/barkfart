@@ -5,6 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+barkfart-audio = { version = "0.1.0", path = "../audio" }
 barkfart-core = { version = "0.1.0", path = "../core" }
 barkfart-render = { version = "0.1.0", path = "../render" }
 

@@ -69,10 +69,16 @@ class _SpikePageState extends State<SpikePage> with SingleTickerProviderStateMix
     if (shot != null) Timer(Duration(seconds: int.tryParse(Platform.environment['BARKFART_SHOT_AFTER'] ?? '') ?? 6), () => _saveShot(shot));
   }
 
+  static const _demos = ['assets/sound-demo.bark', 'assets/demo.bark'];
+  int _demo = 0;
+
   Future<void> _loadDemo() async {
     final e = _engine;
     if (e == null) return;
-    final bytes = (await rootBundle.load('assets/demo.bark')).buffer.asUint8List();
+    final open = Platform.environment['BARKFART_OPEN'];
+    final bytes = open != null && open.isNotEmpty
+        ? File(open).readAsBytesSync()
+        : (await rootBundle.load(_demos[_demo % _demos.length])).buffer.asUint8List();
     final err = e.load(bytes);
     setState(() {
       if (err != null) {
@@ -80,6 +86,9 @@ class _SpikePageState extends State<SpikePage> with SingleTickerProviderStateMix
       } else {
         _info = e.info;
         _clock.reset();
+        _lastFrame = -1;
+        final d = _info?.duration ?? 0;
+        e.play(0, loopStart: 0, loopEnd: d);
       }
     });
   }
@@ -93,11 +102,12 @@ class _SpikePageState extends State<SpikePage> with SingleTickerProviderStateMix
     final w = (_size.width * scale).round(), h = (_size.height * scale).round();
     if (w <= 0 || h <= 0) return;
     final sw = Stopwatch()..start();
-    final secs = _clock.elapsedMicroseconds / 1e6;
+    // the picture follows the sound when there is sound output, else its own clock
+    final secs = e.playbackTime ?? _clock.elapsedMicroseconds / 1e6;
     final fps = (maxFps ?? info.fps).clamp(1.0, 240.0);
     final frame = (secs * fps).floor();
     if (frame == _lastFrame && _size == _lastSize) return;
-    if (Platform.environment['BARKFART_TRACE'] != null) debugPrint('tick frame=$frame secs=${secs.toStringAsFixed(3)} size=$_size');
+    if (Platform.environment['BARKFART_TRACE'] != null) debugPrint('tick frame=$frame secs=${secs.toStringAsFixed(3)} sound=${e.playbackTime != null}');
     _lastFrame = frame;
     _lastSize = _size;
     _busy = true;   // only once we are really drawing (an early return must not leave it set)
@@ -151,19 +161,25 @@ class _SpikePageState extends State<SpikePage> with SingleTickerProviderStateMix
         child: Column(
           children: [
             Expanded(
-              child: LayoutBuilder(builder: (context, c) {
+              child: GestureDetector(
+                onTap: () {
+                  _demo++;
+                  _loadDemo();
+                },
+                child: LayoutBuilder(builder: (context, c) {
                 _size = c.biggest;
                 return SizedBox.expand(
                   child: _frame == null ? const ColoredBox(color: Colors.white) : RawImage(image: _frame, fit: BoxFit.fill, filterQuality: FilterQuality.none),
                 );
               }),
+              ),
             ),
             Container(
               width: double.infinity,
               color: const Color(0xFF222222),
               padding: const EdgeInsets.all(8),
               child: Text(
-                '$_status · ${_info == null ? 'no project' : 'v1 kitchen sink ${_info!.width}x${_info!.height} at ${(maxFps ?? _info!.fps).round()} fps'} · frame $_frames · ${_ms.toStringAsFixed(1)} ms per frame in the engine',
+                '$_status · sound: ${_engine?.audioDevice ?? '-'} · ${_info == null ? 'no project' : '${_info!.width}x${_info!.height} at ${(maxFps ?? _info!.fps).round()} fps'} · frame $_frames · ${_ms.toStringAsFixed(1)} ms per frame in the engine',
                 style: const TextStyle(color: Colors.white, fontSize: 13),
               ),
             ),

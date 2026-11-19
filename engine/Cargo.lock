@@ -91,6 +91,7 @@ dependencies = [
 name = "barkfart-ffi"
 version = "0.1.0"
 dependencies = [
+ "barkfart-audio",
  "barkfart-core",
  "barkfart-render",
 ]

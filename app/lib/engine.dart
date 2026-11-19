@@ -13,6 +13,10 @@ typedef _LoadC = Int32 Function(Pointer<Void>, Pointer<Uint8>, IntPtr);
 typedef _LoadD = int Function(Pointer<Void>, Pointer<Uint8>, int);
 typedef _InfoC = Int32 Function(Pointer<Void>, Pointer<Double>);
 typedef _InfoD = int Function(Pointer<Void>, Pointer<Double>);
+typedef _PlayC = Void Function(Pointer<Void>, Double, Double, Double);
+typedef _PlayD = void Function(Pointer<Void>, double, double, double);
+typedef _TimeC = Double Function(Pointer<Void>);
+typedef _TimeD = double Function(Pointer<Void>);
 typedef _RenderC = Int32 Function(Pointer<Void>, Double, Uint32, Uint32, Pointer<Uint8>, Pointer<Uint32>);
 typedef _RenderD = int Function(Pointer<Void>, double, int, int, Pointer<Uint8>, Pointer<Uint32>);
 
@@ -64,6 +68,27 @@ class Engine {
 
   String get lastError => _error(_handle).toDartString();
 
+  /// Sound output device ("name at rate Hz"), or why there is none.
+  String get audioDevice {
+    final p = _lib.lookupFunction<_StrC, _StrC>('bf_audio_device')(_handle);
+    return p == nullptr ? '?' : p.toDartString();
+  }
+
+  late final _PlayD _play = _lib.lookupFunction<_PlayC, _PlayD>('bf_play');
+  late final _FreeD _stop = _lib.lookupFunction<_FreeC, _FreeD>('bf_stop');
+  late final _TimeD _time = _lib.lookupFunction<_TimeC, _TimeD>('bf_playback_time');
+
+  /// Plays the project's sound from t, looping [loopStart, loopEnd).
+  void play(double t, {double loopStart = 0, double loopEnd = 0}) => _play(_handle, t, loopStart, loopEnd);
+
+  void stop() => _stop(_handle);
+
+  /// Time of the sound being played, or null (stopped, or no sound output).
+  double? get playbackTime {
+    final t = _time(_handle);
+    return t < 0 ? null : t;
+  }
+
   /// Loads a .bark file (or project.json); null on success, else the reason.
   String? load(Uint8List bytes) {
     final p = calloc<Uint8>(bytes.length);
@@ -97,6 +122,7 @@ class Engine {
   }
 
   void dispose() {
+    stop();
     if (_buf != nullptr) calloc.free(_buf);
     _buf = nullptr;
     calloc.free(_micros);

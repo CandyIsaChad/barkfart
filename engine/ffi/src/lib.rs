@@ -11,6 +11,8 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 pub struct Engine {
     renderer: Renderer,
+    player: barkfart_audio::Player,
+    audio_label: Vec<u8>,
     glyphs: GlyphAtlas,
     /// Image ids uploaded for the current project.
     images: Vec<String>,
@@ -36,7 +38,10 @@ pub extern "C" fn bf_engine_new() -> *mut Engine {
             label.push(0);
             let glyphs = GlyphAtlas::new();
             renderer.set_texture(PAGE, glyphs.width, glyphs.height, &glyphs.rgba);
-            Box::into_raw(Box::new(Engine { renderer, glyphs, images: Vec::new(), label, project: None, error: vec![0] }))
+            let player = barkfart_audio::Player::new();
+            let mut audio_label = if player.available() { format!("{} at {} Hz", player.device, player.rate) } else { player.device.clone() }.into_bytes();
+            audio_label.push(0);
+            Box::into_raw(Box::new(Engine { renderer, player, audio_label, glyphs, images: Vec::new(), label, project: None, error: vec![0] }))
         }
         _ => std::ptr::null_mut(),
     }
@@ -97,6 +102,21 @@ pub extern "C" fn bf_project_load(e: *mut Engine, data: *const u8, len: usize) -
                     engine.renderer.set_texture(id, img.w, img.h, &img.px);
                     engine.images.push(id.clone());
                 }
+            }
+            // sounds: decoded once; the plan is what the audio thread plays
+            let mut sounds: std::collections::HashMap<String, std::sync::Arc<barkfart_core::audio::Pcm>> = Default::default();
+            for (id, a) in &p.assets {
+                if a.kind != barkfart_core::model::AssetKind::Audio {
+                    continue;
+                }
+                if let Some(pcm) = barkfart_core::image::asset_bytes(&p, &entries, id).and_then(barkfart_core::audio::decode_sound) {
+                    sounds.insert(id.clone(), std::sync::Arc::new(pcm));
+                }
+            }
+            if let Some(root) = p.root() {
+                let plan = barkfart_core::audio::AudioPlan::build(&p, root, &|id: &str| sounds.get(id).cloned());
+                engine.player.stop();
+                engine.player.set_plan(plan);
             }
             engine.project = Some(p);
             engine.set_error("");
@@ -167,4 +187,48 @@ pub extern "C" fn bf_render_frame(e: *const Engine, t: f64, w: u32, h: u32, out:
         }
         Err(_) => 3,
     }
+}
+
+/// "device at rate Hz", or why there is no sound output.
+#[no_mangle]
+pub extern "C" fn bf_audio_device(e: *const Engine) -> *const c_char {
+    if e.is_null() {
+        return std::ptr::null();
+    }
+    // SAFETY: live handle
+    unsafe { (*e).audio_label.as_ptr() as *const c_char }
+}
+
+/// Plays the project's sound from time t, looping [loop_start, loop_end) when loop_end > loop_start.
+#[no_mangle]
+pub extern "C" fn bf_play(e: *const Engine, t: f64, loop_start: f64, loop_end: f64) {
+    if e.is_null() {
+        return;
+    }
+    // SAFETY: live handle
+    unsafe { (*e).player.play(t, loop_start, loop_end) };
+}
+
+#[no_mangle]
+pub extern "C" fn bf_stop(e: *const Engine) {
+    if e.is_null() {
+        return;
+    }
+    // SAFETY: live handle
+    unsafe { (*e).player.stop() };
+}
+
+/// The time the sound is playing (the picture follows it), or -1 when
+/// stopped or when there is no sound output (the caller keeps its own clock).
+#[no_mangle]
+pub extern "C" fn bf_playback_time(e: *const Engine) -> f64 {
+    if e.is_null() {
+        return -1.0;
+    }
+    // SAFETY: live handle
+    let engine = unsafe { &*e };
+    if !engine.player.available() {
+        return -1.0;
+    }
+    engine.player.position().unwrap_or(-1.0)
 }
