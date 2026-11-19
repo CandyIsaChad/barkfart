@@ -83,14 +83,10 @@ impl Default for CanvasTools {
 /// Snaps an angle to the nearest multiple of step (step <= 0: unchanged).
 pub fn snap(deg: f64, step: f64) -> f64 {
     if step > 0.0 {
-        (deg / step + 0.5).floor() * step
+        java_round_f64(deg / step) * step
     } else {
         deg
     }
-}
-
-fn java_round(v: f64) -> f64 {
-    (v + 0.5).floor()
 }
 
 fn root_symbol(p: &Project) -> &Symbol {
@@ -374,7 +370,7 @@ impl CanvasTools {
         let current = r.f(&n.rotation, t) as f64;
         let mut rel = world - pose.base_angle(f.nodes(), i);
         rel = snap(rel, self.snap_degrees as f64);
-        rel += 360.0 * java_round((current - rel) / 360.0);
+        rel += 360.0 * java_round_f64((current - rel) / 360.0);
         let (rot_id, len_id) = (n.rotation.id.clone(), n.length.id.clone());
         let scale = r.f(&n.scale, t);
         let smart = n.smart_stretch;
@@ -506,7 +502,7 @@ impl CanvasTools {
             let n = &f.nodes()[i];
             let mut rel = world - pose.base_angle(f.nodes(), i);
             let current = r.f(&n.rotation, t) as f64;
-            rel += 360.0 * java_round((current - rel) / 360.0);
+            rel += 360.0 * java_round_f64((current - rel) / 360.0);
             (n.rotation.id.clone(), rel)
         };
         self.editor.change_in(&mut d.state, &id, Value::F(rel as f32), t)?;

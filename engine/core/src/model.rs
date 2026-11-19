@@ -6,6 +6,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Java's `Math.round(float)`: floor(v + 1/2), NaN to 0, clamped to i32.
+/// Java's Math.round(double): floor(v + 0.5).
+pub fn java_round_f64(v: f64) -> f64 {
+    if v.is_nan() {
+        0.0
+    } else {
+        (v + 0.5).floor()
+    }
+}
+
 pub fn java_round(v: f32) -> i32 {
     if v.is_nan() {
         return 0;

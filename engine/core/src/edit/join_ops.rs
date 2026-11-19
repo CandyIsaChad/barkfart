@@ -73,15 +73,6 @@ fn part(i: usize, ax: f64, ay: f64, old: f64, m: &Affine) -> f32 {
     }) as f32
 }
 
-/// Java's Math.round(double): floor(v + 0.5).
-fn java_round_f64(v: f64) -> f64 {
-    if v.is_nan() {
-        0.0
-    } else {
-        (v + 0.5).floor()
-    }
-}
-
 fn change(st: &mut State, sym: &str, child: &str, parent: Option<&str>, node: Option<&str>, rotate: bool, t: f64) -> EditResult<()> {
     // where the layer is at every time that matters, before the change
     let (times, world, template, keyed) = {
