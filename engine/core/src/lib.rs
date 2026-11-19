@@ -5,6 +5,8 @@
 //! version (git tag `java-reference`), which stays the reference until this
 //! crate matches its outputs.
 
+pub mod codec;
+pub mod model;
 pub mod tess;
 
 pub use tess::{DrawList, Vertex};
