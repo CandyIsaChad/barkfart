@@ -5,6 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 indexmap = "2.14.2"
 serde_json = { version = "1.0.154", features = ["preserve_order", "arbitrary_precision"] }
 zip = { version = "9.7.2", default-features = false, features = ["deflate"] }

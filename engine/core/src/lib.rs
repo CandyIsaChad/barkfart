@@ -8,6 +8,7 @@
 pub mod codec;
 pub mod eval;
 pub mod fx;
+pub mod image;
 pub mod model;
 pub mod tess;
 

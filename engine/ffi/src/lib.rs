@@ -4,12 +4,16 @@
 
 use barkfart_core::model::Project;
 use barkfart_core::{codec, eval, tess};
+use barkfart_render::glyphs::{GlyphAtlas, PAGE};
 use barkfart_render::{Renderer, View};
 use std::ffi::c_char;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 pub struct Engine {
     renderer: Renderer,
+    glyphs: GlyphAtlas,
+    /// Image ids uploaded for the current project.
+    images: Vec<String>,
     label: Vec<u8>,
     project: Option<Project>,
     error: Vec<u8>,
@@ -30,7 +34,9 @@ pub extern "C" fn bf_engine_new() -> *mut Engine {
             let a = &renderer.adapter;
             let mut label = format!("{} via {}", a.name, a.backend).into_bytes();
             label.push(0);
-            Box::into_raw(Box::new(Engine { renderer, label, project: None, error: vec![0] }))
+            let glyphs = GlyphAtlas::new();
+            renderer.set_texture(PAGE, glyphs.width, glyphs.height, &glyphs.rgba);
+            Box::into_raw(Box::new(Engine { renderer, glyphs, images: Vec::new(), label, project: None, error: vec![0] }))
         }
         _ => std::ptr::null_mut(),
     }
@@ -75,13 +81,23 @@ pub extern "C" fn bf_project_load(e: *mut Engine, data: *const u8, len: usize) -
     let (engine, bytes) = unsafe { (&mut *e, std::slice::from_raw_parts(data, len)) };
     let r = catch_unwind(AssertUnwindSafe(|| {
         if bytes.starts_with(b"PK") {
-            codec::read_bark(bytes).map(|b| b.project)
+            codec::read_bark(bytes).map(|b| (b.project, b.assets))
         } else {
-            codec::decode(&String::from_utf8_lossy(bytes))
+            codec::decode(&String::from_utf8_lossy(bytes)).map(|p| (p, Default::default()))
         }
     }));
     match r {
-        Ok(Ok(p)) => {
+        Ok(Ok((p, entries))) => {
+            for id in engine.images.drain(..) {
+                engine.renderer.remove_texture(&id);
+            }
+            // sprite images (anything missing or unreadable draws in plain colour)
+            for id in p.assets.keys() {
+                if let Some(img) = barkfart_core::image::asset_bytes(&p, &entries, id).and_then(barkfart_core::image::decode) {
+                    engine.renderer.set_texture(id, img.w, img.h, &img.px);
+                    engine.images.push(id.clone());
+                }
+            }
             engine.project = Some(p);
             engine.set_error("");
             0
@@ -129,7 +145,7 @@ pub extern "C" fn bf_render_frame(e: *const Engine, t: f64, w: u32, h: u32, out:
         let start = std::time::Instant::now();
         let scene = eval::evaluate(p, &p.root_symbol, t);
         // isolates: effects, adjustment layers, translucent groups drawn as one piece
-        let list = tess::layered(&scene, None);
+        let list = tess::layered(&scene, Some(&engine.glyphs));
         let (sw, sh) = (p.settings.width.max(1) as f32, p.settings.height.max(1) as f32);
         let aspect = w as f32 / h as f32;
         let (hw, hh) = if aspect >= sw / sh { (sh * aspect / 2.0, sh / 2.0) } else { (sw / 2.0, sw / aspect / 2.0) };

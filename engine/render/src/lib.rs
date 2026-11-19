@@ -8,6 +8,8 @@
 //! Frames are read back as pixels (sharing the GPU texture with Flutter
 //! directly comes later).
 
+pub mod glyphs;
+
 use barkfart_core::eval::ResolvedEffect;
 use barkfart_core::fx as rfx;
 use barkfart_core::model::{Blend, Color};
@@ -112,6 +114,8 @@ pub struct Renderer {
     sampler: wgpu::Sampler,
     /// Free textures by (width, height, samples), reused between frames.
     pool: std::sync::Mutex<Vec<(u32, u32, u32, wgpu::Texture)>>,
+    /// Images by id (sprite assets, "glyphs:<page>"); missing ids draw in plain colour.
+    textures: std::sync::Mutex<std::collections::HashMap<String, wgpu::TextureView>>,
     pub adapter: AdapterReport,
 }
 
@@ -126,6 +130,8 @@ struct Frame<'a> {
     y0: f32,
     s: f32,
     view_bind: wgpu::BindGroup,
+    /// Bind groups for textured batches, by texture id.
+    tex_binds: std::collections::HashMap<String, wgpu::BindGroup>,
     vbuf: wgpu::Buffer,
     /// First vertex of each batch in vbuf.
     starts: Vec<u32>,
@@ -287,12 +293,49 @@ impl Renderer {
             fx_layout,
             pipes,
             pool: std::sync::Mutex::new(Vec::new()),
+            textures: std::sync::Mutex::new(std::collections::HashMap::new()),
             adapter: AdapterReport { name: info.name, backend: format!("{:?}", info.backend), driver: format!("{} {}", info.driver, info.driver_info) },
         })
     }
 
     pub fn options(&self) -> Options {
         self.options
+    }
+
+    /// Uploads an image (straight RGBA8, rows top-down) under an id; batches
+    /// whose texture is that id sample it. Replaces any image with the id.
+    pub fn set_texture(&self, id: &str, w: u32, h: u32, rgba: &[u8]) {
+        if w == 0 || h == 0 || rgba.len() < (w * h * 4) as usize {
+            return;
+        }
+        let max = self.device.limits().max_texture_dimension_2d;
+        if w > max || h > max {
+            return; // too large for this GPU: drawn in plain colour
+        }
+        let tex = self.device.create_texture_with_data(
+            &self.queue,
+            &wgpu::TextureDescriptor {
+                label: Some(id),
+                size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: FORMAT,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            &rgba[..(w * h * 4) as usize],
+        );
+        self.textures.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string(), tex.create_view(&Default::default()));
+    }
+
+    pub fn remove_texture(&self, id: &str) {
+        self.textures.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+    }
+
+    pub fn has_texture(&self, id: &str) -> bool {
+        self.textures.lock().unwrap_or_else(|e| e.into_inner()).contains_key(id)
     }
 
     /// Draws the list (flat or layered) over the background into a w x h
@@ -312,15 +355,31 @@ impl Renderer {
         let uniform: [f32; 4] = [2.0 / (view.x1 - view.x0), 2.0 / (view.y1 - view.y0), -1.0 - view.x0 * 2.0 / (view.x1 - view.x0), -1.0 - view.y0 * 2.0 / (view.y1 - view.y0)];
         let _ = sy;
         let ubuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("view"), contents: bytemuck::cast_slice(&uniform), usage: wgpu::BufferUsages::UNIFORM });
-        let view_bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &self.shape_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: ubuf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&self.white) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.sampler) },
-            ],
-        });
+        let bind_with = |view: &wgpu::TextureView| {
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &self.shape_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: ubuf.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(view) },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                ],
+            })
+        };
+        let view_bind = bind_with(&self.white);
+        let mut tex_binds = std::collections::HashMap::new();
+        {
+            let textures = self.textures.lock().unwrap_or_else(|e| e.into_inner());
+            for b in &list.batches {
+                if let Some(id) = &b.texture {
+                    if !tex_binds.contains_key(id) {
+                        if let Some(v) = textures.get(id) {
+                            tex_binds.insert(id.clone(), bind_with(v));
+                        }
+                    }
+                }
+            }
+        }
         // all vertices in one buffer; textured batches use the white texture for now
         let mut bytes = Vec::new();
         let mut starts = Vec::with_capacity(list.batches.len());
@@ -341,7 +400,7 @@ impl Renderer {
         }
         let vbuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("vertices"), contents: &bytes, usage: wgpu::BufferUsages::VERTEX });
         let enc = self.device.create_command_encoder(&Default::default());
-        let mut f = Frame { r: self, enc, w, h, x0: view.x0, y0: view.y1, s, view_bind, vbuf, starts };
+        let mut f = Frame { r: self, enc, w, h, x0: view.x0, y0: view.y1, s, view_bind, tex_binds, vbuf, starts };
         let full = Rect { x: 0, y: 0, w, h };
         let root = f.target();
         f.clear(&root);
@@ -534,7 +593,6 @@ impl<'a> Frame<'a> {
     /// Draws batches (by index) into a target with their blend modes.
     fn batches(&mut self, list: &DrawList, idx: &[usize], t: &Target, clip: Rect) {
         let mut pass = Self::pass(&mut self.enc, t, false);
-        pass.set_bind_group(0, &self.view_bind, &[]);
         pass.set_vertex_buffer(0, self.vbuf.slice(..));
         pass.set_scissor_rect(clip.x, clip.y, clip.w, clip.h);
         for &b in idx {
@@ -542,6 +600,8 @@ impl<'a> Frame<'a> {
             if n == 0 {
                 continue;
             }
+            let bind = list.batches[b].texture.as_ref().and_then(|id| self.tex_binds.get(id)).unwrap_or(&self.view_bind);
+            pass.set_bind_group(0, bind, &[]);
             pass.set_pipeline(&self.r.pipes.batch[blend_index(list.batches[b].blend())]);
             let s = self.starts[b];
             pass.draw(s..s + n, 0..1);
