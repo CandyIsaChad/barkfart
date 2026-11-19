@@ -8,7 +8,7 @@ use crate::model::*;
 pub const ALL: [(&str, &str); 11] = [
     ("stickman", "Stickman"),
     ("thin", "Thin stickman"),
-    ("hands", "Stickman with hands and feet"),
+    ("hands", "Hands & feet"),
     ("chibi", "Chibi"),
     ("dog", "Dog"),
     ("bird", "Bird"),

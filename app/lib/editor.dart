@@ -523,26 +523,22 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _say('New animation');
   }
 
+  /// A list shown in the left panel in place of the tools (no overlay): 'figures' or 'open'.
+  String? _panel;
+  List<ProjectFile> _panelFiles = const [];
+
   Future<void> _openSheet() async {
     if (!await _leaveUnsaved()) return;
     final files = await ProjectFile.all();
     if (!mounted) return;
-    final chosen = await showModalBottomSheet<ProjectFile>(
-      context: context,
-      backgroundColor: cPanel,
-      builder: (c) => ListView(children: [
-        const Padding(padding: EdgeInsets.all(16), child: Text('Animations', style: TextStyle(color: cText, fontSize: 17, fontWeight: FontWeight.w600))),
-        if (files.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Nothing saved yet.', style: TextStyle(color: cSecondary))),
-        for (final f in files)
-          ListTile(
-            title: Text(f.name, style: const TextStyle(color: cText)),
-            subtitle: Text(f.when, style: const TextStyle(color: cSecondary)),
-            selected: f.path == _file?.path,
-            onTap: () => Navigator.pop(c, f),
-          ),
-      ]),
-    );
-    if (chosen == null) return;
+    setState(() {
+      _panelFiles = files;
+      _panel = 'open';
+    });
+  }
+
+  Future<void> _openFile(ProjectFile chosen) async {
+    setState(() => _panel = null);
     final err = _engine?.load(await chosen.read());
     if (err != null) {
       _say('Could not open ${chosen.name}: $err');
@@ -551,6 +547,33 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _file = chosen;
     _fitted = false;
     _refresh(_engine?.command({'op': 'state'}));
+  }
+
+  List<Widget> _panelList() {
+    final back = _Btn('◀ Back', onTap: () => setState(() => _panel = null));
+    if (_panel == 'figures') {
+      final list = ((_st['builtins'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      return [
+        back,
+        _title('Add a figure'),
+        for (final f in list) ...[
+          _Btn(f['name'] as String, onTap: () {
+            setState(() => _panel = null);
+            _cmd({'op': 'add_figure', 'kind': f['id']});
+          }),
+          _gap,
+        ],
+      ];
+    }
+    return [
+      back,
+      _title('Open an animation'),
+      if (_panelFiles.isEmpty) const Text('Nothing saved yet.', style: TextStyle(color: cSecondary, fontSize: 13)),
+      for (final f in _panelFiles) ...[
+        _FileRow(f.name, f.when, f.path == _file?.path, () => _openFile(f)),
+        _gap,
+      ],
+    ];
   }
 
   ExportJob? _export;
@@ -643,7 +666,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         case 'picker':
           unawaited(_figurePicker());
         case 'back':
-          if (mounted) Navigator.of(context).maybePop();
+          setState(() => _panel = null);
         case 'quit':
           exit(0);
       }
@@ -829,7 +852,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ),
       const SizedBox(height: 6),
       Expanded(
-        child: ListView(padding: const EdgeInsets.fromLTRB(10, 4, 10, 10), children: _st['building'] != null ? _builder(sel) : (sel == null ? _nothingSelected() : _selected(sel))),
+        child: ListView(padding: const EdgeInsets.fromLTRB(10, 4, 10, 10), children: _panel != null ? _panelList() : _st['building'] != null ? _builder(sel) : (sel == null ? _nothingSelected() : _selected(sel))),
       ),
       Container(
         color: cControl,
@@ -897,21 +920,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   Future<void> _figurePicker() async {
-    final list = ((_st['builtins'] as List?) ?? const []).cast<Map<String, dynamic>>();
-    final kind = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: cPanel,
-      builder: (c) => ListView(children: [
-        const Padding(padding: EdgeInsets.all(16), child: Text('Add a figure', style: TextStyle(color: cText, fontSize: 17, fontWeight: FontWeight.w600))),
-        for (final f in list)
-          ListTile(
-            title: Text(f['name'] as String, style: const TextStyle(color: cText)),
-            onTap: () => Navigator.pop(c, f['id'] as String),
-          ),
-      ]),
-    );
-    if (kind != null) _cmd({'op': 'add_figure', 'kind': kind});
+    setState(() => _panel = 'figures');
   }
+
 
   /// A figure is selected: posing and figure tools only (segments live in the figure editor).
   List<Widget> _selected(Map<String, dynamic> sel) {
@@ -1200,6 +1211,32 @@ class _Chip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
         decoration: BoxDecoration(color: selected ? cSelected : cControl, borderRadius: BorderRadius.circular(4), border: selected ? Border.all(color: const Color(0xFF5A6068)) : null),
         child: Text(label, style: TextStyle(color: selected ? cText : cSecondary, fontSize: 12)),
+      ),
+    );
+  }
+}
+
+class _FileRow extends StatelessWidget {
+  final String name, when;
+  final bool current;
+  final VoidCallback onTap;
+  const _FileRow(this.name, this.when, this.current, this.onTap);
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: current ? cSelected : cControl,
+      borderRadius: BorderRadius.circular(4),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(4),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 13)),
+            Text(when, style: const TextStyle(color: cSecondary, fontSize: 11)),
+          ]),
+        ),
       ),
     );
   }
