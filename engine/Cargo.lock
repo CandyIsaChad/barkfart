@@ -95,6 +95,8 @@ dependencies = [
  "barkfart-audio",
  "barkfart-core",
  "barkfart-render",
+ "indexmap",
+ "serde_json",
  "zip",
 ]
 

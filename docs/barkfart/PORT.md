@@ -92,3 +92,32 @@ Decision and reasons: PROGRESS.md, 2026-11-19.
   debugging allowed on the phone. Android SDK not installed yet (needs the
   user's OK for Google's license).
 - IPAs are named Barkfart-Next-<UTC date-time>-<commit>.ipa.
+
+## Interface checklist (from the Java editor, UI-SPEC.md and UI.md)
+Status: [x] in the Flutter app, [ ] not yet.
+- Layout: sidebar left, Undo/Redo top-left, frame strip top, Play top-right, stage centre. [x]
+- Modes Figure | All | Camera (segmented). [x]
+- Stage: joint rings, square main node, selected joint highlighted; drag
+  after a few points of movement poses (no separate select step); tap on a
+  cluster digs through joints; tap empty = deselect; drag empty = pan view;
+  pinch = zoom; double-tap = fit. [x]
+- Export frame (camera rectangle) drawn on the stage; grey surround. [x]
+- Onion skin (2 back red, 1 forward blue), toggle. [x]
+- Frames: strip of numbered cells with a key mark, tap to go, insert
+  (copy pose), delete, tween on/off, FPS. [x]
+- Play / stop with sound, loop. [x]
+- Nothing selected: Add figure, Onion skin, FPS, Add camera. [x]
+- Figure/joint selected: Previous/Next figure, Previous/Next joint, Copy
+  pose / Paste pose, Drag: Rotate | Stretch, Pose: Joint | Whole figure,
+  angle snap, flip figure, duplicate, front/back, delete figure. [x]
+- Segment tools: add segment, delete, split, duplicate branch, flip branch,
+  lock joint (pin), static, shape, thickness, colour. [x]
+- Files: New, Open (projects in Documents), Save, Import from Files
+  (.bark/.nodes/.nodemc/.stknds/images/sounds). [ ] (Save/New/Open only)
+- Export panel: GIF, PNG frames, soundtrack, video. [ ] (long-press export kept)
+- Dope sheet (keys, easing, retime, stagger, scale time, multi-select). [ ]
+- Status line with frame / time and transient messages. [x]
+- Two-finger tap undo, three-finger tap redo. [ ]
+- Nudge pad, magnifier windows. [ ]
+- Effects, sounds panels, diagnostics, UI size setting. [ ]
+- Creation mode (draw tools: segment, circle, polyfill ...). [ ]

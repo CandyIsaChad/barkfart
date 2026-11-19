@@ -1,4 +1,5 @@
 // Bindings to the Rust engine (engine/ffi, a plain C interface).
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
@@ -27,6 +28,13 @@ typedef _SoundC = Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Uint32);
 typedef _SoundD = int Function(Pointer<Void>, Pointer<Utf8>, int, int);
 typedef _RenderC = Int32 Function(Pointer<Void>, Double, Uint32, Uint32, Pointer<Uint8>, Pointer<Uint32>);
 typedef _RenderD = int Function(Pointer<Void>, double, int, int, Pointer<Uint8>, Pointer<Uint32>);
+
+typedef _DocNewC = Int32 Function(Pointer<Void>);
+typedef _DocNewD = int Function(Pointer<Void>);
+typedef _CmdC = Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>);
+typedef _ViewC = Int32 Function(Pointer<Void>, Double, Uint32, Uint32, Float, Float, Float, Float, Uint32, Pointer<Uint8>, Pointer<Uint32>);
+typedef _ViewD = int Function(Pointer<Void>, double, int, int, double, double, double, double, int, Pointer<Uint8>, Pointer<Uint32>);
+typedef _SaveC = Pointer<Uint8> Function(Pointer<Void>, Pointer<IntPtr>);
 
 DynamicLibrary _open() {
   final override = Platform.environment['BARKFART_ENGINE'];
@@ -127,6 +135,45 @@ class Engine {
     }
     if (_render(_handle, t, w, h, _buf, _micros) != 0) return null;
     return Uint8List.fromList(_buf.asTypedList(need));
+  }
+
+  late final _CmdC _cmd = _lib.lookupFunction<_CmdC, _CmdC>('bf_cmd');
+  late final _ViewD _view = _lib.lookupFunction<_ViewC, _ViewD>('bf_render_view');
+
+  /// Opens a new project (one frame, one figure).
+  void newProject() => _lib.lookupFunction<_DocNewC, _DocNewD>('bf_doc_new')(_handle);
+
+  /// Runs an editing command; returns the editor state (null without a project).
+  Map<String, dynamic>? command(Map<String, Object?> c) {
+    final p = jsonEncode(c).toNativeUtf8();
+    final r = _cmd(_handle, p);
+    calloc.free(p);
+    if (r == nullptr) return null;
+    return jsonDecode(r.toDartString()) as Map<String, dynamic>;
+  }
+
+  /// The stage rectangle [x0, x1] x [y0, y1] (y up) as straight RGBA rows.
+  /// camera: as played (through the camera); onion: ghosts of nearby frames.
+  Uint8List? renderView(double t, int w, int h, double x0, double y0, double x1, double y1, {bool camera = false, bool onion = false}) {
+    final need = w * h * 4;
+    if (need > _bufLen) {
+      if (_buf != nullptr) calloc.free(_buf);
+      _buf = calloc<Uint8>(need);
+      _bufLen = need;
+    }
+    final flags = (camera ? 1 : 0) | (onion ? 2 : 0);
+    if (_view(_handle, t, w, h, x0, y0, x1, y1, flags, _buf, _micros) != 0) return null;
+    return Uint8List.fromList(_buf.asTypedList(need));
+  }
+
+  /// The project as .bark bytes (marks it saved); null with the reason in [lastError].
+  Uint8List? save() {
+    final len = calloc<IntPtr>();
+    final p = _lib.lookupFunction<_SaveC, _SaveC>('bf_save')(_handle, len);
+    final n = len.value;
+    calloc.free(len);
+    if (p == nullptr) return null;
+    return Uint8List.fromList(p.asTypedList(n));
   }
 
   /// Starts an export (0 = GIF, 1 = PNG frames in a ZIP); null with the reason in [lastError].
