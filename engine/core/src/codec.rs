@@ -581,3 +581,437 @@ pub fn read_bark(bytes: &[u8]) -> Result<BarkFile, FormatError> {
     let project = decode(&json.ok_or_else(|| FormatError("no project.json".into()))?)?;
     Ok(BarkFile { project, assets })
 }
+
+// ================================================================ encode
+
+use crate::json::{self, Json, Obj as JObj};
+
+fn color_hex(c: &Color) -> Json {
+    Json::Str(format!("#{:08x}", c.to_rgba8888()))
+}
+
+fn value_json(v: &Value) -> Json {
+    match v {
+        Value::F(x) => json::f32(*x),
+        Value::D(x) => json::f64(*x),
+        Value::C(c) => color_hex(c),
+        Value::B(b) => Json::Bool(*b),
+    }
+}
+
+fn prop_json(p: &Property, with_type: bool) -> Json {
+    let mut m = JObj::new();
+    if with_type {
+        m.put("t", json::s(p.ty.name()));
+    }
+    m.put("v", value_json(&p.value));
+    if !p.track.is_empty() {
+        let keys = p
+            .track
+            .keys()
+            .iter()
+            .map(|k| {
+                let mut km = vec![json::f64(k.time), value_json(&k.value), json::s(match k.interp {
+                    Interp::Hold => "H",
+                    Interp::Linear => "L",
+                    Interp::Bezier => "B",
+                })];
+                if k.interp == Interp::Bezier {
+                    km.extend([json::f32(k.ease.x1), json::f32(k.ease.y1), json::f32(k.ease.x2), json::f32(k.ease.y2)]);
+                    if k.ease.kind != EaseKind::Cubic {
+                        km.push(json::s(k.ease.kind.name()));
+                    }
+                }
+                Json::List(km)
+            })
+            .collect();
+        m.put("k", Json::List(keys));
+    }
+    if !p.modifiers.is_empty() {
+        m.put("m", Json::List(p.modifiers.iter().map(modifier_json).collect()));
+    }
+    m.done()
+}
+
+fn modifier_json(md: &Modifier) -> Json {
+    let mut m = JObj::new();
+    match &md.kind {
+        ModifierKind::Wiggle { frequency, amplitude, seed, octaves } => {
+            m.put("type", json::s("wiggle"))
+                .put("frequency", json::f32(*frequency))
+                .put("amplitude", json::f32(*amplitude))
+                .put("seed", json::int(*seed as i64))
+                .put("octaves", json::int(*octaves as i64));
+        }
+        ModifierKind::Sine { frequency, amplitude, phase } => {
+            m.put("type", json::s("sine")).put("frequency", json::f32(*frequency)).put("amplitude", json::f32(*amplitude)).put("phase", json::f32(*phase));
+        }
+        ModifierKind::Loop { mode, start, end } => {
+            m.put("type", json::s("loop"))
+                .put("mode", json::s(if *mode == LoopMode::Cycle { "CYCLE" } else { "PING_PONG" }))
+                .put("start", json::f64(*start))
+                .put("end", json::f64(*end));
+        }
+        ModifierKind::DelayFollow { source, delay, scale, offset } => {
+            m.put("type", json::s("delayFollow"))
+                .put("source", json::s(source))
+                .put("delay", json::f64(*delay))
+                .put("scale", json::f32(*scale))
+                .put("offset", json::f32(*offset));
+        }
+        ModifierKind::Link { source, scale, offset } => {
+            m.put("type", json::s("link")).put("source", json::s(source)).put("scale", json::f32(*scale)).put("offset", json::f32(*offset));
+        }
+    }
+    m.put("enabled", Json::Bool(md.enabled));
+    m.done()
+}
+
+fn scope_json(s: &Scope) -> Json {
+    let kind = match s.kind {
+        ScopeKind::Node => "NODE",
+        ScopeKind::NodeSet => "NODE_SET",
+        ScopeKind::Figure => "FIGURE",
+        ScopeKind::Layer => "LAYER",
+        ScopeKind::SymbolInstance => "SYMBOL_INSTANCE",
+        ScopeKind::Composition => "COMPOSITION",
+    };
+    let mut m = JObj::new();
+    m.put("kind", json::s(kind)).put("target", json::opt(&s.target)).put("node", json::opt(&s.node));
+    m.done()
+}
+
+fn stack_json(st: &EffectStack) -> Json {
+    let nodes = st
+        .nodes
+        .values()
+        .map(|e| {
+            let mut params = JObj::new();
+            for (k, p) in &e.params {
+                params.put(k, prop_json(p, true));
+            }
+            let mut em = JObj::new();
+            em.put("id", json::s(&e.id))
+                .put("type", json::s(&e.ty))
+                .put("enabled", Json::Bool(e.enabled))
+                .put("mix", prop_json(&e.mix, false))
+                .put("params", params.done())
+                .put("inputs", Json::List(e.inputs.iter().map(|x| json::s(x)).collect()))
+                .put("mask", e.mask.as_ref().map(scope_json).unwrap_or(Json::Null));
+            em.done()
+        })
+        .collect();
+    let mut m = JObj::new();
+    m.put("output", json::opt(&st.output)).put("nodes", Json::List(nodes));
+    m.done()
+}
+
+fn node_json(n: &Node) -> Json {
+    let mut m = JObj::new();
+    m.put("id", json::s(&n.id)).put("parent", json::opt(&n.parent)).put("shape", json::s(n.shape.name())).put("draw", json::int(n.draw_order as i64));
+    if n.curve != 0.0 {
+        m.put("curve", json::f32(n.curve));
+    }
+    if n.triangle_upside_down {
+        m.put("upsideDown", Json::Bool(true));
+    }
+    if n.right_triangle != 0 {
+        m.put("rightTriangle", json::int(n.right_triangle as i64));
+    }
+    if n.is_static {
+        m.put("static", Json::Bool(true));
+    }
+    if n.stretchy {
+        m.put("stretchy", Json::Bool(true));
+    }
+    if n.smart_stretch {
+        m.put("smartStretch", Json::Bool(true));
+    }
+    if n.no_smart_stretch {
+        m.put("noSmartStretch", Json::Bool(true));
+    }
+    if n.rest_length != 0.0 {
+        m.put("restLength", json::f32(n.rest_length));
+    }
+    if n.circle_hollow {
+        m.put("hollow", Json::Bool(true));
+    }
+    if n.circle_outline {
+        m.put("outline", Json::Bool(true));
+    }
+    if !n.outline_color.track.is_empty() || n.outline_color.value != Value::C(Color::BLACK) {
+        m.put("outlineColor", prop_json(&n.outline_color, false));
+    }
+    if n.half_arc != 0 {
+        m.put("halfArc", json::int(n.half_arc as i64));
+    }
+    if n.polygon_sides != 0 {
+        m.put("sides", json::int(n.polygon_sides as i64));
+    }
+    if n.trapezoid_ratio != 1.0 {
+        m.put("trapezoidRatio", json::f32(n.trapezoid_ratio));
+    }
+    if n.trapezoid_round_start {
+        m.put("roundStart", Json::Bool(true));
+    }
+    if n.trapezoid_round_end {
+        m.put("roundEnd", Json::Bool(true));
+    }
+    if n.angle_lock != 0 {
+        m.put("angleLock", json::int(n.angle_lock as i64));
+    }
+    if n.drag_lock != 0 {
+        m.put("dragLock", json::int(n.drag_lock as i64));
+    }
+    if n.pinned {
+        m.put("pinned", Json::Bool(true));
+    }
+    let grad_colour_set = !n.gradient_color.track.is_empty() || n.gradient_color.value != Value::C(Color::WHITE);
+    if n.gradient || n.gradient_reverse || n.gradient_sideways || n.gradient_linear || grad_colour_set {
+        let mut gm = JObj::new();
+        gm.put("on", Json::Bool(n.gradient)).put("reverse", Json::Bool(n.gradient_reverse)).put("sideways", Json::Bool(n.gradient_sideways));
+        if n.gradient_linear {
+            gm.put("linear", Json::Bool(true));
+        }
+        gm.put("color", prop_json(&n.gradient_color, false));
+        m.put("gradient", gm.done());
+    }
+    m.put("rotation", prop_json(&n.rotation, false))
+        .put("length", prop_json(&n.length, false))
+        .put("thickness", prop_json(&n.thickness, false))
+        .put("scale", prop_json(&n.scale, false))
+        .put("color", prop_json(&n.color, false))
+        .put("shown", prop_json(&n.shown, false));
+    if !n.legacy_extras.is_empty() {
+        let mut ex = JObj::new();
+        for (k, v) in &n.legacy_extras {
+            ex.put(k, json::s(v));
+        }
+        m.put("legacy", ex.done());
+    }
+    m.done()
+}
+
+fn layer_json(l: &Layer) -> Json {
+    let mut m = JObj::new();
+    m.put("id", json::s(&l.id))
+        .put("name", json::opt(&l.name))
+        .put("type", json::s(l.kind.type_name()))
+        .put("visible", Json::Bool(l.visible))
+        .put("locked", Json::Bool(l.locked))
+        .put("solo", Json::Bool(l.solo))
+        .put("onion", Json::Bool(l.onion))
+        .put("blend", json::s(l.blend.name()))
+        .put("parent", json::opt(&l.parent));
+    if let Some(pn) = &l.parent_node {
+        m.put("parentNode", json::s(pn));
+    }
+    if !l.parent_node_rotate {
+        m.put("parentNodeRotate", Json::Bool(false));
+    }
+    if l.inherit_effects {
+        m.put("inheritEffects", Json::Bool(true));
+    }
+    if l.parallax != 0.0 {
+        m.put("parallax", json::f32(l.parallax));
+    }
+    m.put("shown", prop_json(&l.shown, false)).put("opacity", prop_json(&l.opacity, false));
+    let tr = &l.transform;
+    let mut t = JObj::new();
+    t.put("x", prop_json(&tr.x, false))
+        .put("y", prop_json(&tr.y, false))
+        .put("rotation", prop_json(&tr.rotation, false))
+        .put("scaleX", prop_json(&tr.scale_x, false))
+        .put("scaleY", prop_json(&tr.scale_y, false))
+        .put("anchorX", prop_json(&tr.anchor_x, false))
+        .put("anchorY", prop_json(&tr.anchor_y, false));
+    m.put("transform", t.done()).put("effects", stack_json(&l.effects));
+    match &l.kind {
+        LayerKind::Figure(f) => {
+            m.put("nodes", Json::List(f.nodes().iter().map(node_json).collect()));
+            let fills = f
+                .polyfills
+                .iter()
+                .map(|pf| {
+                    let mut pm = JObj::new();
+                    pm.put("id", json::s(&pf.id))
+                        .put("anchor", json::s(&pf.anchor))
+                        .put("nodes", Json::List(pf.nodes.iter().map(|x| json::s(x)).collect()))
+                        .put("ownColor", Json::Bool(pf.use_own_color))
+                        .put("color", prop_json(&pf.color, false));
+                    pm.done()
+                })
+                .collect();
+            m.put("polyfills", Json::List(fills));
+        }
+        LayerKind::Sprite(s) => {
+            m.put("asset", json::opt(&s.asset)).put("width", json::f32(s.width)).put("height", json::f32(s.height)).put("tint", prop_json(&s.tint, false));
+            if s.distorted() {
+                m.put("distort", Json::List(s.distort.iter().map(|q| prop_json(q, false)).collect()));
+            }
+        }
+        LayerKind::Text(t) => {
+            m.put("text", json::opt(&t.text)).put("font", json::opt(&t.font)).put("size", json::f32(t.size)).put("color", prop_json(&t.color, false));
+            if t.corner != 0 {
+                m.put("corner", json::int(t.corner as i64));
+            }
+            if t.above_bars {
+                m.put("aboveBars", Json::Bool(true));
+            }
+        }
+        LayerKind::Symbol(s) => {
+            m.put("symbol", json::s(&s.symbol))
+                .put("timeOffset", prop_json(&s.time_offset, false))
+                .put("speed", prop_json(&s.speed, false))
+                .put(
+                    "loop",
+                    json::s(match s.loop_mode {
+                        SymbolLoop::Once => "ONCE",
+                        SymbolLoop::Loop => "LOOP",
+                        SymbolLoop::PingPong => "PING_PONG",
+                    }),
+                )
+                .put("recursionLimit", json::int(s.recursion_limit as i64));
+        }
+        LayerKind::Audio(clips) => {
+            let cl = clips
+                .iter()
+                .map(|c| {
+                    let mut cm = JObj::new();
+                    cm.put("id", json::s(&c.id))
+                        .put("asset", json::opt(&c.asset))
+                        .put("start", json::f64(c.start))
+                        .put("in", json::f64(c.in_))
+                        .put("out", json::f64(c.out))
+                        .put("loop", Json::Bool(c.loop_))
+                        .put("fadeIn", json::f64(c.fade_in))
+                        .put("fadeOut", json::f64(c.fade_out));
+                    if c.pitch != 1.0 {
+                        cm.put("pitch", json::f64(c.pitch));
+                    }
+                    cm.put("volume", prop_json(&c.volume, false)).put("pan", prop_json(&c.pan, false));
+                    cm.done()
+                })
+                .collect();
+            m.put("clips", Json::List(cl));
+        }
+        LayerKind::Camera(c) => {
+            m.put("camX", prop_json(&c.x, false)).put("camY", prop_json(&c.y, false)).put("zoom", prop_json(&c.zoom, false)).put("camRotation", prop_json(&c.rotation, false));
+            if !c.background.track.is_empty() || c.background.value.color().a > 0.0 {
+                m.put("background", prop_json(&c.background, false));
+            }
+            if !c.background2.track.is_empty() || c.background2.value.color().a > 0.0 {
+                m.put("background2", prop_json(&c.background2, false));
+            }
+        }
+        LayerKind::Adjustment => {}
+    }
+    m.done()
+}
+
+fn symbol_json(s: &Symbol) -> Json {
+    let mut m = JObj::new();
+    m.put("id", json::s(&s.id)).put("name", json::opt(&s.name)).put("duration", json::f64(s.duration));
+    m.put("layers", Json::List(s.layers.iter().map(layer_json).collect()));
+    let markers = s
+        .markers
+        .iter()
+        .map(|mk| {
+            let mut mm = JObj::new();
+            mm.put("time", json::f64(mk.time)).put("name", json::opt(&mk.name)).put("color", color_hex(&mk.color));
+            mm.done()
+        })
+        .collect();
+    m.put("markers", Json::List(markers));
+    let scoped = s
+        .scoped_effects
+        .iter()
+        .map(|ss| {
+            let mut sm = JObj::new();
+            sm.put("scope", scope_json(&ss.scope)).put("stack", stack_json(&ss.stack));
+            sm.done()
+        })
+        .collect();
+    m.put("scopedEffects", Json::List(scoped));
+    m.done()
+}
+
+/// project.json for a project (the same text the Java version writes).
+pub fn encode(p: &Project) -> String {
+    let mut m = JObj::new();
+    m.put("format", json::s("barkfart")).put("formatVersion", json::int(FORMAT_VERSION)).put("idCounter", json::int(p.id_counter as i64));
+    let st = &p.settings;
+    let mut s = JObj::new();
+    s.put("fps", json::f32(st.fps)).put("width", json::int(st.width as i64)).put("height", json::int(st.height as i64)).put("background", color_hex(&st.background));
+    if st.letterbox != 0.0 {
+        s.put("letterbox", json::f32(st.letterbox));
+    }
+    m.put("settings", s.done());
+    let v = &p.view;
+    let is_default = v.zoom == 1.0 && v.pan_x == 0.0 && v.pan_y == 0.0 && v.frame == 0 && v.onion_before == 2 && v.onion_after == 1 && !v.onion_in_front;
+    if !is_default {
+        let mut vm = JObj::new();
+        vm.put("zoom", json::f32(v.zoom))
+            .put("panX", json::f32(v.pan_x))
+            .put("panY", json::f32(v.pan_y))
+            .put("frame", json::int(v.frame as i64))
+            .put("onionBefore", json::int(v.onion_before as i64))
+            .put("onionAfter", json::int(v.onion_after as i64));
+        if v.onion_in_front {
+            vm.put("onionInFront", Json::Bool(true));
+        }
+        m.put("view", vm.done());
+    }
+    m.put("rootSymbol", json::s(&p.root_symbol));
+    m.put("library", Json::List(p.library.values().map(symbol_json).collect()));
+    let assets = p
+        .assets
+        .values()
+        .map(|a| {
+            let mut am = JObj::new();
+            am.put("id", json::s(&a.id))
+                .put(
+                    "kind",
+                    json::s(match a.kind {
+                        AssetKind::Image => "IMAGE",
+                        AssetKind::Audio => "AUDIO",
+                        AssetKind::Font => "FONT",
+                    }),
+                )
+                .put("path", json::s(&a.path));
+            am.done()
+        })
+        .collect();
+    m.put("assets", Json::List(assets));
+    let sets = p
+        .node_sets
+        .values()
+        .map(|ns| {
+            let mut nm = JObj::new();
+            nm.put("id", json::s(&ns.id))
+                .put("name", json::opt(&ns.name))
+                .put("members", Json::List(ns.members.iter().map(|(a, b)| Json::List(vec![json::s(a), json::s(b)])).collect()));
+            nm.done()
+        })
+        .collect();
+    m.put("nodeSets", Json::List(sets));
+    json::write(&m.done())
+}
+
+/// A .bark file: project.json plus the asset entries (stored, they are
+/// already compressed), in the Java writer's order.
+pub fn write_bark(p: &Project, assets: &indexmap::IndexMap<String, Vec<u8>>) -> Result<Vec<u8>, FormatError> {
+    use std::io::Write;
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    zip.start_file("project.json", opts).map_err(|e| FormatError(e.to_string()))?;
+    zip.write_all(encode(p).as_bytes()).map_err(|e| FormatError(e.to_string()))?;
+    let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    for a in p.assets.values() {
+        if let Some(b) = assets.get(&a.path) {
+            zip.start_file(a.path.as_str(), stored).map_err(|e| FormatError(e.to_string()))?;
+            zip.write_all(b).map_err(|e| FormatError(e.to_string()))?;
+        }
+    }
+    Ok(zip.finish().map_err(|e| FormatError(e.to_string()))?.into_inner())
+}

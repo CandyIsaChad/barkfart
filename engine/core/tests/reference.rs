@@ -473,3 +473,40 @@ fn compressed_sounds_decode_to_the_tone() {
         assert!((crossings as i32 - 132).abs() <= 3, "{ext}: {crossings} cycles in 0.3 s (440 Hz is 132)");
     }
 }
+
+#[test]
+fn saving_writes_the_same_text_as_the_java_version() {
+    let mut differ = Vec::new();
+    let mut n = 0;
+    let mut files: Vec<std::path::PathBuf> = cases().iter().map(|c| ref_dir().join(c).join("project.json")).collect();
+    for i in 0..6 {
+        files.push(ref_dir().join(format!("audio/audio-{i}.json")));
+    }
+    for f in files {
+        let json = std::fs::read_to_string(&f).unwrap();
+        let p = barkfart_core::codec::decode(&json).unwrap();
+        let back = barkfart_core::codec::encode(&p);
+        n += 1;
+        if back != json {
+            let line = json.lines().zip(back.lines()).position(|(a, b)| a != b).unwrap_or(0);
+            differ.push(format!(
+                "{}: line {}\n  java: {:?}\n  rust: {:?}",
+                f.display(),
+                line + 1,
+                json.lines().nth(line).unwrap_or(""),
+                back.lines().nth(line).unwrap_or("")
+            ));
+        }
+    }
+    assert!(differ.is_empty(), "{} of {n} files differ:\n{}", differ.len(), differ.iter().take(6).cloned().collect::<Vec<_>>().join("\n"));
+}
+
+#[test]
+fn bark_files_round_trip_with_their_assets() {
+    let bytes = std::fs::read(ref_dir().join("sound-demo.bark")).unwrap();
+    let b = barkfart_core::codec::read_bark(&bytes).unwrap();
+    let out = barkfart_core::codec::write_bark(&b.project, &b.assets).unwrap();
+    let again = barkfart_core::codec::read_bark(&out).unwrap();
+    assert_eq!(barkfart_core::codec::encode(&again.project), barkfart_core::codec::encode(&b.project));
+    assert_eq!(again.assets, b.assets);
+}
