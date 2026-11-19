@@ -6,8 +6,8 @@ use barkfart_render::{Renderer, View};
 fn project(l: Layer) -> Project {
     let mut p = Project { root_symbol: "S1".into(), ..Default::default() };
     let mut s = Symbol::new("S1", Some("root"), 1.0);
-    s.layers.push(l);
-    p.library.insert("S1".into(), s);
+    s.layers.push(std::sync::Arc::new(l));
+    p.add_symbol(s);
     p
 }
 

@@ -3,6 +3,7 @@
 
 use indexmap::IndexMap;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Java's `Math.round(float)`: floor(v + 1/2), NaN to 0, clamped to i32.
 pub fn java_round(v: f32) -> i32 {
@@ -1199,7 +1200,8 @@ pub struct Symbol {
     pub id: String,
     pub name: Option<String>,
     pub duration: f64,
-    pub layers: Vec<Layer>,
+    /// Shared until edited (undo snapshots copy only what changes).
+    pub layers: Vec<Arc<Layer>>,
     pub markers: Vec<Marker>,
     pub scoped_effects: Vec<ScopedStack>,
 }
@@ -1210,7 +1212,16 @@ impl Symbol {
     }
 
     pub fn layer(&self, id: &str) -> Option<&Layer> {
-        self.layers.iter().find(|l| l.id == id)
+        self.layers.iter().find(|l| l.id == id).map(|l| &**l)
+    }
+
+    pub fn layer_index(&self, id: &str) -> Option<usize> {
+        self.layers.iter().position(|l| l.id == id)
+    }
+
+    /// A layer to change (copied first if a snapshot shares it).
+    pub fn layer_mut(&mut self, id: &str) -> Option<&mut Layer> {
+        self.layers.iter_mut().find(|l| l.id == id).map(Arc::make_mut)
     }
 }
 
@@ -1274,7 +1285,8 @@ pub const FORMAT_VERSION: i64 = 1;
 pub struct Project {
     pub settings: Settings,
     pub view: View,
-    pub library: IndexMap<String, Symbol>,
+    /// Symbols, shared until edited.
+    pub library: IndexMap<String, Arc<Symbol>>,
     pub root_symbol: String,
     pub assets: IndexMap<String, Asset>,
     pub node_sets: IndexMap<String, NodeSet>,
@@ -1283,7 +1295,45 @@ pub struct Project {
 
 impl Project {
     pub fn root(&self) -> Option<&Symbol> {
-        self.library.get(&self.root_symbol)
+        self.library.get(&self.root_symbol).map(|s| &**s)
+    }
+
+    pub fn symbol(&self, id: &str) -> Option<&Symbol> {
+        self.library.get(id).map(|s| &**s)
+    }
+
+    /// A symbol to change (copied first if a snapshot shares it).
+    pub fn symbol_mut(&mut self, id: &str) -> Option<&mut Symbol> {
+        self.library.get_mut(id).map(Arc::make_mut)
+    }
+
+    pub fn root_mut(&mut self) -> Option<&mut Symbol> {
+        let id = self.root_symbol.clone();
+        self.symbol_mut(&id)
+    }
+
+    /// A layer of a symbol to change.
+    pub fn layer_mut(&mut self, symbol: &str, layer: &str) -> Option<&mut Layer> {
+        self.symbol_mut(symbol)?.layer_mut(layer)
+    }
+
+    pub fn add_symbol(&mut self, s: Symbol) {
+        self.library.insert(s.id.clone(), Arc::new(s));
+    }
+
+    /// A new id (prefix + base-36 counter), skipping ids already in use (Java Project.newId).
+    pub fn new_id(&mut self, prefix: &str) -> String {
+        loop {
+            let id = format!("{prefix}{}", to_base36(self.id_counter.max(0) as u32));
+            self.id_counter += 1;
+            let taken = self.library.contains_key(&id)
+                || self.assets.contains_key(&id)
+                || self.node_sets.contains_key(&id)
+                || self.library.values().any(|s| s.layer(&id).is_some());
+            if !taken {
+                return id;
+            }
+        }
     }
 
     /// Every property in the project by id (for modifiers that link).
@@ -1306,4 +1356,17 @@ impl Project {
         }
         m
     }
+}
+
+fn to_base36(mut v: u32) -> String {
+    if v == 0 {
+        return "0".into();
+    }
+    let mut s = Vec::new();
+    while v > 0 {
+        s.push(b"0123456789abcdefghijklmnopqrstuvwxyz"[(v % 36) as usize]);
+        v /= 36;
+    }
+    s.reverse();
+    String::from_utf8(s).expect("ascii")
 }

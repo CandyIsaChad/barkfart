@@ -59,7 +59,7 @@ pub fn import_file(p: &mut Project, file_name: &str, bytes: &[u8]) -> Result<Imp
         let mut rep = Report::default();
         let l = legacy::to_layer(p, &fig, &name, &mut rep);
         let id = l.id.clone();
-        p.library[&root_id].layers.push(l);
+        p.root_mut().expect("root").layers.push(std::sync::Arc::new(l));
         return Ok(Imported { layer: id, message: format!("Imported figure {name}"), approximations: rep.approximations, assets: Vec::new() });
     }
     if lower.ends_with(".nodemc") {
@@ -71,7 +71,7 @@ pub fn import_file(p: &mut Project, file_name: &str, bytes: &[u8]) -> Result<Imp
         if let LayerKind::Symbol(s) = &mut inst.kind {
             s.loop_mode = SymbolLoop::Loop;
         }
-        p.library[&root_id].layers.push(inst);
+        p.root_mut().expect("root").layers.push(std::sync::Arc::new(inst));
         return Ok(Imported { layer: lid, message: format!("Imported movieclip {name} ({} frames)", mc.frames.len()), approximations: rep.approximations, assets: Vec::new() });
     }
     if lower.ends_with(".stknds") {
@@ -86,7 +86,7 @@ pub fn import_file(p: &mut Project, file_name: &str, bytes: &[u8]) -> Result<Imp
             let mut l = legacy::to_layer(p, &nf.figure, &nf.name, &mut rep);
             l.transform.x.value = Value::F((i as f32 - (n - 1) as f32 / 2.0) * 160.0);
             last = l.id.clone();
-            p.library[&root_id].layers.push(l);
+            p.root_mut().expect("root").layers.push(std::sync::Arc::new(l));
         }
         return Ok(Imported {
             layer: last,
@@ -112,7 +112,7 @@ pub fn import_file(p: &mut Project, file_name: &str, bytes: &[u8]) -> Result<Imp
         if let LayerKind::Audio(clips) = &mut al.kind {
             clips.push(Clip::new(&lid, &cid, Some(aid.clone()), 0.0, 0.0, pcm.seconds()));
         }
-        p.library[&root_id].layers.push(al);
+        p.root_mut().expect("root").layers.push(std::sync::Arc::new(al));
         return Ok(Imported {
             layer: lid,
             message: format!("Added sound {name} ({:.1} s) at 0.00 s", pcm.seconds()),
@@ -149,7 +149,7 @@ pub fn import_file(p: &mut Project, file_name: &str, bytes: &[u8]) -> Result<Imp
             sl.transform.anchor_x.value = Value::F(s.width / 2.0);
             sl.transform.anchor_y.value = Value::F(s.height / 2.0);
         }
-        p.library[&root_id].layers.push(sl);
+        p.root_mut().expect("root").layers.push(std::sync::Arc::new(sl));
         return Ok(Imported { layer: lid, message: format!("Added image {name} ({w} × {h})"), approximations: Vec::new(), assets: vec![(path, bytes)] });
     }
     if lower.ends_with(".stk") {
@@ -189,16 +189,16 @@ fn import_gif(p: &mut Project, root_id: &str, name: &str, gif: &crate::image::Gi
         if at + fr.delay < total - 1e-9 {
             sl.shown.track.put(Key::new(at + fr.delay, Value::B(false), Interp::Hold));
         }
-        sym.layers.push(sl);
+        sym.layers.push(std::sync::Arc::new(sl));
         at += fr.delay;
     }
-    p.library.insert(sid.clone(), sym);
+    p.add_symbol(sym);
     let lid = legacy::new_id(p, "L");
     let mut inst = Layer::symbol(&lid, Some(name), &sid);
     if let LayerKind::Symbol(s) = &mut inst.kind {
         s.loop_mode = SymbolLoop::Loop;
     }
-    p.library[root_id].layers.push(inst);
+    p.symbol_mut(root_id).expect("root").layers.push(std::sync::Arc::new(inst));
     Imported {
         layer: lid,
         message: format!("Added GIF {name} ({} frames, {total:.2} s, as a movieclip)", gif.frames.len()),

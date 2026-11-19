@@ -433,7 +433,7 @@ fn layer(m: &Obj) -> R<Layer> {
 fn symbol(m: &Obj) -> R<Symbol> {
     let mut s = Symbol::new(req(m, "id")?, str_(m, "name")?, d(m, "duration", 1.0)?);
     for o in list(m, "layers")? {
-        s.layers.push(layer(as_map(o, "layer")?)?);
+        s.layers.push(std::sync::Arc::new(layer(as_map(o, "layer")?)?));
     }
     for o in list(m, "markers")? {
         let mm = as_map(o, "marker")?;
@@ -507,7 +507,7 @@ pub fn decode(json: &str) -> R<Project> {
         if p.library.contains_key(&s.id) {
             return err(format!("duplicate symbol {}", s.id));
         }
-        p.library.insert(s.id.clone(), s);
+        p.library.insert(s.id.clone(), std::sync::Arc::new(s));
     }
     for o in list(m, "nodeSets")? {
         let nm = as_map(o, "nodeSet")?;
@@ -912,7 +912,7 @@ fn layer_json(l: &Layer) -> Json {
 fn symbol_json(s: &Symbol) -> Json {
     let mut m = JObj::new();
     m.put("id", json::s(&s.id)).put("name", json::opt(&s.name)).put("duration", json::f64(s.duration));
-    m.put("layers", Json::List(s.layers.iter().map(layer_json).collect()));
+    m.put("layers", Json::List(s.layers.iter().map(|l| layer_json(l)).collect()));
     let markers = s
         .markers
         .iter()
@@ -963,7 +963,7 @@ pub fn encode(p: &Project) -> String {
         m.put("view", vm.done());
     }
     m.put("rootSymbol", json::s(&p.root_symbol));
-    m.put("library", Json::List(p.library.values().map(symbol_json).collect()));
+    m.put("library", Json::List(p.library.values().map(|s| symbol_json(s)).collect()));
     let assets = p
         .assets
         .values()

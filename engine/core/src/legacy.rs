@@ -690,32 +690,9 @@ pub fn to_layer(p: &mut Project, fig: &LegacyFigure, name: &str, report: &mut Re
     layer
 }
 
-/// The project's next id (like Java Project.newId: prefix + base-36 counter, skipping taken ids).
+/// The project's next id (Project::new_id).
 pub fn new_id(p: &mut Project, prefix: &str) -> String {
-    loop {
-        let id = format!("{prefix}{}", to_base36(p.id_counter as u32));
-        p.id_counter += 1;
-        let taken = p.library.contains_key(&id)
-            || p.assets.contains_key(&id)
-            || p.node_sets.contains_key(&id)
-            || p.library.values().any(|s| s.layer(&id).is_some());
-        if !taken {
-            return id;
-        }
-    }
-}
-
-fn to_base36(mut v: u32) -> String {
-    if v == 0 {
-        return "0".into();
-    }
-    let mut s = Vec::new();
-    while v > 0 {
-        s.push(b"0123456789abcdefghijklmnopqrstuvwxyz"[(v % 36) as usize]);
-        v /= 36;
-    }
-    s.reverse();
-    String::from_utf8(s).expect("ascii")
+    p.new_id(prefix)
 }
 
 fn default_value(fd: &Field) -> LV {
@@ -1116,7 +1093,7 @@ pub fn movieclip_to_symbol(p: &mut Project, mc: &LegacyMovieclip, report: &mut R
     let interp = if mc.tweening != 0 { Interp::Linear } else { Interp::Hold };
     let mut layers: IndexMap<i32, Layer> = IndexMap::new();
     // the symbol is not in the library yet: ids made below must not collide with it
-    p.library.insert(sid.clone(), Symbol::new(&sid, None, 0.0));
+    p.add_symbol(Symbol::new(&sid, None, 0.0));
     for fr in &mc.frames {
         for ff in &fr.figures {
             if layers.contains_key(&ff.instance_id()) {
@@ -1171,8 +1148,8 @@ pub fn movieclip_to_symbol(p: &mut Project, mc: &LegacyMovieclip, report: &mut R
             }
         }
     }
-    sym.layers.extend(layers.into_values());
-    p.library.insert(sid.clone(), sym);
+    sym.layers.extend(layers.into_values().map(std::sync::Arc::new));
+    p.add_symbol(sym);
     sid
 }
 
