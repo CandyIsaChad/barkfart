@@ -66,7 +66,7 @@ class _SpikePageState extends State<SpikePage> with SingleTickerProviderStateMix
     _loadDemo();
     _ticker = createTicker((_) => _tick())..start();
     final shot = Platform.environment['BARKFART_SCREENSHOT'];
-    if (shot != null) Timer(const Duration(seconds: 6), () => _saveShot(shot));
+    if (shot != null) Timer(Duration(seconds: int.tryParse(Platform.environment['BARKFART_SHOT_AFTER'] ?? '') ?? 6), () => _saveShot(shot));
   }
 
   Future<void> _loadDemo() async {
@@ -92,7 +92,6 @@ class _SpikePageState extends State<SpikePage> with SingleTickerProviderStateMix
     final scale = (_dpr * _size.longestSide).clamp(1, 1600) / _size.longestSide;
     final w = (_size.width * scale).round(), h = (_size.height * scale).round();
     if (w <= 0 || h <= 0) return;
-    _busy = true;
     final sw = Stopwatch()..start();
     final secs = _clock.elapsedMicroseconds / 1e6;
     final fps = (maxFps ?? info.fps).clamp(1.0, 240.0);
@@ -101,6 +100,7 @@ class _SpikePageState extends State<SpikePage> with SingleTickerProviderStateMix
     if (Platform.environment['BARKFART_TRACE'] != null) debugPrint('tick frame=$frame secs=${secs.toStringAsFixed(3)} size=$_size');
     _lastFrame = frame;
     _lastSize = _size;
+    _busy = true;   // only once we are really drawing (an early return must not leave it set)
     final t = info.duration > 0 ? (frame / fps) % info.duration : 0.0;
     final px = e.render(t, w, h);
     final renderMs = e.lastMicros / 1000.0;
