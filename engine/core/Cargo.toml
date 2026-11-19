@@ -9,6 +9,7 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 indexmap = "2.14.2"
 png = "0.18.1"
 serde_json = { version = "1.0.154", features = ["preserve_order", "arbitrary_precision"] }
+symphonia = { version = "0.5.4", default-features = false, features = ["mp3", "aac", "isomp4", "ogg", "vorbis", "flac", "wav", "pcm", "adpcm"] }
 zip = { version = "9.7.2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]

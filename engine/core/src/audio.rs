@@ -150,6 +150,82 @@ pub fn encode_wav(pcm: &Pcm) -> Vec<u8> {
     b
 }
 
+// ---------------------------------------------------------------- any sound file
+
+/// Decodes a sound asset: WAV exactly (like the Java decoder), otherwise
+/// MP3, AAC/M4A, OGG Vorbis or FLAC (pure Rust, the same on every platform).
+/// More than two channels keep the first two; longer than MAX_SECONDS is cut.
+pub fn decode_sound(bytes: &[u8]) -> Option<Pcm> {
+    if looks_like_wav(bytes) {
+        if let Some(p) = decode_wav(bytes) {
+            return Some(p);
+        }
+    }
+    decode_compressed(bytes)
+}
+
+fn decode_compressed(bytes: &[u8]) -> Option<Pcm> {
+    use symphonia::core::audio::SampleBuffer;
+    use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
+    use symphonia::core::errors::Error;
+    use symphonia::core::formats::FormatOptions;
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::probe::Hint;
+    let mss = MediaSourceStream::new(Box::new(std::io::Cursor::new(bytes.to_vec())), Default::default());
+    let probed = symphonia::default::get_probe().format(&Hint::new(), mss, &FormatOptions::default(), &MetadataOptions::default()).ok()?;
+    let mut format = probed.format;
+    let track = format.tracks().iter().find(|t| t.codec_params.codec != CODEC_TYPE_NULL)?;
+    let track_id = track.id;
+    let mut decoder = symphonia::default::get_codecs().make(&track.codec_params, &DecoderOptions::default()).ok()?;
+    let mut rate = track.codec_params.sample_rate.unwrap_or(0) as i32;
+    let mut channels = 0usize;
+    let mut out: Vec<i16> = Vec::new();
+    let mut buf: Option<SampleBuffer<f32>> = None;
+    loop {
+        let packet = match format.next_packet() {
+            Ok(p) => p,
+            Err(Error::IoError(_)) | Err(Error::ResetRequired) => break,
+            Err(_) => break,
+        };
+        if packet.track_id() != track_id {
+            continue;
+        }
+        let decoded = match decoder.decode(&packet) {
+            Ok(d) => d,
+            Err(Error::DecodeError(_)) => continue, // a damaged packet: skip it
+            Err(_) => break,
+        };
+        let spec = *decoded.spec();
+        if rate <= 0 {
+            rate = spec.rate as i32;
+        }
+        let ch = spec.channels.count();
+        if channels == 0 {
+            channels = ch;
+        }
+        if buf.as_ref().map(|b| b.capacity() < decoded.capacity() * ch).unwrap_or(true) {
+            buf = Some(SampleBuffer::new(decoded.capacity() as u64, spec));
+        }
+        let b = buf.as_mut()?;
+        b.copy_interleaved_ref(decoded);
+        let keep = if channels >= 2 { 2 } else { 1 };
+        for frame in b.samples().chunks_exact(ch.max(1)) {
+            for c in 0..keep {
+                out.push(Pcm::s16(frame[c.min(frame.len() - 1)]));
+            }
+        }
+        if rate > 0 && out.len() / keep >= (rate * MAX_SECONDS) as usize {
+            out.truncate((rate * MAX_SECONDS) as usize * keep);
+            break;
+        }
+    }
+    if channels == 0 || out.is_empty() {
+        return None;
+    }
+    Pcm::new(rate, if channels >= 2 { 2 } else { 1 }, out)
+}
+
 // ---------------------------------------------------------------- plan
 
 /// Volume and pan are sampled this many times per second.
@@ -363,6 +439,14 @@ pub fn bounce(plan: &AudioPlan, from: f64, seconds: f64) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sounds_decode_from_wav_and_junk_is_refused() {
+        let t = tone(440.0, 0.2, 44100, 0.5);
+        assert_eq!(decode_sound(&encode_wav(&t)).unwrap(), t);
+        assert!(decode_sound(b"definitely not audio").is_none());
+        assert!(decode_sound(&[]).is_none());
+    }
 
     #[test]
     fn wav_round_trip_and_garbage() {

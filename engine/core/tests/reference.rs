@@ -453,3 +453,23 @@ fn png_zip_frames_decode_to_the_pixels() {
     assert_eq!((img.w, img.h), (5, 3));
     assert_eq!(img.px, px);
 }
+
+#[test]
+fn compressed_sounds_decode_to_the_tone() {
+    // 0.5 s stereo 440 Hz sine made with ffmpeg (testdata/sounds)
+    for ext in ["mp3", "m4a", "ogg", "flac"] {
+        let b = std::fs::read(ref_dir().join(format!("../sounds/tone440.{ext}"))).unwrap();
+        let p = barkfart_core::audio::decode_sound(&b).unwrap_or_else(|| panic!("{ext} did not decode"));
+        assert_eq!(p.channels, 2, "{ext}");
+        assert!((p.seconds() - 0.5).abs() < 0.06, "{ext}: {} s", p.seconds());
+        // count rising zero crossings of the left channel over the middle 0.3 s
+        let (a, b2) = ((0.1 * p.rate as f64) as usize, (0.4 * p.rate as f64) as usize);
+        let mut crossings = 0;
+        for i in a..b2 {
+            if p.data[i * 2] < 0 && p.data[(i + 1) * 2] >= 0 {
+                crossings += 1;
+            }
+        }
+        assert!((crossings as i32 - 132).abs() <= 3, "{ext}: {crossings} cycles in 0.3 s (440 Hz is 132)");
+    }
+}
