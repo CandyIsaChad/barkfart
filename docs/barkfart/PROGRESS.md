@@ -1,6 +1,14 @@
 # Progress
 
 ## Decisions
+- 2026-11-19: Stack change (user's call, advisor reviewed): Rust engine +
+  Flutter interface, replacing Java/LibGDX/MobiVM. Reasons: Android, iOS,
+  desktop and web from one codebase for an audience mostly on cheap Android
+  phones; an After Effects style layered workflow (effects built from many
+  layers, controllers exposing properties, saved to a library) needs a fast
+  core without GC pauses; LibGDX's UI and MobiVM were the weak points. The
+  Java version is frozen at tag `java-reference` and is the reference until
+  the Rust port matches it (PORT.md). Sandboxed Lua scripting later (Luau).
 - 2026-11-17: Order changed to core-first (user asked; advisor's plan):
   1 lock the save format, 2 renderer foundation (per-vertex colour,
   textures, offscreen buffers), 3 shapes/gradients/curves/node options
