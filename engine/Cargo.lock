@@ -49,6 +49,14 @@ name = "barkfart-core"
 version = "0.1.0"
 
 [[package]]
+name = "barkfart-ffi"
+version = "0.1.0"
+dependencies = [
+ "barkfart-core",
+ "barkfart-render",
+]
+
+[[package]]
 name = "barkfart-render"
 version = "0.1.0"
 dependencies = [

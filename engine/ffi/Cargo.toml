@@ -1,0 +1,12 @@
+[package]
+name = "barkfart-ffi"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+barkfart-core = { version = "0.1.0", path = "../core" }
+barkfart-render = { version = "0.1.0", path = "../render" }
+
+[lib]
+crate-type = ["cdylib", "staticlib"]

@@ -19,7 +19,18 @@ pub struct AdapterReport {
     pub driver: String,
 }
 
+/// Render targets and readback buffer for one size, kept between frames.
+struct Targets {
+    w: u32,
+    h: u32,
+    msaa: wgpu::TextureView,
+    resolved: wgpu::Texture,
+    readback: wgpu::Buffer,
+    padded: u32,
+}
+
 pub struct Renderer {
+    targets: std::sync::Mutex<Option<Targets>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
@@ -137,6 +148,7 @@ impl Renderer {
             cache: None,
         });
         Ok(Renderer {
+            targets: std::sync::Mutex::new(None),
             device,
             queue,
             pipeline,
@@ -153,20 +165,36 @@ impl Renderer {
     /// straight RGBA8, rows top-down.
     pub fn render(&self, list: &DrawList, w: u32, h: u32, view: View) -> Vec<u8> {
         let size = wgpu::Extent3d { width: w.max(1), height: h.max(1), depth_or_array_layers: 1 };
-        let target = |samples: u32, usage: wgpu::TextureUsages| {
-            self.device.create_texture(&wgpu::TextureDescriptor {
-                label: None,
-                size,
-                mip_level_count: 1,
-                sample_count: samples,
-                dimension: wgpu::TextureDimension::D2,
-                format: FORMAT,
-                usage,
-                view_formats: &[],
-            })
-        };
-        let msaa = target(SAMPLES, wgpu::TextureUsages::RENDER_ATTACHMENT);
-        let resolved = target(1, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
+        let mut cache = self.targets.lock().unwrap_or_else(|e| e.into_inner());
+        if !matches!(&*cache, Some(t) if t.w == size.width && t.h == size.height) {
+            let target = |samples: u32, usage: wgpu::TextureUsages| {
+                self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: None,
+                    size,
+                    mip_level_count: 1,
+                    sample_count: samples,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: FORMAT,
+                    usage,
+                    view_formats: &[],
+                })
+            };
+            let padded = (size.width * 4).div_ceil(256) * 256;
+            *cache = Some(Targets {
+                w: size.width,
+                h: size.height,
+                msaa: target(SAMPLES, wgpu::TextureUsages::RENDER_ATTACHMENT).create_view(&Default::default()),
+                resolved: target(1, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC),
+                readback: self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("readback"),
+                    size: (padded * size.height) as u64,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                }),
+                padded,
+            });
+        }
+        let tg = cache.as_ref().expect("targets");
         let sx = 2.0 / (view.x1 - view.x0);
         let sy = 2.0 / (view.y1 - view.y0);
         let uniform: [f32; 4] = [sx, sy, -1.0 - view.x0 * sx, -1.0 - view.y0 * sy];
@@ -194,24 +222,18 @@ impl Renderer {
             contents: &bytes,
             usage: wgpu::BufferUsages::VERTEX,
         });
-        // rows padded to 256 bytes for the copy
-        let row = w.max(1) * 4;
-        let padded = row.div_ceil(256) * 256;
-        let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("readback"),
-            size: (padded * size.height) as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let row = size.width * 4;
+        let padded = tg.padded;
+        let readback = &tg.readback;
         let bg = view.background;
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
-            let mv = msaa.create_view(&Default::default());
-            let rv = resolved.create_view(&Default::default());
+            let mv = &tg.msaa;
+            let rv = tg.resolved.create_view(&Default::default());
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("frame"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &mv,
+                    view: mv,
                     depth_slice: None,
                     resolve_target: Some(&rv),
                     ops: wgpu::Operations {
@@ -237,9 +259,9 @@ impl Renderer {
             }
         }
         enc.copy_texture_to_buffer(
-            resolved.as_image_copy(),
+            tg.resolved.as_image_copy(),
             wgpu::TexelCopyBufferInfo {
-                buffer: &readback,
+                buffer: readback,
                 layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded), rows_per_image: None },
             },
             size,

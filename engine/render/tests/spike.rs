@@ -49,3 +49,18 @@ fn the_gl_backend_renders_too() {
     let o = ((75 * 300 + 150) * 4) as usize;
     assert_eq!(&px[o..o + 4], &[0, 0, 0, 255]);
 }
+
+#[test]
+#[ignore] // timing only: cargo test --release -p barkfart-render -- --ignored --nocapture
+fn timing() {
+    let r = Renderer::headless_default().unwrap();
+    let view = View { x0: -150.0, y0: -150.0, x1: 150.0, y1: 150.0, background: [1.0, 1.0, 1.0, 1.0] };
+    for (w, h) in [(1280u32, 685u32), (2048, 1536)] {
+        r.render(&demo_figure(0.0), w, h, view);
+        let t = std::time::Instant::now();
+        for i in 0..20 {
+            r.render(&demo_figure(i as f32 / 20.0), w, h, view);
+        }
+        eprintln!("{w}x{h}: {:.1} ms per frame", t.elapsed().as_secs_f64() * 1000.0 / 20.0);
+    }
+}
