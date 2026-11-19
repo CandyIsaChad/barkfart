@@ -129,6 +129,61 @@ class RefDumpTest {
             index.add(entry);
         }
         write(new File(out, "index.json"), Json.write(index));
+        // export: a GIF of generated frames (gradients, translucency, dithering) at 24 fps
+        {
+            int gw = 37, gh = 23;
+            java.io.ByteArrayOutputStream gb = new java.io.ByteArrayOutputStream();
+            app.barkfart.export.Gif g = new app.barkfart.export.Gif(gb, gw, gh, 24, true);
+            for (int f = 0; f < 7; f++) {
+                byte[] px = new byte[gw * gh * 4];
+                for (int y = 0; y < gh; y++) for (int x = 0; x < gw; x++) {
+                    int o = (y * gw + x) * 4;
+                    px[o] = (byte) (x * 7 + f * 20);
+                    px[o + 1] = (byte) (y * 11);
+                    px[o + 2] = (byte) ((x * y + f * 31) & 0xff);
+                    px[o + 3] = (byte) (((x + y + f) % 5 == 0) ? 60 : 255);
+                }
+                g.frame(px);
+            }
+            g.finish();
+            java.io.FileOutputStream fo = new java.io.FileOutputStream(new File(out, "export.gif"));
+            fo.write(gb.toByteArray());
+            fo.close();
+        }
+        // a playable demo with sound: the stickman stepping, a tone on each beat, an image
+        {
+            Project p = Fixtures.empty();
+            p.root().duration = 2;
+            Layer.FigureLayer walker = Fixtures.stickman(p, "man");
+            walker.transform.x.track().put(new Key(0, -150f, Interp.LINEAR));
+            walker.transform.x.track().put(new Key(2, 150f, Interp.LINEAR));
+            p.root().layers.add(walker);
+            p.assets.put("beep", new app.barkfart.model.Asset("beep", app.barkfart.model.Asset.Kind.AUDIO, "assets/beep.wav"));
+            p.assetData.put("beep", app.barkfart.audio.Wav.encode(app.barkfart.audio.Mixer.tone(660, 0.15, 44100, 0.4f)));
+            Layer.AudioLayer al = new Layer.AudioLayer(p.newId("L"), "beats");
+            for (int b = 0; b < 4; b++) al.clips.add(new app.barkfart.model.Clip(al.id, "c" + b, "beep", b * 0.5, 0, 0));
+            p.root().layers.add(al);
+            byte[] img = new byte[8 * 8 * 4];
+            for (int k = 0; k < 64; k++) {
+                img[k * 4] = (byte) ((k % 2 == (k / 8) % 2) ? 255 : 30);
+                img[k * 4 + 1] = (byte) 120;
+                img[k * 4 + 2] = (byte) 200;
+                img[k * 4 + 3] = (byte) 255;
+            }
+            p.assets.put("check", new app.barkfart.model.Asset("check", app.barkfart.model.Asset.Kind.IMAGE, "assets/check.png"));
+            p.assetData.put("check", app.barkfart.export.Png.encode(img, 8, 8, true));
+            Layer.SpriteLayer sp = new Layer.SpriteLayer(p.newId("L"), "check");
+            sp.asset = "check";
+            sp.width = 80;
+            sp.height = 80;
+            sp.transform.x.setValue(-300f);
+            sp.transform.y.setValue(100f);
+            p.root().layers.add(0, sp);
+            p.invalidateIndex();
+            FileOutputStream bo = new FileOutputStream(new File(out, "sound-demo.bark"));
+            app.barkfart.io.BarkFile.write(p, bo);
+            bo.close();
+        }
         // audio: projects with test tones, their plans' soundtrack bounced to WAV
         final app.barkfart.audio.Pcm mono = app.barkfart.audio.Mixer.tone(440, 1.0, 22050, 0.5f);
         final app.barkfart.audio.Pcm high = app.barkfart.audio.Mixer.tone(660, 0.6, 44100, 0.4f);
