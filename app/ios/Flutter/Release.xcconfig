@@ -3,6 +3,6 @@
 // The Rust engine (engine/ffi), built by cargo for the device as a static
 // library and loaded whole so dart:ffi finds its functions in the app.
 BARKFART_ENGINE_LIB = $(PROJECT_DIR)/../../engine/target/aarch64-apple-ios/release/libbarkfart_ffi.a
-OTHER_LDFLAGS[sdk=iphoneos*] = $(inherited) -force_load $(BARKFART_ENGINE_LIB) -framework Metal -framework QuartzCore -framework CoreGraphics -framework Foundation
+OTHER_LDFLAGS[sdk=iphoneos*] = $(inherited) -Wl,-export_dynamic -force_load $(BARKFART_ENGINE_LIB) -framework Metal -framework QuartzCore -framework CoreGraphics -framework Foundation
 // keep the engine's exported functions visible to dlsym
 STRIP_STYLE = non-global

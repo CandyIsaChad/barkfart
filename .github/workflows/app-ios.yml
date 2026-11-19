@@ -24,6 +24,12 @@ jobs:
       - name: Build the app
         working-directory: app
         run: flutter build ios --release --no-codesign
+      - name: Check the engine is in the app
+        working-directory: app
+        run: |
+          xcodebuild -showBuildSettings -project ios/Runner.xcodeproj -target Runner -configuration Release -sdk iphoneos 2>/dev/null | grep -E " (OTHER_LDFLAGS|STRIP_STYLE|DEAD_CODE_STRIPPING) =" || true
+          ls -l build/ios/iphoneos/Runner.app/Runner
+          nm -gU build/ios/iphoneos/Runner.app/Runner | grep -E "_bf_(engine|render)" || { echo "engine functions missing from the app binary"; exit 1; }
       - name: Package unsigned IPA
         working-directory: app
         run: |
