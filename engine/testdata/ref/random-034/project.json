@@ -1,0 +1,224 @@
+{
+  "format": "barkfart",
+  "formatVersion": 1,
+  "idCounter": 6,
+  "settings": {
+    "fps": 60.0,
+    "width": 320,
+    "height": 240,
+    "background": "#ffffffff"
+  },
+  "rootSymbol": "S1",
+  "library": [
+    {
+      "id": "S1",
+      "name": "Root",
+      "duration": 2.0,
+      "layers": [
+        {
+          "id": "L4",
+          "name": "cam",
+          "type": "CAMERA",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0,
+              "k": [[0.375, 49.559708, "H"], [0.7916666666666666, -92.749725, "L"], [1.0, -66.69875, "L"]]
+            },
+            "y": {
+              "v": 0.0,
+              "k": [[0.9583333333333334, 53.688217, "B", 0.34, 1.56, 0.64, 1.0]]
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 0.5164981
+            },
+            "anchorX": {
+              "v": -6.3315554
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "camX": {
+            "v": 0.0,
+            "k": [[0.7083333333333334, 38.77963, "L"], [1.1666666666666667, -44.634995, "B", 0.36, 0.0, 0.66, -0.56]]
+          },
+          "camY": {
+            "v": 0.0,
+            "k": [[1.875, -61.888912, "L"]],
+            "m": [
+              {
+                "type": "wiggle",
+                "frequency": 4.0625973,
+                "amplitude": 34.439064,
+                "seed": 982,
+                "octaves": 2,
+                "enabled": true
+              }
+            ]
+          },
+          "zoom": {
+            "v": 1.0
+          },
+          "camRotation": {
+            "v": 0.0,
+            "k": [[0.9583333333333334, -19.877003, "H"], [1.375, -27.68802, "H"], [1.9583333333333333, -30.90284, "L"]]
+          },
+          "background": {
+            "v": "#51f4d9ff"
+          },
+          "background2": {
+            "v": "#626fe3ff"
+          }
+        },
+        {
+          "id": "L5",
+          "name": "sp",
+          "type": "SPRITE",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": "L4",
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0
+            },
+            "y": {
+              "v": 0.0,
+              "k": [[1.2083333333333333, -27.91715, "B", 0.34, 1.56, 0.64, 1.0]]
+            },
+            "rotation": {
+              "v": 0.0,
+              "k": [[0.75, 15.936657, "H"], [1.25, -34.10951, "L"]]
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 0.67193085
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "asset": "img0",
+          "width": 93.0,
+          "height": 53.0,
+          "tint": {
+            "v": "#4560f3ff"
+          }
+        }
+      ],
+      "markers": [],
+      "scopedEffects": []
+    },
+    {
+      "id": "S2",
+      "name": "s0",
+      "duration": 2.4410149187801204,
+      "layers": [
+        {
+          "id": "L3",
+          "name": "t",
+          "type": "TEXT",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0,
+              "k": [[0.875, -64.90173, "L"], [1.25, -1.845043, "B", 0.34, 1.56, 0.64, 1.0], [1.8333333333333333, -0.9088336, "B", 0.0, 0.0, 1.0, 1.0]],
+              "m": [
+                {
+                  "type": "sine",
+                  "frequency": 0.75893116,
+                  "amplitude": 4.24539,
+                  "phase": 0.796497,
+                  "enabled": true
+                }
+              ]
+            },
+            "y": {
+              "v": 0.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.3112628
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": -30.421398
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "text": "Hi there",
+          "font": null,
+          "size": 33.0,
+          "color": {
+            "v": "#a5d78bff"
+          },
+          "corner": 2
+        }
+      ],
+      "markers": [],
+      "scopedEffects": []
+    }
+  ],
+  "assets": [],
+  "nodeSets": []
+}

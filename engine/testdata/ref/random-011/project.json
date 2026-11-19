@@ -1,0 +1,123 @@
+{
+  "format": "barkfart",
+  "formatVersion": 1,
+  "idCounter": 4,
+  "settings": {
+    "fps": 30.0,
+    "width": 480,
+    "height": 480,
+    "background": "#ffffffff"
+  },
+  "rootSymbol": "S1",
+  "library": [
+    {
+      "id": "S1",
+      "name": "Root",
+      "duration": 2.0,
+      "layers": [
+        {
+          "id": "L2",
+          "name": "sp",
+          "type": "SPRITE",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0,
+              "k": [[0.375, -56.358055, "B", 0.42, 0.0, 0.58, 1.0], [1.8333333333333333, 110.84203, "L"]]
+            },
+            "y": {
+              "v": 0.0,
+              "k": [[0.8333333333333334, -9.485507, "L"]]
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "asset": "img0",
+          "width": 65.0,
+          "height": 104.0,
+          "tint": {
+            "v": "#431c68ff"
+          }
+        },
+        {
+          "id": "L3",
+          "name": "adj",
+          "type": "ADJUSTMENT",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0,
+            "k": [[0.3333333333333333, 0.26821342, "L"], [0.625, 0.3545485, "B", 0.36, 0.0, 0.66, -0.56], [1.5833333333333333, 0.8747566, "L"]]
+          },
+          "transform": {
+            "x": {
+              "v": 0.0,
+              "k": [[0.3333333333333333, -62.79441, "H"], [0.5, -65.5394, "B", 0.0, 0.0, 1.0, 1.0, "BOUNCE_OUT"], [1.4583333333333333, -94.42332, "H"]]
+            },
+            "y": {
+              "v": 0.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          }
+        }
+      ],
+      "markers": [],
+      "scopedEffects": []
+    }
+  ],
+  "assets": [],
+  "nodeSets": []
+}

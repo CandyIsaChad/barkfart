@@ -1,0 +1,814 @@
+{
+  "format": "barkfart",
+  "formatVersion": 1,
+  "idCounter": 6,
+  "settings": {
+    "fps": 24.0,
+    "width": 320,
+    "height": 240,
+    "background": "#ffffffff"
+  },
+  "rootSymbol": "S1",
+  "library": [
+    {
+      "id": "S1",
+      "name": "Root",
+      "duration": 2.0,
+      "layers": [
+        {
+          "id": "L2",
+          "name": "m88",
+          "type": "FIGURE",
+          "visible": false,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0,
+              "k": [[0.4166666666666667, -19.486702, "L"], [0.5833333333333334, 32.28127, "H"], [1.125, -49.921394, "L"]]
+            },
+            "y": {
+              "v": 0.0,
+              "k": [[0.08333333333333333, -15.947564, "B", 0.0, 0.0, 1.0, 1.0], [0.25, -26.795874, "L"], [1.1666666666666667, -29.474733, "B", 0.34, 1.56, 0.64, 1.0]]
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": -1.0
+            },
+            "anchorX": {
+              "v": -22.648764
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "nodes": [
+            {
+              "id": "hip",
+              "parent": null,
+              "shape": "NONE",
+              "draw": 0,
+              "rotation": {
+                "v": 0.0
+              },
+              "length": {
+                "v": 0.0
+              },
+              "thickness": {
+                "v": 10.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "torso",
+              "parent": "hip",
+              "shape": "TRAPEZOID",
+              "draw": 1,
+              "roundEnd": true,
+              "rotation": {
+                "v": 90.0
+              },
+              "length": {
+                "v": 60.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "head",
+              "parent": "torso",
+              "shape": "CIRCLE",
+              "draw": 2,
+              "static": true,
+              "rotation": {
+                "v": 0.0,
+                "k": [[0.125, 57.09206, "L"], [0.25, -222.64865, "L"], [0.6666666666666666, -115.52005, "B", 0.0, 0.0, 1.0, 1.0]]
+              },
+              "length": {
+                "v": 50.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff",
+                "k": [[1.0, "#f77cd5ff", "L"], [1.9166666666666667, "#9b5bd3ff", "L"]]
+              },
+              "shown": {
+                "v": true,
+                "k": [[0.4583333333333333, true, "H"]]
+              }
+            },
+            {
+              "id": "armL1",
+              "parent": "torso",
+              "shape": "TRAPEZOID",
+              "draw": 3,
+              "trapezoidRatio": 0.45769668,
+              "rotation": {
+                "v": -150.0,
+                "k": [[0.7083333333333334, -51.72445, "B", 0.0, 0.0, 1.0, 1.0, "BOUNCE_OUT"], [0.75, 44.313267, "B", 0.0, 0.0, 1.0, 1.0, "BOUNCE_OUT"]]
+              },
+              "length": {
+                "v": 45.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#60ba91ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "armL2",
+              "parent": "armL1",
+              "shape": "LINE",
+              "draw": 4,
+              "rotation": {
+                "v": 20.0
+              },
+              "length": {
+                "v": 45.0,
+                "k": [[0.20833333333333334, 5.835214, "B", 0.0, 0.0, 1.0, 1.0, "BOUNCE_OUT"], [1.0, 37.95623, "H"], [2.0, -65.452286, "B", 0.42, 0.0, 0.58, 1.0]]
+              },
+              "thickness": {
+                "v": 30.60714
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "armR1",
+              "parent": "torso",
+              "shape": "TRAPEZOID",
+              "draw": 5,
+              "upsideDown": true,
+              "rotation": {
+                "v": 150.0
+              },
+              "length": {
+                "v": 45.0,
+                "k": [[1.7916666666666667, -42.683064, "L"]]
+              },
+              "thickness": {
+                "v": 9.880934
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "armR2",
+              "parent": "armR1",
+              "shape": "LINE",
+              "draw": -2,
+              "rightTriangle": 1,
+              "rotation": {
+                "v": -20.0
+              },
+              "length": {
+                "v": 45.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#2391e1c9"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "legL1",
+              "parent": "hip",
+              "shape": "LINE",
+              "draw": 7,
+              "curve": 11.936243,
+              "rotation": {
+                "v": -110.0
+              },
+              "length": {
+                "v": 55.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true,
+                "k": [[0.041666666666666664, false, "H"], [0.5416666666666666, false, "H"], [0.625, true, "H"]]
+              }
+            },
+            {
+              "id": "legL2",
+              "parent": "legL1",
+              "shape": "LINE",
+              "draw": 8,
+              "trapezoidRatio": 0.25508904,
+              "rotation": {
+                "v": 10.0,
+                "k": [[0.5833333333333334, -63.042564, "H"], [0.8333333333333334, -63.888172, "H"], [1.8333333333333333, -159.01936, "H"]]
+              },
+              "length": {
+                "v": 55.0
+              },
+              "thickness": {
+                "v": 17.976217
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "legR1",
+              "parent": "hip",
+              "shape": "LINE",
+              "draw": 9,
+              "trapezoidRatio": 0.67152,
+              "roundStart": true,
+              "rotation": {
+                "v": -70.0
+              },
+              "length": {
+                "v": 55.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "legR2",
+              "parent": "legR1",
+              "shape": "ELLIPSE",
+              "draw": 10,
+              "outline": true,
+              "rotation": {
+                "v": -10.0
+              },
+              "length": {
+                "v": 55.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#9c3d07ff"
+              },
+              "shown": {
+                "v": true
+              }
+            }
+          ],
+          "polyfills": []
+        },
+        {
+          "id": "L3",
+          "name": "m99",
+          "type": "FIGURE",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0,
+              "k": [[0.9166666666666666, 37.679024, "L"], [1.4166666666666667, 14.161271, "H"]]
+            },
+            "y": {
+              "v": 0.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.489717
+            },
+            "anchorX": {
+              "v": 3.2516422
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "nodes": [
+            {
+              "id": "hip",
+              "parent": null,
+              "shape": "NONE",
+              "draw": 0,
+              "rotation": {
+                "v": 0.0
+              },
+              "length": {
+                "v": 0.0
+              },
+              "thickness": {
+                "v": 10.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "torso",
+              "parent": "hip",
+              "shape": "LINE",
+              "draw": 1,
+              "angleLock": 1,
+              "rotation": {
+                "v": 90.0
+              },
+              "length": {
+                "v": 60.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "head",
+              "parent": "torso",
+              "shape": "CIRCLE",
+              "draw": 0,
+              "roundStart": true,
+              "rotation": {
+                "v": 0.0
+              },
+              "length": {
+                "v": 50.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "armL1",
+              "parent": "torso",
+              "shape": "POLYGON",
+              "draw": 3,
+              "static": true,
+              "roundStart": true,
+              "rotation": {
+                "v": -150.0,
+                "k": [[0.08333333333333333, -59.374996, "L"], [1.375, -116.41006, "L"]]
+              },
+              "length": {
+                "v": 45.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#f9bcd7a9"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "armL2",
+              "parent": "armL1",
+              "shape": "ELLIPSE",
+              "draw": 4,
+              "curve": 12.567755,
+              "gradient": {
+                "on": true,
+                "reverse": false,
+                "sideways": true,
+                "color": {
+                  "v": "#0a0e14ff"
+                }
+              },
+              "rotation": {
+                "v": 20.0
+              },
+              "length": {
+                "v": 45.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "armR1",
+              "parent": "torso",
+              "shape": "ELLIPSE",
+              "draw": 5,
+              "upsideDown": true,
+              "rotation": {
+                "v": 150.0
+              },
+              "length": {
+                "v": 45.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.4454131
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true,
+                "k": [[0.08333333333333333, true, "H"], [0.16666666666666666, false, "H"], [0.5833333333333334, false, "H"]]
+              }
+            },
+            {
+              "id": "armR2",
+              "parent": "armR1",
+              "shape": "LINE",
+              "draw": 6,
+              "roundEnd": true,
+              "gradient": {
+                "on": true,
+                "reverse": true,
+                "sideways": false,
+                "color": {
+                  "v": "#9617eeff"
+                }
+              },
+              "rotation": {
+                "v": -20.0
+              },
+              "length": {
+                "v": 45.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#bb9abcff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "legL1",
+              "parent": "hip",
+              "shape": "LINE",
+              "draw": 7,
+              "upsideDown": true,
+              "roundEnd": true,
+              "rotation": {
+                "v": -110.0,
+                "k": [[0.125, 15.970558, "H"], [1.4166666666666667, 83.86351, "L"]]
+              },
+              "length": {
+                "v": 55.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#172fb8ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "legL2",
+              "parent": "legL1",
+              "shape": "LINE",
+              "draw": 8,
+              "rightTriangle": 1,
+              "rotation": {
+                "v": 10.0
+              },
+              "length": {
+                "v": 55.0,
+                "k": [[0.5, 16.652508, "L"], [1.4166666666666667, -3.7300673, "H"]],
+                "m": [
+                  {
+                    "type": "sine",
+                    "frequency": 1.0370872,
+                    "amplitude": 2.2797012,
+                    "phase": 0.21012503,
+                    "enabled": true
+                  }
+                ]
+              },
+              "thickness": {
+                "v": 30.254534
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "legR1",
+              "parent": "hip",
+              "shape": "TRAPEZOID",
+              "draw": 9,
+              "trapezoidRatio": 1.6001095,
+              "roundStart": true,
+              "roundEnd": true,
+              "rotation": {
+                "v": -70.0
+              },
+              "length": {
+                "v": 55.0,
+                "k": [[0.9166666666666666, -15.702365, "B", 0.42, 0.0, 0.58, 1.0]]
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#f2361bff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "legR2",
+              "parent": "legR1",
+              "shape": "LINE",
+              "draw": 10,
+              "rotation": {
+                "v": -10.0
+              },
+              "length": {
+                "v": 55.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 0.7515481
+              },
+              "color": {
+                "v": "#4f3a50ff"
+              },
+              "shown": {
+                "v": true
+              }
+            }
+          ],
+          "polyfills": [
+            {
+              "id": "pf0",
+              "anchor": "torso",
+              "nodes": ["armR2", "legR1", "torso", "hip"],
+              "ownColor": false,
+              "color": {
+                "v": "#b7e945ff"
+              }
+            }
+          ]
+        },
+        {
+          "id": "L4",
+          "name": "adj",
+          "type": "ADJUSTMENT",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "SCREEN",
+          "parent": "L2",
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0,
+              "k": [[0.25, 52.41602, "B", 0.42, 0.0, 0.58, 1.0], [0.6666666666666666, -19.130373, "L"], [1.4166666666666667, -1.3617274, "H"]]
+            },
+            "y": {
+              "v": 0.0,
+              "k": [[0.7916666666666666, -14.819542, "L"], [0.8333333333333334, 30.323013, "B", 0.0, 0.0, 1.0, 1.0, "BOUNCE_OUT"], [1.7916666666666667, 2.7093344, "L"]]
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          }
+        },
+        {
+          "id": "L5",
+          "name": "adj",
+          "type": "ADJUSTMENT",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "SCREEN",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0,
+            "k": [[0.9583333333333334, -0.37084824, "L"], [1.4583333333333333, -0.074848324, "B", 0.0, 0.0, 1.0, 1.0, "BOUNCE_OUT"], [1.5, -0.8767989, "B", 0.0, 0.0, 1.0, 1.0, "ELASTIC_IN"]]
+          },
+          "transform": {
+            "x": {
+              "v": 0.0,
+              "k": [[0.16666666666666666, 41.98752, "H"], [0.8333333333333334, 31.713339, "B", 0.0, 0.0, 1.0, 1.0]]
+            },
+            "y": {
+              "v": 0.0,
+              "k": [[0.8333333333333334, -36.181477, "H"]]
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          }
+        }
+      ],
+      "markers": [],
+      "scopedEffects": []
+    }
+  ],
+  "assets": [],
+  "nodeSets": []
+}

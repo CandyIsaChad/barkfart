@@ -14,6 +14,7 @@ test {
     systemProperty 'barkfart.updateGoldens', System.getProperty('barkfart.updateGoldens', 'false')
     systemProperty 'barkfart.debugIou', System.getProperty('barkfart.debugIou', 'false')
     systemProperty 'barkfart.root', rootProject.projectDir.absolutePath
+    systemProperty 'barkfart.refdump', System.getProperty('barkfart.refdump', '')
     systemProperty 'barkfart.reference', rootProject.file('main/Payload/IOSLauncher.app').absolutePath
     testLogging { events 'passed', 'skipped', 'failed'; exceptionFormat 'full' }
 }

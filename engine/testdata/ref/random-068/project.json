@@ -1,0 +1,299 @@
+{
+  "format": "barkfart",
+  "formatVersion": 1,
+  "idCounter": 8,
+  "settings": {
+    "fps": 60.0,
+    "width": 640,
+    "height": 360,
+    "background": "#ffffffff",
+    "letterbox": 2.39
+  },
+  "rootSymbol": "S1",
+  "library": [
+    {
+      "id": "S1",
+      "name": "Root",
+      "duration": 2.0,
+      "layers": [
+        {
+          "id": "L4",
+          "name": "adj",
+          "type": "ADJUSTMENT",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0
+            },
+            "y": {
+              "v": 0.0,
+              "k": [[0.9583333333333334, -6.0630293, "B", 0.34, 1.56, 0.64, 1.0]]
+            },
+            "rotation": {
+              "v": 0.0,
+              "k": [[0.875, 58.531845, "B", 0.42, 0.0, 0.58, 1.0], [1.4166666666666667, -98.96821, "B", 0.36, 0.0, 0.66, -0.56], [1.5416666666666667, 17.820967, "B", 0.36, 0.0, 0.66, -0.56]]
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          }
+        },
+        {
+          "id": "L5",
+          "name": "sp",
+          "type": "SPRITE",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0,
+              "k": [[0.625, 58.426704, "B", 0.34, 1.56, 0.64, 1.0], [1.0, 2.997364, "L"]]
+            },
+            "y": {
+              "v": 0.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "asset": "img1",
+          "width": 44.0,
+          "height": 39.0,
+          "tint": {
+            "v": "#81aefcff"
+          },
+          "distort": [
+            {
+              "v": 0.0
+            },
+            {
+              "v": 4.313426
+            },
+            {
+              "v": 2.32307
+            },
+            {
+              "v": 0.0
+            },
+            {
+              "v": 4.402975
+            },
+            {
+              "v": -16.80551
+            },
+            {
+              "v": 0.0
+            },
+            {
+              "v": 0.0
+            }
+          ]
+        },
+        {
+          "id": "L6",
+          "name": "adj",
+          "type": "ADJUSTMENT",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true,
+            "k": [[1.9583333333333333, false, "H"]]
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0,
+              "k": [[0.5416666666666666, -31.368975, "L"]]
+            },
+            "y": {
+              "v": 0.0,
+              "k": [[0.0, -36.806984, "H"], [0.75, -8.187997, "L"], [1.3333333333333333, 16.651896, "H"]]
+            },
+            "rotation": {
+              "v": 0.0,
+              "k": [[1.8333333333333333, -71.42445, "H"]]
+            },
+            "scaleX": {
+              "v": 1.1183065
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          }
+        },
+        {
+          "id": "L7",
+          "name": "adj",
+          "type": "ADJUSTMENT",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0,
+              "k": [[0.2916666666666667, 29.327427, "B", 0.0, 0.0, 1.0, 1.0, "BOUNCE_OUT"], [0.5, -125.25677, "B", 0.36, 0.0, 0.66, -0.56]]
+            },
+            "y": {
+              "v": 0.0,
+              "k": [[0.875, 5.3332825, "L"], [1.4166666666666667, 18.662455, "B", 0.0, 0.0, 1.0, 1.0, "ELASTIC_IN"]]
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.1363701
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          }
+        }
+      ],
+      "markers": [],
+      "scopedEffects": []
+    },
+    {
+      "id": "S2",
+      "name": "s0",
+      "duration": 1.4831359944350258,
+      "layers": [
+        {
+          "id": "L3",
+          "name": "adj",
+          "type": "ADJUSTMENT",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0,
+              "k": [[1.375, 17.6554, "H"]]
+            },
+            "y": {
+              "v": 0.0,
+              "k": [[0.9583333333333334, 93.664925, "L"], [1.4583333333333333, 138.2734, "L"], [1.75, 1.5262225, "L"]]
+            },
+            "rotation": {
+              "v": 0.0,
+              "k": [[1.25, 7.6010413, "B", 0.0, 0.0, 1.0, 1.0, "ELASTIC_IN"]]
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 0.6473996
+            },
+            "anchorX": {
+              "v": 17.510193
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          }
+        }
+      ],
+      "markers": [],
+      "scopedEffects": []
+    }
+  ],
+  "assets": [],
+  "nodeSets": []
+}

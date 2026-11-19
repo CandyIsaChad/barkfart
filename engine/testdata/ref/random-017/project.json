@@ -1,0 +1,617 @@
+{
+  "format": "barkfart",
+  "formatVersion": 1,
+  "idCounter": 9,
+  "settings": {
+    "fps": 60.0,
+    "width": 640,
+    "height": 240,
+    "background": "#ffffffff"
+  },
+  "rootSymbol": "S1",
+  "library": [
+    {
+      "id": "S1",
+      "name": "Root",
+      "duration": 2.0,
+      "layers": [
+        {
+          "id": "L7",
+          "name": "sp",
+          "type": "SPRITE",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0,
+              "k": [[0.16666666666666666, -46.366962, "L"]]
+            },
+            "y": {
+              "v": 0.0,
+              "k": [[0.125, -18.035816, "B", 0.0, 0.0, 1.0, 1.0, "ELASTIC_IN"]]
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "asset": "img2",
+          "width": 85.0,
+          "height": 90.0,
+          "tint": {
+            "v": "#b88511ff"
+          },
+          "distort": [
+            {
+              "v": 0.0
+            },
+            {
+              "v": 0.0
+            },
+            {
+              "v": -9.240315
+            },
+            {
+              "v": 0.0
+            },
+            {
+              "v": 0.0
+            },
+            {
+              "v": 0.0
+            },
+            {
+              "v": 39.80389
+            },
+            {
+              "v": 0.0
+            }
+          ]
+        },
+        {
+          "id": "L8",
+          "name": "m39",
+          "type": "FIGURE",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0,
+              "k": [[1.0, -75.55974, "L"]]
+            },
+            "y": {
+              "v": 0.0,
+              "k": [[1.0416666666666667, -35.67725, "H"]]
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": -1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "nodes": [
+            {
+              "id": "hip",
+              "parent": null,
+              "shape": "NONE",
+              "draw": 0,
+              "rotation": {
+                "v": 0.0
+              },
+              "length": {
+                "v": 0.0
+              },
+              "thickness": {
+                "v": 10.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "torso",
+              "parent": "hip",
+              "shape": "LINE",
+              "draw": 1,
+              "static": true,
+              "sides": 3,
+              "rotation": {
+                "v": 90.0
+              },
+              "length": {
+                "v": 60.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "head",
+              "parent": "torso",
+              "shape": "CIRCLE",
+              "draw": 2,
+              "rightTriangle": -1,
+              "sides": 9,
+              "rotation": {
+                "v": 0.0,
+                "k": [[0.3333333333333333, -55.928024, "B", 0.0, 0.0, 1.0, 1.0, "ELASTIC_IN"]]
+              },
+              "length": {
+                "v": 50.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "armL1",
+              "parent": "torso",
+              "shape": "TRIANGLE",
+              "draw": 3,
+              "curve": -26.160471,
+              "outline": true,
+              "trapezoidRatio": 0.113476634,
+              "roundStart": true,
+              "rotation": {
+                "v": -150.0
+              },
+              "length": {
+                "v": 45.0
+              },
+              "thickness": {
+                "v": 21.798695
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#88b5ba06"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "armL2",
+              "parent": "armL1",
+              "shape": "TRAPEZOID",
+              "draw": 4,
+              "curve": -13.756673,
+              "gradient": {
+                "on": true,
+                "reverse": false,
+                "sideways": false,
+                "color": {
+                  "v": "#1d7630ff"
+                }
+              },
+              "rotation": {
+                "v": 20.0
+              },
+              "length": {
+                "v": 45.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#02ca2eff",
+                "k": [[0.4583333333333333, "#478dbd36", "H"], [0.9583333333333334, "#bfdec6ff", "H"], [1.7916666666666667, "#b8f729ff", "B", 0.42, 0.0, 0.58, 1.0]]
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "armR1",
+              "parent": "torso",
+              "shape": "ELLIPSE",
+              "draw": 5,
+              "rotation": {
+                "v": 150.0
+              },
+              "length": {
+                "v": 45.0
+              },
+              "thickness": {
+                "v": 24.815615
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff",
+                "k": [[0.4583333333333333, "#4863aeff", "B", 0.34, 1.56, 0.64, 1.0], [1.9583333333333333, "#771085ff", "B", 0.36, 0.0, 0.66, -0.56]]
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "armR2",
+              "parent": "armR1",
+              "shape": "LINE",
+              "draw": 6,
+              "roundEnd": true,
+              "rotation": {
+                "v": -20.0,
+                "k": [[0.0, 41.416466, "L"], [0.5416666666666666, -44.16356, "L"], [0.8333333333333334, 124.873985, "L"]]
+              },
+              "length": {
+                "v": 45.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "legL1",
+              "parent": "hip",
+              "shape": "POLYGON",
+              "draw": 7,
+              "rightTriangle": -1,
+              "sides": 4,
+              "angleLock": 1,
+              "rotation": {
+                "v": -110.0
+              },
+              "length": {
+                "v": 55.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "legL2",
+              "parent": "legL1",
+              "shape": "LINE",
+              "draw": 8,
+              "static": true,
+              "outline": true,
+              "halfArc": -1,
+              "rotation": {
+                "v": 10.0
+              },
+              "length": {
+                "v": 55.0,
+                "k": [[1.2916666666666667, 20.051577, "B", 0.36, 0.0, 0.66, -0.56]]
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff",
+                "k": [[0.7083333333333334, "#5fb2f0c5", "H"]]
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "legR1",
+              "parent": "hip",
+              "shape": "LINE",
+              "draw": 9,
+              "static": true,
+              "outline": true,
+              "roundEnd": true,
+              "angleLock": 2,
+              "gradient": {
+                "on": true,
+                "reverse": true,
+                "sideways": false,
+                "linear": true,
+                "color": {
+                  "v": "#546a28ff"
+                }
+              },
+              "rotation": {
+                "v": -70.0
+              },
+              "length": {
+                "v": 55.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#72ddb4ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "legR2",
+              "parent": "legR1",
+              "shape": "LINE",
+              "draw": 10,
+              "roundEnd": true,
+              "rotation": {
+                "v": -10.0
+              },
+              "length": {
+                "v": 55.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            }
+          ],
+          "polyfills": []
+        }
+      ],
+      "markers": [],
+      "scopedEffects": []
+    },
+    {
+      "id": "S2",
+      "name": "s0",
+      "duration": 2.269844935355034,
+      "layers": [
+        {
+          "id": "L3",
+          "name": "t",
+          "type": "TEXT",
+          "visible": false,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "SCREEN",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0,
+            "k": [[0.7083333333333334, -0.52520746, "L"], [1.5416666666666667, -1.3298036, "H"]]
+          },
+          "transform": {
+            "x": {
+              "v": 0.0,
+              "m": [
+                {
+                  "type": "wiggle",
+                  "frequency": 0.8622408,
+                  "amplitude": 32.539413,
+                  "seed": 825,
+                  "octaves": 3,
+                  "enabled": true
+                }
+              ]
+            },
+            "y": {
+              "v": 0.0,
+              "k": [[0.20833333333333334, 27.251942, "H"], [0.9583333333333334, 41.698822, "L"], [1.0416666666666667, -33.68812, "B", 0.34, 1.56, 0.64, 1.0]]
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": "FX4",
+            "nodes": [
+              {
+                "id": "FX4",
+                "type": "outline",
+                "enabled": true,
+                "mix": {
+                  "v": 1.0
+                },
+                "params": {
+                  "strength": {
+                    "t": "FLOAT",
+                    "v": 1.1245793
+                  }
+                },
+                "inputs": [],
+                "mask": null
+              }
+            ]
+          },
+          "text": "Hi there",
+          "font": null,
+          "size": 39.0,
+          "color": {
+            "v": "#4bb2076c"
+          },
+          "corner": 2
+        },
+        {
+          "id": "L5",
+          "name": "adj",
+          "type": "ADJUSTMENT",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0,
+            "k": [[1.4166666666666667, -0.6007792, "H"]]
+          },
+          "transform": {
+            "x": {
+              "v": 0.0,
+              "k": [[0.625, 47.20152, "H"], [1.75, 159.99658, "B", 0.36, 0.0, 0.66, -0.56]]
+            },
+            "y": {
+              "v": 0.0
+            },
+            "rotation": {
+              "v": 0.0,
+              "k": [[0.7083333333333334, -17.385763, "L"]]
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": -1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": "FX6",
+            "nodes": [
+              {
+                "id": "FX6",
+                "type": "shadow.drop",
+                "enabled": true,
+                "mix": {
+                  "v": 1.0
+                },
+                "params": {
+                  "strength": {
+                    "t": "FLOAT",
+                    "v": 2.19269
+                  },
+                  "amount": {
+                    "t": "FLOAT",
+                    "v": 3.769362
+                  }
+                },
+                "inputs": [],
+                "mask": null
+              }
+            ]
+          }
+        }
+      ],
+      "markers": [],
+      "scopedEffects": []
+    }
+  ],
+  "assets": [],
+  "nodeSets": []
+}

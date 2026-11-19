@@ -1,0 +1,89 @@
+{
+  "format": "barkfart",
+  "formatVersion": 1,
+  "idCounter": 3,
+  "settings": {
+    "fps": 60.0,
+    "width": 320,
+    "height": 240,
+    "background": "#ffffffff"
+  },
+  "rootSymbol": "S1",
+  "library": [
+    {
+      "id": "S1",
+      "name": "Root",
+      "duration": 2.0,
+      "layers": [
+        {
+          "id": "L2",
+          "name": "cam",
+          "type": "CAMERA",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0
+            },
+            "y": {
+              "v": 0.0,
+              "k": [[0.75, -114.06353, "B", 0.42, 0.0, 0.58, 1.0], [1.4583333333333333, -3.1055224, "H"]]
+            },
+            "rotation": {
+              "v": 0.0,
+              "k": [[0.16666666666666666, 69.36487, "H"], [0.5416666666666666, -48.74982, "L"], [0.625, 19.495394, "B", 0.0, 0.0, 1.0, 1.0, "ELASTIC_IN"]]
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "camX": {
+            "v": 0.0,
+            "k": [[1.75, -6.509706, "B", 0.34, 1.56, 0.64, 1.0]]
+          },
+          "camY": {
+            "v": 0.0,
+            "k": [[1.8333333333333333, -35.433723, "B", 0.0, 0.0, 1.0, 1.0]]
+          },
+          "zoom": {
+            "v": 1.0
+          },
+          "camRotation": {
+            "v": 0.0,
+            "k": [[0.08333333333333333, -13.25983, "L"]]
+          },
+          "background2": {
+            "v": "#a5e96bff"
+          }
+        }
+      ],
+      "markers": [],
+      "scopedEffects": []
+    }
+  ],
+  "assets": [],
+  "nodeSets": []
+}

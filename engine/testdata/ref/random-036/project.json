@@ -1,0 +1,72 @@
+{
+  "format": "barkfart",
+  "formatVersion": 1,
+  "idCounter": 3,
+  "settings": {
+    "fps": 30.0,
+    "width": 640,
+    "height": 480,
+    "background": "#ffffffff"
+  },
+  "rootSymbol": "S1",
+  "library": [
+    {
+      "id": "S1",
+      "name": "Root",
+      "duration": 2.0,
+      "layers": [
+        {
+          "id": "L2",
+          "name": "adj",
+          "type": "ADJUSTMENT",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0,
+            "k": [[0.16666666666666666, -1.0952777, "L"], [0.3333333333333333, -1.9424382, "H"]]
+          },
+          "transform": {
+            "x": {
+              "v": 0.0,
+              "k": [[0.875, -105.93662, "B", 0.0, 0.0, 1.0, 1.0], [1.75, 44.418724, "H"]]
+            },
+            "y": {
+              "v": 0.0,
+              "k": [[1.0, -67.60017, "L"], [1.5416666666666667, -134.41597, "H"]]
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          }
+        }
+      ],
+      "markers": [],
+      "scopedEffects": []
+    }
+  ],
+  "assets": [],
+  "nodeSets": []
+}
