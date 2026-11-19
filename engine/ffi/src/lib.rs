@@ -595,3 +595,85 @@ pub extern "C" fn bf_save_copy(e: *mut Engine, len: *mut usize) -> *const u8 {
         }
     }
 }
+
+/// Draws a project's first frame fitted into w x h, transparent around it.
+fn render_fitted(engine: &Engine, p: &Project, w: u32, h: u32) -> Option<Vec<u8>> {
+    let scene = eval::evaluate_with(p, &p.root_symbol, 0.0, false, false);
+    let list = tess::layered(&scene, Some(&engine.glyphs));
+    let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for b in &list.batches {
+        for v in b.xy.chunks(2) {
+            x0 = x0.min(v[0]);
+            x1 = x1.max(v[0]);
+            y0 = y0.min(v[1]);
+            y1 = y1.max(v[1]);
+        }
+    }
+    if x0 > x1 {
+        return None;
+    }
+    let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+    let k = ((x1 - x0) / w as f32).max((y1 - y0) / h as f32).max(1e-3) * 1.15;
+    let (hw, hh) = (w as f32 * k / 2.0, h as f32 * k / 2.0);
+    let view = View { x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh, background: [0.0, 0.0, 0.0, 0.0] };
+    Some(engine.renderer.render(&list, w, h, view))
+}
+
+/// Draws one built-in figure (barkfart_core::figures) fitted into w x h,
+/// transparent around it, for the figure picker. Returns 0 on success.
+#[no_mangle]
+pub extern "C" fn bf_render_figure(e: *const Engine, kind: *const c_char, w: u32, h: u32, out: *mut u8) -> i32 {
+    if e.is_null() || out.is_null() || w == 0 || h == 0 || w > 2048 || h > 2048 {
+        return 1;
+    }
+    // SAFETY: live handle
+    let engine = unsafe { &*e };
+    let Some(kind) = cstr(kind) else { return 1 };
+    let r = catch_unwind(AssertUnwindSafe(|| barkfart_core::figures::preview_project(&kind).and_then(|p| render_fitted(engine, &p, w, h))));
+    match r {
+        Ok(Some(px)) => {
+            // SAFETY: caller provides w * h * 4 bytes
+            unsafe { std::ptr::copy_nonoverlapping(px.as_ptr(), out, px.len()) };
+            0
+        }
+        _ => 2,
+    }
+}
+
+/// Draws what a Stick Nodes file (.nodes, .nodemc, .stknds) holds, for the
+/// figure picker. Returns 0 on success, 2 when it cannot be read.
+#[no_mangle]
+pub extern "C" fn bf_render_file(e: *const Engine, name: *const c_char, data: *const u8, len: usize, w: u32, h: u32, out: *mut u8) -> i32 {
+    if e.is_null() || out.is_null() || data.is_null() || w == 0 || h == 0 || w > 2048 || h > 2048 {
+        return 1;
+    }
+    // SAFETY: live handle; the caller passes len readable bytes
+    let (engine, bytes) = unsafe { (&*e, std::slice::from_raw_parts(data, len)) };
+    let Some(name) = cstr(name) else { return 1 };
+    let r = catch_unwind(AssertUnwindSafe(|| barkfart_core::figures::preview_file(&name, bytes).and_then(|p| render_fitted(engine, &p, w, h))));
+    match r {
+        Ok(Some(px)) => {
+            // SAFETY: caller provides w * h * 4 bytes
+            unsafe { std::ptr::copy_nonoverlapping(px.as_ptr(), out, px.len()) };
+            0
+        }
+        _ => 2,
+    }
+}
+
+/// Imports a file into the open project (one undo step); returns the editor
+/// state as JSON like bf_cmd (its "message" says why when it failed).
+#[no_mangle]
+pub extern "C" fn bf_import(e: *mut Engine, name: *const c_char, data: *const u8, len: usize) -> *const c_char {
+    if e.is_null() || data.is_null() {
+        return std::ptr::null();
+    }
+    // SAFETY: live handle; the caller passes len readable bytes
+    let (engine, bytes) = unsafe { (&mut *e, std::slice::from_raw_parts(data, len)) };
+    let Some(name) = cstr(name) else { return std::ptr::null() };
+    let Some(s) = engine.session.as_mut() else { return std::ptr::null() };
+    let v = catch_unwind(AssertUnwindSafe(|| s.import(&name, bytes))).unwrap_or_else(|_| serde_json::json!({"error": "internal error"}));
+    engine.answer = serde_json::to_vec(&v).unwrap_or_default();
+    engine.answer.push(0);
+    engine.answer.as_ptr() as *const c_char
+}

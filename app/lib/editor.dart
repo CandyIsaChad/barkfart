@@ -10,6 +10,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 
 import 'engine.dart';
 import 'files.dart';
@@ -551,7 +552,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   List<Widget> _panelList() {
     final back = _Btn('◀ Back', onTap: () => setState(() => _panel = null));
-    if (_panel == 'figures') {
+    if (_panel == 'never') {
       final list = ((_st['builtins'] as List?) ?? const []).cast<Map<String, dynamic>>();
       return [
         back,
@@ -919,9 +920,61 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     ];
   }
 
+  final Map<String, ui.Image> _previews = {};
+
+
+
+  /// "Add a figure": a window over the editor with the user's Stick Nodes
+  /// figures (Barkfart Figures folder) and the built-in ones, with pictures.
   Future<void> _figurePicker() async {
-    setState(() => _panel = 'figures');
+    final e = _engine;
+    if (e == null) return;
+    final entries = <_PickEntry>[];
+    for (final f in await figureFiles()) {
+      final name = f.path.split(Platform.pathSeparator).last;
+      final key = 'file:${f.path}';
+      if (!_previews.containsKey(key)) {
+        final px = e.renderFile(name, await f.readAsBytes(), 160, 160);
+        if (px != null) {
+          final c = Completer<ui.Image>();
+          ui.decodeImageFromPixels(px, 160, 160, ui.PixelFormat.rgba8888, c.complete);
+          _previews[key] = await c.future;
+        }
+      }
+      entries.add(_PickEntry(key, name.replaceAll(RegExp(r'\.(nodes|nodemc|stknds)$', caseSensitive: false), ''), true));
+    }
+    // the stock figures and effects that ship with the app
+    final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+    for (final path in manifest.listAssets().where((a) => a.startsWith('assets/stock/')).toList()..sort()) {
+      final key = 'asset:$path';
+      final name = Uri.decodeComponent(path.split('/').last);
+      if (!_previews.containsKey(key)) {
+        final bytes = (await rootBundle.load(path)).buffer.asUint8List();
+        final px = e.renderFile(name, bytes, 160, 160);
+        if (px != null) {
+          final c = Completer<ui.Image>();
+          ui.decodeImageFromPixels(px, 160, 160, ui.PixelFormat.rgba8888, c.complete);
+          _previews[key] = await c.future;
+        }
+      }
+      entries.add(_PickEntry(key, name.replaceAll(RegExp(r'\.(nodes|nodemc)$'), ''), false, effect: path.contains('/effects/')));
+    }
+    if (!mounted) return;
+    final picked = await showDialog<List<String>>(context: context, builder: (c) => _FigurePicker(entries, _previews));
+    for (final k in picked ?? const <String>[]) {
+      if (k.startsWith('file:')) {
+        final path = k.substring(5);
+        _refresh(e.importFile(path.split(Platform.pathSeparator).last, await File(path).readAsBytes()));
+      } else if (k.startsWith('asset:')) {
+        final path = k.substring(6);
+        _refresh(e.importFile(Uri.decodeComponent(path.split('/').last), (await rootBundle.load(path)).buffer.asUint8List()));
+      } else {
+        _cmd({'op': 'add_figure', 'kind': k});
+      }
+    }
   }
+
+
 
 
   /// A figure is selected: posing and figure tools only (segments live in the figure editor).
@@ -1235,6 +1288,119 @@ class _FileRow extends StatelessWidget {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 13)),
             Text(when, style: const TextStyle(color: cSecondary, fontSize: 11)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+class _PickEntry {
+  final String id, name;
+  final bool mine, effect;
+  const _PickEntry(this.id, this.name, this.mine, {this.effect = false});
+}
+
+class _FigurePicker extends StatefulWidget {
+  final List<_PickEntry> entries;
+  final Map<String, ui.Image> previews;
+  const _FigurePicker(this.entries, this.previews);
+
+  @override
+  State<_FigurePicker> createState() => _FigurePickerState();
+}
+
+class _FigurePickerState extends State<_FigurePicker> {
+  final List<String> _picked = [];
+  String _filter = '';
+
+  Widget _tile(_PickEntry f) {
+    final on = _picked.contains(f.id);
+    final img = widget.previews[f.id];
+    return GestureDetector(
+      onTap: () => setState(() => on ? _picked.remove(f.id) : _picked.add(f.id)),
+      onDoubleTap: () => Navigator.pop(context, [f.id]),
+      child: Container(
+        decoration: BoxDecoration(color: cControl, borderRadius: BorderRadius.circular(6), border: Border.all(color: on ? cAccent : const Color(0x00000000), width: 2)),
+        padding: const EdgeInsets.all(6),
+        child: Column(children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(color: const Color(0xFFF2F2F2), borderRadius: BorderRadius.circular(4)),
+              padding: const EdgeInsets.all(4),
+              child: img == null ? const Center(child: Text('?', style: TextStyle(color: cSecondary))) : RawImage(image: img, fit: BoxFit.contain),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(f.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: on ? cText : cSecondary, fontSize: 12)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final match = widget.entries.where((f) => f.name.toLowerCase().contains(_filter.toLowerCase())).toList();
+    final mine = match.where((f) => f.mine).toList();
+    final figs = match.where((f) => !f.mine && !f.effect).toList(), effects = match.where((f) => f.effect).toList();
+    Widget grid(List<_PickEntry> list) => GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 132, mainAxisSpacing: 8, crossAxisSpacing: 8, childAspectRatio: 0.82),
+          itemCount: list.length,
+          itemBuilder: (c, i) => _tile(list[i]),
+        );
+    const head = TextStyle(color: cText, fontSize: 13, fontWeight: FontWeight.w600);
+    return Dialog(
+      backgroundColor: cPanel,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      child: SizedBox(
+        width: math.min(720, size.width * 0.8),
+        height: math.min(560, size.height * 0.85),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const Text('Add a figure', style: TextStyle(color: cText, fontSize: 17, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 10),
+            TextField(
+              style: const TextStyle(color: cText),
+              decoration: const InputDecoration(hintText: 'Filter', isDense: true, prefixIcon: Icon(Icons.search, size: 18)),
+              onChanged: (v) => setState(() => _filter = v),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: ListView(children: [
+                const Text('Your figures', style: head),
+                const SizedBox(height: 6),
+                if (mine.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 8),
+                    child: Text('Put Stick Nodes figure files (.nodes, .nodemc, .stknds) in the "Barkfart Figures" folder (Files app) and they show up here.', style: TextStyle(color: cSecondary, fontSize: 12)),
+                  )
+                else
+                  grid(mine),
+                const SizedBox(height: 12),
+                const Text('Stick figures', style: head),
+                const SizedBox(height: 6),
+                grid(figs),
+                const SizedBox(height: 12),
+                const Text('Effects', style: head),
+                const SizedBox(height: 6),
+                grid(effects),
+              ]),
+            ),
+            const SizedBox(height: 12),
+            Row(children: [
+              Text(_picked.isEmpty ? 'Tap figures to pick them.' : '${_picked.length} picked', style: const TextStyle(color: cSecondary, fontSize: 12)),
+              const Spacer(),
+              SizedBox(width: 110, child: _Btn('Cancel', onTap: () => Navigator.pop(context))),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 110,
+                child: _Btn(_picked.isEmpty ? 'Add' : 'Add (${_picked.length})', accent: true, enabled: _picked.isNotEmpty, onTap: () => Navigator.pop(context, List<String>.from(_picked))),
+              ),
+            ]),
           ]),
         ),
       ),

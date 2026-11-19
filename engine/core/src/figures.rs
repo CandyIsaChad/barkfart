@@ -109,18 +109,23 @@ pub fn build(kind: &str, layer_id: &str, name: &str) -> Option<Layer> {
             b.line("tail2", "tail1", 20.0, 20.0);
         }
         "bird" => {
+            // a round body made of two halves around the main node
+            b.thick = 30.0;
+            b.seg("chest", "main", Shape::Ellipse, 0.0, 30.0);
+            b.thick = 26.0;
+            b.seg("rump", "main", Shape::Ellipse, 180.0, 28.0);
             b.thick = 9.0;
-            b.seg("body", "main", Shape::Ellipse, 0.0, 60.0);
-            b.circle("head", "body", 30.0, 30.0);
-            b.seg("beak", "head", Shape::Triangle, -20.0, 16.0);
-            b.line("wingL1", "body", 120.0, 38.0);
-            b.line("wingL2", "wingL1", -30.0, 32.0);
-            b.line("wingR1", "body", 100.0, 38.0);
-            b.line("wingR2", "wingR1", -30.0, 32.0);
+            b.circle("head", "chest", 40.0, 26.0);
+            b.seg("beak", "head", Shape::Triangle, -40.0, 14.0);
+            b.thick = 8.0;
+            b.line("wingL1", "main", 130.0, 34.0);
+            b.line("wingL2", "wingL1", 30.0, 28.0);
+            b.line("wingR1", "main", 110.0, 34.0);
+            b.line("wingR2", "wingR1", 30.0, 28.0);
             b.thick = 5.0;
             b.line("legL", "main", -100.0, 26.0);
             b.line("legR", "main", -80.0, 26.0);
-            b.line("tail", "main", 170.0, 26.0);
+            b.line("tail", "rump", 15.0, 24.0);
         }
         "snake" => {
             let mut parent = "main".to_string();
@@ -150,7 +155,8 @@ pub fn build(kind: &str, layer_id: &str, name: &str) -> Option<Layer> {
             b.line("stick", "main", 90.0, 80.0);
         }
         "square" => {
-            let n = b.seg("square", "main", Shape::Polygon, 90.0, 60.0);
+            // a polygon has a corner where its segment points: 45 degrees makes it sit flat
+            let n = b.seg("square", "main", Shape::Polygon, 45.0, 60.0);
             n.polygon_sides = 4;
         }
         _ => return None,
@@ -161,6 +167,24 @@ pub fn build(kind: &str, layer_id: &str, name: &str) -> Option<Layer> {
     let LayerKind::Figure(f) = &mut l.kind else { unreachable!() };
     f.set_nodes(b.nodes).ok()?;
     Some(l)
+}
+
+/// A project holding just one built-in figure (for picker previews).
+pub fn preview_project(kind: &str) -> Option<Project> {
+    let mut p = crate::session::new_project();
+    if kind != "stickman" {
+        let l = build(kind, "L2", "preview")?;
+        p.root_mut()?.layers = vec![std::sync::Arc::new(l)];
+    }
+    Some(p)
+}
+
+/// A project holding just what a Stick Nodes file brings in (picker previews).
+pub fn preview_file(file_name: &str, bytes: &[u8]) -> Option<Project> {
+    let mut p = crate::session::new_project();
+    p.root_mut()?.layers.clear();
+    crate::import::import_file(&mut p, file_name, bytes).ok()?;
+    Some(p)
 }
 
 #[cfg(test)]

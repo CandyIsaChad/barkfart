@@ -717,6 +717,40 @@ impl Session {
         self.state()
     }
 
+    /// Imports a Stick Nodes file (.nodes, .nodemc, .stknds, sounds, images)
+    /// as one undo step; like an added figure it shows from this frame on.
+    pub fn import(&mut self, file_name: &str, bytes: &[u8]) -> J {
+        self.message.clear();
+        if self.dragging() {
+            self.end_gesture(false);
+        }
+        let t = self.time();
+        let made = self.step("Import", |s| {
+            let before: std::collections::HashSet<String> = s.project.root().map(|r| r.layers.iter().map(|l| l.id.clone()).collect()).unwrap_or_default();
+            let got = crate::import::import_file(&mut s.project, file_name, bytes).map_err(|e| crate::edit::EditError(e.to_string()))?;
+            for (path, b) in got.assets {
+                s.assets.insert(path, std::sync::Arc::new(b));
+            }
+            let sym = s.project.root_symbol.clone();
+            let added: Vec<String> = s.project.root().map(|r| r.layers.iter().filter(|l| !before.contains(&l.id)).map(|l| l.id.clone()).collect()).unwrap_or_default();
+            if t > 1e-9 {
+                for id in &added {
+                    show_only_from(s, &sym, id, 0.0, t);
+                }
+            }
+            Ok((got.layer, got.message))
+        });
+        if let Some((layer, msg)) = made {
+            let root = self.project().root().and_then(|s| s.layer(&layer)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
+            self.selected = root.map(|r| (layer, r));
+            self.validate();
+            if !msg.is_empty() {
+                self.message = msg;
+            }
+        }
+        self.state()
+    }
+
     /// Everything the app draws besides the picture.
     pub fn state(&self) -> J {
         let p = self.project();

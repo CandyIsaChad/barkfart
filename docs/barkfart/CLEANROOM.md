@@ -32,3 +32,14 @@ Not allowed
 Golden references for import tests come from the original app's own preview
 images inside its movieclip files (local only), screen captures made by the
 user, and our own renders. Never from running the original's code.
+
+## Decision 2026-11-19: stock figures
+The user decided that the original's bundled stock stickfigures and effect
+movieclips count as stock material and may ship with Barkfart, so the figure
+picker has the figures people expect. They live in app/assets/stock
+(figures: generic stickfigures, props, backgrounds; effects: fire, rain,
+sparks ...). Figures of third-party characters (Naruto, Goku, Vegeta,
+Sasuke, Pikachu, Spider-Man, Iron Man, Batman, Creeper) and the "SSJ"
+auras stay out for trademark reasons; users can import them from their own
+device. Everything else above still holds (no binary, skins, icons, fonts,
+strings or branding).

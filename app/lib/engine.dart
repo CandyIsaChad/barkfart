@@ -34,6 +34,12 @@ typedef _DocNewD = int Function(Pointer<Void>);
 typedef _CmdC = Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>);
 typedef _ViewC = Int32 Function(Pointer<Void>, Double, Uint32, Uint32, Float, Float, Float, Float, Uint32, Pointer<Uint8>, Pointer<Uint32>);
 typedef _ViewD = int Function(Pointer<Void>, double, int, int, double, double, double, double, int, Pointer<Uint8>, Pointer<Uint32>);
+typedef _FigC = Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Uint32, Pointer<Uint8>);
+typedef _FigD = int Function(Pointer<Void>, Pointer<Utf8>, int, int, Pointer<Uint8>);
+typedef _FileC = Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, IntPtr, Uint32, Uint32, Pointer<Uint8>);
+typedef _FileD = int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, int, int, int, Pointer<Uint8>);
+typedef _ImportC = Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, IntPtr);
+typedef _ImportD = Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, int);
 typedef _SaveC = Pointer<Uint8> Function(Pointer<Void>, Pointer<IntPtr>);
 
 DynamicLibrary _open() {
@@ -174,6 +180,43 @@ class Engine {
     calloc.free(len);
     if (p == nullptr) return null;
     return Uint8List.fromList(p.asTypedList(n));
+  }
+
+  /// One built-in figure drawn alone into w x h (transparent around it).
+  Uint8List? renderFigure(String kind, int w, int h) {
+    final out = calloc<Uint8>(w * h * 4);
+    final k = kind.toNativeUtf8();
+    final r = _lib.lookupFunction<_FigC, _FigD>('bf_render_figure')(_handle, k, w, h, out);
+    calloc.free(k);
+    final px = r == 0 ? Uint8List.fromList(out.asTypedList(w * h * 4)) : null;
+    calloc.free(out);
+    return px;
+  }
+
+  /// What a Stick Nodes file holds, drawn into w x h (null when unreadable).
+  Uint8List? renderFile(String name, Uint8List bytes, int w, int h) {
+    final out = calloc<Uint8>(w * h * 4);
+    final data = calloc<Uint8>(bytes.length);
+    data.asTypedList(bytes.length).setAll(0, bytes);
+    final n = name.toNativeUtf8();
+    final r = _lib.lookupFunction<_FileC, _FileD>('bf_render_file')(_handle, n, data, bytes.length, w, h, out);
+    calloc.free(n);
+    calloc.free(data);
+    final px = r == 0 ? Uint8List.fromList(out.asTypedList(w * h * 4)) : null;
+    calloc.free(out);
+    return px;
+  }
+
+  /// Imports a file into the open project (one undo step); the new editor state.
+  Map<String, dynamic>? importFile(String name, Uint8List bytes) {
+    final data = calloc<Uint8>(bytes.length);
+    data.asTypedList(bytes.length).setAll(0, bytes);
+    final n = name.toNativeUtf8();
+    final r = _lib.lookupFunction<_ImportC, _ImportD>('bf_import')(_handle, n, data, bytes.length);
+    calloc.free(n);
+    calloc.free(data);
+    if (r == nullptr) return null;
+    return jsonDecode(r.toDartString()) as Map<String, dynamic>;
   }
 
   /// The project as .bark bytes without marking it saved (recovery copies).

@@ -114,3 +114,20 @@ Future<ProjectFile> named(String name) async {
   final clean = name.replaceAll(RegExp(r'[/\\:*?"<>|]'), '').trim();
   return ProjectFile('${d.path}/${clean.isEmpty ? 'Animation' : clean}.bark');
 }
+
+/// Stick Nodes figure files the user keeps for the figure picker.
+Future<Directory> figuresDir() async {
+  final d = Directory('${(await _docs()).path}/Barkfart Figures');
+  await d.create(recursive: true);
+  return d;
+}
+
+Future<List<File>> figureFiles() async {
+  final d = await figuresDir();
+  final out = d.listSync().whereType<File>().where((f) {
+    final n = f.path.toLowerCase();
+    return n.endsWith('.nodes') || n.endsWith('.nodemc') || n.endsWith('.stknds');
+  }).toList()
+    ..sort((a, b) => a.path.toLowerCase().compareTo(b.path.toLowerCase()));
+  return out;
+}

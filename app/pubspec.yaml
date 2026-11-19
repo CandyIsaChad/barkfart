@@ -23,3 +23,5 @@ flutter:
   assets:
     - assets/demo.bark
     - assets/sound-demo.bark
+    - assets/stock/figures/
+    - assets/stock/effects/

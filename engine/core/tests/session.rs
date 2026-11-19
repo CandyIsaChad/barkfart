@@ -253,3 +253,20 @@ fn a_cut_inside_an_eased_tween() {
     eprintln!("eased cut: largest vertex change {worst}");
     assert!(worst < 1e-3, "frames after a cut in an eased tween moved by {worst}");
 }
+
+#[test]
+fn importing_a_stick_nodes_figure_is_one_step() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata/legacy/synthetic");
+    let file = std::fs::read_dir(dir).unwrap().filter_map(|e| e.ok()).map(|e| e.path()).find(|p| p.extension().is_some_and(|x| x == "nodes")).expect("a synthetic .nodes sample");
+    let mut s = session();
+    let before = codec::encode(s.project());
+    let st = s.import(file.file_name().unwrap().to_str().unwrap(), &std::fs::read(&file).unwrap());
+    assert_eq!(st["figures"].as_array().unwrap().len(), 2, "{}", st["message"]);
+    assert_eq!(st["undo"], "Import");
+    assert!(!st["selected"].is_null());
+    assert!(barkfart_core::figures::preview_file("x.nodes", &std::fs::read(&file).unwrap()).is_some());
+    s.command(&json!({"op": "undo"}));
+    let mut back = codec::decode(&codec::encode(s.project())).unwrap();
+    back.id_counter = codec::decode(&before).unwrap().id_counter;
+    assert_eq!(codec::encode(&back), before);
+}
