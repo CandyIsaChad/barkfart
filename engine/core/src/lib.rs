@@ -11,7 +11,9 @@ pub mod eval;
 pub mod export;
 pub mod fx;
 pub mod image;
+pub mod import;
 pub mod json;
+pub mod legacy;
 pub mod model;
 pub mod tess;
 

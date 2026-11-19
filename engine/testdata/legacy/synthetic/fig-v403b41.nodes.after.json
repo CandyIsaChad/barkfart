@@ -1,0 +1,498 @@
+{
+  "format": "barkfart",
+  "formatVersion": 1,
+  "idCounter": 3,
+  "settings": {
+    "fps": 30.0,
+    "width": 1280,
+    "height": 720,
+    "background": "#ffffffff"
+  },
+  "rootSymbol": "S1",
+  "library": [
+    {
+      "id": "S1",
+      "name": "Root",
+      "duration": 2.0,
+      "layers": [
+        {
+          "id": "L2",
+          "name": "fig-v403b41",
+          "type": "FIGURE",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0
+            },
+            "y": {
+              "v": 0.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "nodes": [
+            {
+              "id": "n0",
+              "parent": null,
+              "shape": "NONE",
+              "draw": 0,
+              "outlineColor": {
+                "v": "#00000000"
+              },
+              "gradient": {
+                "on": false,
+                "reverse": false,
+                "sideways": false,
+                "color": {
+                  "v": "#00000000"
+                }
+              },
+              "rotation": {
+                "v": 0.0
+              },
+              "length": {
+                "v": 0.0
+              },
+              "thickness": {
+                "v": 21.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#202020ff"
+              },
+              "shown": {
+                "v": true
+              },
+              "legacy": {
+                "L.type": "i:-1",
+                "L.drawIndex": "i:0",
+                "L.static": "i:0",
+                "L.stretchy": "i:0",
+                "L.smartStretch": "i:0",
+                "L.noSmartStretch": "i:0",
+                "L.useSegmentColor": "i:0",
+                "L.circleOutline": "i:0",
+                "L.circleHollow": "i:0",
+                "L.gradient": "i:0",
+                "L.reverseGradient": "i:0",
+                "L.gradientMode": "i:0",
+                "L.useSegmentScale": "i:0",
+                "L.localX": "f:0.0",
+                "L.localY": "f:0.0",
+                "L.scale": "f:1.0",
+                "L.defaultLength": "f:0.0",
+                "L.length": "f:0.0",
+                "L.defaultThickness": "i:21",
+                "L.thickness": "i:21",
+                "L.curveRadius": "i:0",
+                "L.curveCircularize": "i:0",
+                "L.curvePolyfillPrecision": "i:0",
+                "L.halfArc": "i:0",
+                "L.rightTriangleDirection": "i:0",
+                "L.triangleUpsideDown": "i:0",
+                "L.trapezoidStartI": "i:0",
+                "L.trapezoidEndI": "i:0",
+                "L.trapezoidTopRatio": "f:0.0",
+                "L.trapezoidRoundedStart": "i:0",
+                "L.trapezoidRoundedEnd": "i:0",
+                "L.polygonVertices": "i:0",
+                "L.defaultLocalAngle": "f:0.0",
+                "L.localAngle": "f:0.0",
+                "L.defaultAngle": "f:0.0",
+                "L.color": "i:-14737633",
+                "L.gradientColor": "i:0",
+                "L.circleOutlineColor": "i:0",
+                "L.angleLocked": "i:0",
+                "L.unused39to50": "f:0.0",
+                "L.dragLocked": "i:0",
+                "L.unused41to45s": "i:0",
+                "L.smartStretchMultiplier": "f:0.0",
+                "L.unused41to45b": "i:0",
+                "fig.version": "i:403",
+                "fig.build": "i:41",
+                "fig.color": "i:-14671840",
+                "fig.scale": "f:1.0",
+                "fig.little": "b:false",
+                "fig.compressed": "b:false",
+                "fig.connections": "s:"
+              }
+            },
+            {
+              "id": "n1",
+              "parent": "n0",
+              "shape": "LINE",
+              "draw": 1,
+              "restLength": 90.0,
+              "outlineColor": {
+                "v": "#00000000"
+              },
+              "gradient": {
+                "on": false,
+                "reverse": true,
+                "sideways": false,
+                "color": {
+                  "v": "#00000000"
+                }
+              },
+              "rotation": {
+                "v": 90.0
+              },
+              "length": {
+                "v": 90.0
+              },
+              "thickness": {
+                "v": 21.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#202020ff"
+              },
+              "shown": {
+                "v": true
+              },
+              "legacy": {
+                "L.type": "i:0",
+                "L.drawIndex": "i:1",
+                "L.static": "i:0",
+                "L.stretchy": "i:0",
+                "L.smartStretch": "i:0",
+                "L.noSmartStretch": "i:0",
+                "L.useSegmentColor": "i:0",
+                "L.circleOutline": "i:0",
+                "L.circleHollow": "i:0",
+                "L.gradient": "i:0",
+                "L.reverseGradient": "i:0",
+                "L.gradientMode": "i:0",
+                "L.useSegmentScale": "i:0",
+                "L.localX": "f:0.0",
+                "L.localY": "f:45.0",
+                "L.scale": "f:1.0",
+                "L.defaultLength": "f:90.0",
+                "L.length": "f:90.0",
+                "L.defaultThickness": "i:21",
+                "L.thickness": "i:21",
+                "L.curveRadius": "i:0",
+                "L.curveCircularize": "i:0",
+                "L.curvePolyfillPrecision": "i:0",
+                "L.halfArc": "i:0",
+                "L.rightTriangleDirection": "i:0",
+                "L.triangleUpsideDown": "i:0",
+                "L.trapezoidStartI": "i:0",
+                "L.trapezoidEndI": "i:0",
+                "L.trapezoidTopRatio": "f:0.0",
+                "L.trapezoidRoundedStart": "i:0",
+                "L.trapezoidRoundedEnd": "i:0",
+                "L.polygonVertices": "i:0",
+                "L.defaultLocalAngle": "f:0.0",
+                "L.localAngle": "f:90.0",
+                "L.defaultAngle": "f:0.0",
+                "L.color": "i:-14737633",
+                "L.gradientColor": "i:0",
+                "L.circleOutlineColor": "i:0",
+                "L.angleLocked": "i:0",
+                "L.unused39to50": "f:0.0",
+                "L.dragLocked": "i:0",
+                "L.unused41to45s": "i:0",
+                "L.smartStretchMultiplier": "f:0.0",
+                "L.unused41to45b": "i:0"
+              }
+            },
+            {
+              "id": "n2",
+              "parent": "n1",
+              "shape": "CIRCLE",
+              "draw": 2,
+              "restLength": 60.0,
+              "outlineColor": {
+                "v": "#00000000"
+              },
+              "gradient": {
+                "on": false,
+                "reverse": false,
+                "sideways": false,
+                "color": {
+                  "v": "#00000000"
+                }
+              },
+              "rotation": {
+                "v": 0.0
+              },
+              "length": {
+                "v": 60.0
+              },
+              "thickness": {
+                "v": 21.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#202020ff"
+              },
+              "shown": {
+                "v": true
+              },
+              "legacy": {
+                "L.type": "i:4",
+                "L.drawIndex": "i:2",
+                "L.static": "i:0",
+                "L.stretchy": "i:0",
+                "L.smartStretch": "i:0",
+                "L.noSmartStretch": "i:0",
+                "L.useSegmentColor": "i:0",
+                "L.circleOutline": "i:0",
+                "L.circleHollow": "i:0",
+                "L.gradient": "i:0",
+                "L.reverseGradient": "i:0",
+                "L.gradientMode": "i:0",
+                "L.useSegmentScale": "i:0",
+                "L.localX": "f:0.0",
+                "L.localY": "f:30.0",
+                "L.scale": "f:1.0",
+                "L.defaultLength": "f:60.0",
+                "L.length": "f:60.0",
+                "L.defaultThickness": "i:21",
+                "L.thickness": "i:21",
+                "L.curveRadius": "i:0",
+                "L.curveCircularize": "i:0",
+                "L.curvePolyfillPrecision": "i:0",
+                "L.halfArc": "i:0",
+                "L.rightTriangleDirection": "i:0",
+                "L.triangleUpsideDown": "i:0",
+                "L.trapezoidStartI": "i:0",
+                "L.trapezoidEndI": "i:0",
+                "L.trapezoidTopRatio": "f:0.0",
+                "L.trapezoidRoundedStart": "i:0",
+                "L.trapezoidRoundedEnd": "i:0",
+                "L.polygonVertices": "i:0",
+                "L.defaultLocalAngle": "f:0.0",
+                "L.localAngle": "f:0.0",
+                "L.defaultAngle": "f:0.0",
+                "L.color": "i:-14737633",
+                "L.gradientColor": "i:0",
+                "L.circleOutlineColor": "i:0",
+                "L.angleLocked": "i:0",
+                "L.unused39to50": "f:0.0",
+                "L.dragLocked": "i:0",
+                "L.unused41to45s": "i:0",
+                "L.smartStretchMultiplier": "f:0.0",
+                "L.unused41to45b": "i:0"
+              }
+            },
+            {
+              "id": "n3",
+              "parent": "n1",
+              "shape": "LINE",
+              "draw": 3,
+              "restLength": 60.0,
+              "outlineColor": {
+                "v": "#00000000"
+              },
+              "gradient": {
+                "on": false,
+                "reverse": true,
+                "sideways": false,
+                "color": {
+                  "v": "#00000000"
+                }
+              },
+              "rotation": {
+                "v": 90.0
+              },
+              "length": {
+                "v": 60.0
+              },
+              "thickness": {
+                "v": 21.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#202020ff"
+              },
+              "shown": {
+                "v": true
+              },
+              "legacy": {
+                "L.type": "i:0",
+                "L.drawIndex": "i:3",
+                "L.static": "i:0",
+                "L.stretchy": "i:0",
+                "L.smartStretch": "i:0",
+                "L.noSmartStretch": "i:0",
+                "L.useSegmentColor": "i:0",
+                "L.circleOutline": "i:0",
+                "L.circleHollow": "i:0",
+                "L.gradient": "i:0",
+                "L.reverseGradient": "i:0",
+                "L.gradientMode": "i:0",
+                "L.useSegmentScale": "i:0",
+                "L.localX": "f:-30.0",
+                "L.localY": "f:0.0",
+                "L.scale": "f:1.0",
+                "L.defaultLength": "f:60.0",
+                "L.length": "f:60.0",
+                "L.defaultThickness": "i:21",
+                "L.thickness": "i:21",
+                "L.curveRadius": "i:0",
+                "L.curveCircularize": "i:0",
+                "L.curvePolyfillPrecision": "i:0",
+                "L.halfArc": "i:0",
+                "L.rightTriangleDirection": "i:0",
+                "L.triangleUpsideDown": "i:0",
+                "L.trapezoidStartI": "i:0",
+                "L.trapezoidEndI": "i:0",
+                "L.trapezoidTopRatio": "f:0.0",
+                "L.trapezoidRoundedStart": "i:0",
+                "L.trapezoidRoundedEnd": "i:0",
+                "L.polygonVertices": "i:0",
+                "L.defaultLocalAngle": "f:0.0",
+                "L.localAngle": "f:90.0",
+                "L.defaultAngle": "f:0.0",
+                "L.color": "i:-14737633",
+                "L.gradientColor": "i:0",
+                "L.circleOutlineColor": "i:0",
+                "L.angleLocked": "i:0",
+                "L.unused39to50": "f:0.0",
+                "L.dragLocked": "i:0",
+                "L.unused41to45s": "i:0",
+                "L.smartStretchMultiplier": "f:0.0",
+                "L.unused41to45b": "i:0"
+              }
+            },
+            {
+              "id": "n4",
+              "parent": "n0",
+              "shape": "SQUARE_LINE",
+              "draw": 4,
+              "restLength": 108.0,
+              "outlineColor": {
+                "v": "#00000000"
+              },
+              "gradient": {
+                "on": false,
+                "reverse": false,
+                "sideways": false,
+                "color": {
+                  "v": "#00000000"
+                }
+              },
+              "rotation": {
+                "v": -158.0
+              },
+              "length": {
+                "v": 108.0
+              },
+              "thickness": {
+                "v": 21.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#202020ff"
+              },
+              "shown": {
+                "v": true
+              },
+              "legacy": {
+                "L.type": "i:1",
+                "L.drawIndex": "i:4",
+                "L.static": "i:0",
+                "L.stretchy": "i:0",
+                "L.smartStretch": "i:0",
+                "L.noSmartStretch": "i:0",
+                "L.useSegmentColor": "i:0",
+                "L.circleOutline": "i:0",
+                "L.circleHollow": "i:0",
+                "L.gradient": "i:0",
+                "L.reverseGradient": "i:0",
+                "L.gradientMode": "i:0",
+                "L.useSegmentScale": "i:0",
+                "L.localX": "f:-50.06793",
+                "L.localY": "f:-20.228756",
+                "L.scale": "f:1.0",
+                "L.defaultLength": "f:108.0",
+                "L.length": "f:108.0",
+                "L.defaultThickness": "i:21",
+                "L.thickness": "i:21",
+                "L.curveRadius": "i:0",
+                "L.curveCircularize": "i:0",
+                "L.curvePolyfillPrecision": "i:0",
+                "L.halfArc": "i:0",
+                "L.rightTriangleDirection": "i:0",
+                "L.triangleUpsideDown": "i:0",
+                "L.trapezoidStartI": "i:0",
+                "L.trapezoidEndI": "i:0",
+                "L.trapezoidTopRatio": "f:0.0",
+                "L.trapezoidRoundedStart": "i:0",
+                "L.trapezoidRoundedEnd": "i:0",
+                "L.polygonVertices": "i:0",
+                "L.defaultLocalAngle": "f:0.0",
+                "L.localAngle": "f:-158.0",
+                "L.defaultAngle": "f:0.0",
+                "L.color": "i:-14737633",
+                "L.gradientColor": "i:0",
+                "L.circleOutlineColor": "i:0",
+                "L.angleLocked": "i:0",
+                "L.unused39to50": "f:0.0",
+                "L.dragLocked": "i:0",
+                "L.unused41to45s": "i:0",
+                "L.smartStretchMultiplier": "f:0.0",
+                "L.unused41to45b": "i:0"
+              }
+            }
+          ],
+          "polyfills": [
+            {
+              "id": "pf0",
+              "anchor": "n1",
+              "nodes": ["n2", "n3"],
+              "ownColor": true,
+              "color": {
+                "v": "#ff0000ff"
+              }
+            }
+          ]
+        }
+      ],
+      "markers": [],
+      "scopedEffects": []
+    }
+  ],
+  "assets": [],
+  "nodeSets": []
+}

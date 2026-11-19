@@ -1,0 +1,24 @@
+{
+  "format": "barkfart",
+  "formatVersion": 1,
+  "idCounter": 2,
+  "settings": {
+    "fps": 30.0,
+    "width": 1280,
+    "height": 720,
+    "background": "#ffffffff"
+  },
+  "rootSymbol": "S1",
+  "library": [
+    {
+      "id": "S1",
+      "name": "Root",
+      "duration": 2.0,
+      "layers": [],
+      "markers": [],
+      "scopedEffects": []
+    }
+  ],
+  "assets": [],
+  "nodeSets": []
+}

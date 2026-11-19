@@ -15,27 +15,99 @@ pub enum Json {
 
 /// Java's spelling of a decimal: shortest digits, ".0" for whole numbers,
 /// scientific ("1.5E-4") below 1e-3 and from 1e7.
-fn java_style(shortest_sci: String, plain: String, v: f64) -> String {
+fn java_style(shortest_sci: String, _plain: String, v: f64) -> String {
+    let (m, e) = shortest_sci.split_once('e').unwrap_or((&shortest_sci, "0"));
+    let neg = m.starts_with('-');
+    let digits: String = m.trim_start_matches('-').chars().filter(|c| *c != '.').collect();
+    let exp: i32 = e.parse().unwrap_or(0);
+    spell(neg, &digits, exp, v)
+}
+
+/// Writes sign, significant digits and decimal exponent (value = d.ddd x 10^exp) the Java way.
+fn spell(neg: bool, digits: &str, exp: i32, v: f64) -> String {
     let a = v.abs();
+    let sign = if neg { "-" } else { "" };
     if a != 0.0 && !(1e-3..1e7).contains(&a) {
-        // shortest_sci like "1.5e-4" or "1e7"
-        let (m, e) = shortest_sci.split_once('e').unwrap_or((&shortest_sci, "0"));
-        let m = if m.contains('.') { m.to_string() } else { format!("{m}.0") };
-        return format!("{m}E{e}");
+        let (head, tail) = digits.split_at(1);
+        let tail = if tail.is_empty() { "0" } else { tail };
+        return format!("{sign}{head}.{tail}E{exp}");
     }
-    if plain.contains('.') || plain.contains("inf") || plain.contains("NaN") {
-        plain
+    if exp >= 0 {
+        let e = exp as usize;
+        let int: String = if digits.len() > e { digits[..e + 1].to_string() } else { format!("{digits}{}", "0".repeat(e + 1 - digits.len())) };
+        let frac = if digits.len() > e + 1 { &digits[e + 1..] } else { "0" };
+        format!("{sign}{int}.{frac}")
     } else {
-        format!("{plain}.0")
+        format!("{sign}0.{}{digits}", "0".repeat((-exp - 1) as usize))
     }
+}
+
+/// Java's Float.toString breaks exact ties between the two shortest
+/// spellings toward the even digit ("-3.5507812" for -3.55078125), where
+/// Rust's shortest form rounds up; both read back to the same float.
+fn float_digits(v: f32) -> (bool, String, i32) {
+    let sci = format!("{v:e}");
+    let (m, e) = sci.split_once('e').unwrap_or((&sci, "0"));
+    let neg = m.starts_with('-');
+    let mut digits: String = m.trim_start_matches('-').chars().filter(|c| *c != '.').collect();
+    let mut exp: i32 = e.parse().unwrap_or(0);
+    let n = digits.len();
+    // one more digit, exactly: is the value a tie at n digits?
+    let longer = format!("{:.*e}", n, (v as f64).abs());
+    let (lm, le) = longer.split_once('e').unwrap_or((&longer, "0"));
+    let ldigits: String = lm.chars().filter(|c| *c != '.').collect();
+    let exact = longer.parse::<f64>().map(|x| x == (v as f64).abs()).unwrap_or(false);
+    if exact && ldigits.ends_with('5') && ldigits.len() == n + 1 {
+        let le: i32 = le.parse().unwrap_or(0);
+        let base = &ldigits[..n];
+        let last = base.as_bytes()[n - 1] - b'0';
+        let candidate = if last % 2 == 0 { base.to_string() } else { increment(base) };
+        let (cd, ce) = if candidate.len() > n { (candidate[..n].to_string(), le + 1) } else { (candidate, le) };
+        // keep it only if it still names the same float
+        let text = format!("{}{}.{}e{}", if neg { "-" } else { "" }, &cd[..1], if cd.len() > 1 { &cd[1..] } else { "0" }, ce);
+        if text.parse::<f32>().map(|x| x == v).unwrap_or(false) {
+            digits = cd;
+            exp = ce;
+        }
+    }
+    (neg, digits, exp)
+}
+
+fn increment(d: &str) -> String {
+    let mut b: Vec<u8> = d.bytes().collect();
+    let mut i = b.len();
+    while i > 0 {
+        i -= 1;
+        if b[i] == b'9' {
+            b[i] = b'0';
+        } else {
+            b[i] += 1;
+            return String::from_utf8(b).expect("digits");
+        }
+    }
+    format!("1{}", String::from_utf8(b).expect("digits"))
+}
+
+/// Java's Float.toString (NaN, Infinity, -0.0 included).
+pub fn java_float(v: f32) -> String {
+    if v.is_nan() {
+        return "NaN".into();
+    }
+    if v.is_infinite() {
+        return if v > 0.0 { "Infinity".into() } else { "-Infinity".into() };
+    }
+    if v == 0.0 && v.is_sign_negative() {
+        return "-0.0".into();
+    }
+    let (neg, digits, exp) = float_digits(v);
+    spell(neg, &digits, exp, v as f64)
 }
 
 pub fn f32(v: f32) -> Json {
     if !v.is_finite() {
         return Json::Num("0".into());
     }
-    let s = if v == 0.0 && v.is_sign_negative() { "-0.0".to_string() } else { java_style(format!("{v:e}"), format!("{v}"), v as f64) };
-    Json::Num(s)
+    Json::Num(java_float(v))
 }
 
 pub fn f64(v: f64) -> Json {
@@ -180,5 +252,9 @@ mod tests {
         assert_eq!(t(f64(2.0)), "2.0");
         assert_eq!(t(f32(f32::NAN)), "0");
         assert_eq!(t(int(24)), "24");
+        assert_eq!(t(f32(-3.550_781_25)), "-3.5507812", "ties go to the even digit");
+        assert_eq!(t(f32(1558.906_25)), "1558.9062");
+        assert_eq!(t(f32(100.0)), "100.0");
+        assert_eq!(t(f32(123456.7)), "123456.7");
     }
 }

@@ -1,0 +1,304 @@
+{
+  "format": "barkfart",
+  "formatVersion": 1,
+  "idCounter": 3,
+  "settings": {
+    "fps": 30.0,
+    "width": 1280,
+    "height": 720,
+    "background": "#ffffffff"
+  },
+  "rootSymbol": "S1",
+  "library": [
+    {
+      "id": "S1",
+      "name": "Root",
+      "duration": 2.0,
+      "layers": [
+        {
+          "id": "L2",
+          "name": "fig-v100b0",
+          "type": "FIGURE",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": 0.0
+            },
+            "y": {
+              "v": 0.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "nodes": [
+            {
+              "id": "n0",
+              "parent": null,
+              "shape": "NONE",
+              "draw": 0,
+              "rotation": {
+                "v": 0.0
+              },
+              "length": {
+                "v": 0.0
+              },
+              "thickness": {
+                "v": 21.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#202020ff"
+              },
+              "shown": {
+                "v": true
+              },
+              "legacy": {
+                "L.type": "i:-1",
+                "L.drawIndex": "i:0",
+                "L.static": "i:0",
+                "L.stretchy": "i:0",
+                "L.useSegmentColor": "i:0",
+                "L.useSegmentScale": "i:0",
+                "L.localX": "f:0.0",
+                "L.localY": "f:0.0",
+                "L.scale": "f:1.0",
+                "L.defaultLength": "f:0.0",
+                "L.length": "f:0.0",
+                "L.defaultThickness": "i:21",
+                "L.thickness": "i:21",
+                "L.localAngle": "f:0.0",
+                "L.color": "i:-14737633",
+                "fig.version": "i:100",
+                "fig.build": "i:0",
+                "fig.color": "i:-14671840",
+                "fig.scale": "f:1.0",
+                "fig.little": "b:true",
+                "fig.compressed": "b:true",
+                "fig.connections": "s:"
+              }
+            },
+            {
+              "id": "n1",
+              "parent": "n0",
+              "shape": "LINE",
+              "draw": 1,
+              "restLength": 90.0,
+              "gradient": {
+                "on": false,
+                "reverse": true,
+                "sideways": false,
+                "color": {
+                  "v": "#ffffffff"
+                }
+              },
+              "rotation": {
+                "v": 90.0
+              },
+              "length": {
+                "v": 90.0
+              },
+              "thickness": {
+                "v": 21.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#202020ff"
+              },
+              "shown": {
+                "v": true
+              },
+              "legacy": {
+                "L.type": "i:0",
+                "L.drawIndex": "i:1",
+                "L.static": "i:0",
+                "L.stretchy": "i:0",
+                "L.useSegmentColor": "i:0",
+                "L.useSegmentScale": "i:0",
+                "L.localX": "f:0.0",
+                "L.localY": "f:45.0",
+                "L.scale": "f:1.0",
+                "L.defaultLength": "f:90.0",
+                "L.length": "f:90.0",
+                "L.defaultThickness": "i:21",
+                "L.thickness": "i:21",
+                "L.localAngle": "f:90.0",
+                "L.color": "i:-14737633"
+              }
+            },
+            {
+              "id": "n2",
+              "parent": "n1",
+              "shape": "CIRCLE",
+              "draw": 2,
+              "restLength": 60.0,
+              "rotation": {
+                "v": 0.0
+              },
+              "length": {
+                "v": 60.0
+              },
+              "thickness": {
+                "v": 21.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#202020ff"
+              },
+              "shown": {
+                "v": true
+              },
+              "legacy": {
+                "L.type": "i:4",
+                "L.drawIndex": "i:2",
+                "L.static": "i:0",
+                "L.stretchy": "i:0",
+                "L.useSegmentColor": "i:0",
+                "L.useSegmentScale": "i:0",
+                "L.localX": "f:0.0",
+                "L.localY": "f:30.0",
+                "L.scale": "f:1.0",
+                "L.defaultLength": "f:60.0",
+                "L.length": "f:60.0",
+                "L.defaultThickness": "i:21",
+                "L.thickness": "i:21",
+                "L.localAngle": "f:0.0",
+                "L.color": "i:-14737633"
+              }
+            },
+            {
+              "id": "n3",
+              "parent": "n1",
+              "shape": "LINE",
+              "draw": 3,
+              "restLength": 60.0,
+              "gradient": {
+                "on": false,
+                "reverse": true,
+                "sideways": false,
+                "color": {
+                  "v": "#ffffffff"
+                }
+              },
+              "rotation": {
+                "v": 90.0
+              },
+              "length": {
+                "v": 60.0
+              },
+              "thickness": {
+                "v": 21.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#202020ff"
+              },
+              "shown": {
+                "v": true
+              },
+              "legacy": {
+                "L.type": "i:0",
+                "L.drawIndex": "i:3",
+                "L.static": "i:0",
+                "L.stretchy": "i:0",
+                "L.useSegmentColor": "i:0",
+                "L.useSegmentScale": "i:0",
+                "L.localX": "f:-30.0",
+                "L.localY": "f:0.0",
+                "L.scale": "f:1.0",
+                "L.defaultLength": "f:60.0",
+                "L.length": "f:60.0",
+                "L.defaultThickness": "i:21",
+                "L.thickness": "i:21",
+                "L.localAngle": "f:90.0",
+                "L.color": "i:-14737633"
+              }
+            },
+            {
+              "id": "n4",
+              "parent": "n0",
+              "shape": "SQUARE_LINE",
+              "draw": 4,
+              "restLength": 108.0,
+              "rotation": {
+                "v": -158.0
+              },
+              "length": {
+                "v": 108.0
+              },
+              "thickness": {
+                "v": 21.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#202020ff"
+              },
+              "shown": {
+                "v": true
+              },
+              "legacy": {
+                "L.type": "i:1",
+                "L.drawIndex": "i:4",
+                "L.static": "i:0",
+                "L.stretchy": "i:0",
+                "L.useSegmentColor": "i:0",
+                "L.useSegmentScale": "i:0",
+                "L.localX": "f:-50.06793",
+                "L.localY": "f:-20.228756",
+                "L.scale": "f:1.0",
+                "L.defaultLength": "f:108.0",
+                "L.length": "f:108.0",
+                "L.defaultThickness": "i:21",
+                "L.thickness": "i:21",
+                "L.localAngle": "f:-158.0",
+                "L.color": "i:-14737633"
+              }
+            }
+          ],
+          "polyfills": []
+        }
+      ],
+      "markers": [],
+      "scopedEffects": []
+    }
+  ],
+  "assets": [],
+  "nodeSets": []
+}
