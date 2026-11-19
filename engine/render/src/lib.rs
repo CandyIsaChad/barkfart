@@ -346,6 +346,50 @@ impl Renderer {
         px
     }
 
+    /// An export frame: drawn `supersample` times larger (capped at 4096 px)
+    /// and box-filtered down, so edges are smooth; straight RGBA8 rows
+    /// top-down, over the view's background or transparent.
+    pub fn render_export(&self, list: &DrawList, w: u32, h: u32, view: View, supersample: u32, transparent: bool) -> Vec<u8> {
+        let (w, h) = (w.max(1), h.max(1));
+        let mut k = supersample.clamp(1, 4);
+        while k > 1 && (w * k > 4096 || h * k > 4096) {
+            k -= 1;
+        }
+        let bg = view.background;
+        let big = self.render_raw(list, w * k, h * k, View { background: [0.0; 4], ..view });
+        let (bw, n) = ((w * k) as usize, (k * k) as u32);
+        let mut out = vec![0u8; (w * h * 4) as usize];
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let mut acc = [0u32; 4];
+                for dy in 0..k as usize {
+                    let row = ((y * k as usize + dy) * bw + x * k as usize) * 4;
+                    for dx in 0..k as usize {
+                        for c in 0..4 {
+                            acc[c] += big[row + dx * 4 + c] as u32;
+                        }
+                    }
+                }
+                let px: [u32; 4] = std::array::from_fn(|c| (acc[c] + n / 2) / n);
+                let o = (y * w as usize + x) * 4;
+                let a = px[3];
+                if transparent {
+                    for c in 0..3 {
+                        out[o + c] = if a > 0 { (px[c] * 255 / a).min(255) as u8 } else { 0 };
+                    }
+                    out[o + 3] = a as u8;
+                } else {
+                    for c in 0..3 {
+                        let b = (bg[c] * 255.0).round() as u32;
+                        out[o + c] = (px[c] + b * (255 - a) / 255).min(255) as u8;
+                    }
+                    out[o + 3] = 255;
+                }
+            }
+        }
+        out
+    }
+
     /// Premultiplied RGBA8 rows top-down (the reference's format; use a
     /// transparent background to compare isolates).
     pub fn render_raw(&self, list: &DrawList, w: u32, h: u32, view: View) -> Vec<u8> {

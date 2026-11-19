@@ -118,3 +118,21 @@ fn timing_spaced() {
         eprintln!("gap {gap} ms: {:.1} ms per frame", total * 1000.0 / 15.0);
     }
 }
+
+#[test]
+fn export_frames_are_supersampled_and_composited() {
+    let Some(r) = renderer(&[wgpu::Backends::PRIMARY, wgpu::Backends::GL]) else { return };
+    let p = kitchen_sink();
+    let d = tess::layered(&eval::evaluate(&p, &p.root_symbol, 0.6), None);
+    let (hw, hh) = (p.settings.width as f32 / 2.0, p.settings.height as f32 / 2.0);
+    let bg = p.settings.background;
+    let view = View { x0: -hw, y0: -hh, x1: hw, y1: hh, background: [bg.r, bg.g, bg.b, bg.a] };
+    let solid = r.render_export(&d, 320, 180, view, 2, false);
+    assert!(solid.chunks_exact(4).all(|p| p[3] == 255), "opaque over the background");
+    assert_eq!(&solid[0..3], &bg.to_rgba8888().to_be_bytes()[0..3]);
+    let clear = r.render_export(&d, 320, 180, view, 2, true);
+    assert_eq!(clear[3], 0, "transparent corner");
+    // smooth edges: some partly covered pixels
+    let partial = clear.chunks_exact(4).filter(|p| p[3] > 10 && p[3] < 245).count();
+    assert!(partial > 50, "anti-aliased edges: {partial}");
+}

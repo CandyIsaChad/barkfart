@@ -53,8 +53,14 @@ Decision and reasons: PROGRESS.md, 2026-11-19.
 - Laptop numbers (Intel HD 5500, 3 GB RAM, swapping): engine 21.5 ms per
   1280x720 layered frame alone, ~50 ms inside the running app (Flutter
   shares the GPU). The fix is texture sharing instead of readback.
-- Next: textures (sprite images from .bark assets, glyph atlas for text),
-  then onion skin, audio, export, legacy import, then the interface.
+- Also done (same checks): textures (PNG/JPEG sprite assets; missing
+  images draw plain like Java) and text (Inter glyph atlas via fontdue);
+  onion skin (ghost isolates match Java); audio (plan, mixer, bounce match
+  the Java soundtrack within one sample step); export writers (GIF identical
+  byte for byte, PNG frames in a ZIP) and supersampled export frames.
+- Next: playback audio output (cpal), export through the C interface and
+  in the app, video (per platform), legacy import (.nodes, .nodemc,
+  .stknds, GIF/WAV import), editing operations, then the interface.
 
 ## Notes from device tests
 - 2026-11-19, iPad: first Barkfart Next IPA works; 2.9 ms per render.
