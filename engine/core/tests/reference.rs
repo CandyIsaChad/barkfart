@@ -413,3 +413,43 @@ fn bounced_soundtracks_match_the_java_mixer() {
         assert_eq!(&want[..44], &got[..44], "audio-{i}: header");
     }
 }
+
+#[test]
+fn gif_bytes_match_the_java_writer() {
+    let (gw, gh) = (37usize, 23usize);
+    let mut g = barkfart_core::export::Gif::new(Vec::new(), gw as u16, gh as u16, 24.0, true).unwrap();
+    for f in 0..7usize {
+        let mut px = vec![0u8; gw * gh * 4];
+        for y in 0..gh {
+            for x in 0..gw {
+                let o = (y * gw + x) * 4;
+                px[o] = (x * 7 + f * 20) as u8;
+                px[o + 1] = (y * 11) as u8;
+                px[o + 2] = ((x * y + f * 31) & 0xff) as u8;
+                px[o + 3] = if (x + y + f) % 5 == 0 { 60 } else { 255 };
+            }
+        }
+        g.frame(&px).unwrap();
+    }
+    let got = g.finish().unwrap();
+    let want = std::fs::read(ref_dir().join("export.gif")).unwrap();
+    assert_eq!(got.len(), want.len());
+    assert!(got == want, "GIF bytes differ from the Java writer");
+}
+
+#[test]
+fn png_zip_frames_decode_to_the_pixels() {
+    let px: Vec<u8> = (0..(5 * 3 * 4)).map(|i| (i * 13 % 256) as u8).collect();
+    let mut z = barkfart_core::export::PngZip::new(std::io::Cursor::new(Vec::new()), 5, 3, true);
+    z.frame(&px).unwrap();
+    z.frame(&px).unwrap();
+    let bytes = z.finish().unwrap().into_inner();
+    let mut a = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    assert_eq!(a.len(), 2);
+    let mut f = a.by_name("frame_0002.png").unwrap();
+    let mut b = Vec::new();
+    std::io::Read::read_to_end(&mut f, &mut b).unwrap();
+    let img = barkfart_core::image::decode(&b).unwrap();
+    assert_eq!((img.w, img.h), (5, 3));
+    assert_eq!(img.px, px);
+}
