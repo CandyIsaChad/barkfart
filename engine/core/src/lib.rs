@@ -6,6 +6,7 @@
 //! crate matches its outputs.
 
 pub mod codec;
+pub mod eval;
 pub mod model;
 pub mod tess;
 
