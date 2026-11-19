@@ -1,0 +1,38 @@
+name: Flutter app IPA (unsigned)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust target
+        run: rustup target add aarch64-apple-ios
+      - name: Engine tests
+        working-directory: engine
+        run: cargo test -p barkfart-core
+      - name: Build the engine for iOS
+        working-directory: engine
+        run: cargo build -p barkfart-ffi --release --target aarch64-apple-ios
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.50.0'
+          channel: stable
+      - name: Build the app
+        working-directory: app
+        run: flutter build ios --release --no-codesign
+      - name: Package unsigned IPA
+        working-directory: app
+        run: |
+          mkdir -p out/Payload
+          cp -R build/ios/iphoneos/Runner.app out/Payload/
+          cd out && zip -qr Barkfart-flutter.ipa Payload
+          ls -l Barkfart-flutter.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Barkfart-flutter-ipa
+          path: app/out/Barkfart-flutter.ipa
+          if-no-files-found: error
