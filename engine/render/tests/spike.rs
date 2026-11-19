@@ -75,7 +75,11 @@ fn matches_the_locked_v1_reference_render() {
     // FormatLockTest: Raster.fill(tessellate(evaluate(p, root, 0.6)), 320, 240, white)
     let Some(r) = renderer(&[wgpu::Backends::PRIMARY, wgpu::Backends::GL]) else { return };
     let p = kitchen_sink();
-    let d = tess::tessellate(&eval::evaluate(&p, &p.root_symbol, 0.6), None);
+    let mut d = tess::tessellate(&eval::evaluate(&p, &p.root_symbol, 0.6), None);
+    // that image was drawn with plain source-over for every batch (blend modes ignored)
+    for b in &mut d.batches {
+        b.blend = Some(barkfart_core::model::Blend::Normal);
+    }
     let px = r.render(&d, 320, 240, View { x0: -160.0, y0: -120.0, x1: 160.0, y1: 120.0, background: [1.0, 1.0, 1.0, 1.0] });
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/src/test/resources/formats/v1-kitchen-sink.png");
     let dec = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).unwrap()));
