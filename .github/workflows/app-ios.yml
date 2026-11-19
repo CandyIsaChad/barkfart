@@ -33,12 +33,14 @@ jobs:
       - name: Package unsigned IPA
         working-directory: app
         run: |
+          # a new file name every build, so the iPad never saves "Barkfart.ipa 2"
+          name="Barkfart-Next-$(date -u +%Y%m%d-%H%M)-${GITHUB_SHA::7}.ipa"
           mkdir -p out/Payload
           cp -R build/ios/iphoneos/Runner.app out/Payload/
-          cd out && zip -qr Barkfart-flutter.ipa Payload
-          ls -l Barkfart-flutter.ipa
+          cd out && zip -qr "$name" Payload
+          ls -l "$name"
       - uses: actions/upload-artifact@v4
         with:
           name: Barkfart-flutter-ipa
-          path: app/out/Barkfart-flutter.ipa
+          path: app/out/*.ipa
           if-no-files-found: error

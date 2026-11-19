@@ -38,3 +38,11 @@ Decision and reasons: PROGRESS.md, 2026-11-19.
 ## Machine notes
 - Dev box: 4 cores, 3 GB RAM: cargo jobs = 2, no debug info in dev builds.
 - Toolchains: Rust (rustup), Flutter in `~/.local/flutter`.
+
+## Notes from device tests
+- 2026-11-19, iPad: first Barkfart Next IPA works; 2.9 ms per render.
+  Later (options menu): a frame-rate cap (60 / 120 fps / display rate).
+- Phone for Android (last): ZTE Blade A75 5G on USB; adb needs USB
+  debugging allowed on the phone. Android SDK not installed yet (needs the
+  user's OK for Google's license).
+- IPAs are named Barkfart-Next-<UTC date-time>-<commit>.ipa.
