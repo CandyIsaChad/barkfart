@@ -224,3 +224,24 @@ fn join_layer_movieclip_and_camera_operations_match_java() {
         });
     });
 }
+
+use barkfart_core::edit::frame_ops as fr;
+
+#[test]
+fn frame_operations_match_java() {
+    let g = "frames";
+    check(g, "insert-copy", |d, _| step(d, |s| fr::insert_after(s, 5, true)));
+    check(g, "insert-blank", |d, _| step(d, |s| fr::insert_after(s, 5, false)));
+    check(g, "delete-frame", |d, _| step(d, |s| fr::delete(s, 18).map(|_| ())));
+    check(g, "delete-first", |d, _| step(d, |s| fr::delete(s, 0).map(|_| ())));
+    check(g, "tween-off", |d, e| {
+        let ed = e.clone();
+        step(d, |s| fr::set_tween(&ed, s, 18, false));
+    });
+    check(g, "key-pose", |d, _| step(d, |s| fr::key_pose(s, None, 0.37).map(|_| ())));
+    check(g, "key-pose-between", |d, _| step(d, |s| fr::key_pose_between(s, Some("L2"), 0.0, 0.75, 0.3).map(|_| ())));
+    check(g, "hold", |d, _| step(d, |s| fr::hold(s, 18, 4, false)));
+    check(g, "hold-camera-moves", |d, _| step(d, |s| fr::hold(s, 6, 3, true)));
+    check(g, "insert-tweened", |d, _| step(d, |s| fr::insert_tweened(s, 10, 3)));
+    check(g, "slow-motion", |d, _| step(d, |s| fr::slow_motion(s, 0, 2).map(|_| ())));
+}

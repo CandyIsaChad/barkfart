@@ -5,6 +5,7 @@
 
 pub mod editor;
 pub mod figure_ops;
+pub mod frame_ops;
 pub mod join_ops;
 pub mod layer_ops;
 pub mod symbol_ops;

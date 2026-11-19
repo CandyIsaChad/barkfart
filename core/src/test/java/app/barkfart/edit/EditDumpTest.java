@@ -143,6 +143,20 @@ class EditDumpTest {
         });
     }
 
+    private void frameScenarios() throws Exception {
+        scenario("insert-copy", (d, e, p) -> new FrameOps(e).insertAfter(5, true));
+        scenario("insert-blank", (d, e, p) -> new FrameOps(e).insertAfter(5, false));
+        scenario("delete-frame", (d, e, p) -> new FrameOps(e).delete(18));
+        scenario("delete-first", (d, e, p) -> new FrameOps(e).delete(0));
+        scenario("tween-off", (d, e, p) -> new FrameOps(e).setTween(18, false));
+        scenario("key-pose", (d, e, p) -> new FrameOps(e).keyPose(null, 0.37));
+        scenario("key-pose-between", (d, e, p) -> new FrameOps(e).keyPoseBetween(man(p), 0, 0.75, 0.3));
+        scenario("hold", (d, e, p) -> new FrameOps(e).hold(18, 4));
+        scenario("hold-camera-moves", (d, e, p) -> new FrameOps(e).hold(6, 3, true));
+        scenario("insert-tweened", (d, e, p) -> new FrameOps(e).insertTweened(10, 3));
+        scenario("slow-motion", (d, e, p) -> new FrameOps(e).slowMotion(0, 2));
+    }
+
     @Test
     void dump() throws Exception {
         String d0 = System.getProperty("barkfart.editdump", "");
@@ -156,6 +170,9 @@ class EditDumpTest {
         dir = new File(d0, "ops");
         dir.mkdirs();
         opsScenarios();
+        dir = new File(d0, "frames");
+        dir.mkdirs();
+        frameScenarios();
         dir = editorDir;
         scenario("change-autokey", (d, e, p) -> e.change(p.property("L2/armR1/rotation"), 33f, 0.5));
         scenario("change-static", (d, e, p) -> {
