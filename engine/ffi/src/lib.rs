@@ -525,9 +525,13 @@ pub extern "C" fn bf_render_view(e: *const Engine, t: f64, w: u32, h: u32, x0: f
             let onion = tess::OnionSkin { apply_camera: camera, ..Default::default() };
             list = list.with_underlay(onion.build_layered(p, &p.root_symbol, t));
         }
+        let cpu = start.elapsed();
         let bg = p.settings.background;
         let view = View { x0, y0, x1, y1, background: [bg.r, bg.g, bg.b, bg.a] };
         let px = engine.renderer.render(&list, w, h, view);
+        if std::env::var_os("BARKFART_TRACE").is_some() {
+            eprintln!("render_view {w}x{h}: evaluate+tessellate {:.1} ms, gpu+readback {:.1} ms, {} triangles", cpu.as_secs_f64() * 1e3, (start.elapsed() - cpu).as_secs_f64() * 1e3, list.triangle_count());
+        }
         (px, start.elapsed().as_micros().min(u32::MAX as u128) as u32)
     }));
     match r {

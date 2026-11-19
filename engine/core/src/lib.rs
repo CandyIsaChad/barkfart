@@ -10,6 +10,7 @@ pub mod codec;
 pub mod edit;
 pub mod eval;
 pub mod export;
+pub mod figures;
 pub mod files;
 pub mod fx;
 pub mod image;

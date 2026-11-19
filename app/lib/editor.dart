@@ -26,6 +26,9 @@ const cAccent = Color(0xFF0A84FF);
 const cDanger = Color(0xFFFF453A);
 const cRoot = Color(0xFFFF9F0A);
 
+/// Wraps the whole app (dialogs included) for scripted screenshots.
+final GlobalKey appShot = GlobalKey();
+
 class EditorPage extends StatefulWidget {
   const EditorPage({super.key});
 
@@ -55,6 +58,32 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   bool _fitted = false;
 
   ui.Image? _image;
+  bool _imageOwned = true;
+  /// Playback quality (fraction of full resolution) and the frames drawn
+  /// while playing, reused on the next loop (cleared when anything changes).
+  double _quality = 0.5;
+  final Map<int, ui.Image> _frameCache = {};
+  String _cacheKey = '';
+  int _cacheBytes = 0;
+  static const _cacheBudget = 160 * 1024 * 1024;
+
+  void _setImage(ui.Image img, {required bool owned}) {
+    if (_imageOwned && _image != null && !identical(_image, img)) _image!.dispose();
+    _image = img;
+    _imageOwned = owned;
+  }
+
+  void _clearCache() {
+    for (final img in _frameCache.values) {
+      if (identical(img, _image)) {
+        _imageOwned = true;
+      } else {
+        img.dispose();
+      }
+    }
+    _frameCache.clear();
+    _cacheBytes = 0;
+  }
   // what the current image shows; a new one is drawn when any of these change
   String _drawn = '';
   bool _busy = false;
@@ -134,7 +163,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _ticker.dispose();
-    _image?.dispose();
+    _clearCache();
+    if (_imageOwned) _image?.dispose();
     _engine?.dispose();
     super.dispose();
   }
@@ -204,7 +234,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     } else {
       t = _frame / _fps;
     }
-    final scale = math.min(_dpr, 1600 / _view.size.longestSide);
+    final scale = math.min(_dpr, 1600 / _view.size.longestSide) * (_playing ? _quality : 1.0);
     final w = (_view.size.width * scale).round(), h = (_view.size.height * scale).round();
     if (w <= 0 || h <= 0) return;
     final camera = _playing;
@@ -226,8 +256,23 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     }
     final key = '${_st['rev']} $t $w $h $x0 $y0 $x1 $y1 $camera $onion';
     if (key == _drawn) return;
+    final fi = (t * _fps).round();
+    if (camera) {
+      final ck = '${_st['rev']} $w $h';
+      if (ck != _cacheKey) {
+        _clearCache();
+        _cacheKey = ck;
+      }
+      final cached = _frameCache[fi];
+      if (cached != null) {
+        _drawn = key;
+        if (!identical(cached, _image)) setState(() => _setImage(cached, owned: false));
+        return;
+      }
+    }
     _drawn = key;
     _busy = true;
+    final sw = Stopwatch()..start();
     final px = e.renderView(t, w, h, x0, y0, x1, y1, camera: camera, onion: onion);
     if (px == null) {
       _busy = false;
@@ -236,11 +281,16 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final ms = e.lastMicros / 1000.0;
     ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, (img) {
       if (!mounted) return;
+      final keep = camera && _cacheBytes + w * h * 4 <= _cacheBudget && '${_st['rev']} $w $h' == _cacheKey;
+      if (keep) {
+        _frameCache[fi] = img;
+        _cacheBytes += w * h * 4;
+      }
       setState(() {
-        _image?.dispose();
-        _image = img;
+        _setImage(img, owned: !keep);
         _engineMs = _engineMs == 0 ? ms : _engineMs * 0.9 + ms * 0.1;
       });
+      if (Platform.environment['BARKFART_TRACE'] != null) debugPrint('picture ${w}x$h engine ${ms.toStringAsFixed(1)} ms, total ${sw.elapsedMicroseconds / 1000} ms${camera ? ' (cached ${_frameCache.length})' : ''}');
       _busy = false;
     });
   }
@@ -588,6 +638,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           await _saveShot(w[1]);
         case 'state':
           debugPrint('state: ${_st['frame']}/${_st['frames']} undo=${_st['undo']} selected=${_sel?['node']} handles=${(_st['handles'] as List).length} ms=${_engineMs.toStringAsFixed(1)}');
+        case 'savebutton':
+          unawaited(_save());
+        case 'picker':
+          unawaited(_figurePicker());
+        case 'back':
+          if (mounted) Navigator.of(context).maybePop();
         case 'quit':
           exit(0);
       }
@@ -606,7 +662,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   Future<void> _saveShot(String path) async {
-    final b = _shot.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+    final b = (appShot.currentContext ?? _shot.currentContext)?.findRenderObject() as RenderRepaintBoundary?;
     if (b == null) return;
     final img = await b.toImage(pixelRatio: 1);
     final data = await img.toByteData(format: ui.ImageByteFormat.png);
@@ -674,6 +730,20 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   Widget _strip(bool big) {
+    final building = _st['building'] as Map<String, dynamic>?;
+    if (building != null) {
+      return Row(children: [
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Editing ${building['name']}', style: const TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w600)),
+            const Text('Segment changes apply to this figure on every frame.', style: TextStyle(color: cSecondary, fontSize: 11)),
+          ]),
+        ),
+        SizedBox(width: 96, child: _Btn('Done', accent: true, onTap: () => _cmd({'op': 'build_done'}))),
+        const SizedBox(width: 8),
+      ]);
+    }
     final cell = big ? 64.0 : 52.0;
     final keyed = (_st['keyed'] as List?) ?? const [];
     return Row(children: [
@@ -684,19 +754,25 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           itemCount: _frames,
           itemBuilder: (c, i) {
             final cur = _playing ? (_playT * _fps).round() == i : i == _frame;
+            final key = i == 0 || (i < keyed.length && keyed[i] == true);
             return GestureDetector(
               onTap: () {
                 if (_playing) _togglePlay();
                 _cmd({'op': 'frame', 'i': i});
               },
               child: Container(
-                width: cell,
+                width: key ? cell : cell * 0.6,
                 margin: const EdgeInsets.only(right: 4),
-                decoration: BoxDecoration(color: cur ? cSelected : cControl, border: Border.all(color: cur ? cAccent : const Color(0x00000000), width: 2)),
+                decoration: BoxDecoration(
+                  color: cur ? cSelected : (key ? cControl : const Color(0xFF24272B)),
+                  border: Border.all(color: cur ? cAccent : const Color(0x00000000), width: 2),
+                ),
                 child: Stack(children: [
-                  Positioned(left: 5, top: 3, child: Text('${i + 1}', style: TextStyle(color: cur ? cText : cSecondary, fontSize: 12, fontFeatures: const [ui.FontFeature.tabularFigures()]))),
-                  if (i < keyed.length && keyed[i] == true)
-                    Positioned(left: 0, right: 0, bottom: 6, child: Center(child: Transform.rotate(angle: math.pi / 4, child: Container(width: 7, height: 7, color: cur ? cAccent : cSecondary)))),
+                  Positioned(left: 5, top: 3, child: Text('${i + 1}', style: TextStyle(color: cur ? cText : (key ? cSecondary : const Color(0xFF5F646B)), fontSize: 12, fontFeatures: const [ui.FontFeature.tabularFigures()]))),
+                  if (key)
+                    Positioned(left: 0, right: 0, bottom: 6, child: Center(child: Transform.rotate(angle: math.pi / 4, child: Container(width: 7, height: 7, color: cur ? cAccent : cSecondary))))
+                  else
+                    const Positioned(left: 0, right: 0, bottom: 4, child: Center(child: Text('~', style: TextStyle(color: Color(0xFF5F646B), fontSize: 12)))),
                 ]),
               ),
             );
@@ -753,7 +829,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ),
       const SizedBox(height: 6),
       Expanded(
-        child: ListView(padding: const EdgeInsets.fromLTRB(10, 4, 10, 10), children: sel == null ? _nothingSelected() : _selected(sel)),
+        child: ListView(padding: const EdgeInsets.fromLTRB(10, 4, 10, 10), children: _st['building'] != null ? _builder(sel) : (sel == null ? _nothingSelected() : _selected(sel))),
       ),
       Container(
         color: cControl,
@@ -770,43 +846,83 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   List<Widget> _nothingSelected() {
     final onion = _opts['onion'] == true;
-    final tweenOn = _opts['tweenNew'] != false;
     return [
       _title('Animation'),
-      _Btn('Add figure', accent: true, onTap: () => _cmd({'op': 'add_figure'})),
+      _Btn('Add figure…', accent: true, onTap: _figurePicker),
       _gap,
       _Toggle('Onion skin', onion, (v) => _cmd({'op': 'set', 'k': 'onion', 'v': v})),
       _gap,
       _stepper('FPS', _fps.round().toString(), () => _cmd({'op': 'fps', 'v': _fps - 1}), () => _cmd({'op': 'fps', 'v': _fps + 1})),
-      _title('Frame ${_frame + 1}'),
-      _pair(_Btn('Insert', onTap: () => _cmd({'op': 'insert_frame'})), _Btn('Delete', danger: true, enabled: _frames > 1, onTap: () => _cmd({'op': 'delete_frame'}))),
-      _gap,
-      _pair(_Btn('Tween', onTap: () => _cmd({'op': 'tween', 'on': true})), _Btn('No tween', onTap: () => _cmd({'op': 'tween', 'on': false}))),
-      _gap,
-      _Toggle('New keys tween', tweenOn, (v) => _cmd({'op': 'set', 'k': 'tween_new', 'v': v})),
+      ..._frameTools(),
       _title('Camera'),
       if (_st['hasCamera'] != true) _Btn('Add camera', onTap: () => _cmd({'op': 'add_camera'})) else _Btn('Reset camera', onTap: () => _cmd({'op': 'reset_camera'})),
+      _title('View'),
+      _Toggle('Joints of other figures', _opts['mainOnly'] != true, (v) => _cmd({'op': 'set', 'k': 'mainonly', 'v': !v})),
+      _gap,
+      _label('Playback quality'),
+      _Segmented(const ['Full', 'Half', 'Fast'], _quality == 1 ? 0 : _quality == 0.5 ? 1 : 2, (i) => setState(() {
+            _quality = [1.0, 0.5, 0.3][i];
+            _clearCache();
+          })),
       _title('File'),
       _pair(_Btn('New', onTap: _newProject), _Btn('Open', onTap: _openSheet)),
       _gap,
-      _pair(_Btn('Save', onTap: _save), _Btn('Export GIF', onTap: _exportGif)),
+      _pair(_Btn('Save…', onTap: _save), _Btn('Export GIF', onTap: _exportGif)),
       _gap,
       Text(_file?.name ?? 'Not saved yet', style: const TextStyle(color: cSecondary, fontSize: 11)),
       if (_engineMs > 0) Text('${_engineMs.toStringAsFixed(1)} ms per picture', style: const TextStyle(color: cSecondary, fontSize: 11)),
     ];
   }
 
+  /// Frame tools: frames, in-betweens, easing (also under a selected figure).
+  List<Widget> _frameTools() {
+    return [
+      _title('Frame ${_frame + 1}'),
+      _pair(_Btn('New frame', onTap: () => _cmd({'op': 'insert_frame'})), _Btn('Delete', danger: true, enabled: _frames > 1, onTap: () => _cmd({'op': 'delete_frame'}))),
+      _gap,
+      _label('Add in-betweens after this frame'),
+      Row(children: [
+        for (final n in const [1, 2, 3, 5]) ...[
+          Expanded(child: _Btn('+$n', onTap: () => _cmd({'op': 'inbetween', 'n': n}))),
+          if (n != 5) const SizedBox(width: 4),
+        ],
+      ]),
+      _gap,
+      _label('Easing to the next key frame'),
+      Wrap(spacing: 4, runSpacing: 4, children: [
+        for (final e in const [('linear', 'Even'), ('smooth', 'Smooth'), ('in', 'Speed up'), ('out', 'Slow down'), ('hold', 'No tween')])
+          _Chip(e.$2, false, () => _cmd({'op': 'easing', 'v': e.$1})),
+      ]),
+    ];
+  }
+
+  Future<void> _figurePicker() async {
+    final list = ((_st['builtins'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    final kind = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: cPanel,
+      builder: (c) => ListView(children: [
+        const Padding(padding: EdgeInsets.all(16), child: Text('Add a figure', style: TextStyle(color: cText, fontSize: 17, fontWeight: FontWeight.w600))),
+        for (final f in list)
+          ListTile(
+            title: Text(f['name'] as String, style: const TextStyle(color: cText)),
+            onTap: () => Navigator.pop(c, f['id'] as String),
+          ),
+      ]),
+    );
+    if (kind != null) _cmd({'op': 'add_figure', 'kind': kind});
+  }
+
+  /// A figure is selected: posing and figure tools only (segments live in the figure editor).
   List<Widget> _selected(Map<String, dynamic> sel) {
-    final root = sel['root'] == true;
     final stretch = _opts['stretch'] == true;
     final scope = _opts['scope'] as String? ?? 'figure';
     final snap = (_opts['snap'] as num?)?.toDouble() ?? 0;
-    final shape = sel['shape'] as String? ?? 'line';
-    final thick = (sel['thickness'] as num?)?.toDouble() ?? 0;
-    final color = (sel['color'] as num?)?.toInt() ?? 0xff;
     return [
       _title(sel['name'] as String? ?? 'Figure'),
       _pair(_Btn('◀ Figure', onTap: () => _cmd({'op': 'cycle_figure', 'dir': -1})), _Btn('Figure ▶', onTap: () => _cmd({'op': 'cycle_figure', 'dir': 1}))),
+      _gap,
+      _Btn('Edit figure…', accent: true, onTap: () => _cmd({'op': 'build'})),
       _gap,
       _pair(_Btn('Copy pose', onTap: () => _cmd({'op': 'copy_pose'})), _Btn('Paste pose', enabled: _st['pose'] == true, onTap: () => _cmd({'op': 'paste_pose'}))),
       _gap,
@@ -824,11 +940,35 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _pair(_Btn('Flip', onTap: () => _cmd({'op': 'flip_figure', 'h': true})), _Btn('Duplicate', onTap: () => _cmd({'op': 'duplicate_figure'}))),
       _gap,
       _pair(_Btn('To back', onTap: () => _cmd({'op': 'layer_order', 'forward': false})), _Btn('To front', onTap: () => _cmd({'op': 'layer_order', 'forward': true}))),
+      _gap,
+      _pair(_Btn('Cut here', enabled: _frame > 0, onTap: () => _cmd({'op': 'cut'})), _Btn('Delete here', danger: true, onTap: () => _cmd({'op': 'delete_here'}))),
+      _gap,
+      const Text('Cut: the figure becomes two separate figures from this frame. Delete here: gone on this frame only.', style: TextStyle(color: cSecondary, fontSize: 11)),
+      _gap,
+      _Btn('Delete on every frame', danger: true, onTap: () => _cmd({'op': 'delete_everywhere'})),
+      ..._frameTools(),
+      _gap,
+      _Btn('Done', onTap: () => _cmd({'op': 'select'})),
+    ];
+  }
+
+  /// The figure editor: structure tools for the selected segment.
+  List<Widget> _builder(Map<String, dynamic>? sel) {
+    if (sel == null) return [_title('Figure editor'), const Text('Tap a joint of this figure.', style: TextStyle(color: cSecondary, fontSize: 13))];
+    final root = sel['root'] == true;
+    final shape = sel['shape'] as String? ?? 'line';
+    final thick = (sel['thickness'] as num?)?.toDouble() ?? 0;
+    final color = (sel['color'] as num?)?.toInt() ?? 0xff;
+    final stretch = _opts['stretch'] == true;
+    return [
       _title(root ? 'Main node' : 'Segment'),
       _pair(_Btn('◀ Joint', onTap: () => _cmd({'op': 'cycle_joint', 'dir': -1})), _Btn('Joint ▶', onTap: () => _cmd({'op': 'cycle_joint', 'dir': 1}))),
       _gap,
       if (!root) Text('Angle ${sel['angle']}° · length ${sel['length']}', style: const TextStyle(color: cSecondary, fontSize: 11)),
       if (!root) _gap,
+      _label('Drag'),
+      _Segmented(const ['Rotate', 'Stretch'], stretch ? 1 : 0, (i) => _cmd({'op': 'set', 'k': 'stretch', 'v': i == 1})),
+      _gap,
       _pair(_Btn('Add segment', onTap: () => _cmd({'op': 'add_segment'})), _Btn('Delete', danger: true, enabled: !root, onTap: () => _cmd({'op': 'delete_segment'}))),
       _gap,
       if (!root) ...[
@@ -865,10 +1005,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _gap,
         _Btn('Colour whole branch', onTap: () => _cmd({'op': 'segment', 'branch': true, 'color': color})),
       ],
-      _title('Figure'),
-      _Btn('Delete figure', danger: true, onTap: () => _cmd({'op': 'delete_figure'})),
       _gap,
-      _Btn('Done', onTap: () => _cmd({'op': 'select'})),
+      _Btn('Done', accent: true, onTap: () => _cmd({'op': 'build_done'})),
     ];
   }
 

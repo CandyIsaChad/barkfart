@@ -83,7 +83,10 @@ Decision and reasons: PROGRESS.md, 2026-11-19.
   lock, smart-stretch and pinned joints, turning a figure, panning).
   Checked by EditDumpTest: 85 scenarios give the Java project text after
   the edit and after undo, plus handle positions and pick order.
-- Next: wire editing into the C interface, then the interface itself.
+- Speed (laptop, 100 figures, 17,100 triangles): evaluate + tessellate
+  about 10 ms, GPU + readback about 5 ms per picture; onion skin triples
+  the CPU part. Playback caches drawn frames, so later loops are free.
+- Next: dope sheet, frame thumbnails, importing files, faster evaluation.
 
 ## Notes from device tests
 - 2026-11-19, iPad: first Barkfart Next IPA works; 2.9 ms per render.
@@ -117,6 +120,15 @@ Status: [x] in the Flutter app, [ ] not yet.
 - Export panel: GIF, PNG frames, soundtrack, video. [ ] (long-press export kept)
 - Dope sheet (keys, easing, retime, stagger, scale time, multi-select). [ ]
 - Status line with frame / time and transient messages. [x]
+- Frames are poses: new frames key the whole pose; in-betweens (+1/2/3/5)
+  tween to the next key frame; easing presets per frame. [x]
+- Delete a figure on one frame only; cut a figure in two at a frame. [x]
+- Figure editor (segment tools apart from posing). [x]
+- Built-in figure picker (our own figures, figures.rs). [x]
+- Save asks for a name / confirms; unsaved work kept in a hidden recovery
+  copy. [x]
+- Playback quality (Full / Half / Fast) and frames cached while playing. [x]
+- Frame thumbnails in the strip; tool tabs above the stage. [ ]
 - Two-finger tap undo, three-finger tap redo. [ ]
 - Nudge pad, magnifier windows. [ ]
 - Effects, sounds panels, diagnostics, UI size setting. [ ]

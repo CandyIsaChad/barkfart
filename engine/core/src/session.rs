@@ -41,6 +41,8 @@ pub struct Session {
     /// Selected (layer, node).
     pub selected: Option<(String, String)>,
     pub onion: bool,
+    /// The figure open in the figure editor (structure tools, its joints only).
+    pub building: Option<String>,
     gesture: Gesture,
     /// The last tap (no drag): where, and which handle, for node digging.
     last_tap: Option<(f32, f32, String, String)>,
@@ -62,7 +64,7 @@ impl Session {
         let mut tools = CanvasTools::default();
         tools.key_scope = KeyScope::Figure;
         let frame = doc.project().view.frame.max(0);
-        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, onion: true, gesture: Gesture::None, last_tap: None, pose_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, onion: true, building: None, gesture: Gesture::None, last_tap: None, pose_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -100,9 +102,19 @@ impl Session {
         }
     }
 
+    fn sync_tools(&mut self) {
+        self.tools.active_figure = self.selected.as_ref().map(|s| s.0.clone());
+        if let Some(b) = &self.building {
+            if self.project().root().and_then(|s| s.layer(b)).is_none() {
+                self.building = None;
+            }
+        }
+    }
+
     fn changed(&mut self) {
         self.rev += 1;
         self.validate();
+        self.sync_tools();
     }
 
     fn figure_ids(&self) -> Vec<String> {
@@ -140,7 +152,13 @@ impl Session {
             Mode::Figure => {
                 let prev = self.last_tap.as_ref().filter(|(tx, ty, _, _)| (tx - x).hypot(ty - y) <= radius).map(|(_, _, l, n)| (l.clone(), n.clone()));
                 let sel = self.selected.clone();
-                let hit = self.tools.pick_cycling(self.project(), x, y, radius, t, sel.as_ref().map(|(l, n)| (l.as_str(), n.as_str())), prev.as_ref().map(|(l, n)| (l.as_str(), n.as_str())));
+                self.sync_tools();
+                let mut hit = self.tools.pick_cycling(self.project(), x, y, radius, t, sel.as_ref().map(|(l, n)| (l.as_str(), n.as_str())), prev.as_ref().map(|(l, n)| (l.as_str(), n.as_str())));
+                if let (Some(b), Some(h)) = (&self.building, &hit) {
+                    if h.layer != *b {
+                        hit = None;
+                    }
+                }
                 match hit {
                     Some(h) => {
                         self.selected = Some((h.layer.clone(), h.node.clone()));
@@ -148,6 +166,7 @@ impl Session {
                         self.rev += 1;
                         true
                     }
+                    None if self.building.is_some() => false,
                     None => {
                         if self.selected.take().is_some() {
                             self.rev += 1;
@@ -299,7 +318,16 @@ impl Session {
             "insert_frame" => {
                 let fr = self.frame;
                 let copy = c.get("copy").and_then(|v| v.as_bool()).unwrap_or(true);
-                if self.step("Insert frame", |s| frame_ops::insert_after(s, fr, copy)).is_some() {
+                let made = self.step("Insert frame", |s| {
+                    frame_ops::insert_after(s, fr, copy)?;
+                    if copy {
+                        // a new frame is a whole pose (a snapshot), like the original's frames
+                        anchor_poses(s);
+                        frame_ops::key_pose(s, None, frame_ops::time(s, fr + 1))?;
+                    }
+                    Ok(())
+                });
+                if made.is_some() {
                     self.frame += 1;
                     self.changed();
                 }
@@ -395,6 +423,7 @@ impl Session {
                     "onion" => self.onion = b("v"),
                     "axis" => self.tools.axis_lock = b("v"),
                     "static" => self.tools.show_static = b("v"),
+                    "mainonly" => self.tools.main_nodes_only = b("v"),
                     "tween_new" => self.tools.editor.default_interp = if b("v") { Interp::Linear } else { Interp::Hold },
                     _ => {}
                 }
@@ -437,18 +466,48 @@ impl Session {
                     }
                 }
             }
+            "build" => {
+                let l = c["layer"].as_str().map(str::to_string).or(self.sel_layer());
+                if let Some(l) = l {
+                    if self.project().root().and_then(|s| s.layer(&l)).and_then(|x| x.as_figure()).is_some() {
+                        self.building = Some(l.clone());
+                        if self.sel_layer().as_deref() != Some(&l) {
+                            let root = self.project().root().and_then(|s| s.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
+                            self.selected = root.map(|r| (l, r));
+                        }
+                        self.mode = Mode::Figure;
+                        self.rev += 1;
+                    }
+                }
+            }
+            "build_done" => {
+                self.building = None;
+                self.rev += 1;
+            }
             "add_figure" => {
                 let n = self.figure_ids().len() + 1;
+                let kind = c["kind"].as_str().unwrap_or("stickman").to_string();
+                let name = crate::figures::ALL.iter().find(|(id, _)| *id == kind).map(|(_, nm)| *nm).unwrap_or("Figure");
                 let template = new_project();
                 let src = template.root().and_then(|s| s.layers.first()).map(|l| (**l).clone()).expect("starter figure");
                 let made = self.step("Add figure", |s| {
                     let id = s.project.new_id("L");
-                    let mut ids = std::collections::HashMap::new();
-                    ids.insert(src.id.clone(), id.clone());
-                    let mut l = structure::copy_layer(&src, &ids)?;
-                    l.name = Some(format!("Figure {n}"));
+                    let mut l = if kind == "stickman" {
+                        let mut ids = std::collections::HashMap::new();
+                        ids.insert(src.id.clone(), id.clone());
+                        structure::copy_layer(&src, &ids)?
+                    } else {
+                        match crate::figures::build(&kind, &id, name) {
+                            Some(l) => l,
+                            None => return crate::edit::fail(format!("no built-in figure {kind}")),
+                        }
+                    };
+                    l.name = Some(if kind == "stickman" { format!("Figure {n}") } else { format!("{name} {n}") });
                     // offset so it does not sit exactly on the last one
-                    l.transform.x.value = Value::F(40.0 * ((n as f32 - 1.0) % 6.0) - 100.0 * ((n > 1) as i32 as f32));
+                    // side by side: left, right, further left, further right ...
+                    let k = (n as i32) / 2;
+                    let side = if n % 2 == 0 { -1.0 } else { 1.0 };
+                    l.transform.x.value = Value::F(side * 230.0 * (((k - 1) % 3) + 1) as f32 * ((n > 1) as i32 as f32));
                     let at = s.project.root().map(|r| r.layers.len()).unwrap_or(0);
                     let sym = s.project.root_symbol.clone();
                     structure::add_layer(s, &sym, l, at)?;
@@ -459,7 +518,8 @@ impl Session {
                     Ok(id)
                 });
                 if let Some(id) = made {
-                    self.selected = Some((id, "hip".into()));
+                    let root = self.project().root().and_then(|s| s.layer(&id)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
+                    self.selected = root.map(|r| (id, r));
                 }
             }
             "delete_everywhere" | "delete_figure" => {
@@ -664,6 +724,9 @@ impl Session {
         let mut handles = Vec::new();
         if self.mode == Mode::Figure {
             for h in self.tools.handles(p, t) {
+                if self.building.as_ref().is_some_and(|b| *b != h.layer) {
+                    continue;
+                }
                 let sel = self.selected.as_ref().is_some_and(|(l, n)| *l == h.layer && *n == h.node);
                 let fig = self.selected.as_ref().is_some_and(|(l, _)| *l == h.layer);
                 let flags = h.root as u32 | (sel as u32) << 1 | (fig as u32) << 2;
@@ -701,9 +764,11 @@ impl Session {
             "opts": {
                 "stretch": self.tools.stretch, "scope": if self.tools.key_scope == KeyScope::Joint { "joint" } else { "figure" },
                 "snap": self.tools.snap_degrees, "onion": self.onion, "axis": self.tools.axis_lock, "static": self.tools.show_static,
-                "tweenNew": self.tools.editor.default_interp != Interp::Hold,
+                "tweenNew": self.tools.editor.default_interp != Interp::Hold, "mainOnly": self.tools.main_nodes_only,
             },
             "pose": self.pose_clip.is_some(),
+            "building": self.building.as_ref().and_then(|b| p.root()?.layer(b)).map(|l| json!({"layer": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone())})),
+            "builtins": crate::figures::ALL.iter().map(|(id, name)| json!({"id": id, "name": name})).collect::<Vec<_>>(),
             "message": self.message,
         })
     }

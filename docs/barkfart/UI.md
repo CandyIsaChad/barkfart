@@ -72,3 +72,22 @@ inside it (see the table below).
   selected, a node selected, a figure selected), the frame strip, the
   stickfigure editor, the tool menus, the export screen.
 - The worst three or four pain points from daily use.
+
+## Observed in public tutorial videos (2026-11-19, features only, nothing copied)
+- The frame strip shows a small picture of every frame, numbered; the
+  current frame has a blue outline; a scroll bar runs under it.
+- Tool menus are tabs above the stage that follow the selection: nothing
+  selected shows App / Project / Animation / Library / Textfield tools; a
+  figure shows Stickfigure tools / Stickfigure filters / Segment tools; a
+  frame shows Frame tools. The chosen menu fills the left panel.
+- Frame tools: "Add tweened frame" bakes real in-between frames, with
+  presets for where they fall (50%, 33/67%, 10/90%) and a node counter.
+- Stickfigure tools: delete stickfigure, previous / next, copy / paste
+  stickfigure, copy / paste all properties; a ring of quick buttons
+  appears around the selected joint.
+- Animation tools: animation FPS 1-60 and a note that playback in the
+  editor may lag while export does not.
+- Each frame can carry a sound (frame tools: import a sound, volume, pan).
+- Barkfart's answers: in-betweens are real frames that tween (posing one
+  makes it a key frame); segment tools live in a separate figure editor;
+  deleting a figure removes it from one frame by splitting it in two.

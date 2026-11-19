@@ -20,6 +20,7 @@ class BarkfartApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(brightness: Brightness.dark, colorSchemeSeed: cAccent, useMaterial3: true),
       home: const EditorPage(),
+      builder: (c, child) => RepaintBoundary(key: appShot, child: child),
     );
   }
 }
