@@ -752,6 +752,11 @@ impl Figure {
         self.nodes.first()
     }
 
+    /// Nodes and polyfills to change together.
+    pub fn parts_mut(&mut self) -> (&mut [Node], &mut Vec<Polyfill>) {
+        (&mut self.nodes, &mut self.polyfills)
+    }
+
     pub fn node(&self, id: &str) -> Option<&Node> {
         self.index.get(id).map(|&i| &self.nodes[i])
     }
@@ -1167,6 +1172,46 @@ impl Layer {
         out
     }
 
+    /// The layer's properties, mutable (same order as properties()).
+    pub fn properties_mut(&mut self) -> Vec<&mut Property> {
+        let mut out: Vec<&mut Property> = vec![&mut self.shown, &mut self.opacity];
+        let t = &mut self.transform;
+        out.extend([&mut t.x, &mut t.y, &mut t.rotation, &mut t.scale_x, &mut t.scale_y, &mut t.anchor_x, &mut t.anchor_y]);
+        for e in self.effects.nodes.values_mut() {
+            out.push(&mut e.mix);
+            out.extend(e.params.values_mut());
+        }
+        match &mut self.kind {
+            LayerKind::Figure(f) => {
+                let (nodes, fills) = f.parts_mut();
+                for n in nodes {
+                    out.extend([&mut n.rotation, &mut n.length, &mut n.thickness, &mut n.scale, &mut n.color, &mut n.shown, &mut n.gradient_color, &mut n.outline_color]);
+                }
+                for pf in fills {
+                    out.push(&mut pf.color);
+                }
+            }
+            LayerKind::Sprite(s) => {
+                out.push(&mut s.tint);
+                out.extend(s.distort.iter_mut());
+            }
+            LayerKind::Text(t) => out.push(&mut t.color),
+            LayerKind::Symbol(s) => {
+                out.push(&mut s.time_offset);
+                out.push(&mut s.speed);
+            }
+            LayerKind::Adjustment => {}
+            LayerKind::Audio(clips) => {
+                for c in clips {
+                    out.push(&mut c.volume);
+                    out.push(&mut c.pan);
+                }
+            }
+            LayerKind::Camera(c) => out.extend([&mut c.x, &mut c.y, &mut c.zoom, &mut c.rotation, &mut c.background, &mut c.background2]),
+        }
+        out
+    }
+
     pub fn as_figure(&self) -> Option<&Figure> {
         match &self.kind {
             LayerKind::Figure(f) => Some(f),
@@ -1232,21 +1277,21 @@ pub enum AssetKind {
     Font,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Asset {
     pub id: String,
     pub kind: AssetKind,
     pub path: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct NodeSet {
     pub id: String,
     pub name: Option<String>,
     pub members: Vec<(String, String)>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     pub fps: f32,
     pub width: i32,
@@ -1262,7 +1307,7 @@ impl Default for Settings {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct View {
     pub zoom: f32,
     pub pan_x: f32,
@@ -1334,6 +1379,29 @@ impl Project {
                 return id;
             }
         }
+    }
+
+    /// Where a property lives: (symbol id, layer id), or (symbol id, "") for scoped effects.
+    pub fn locate_property(&self, id: &str) -> Option<(String, String)> {
+        for s in self.library.values() {
+            for l in &s.layers {
+                if l.properties().iter().any(|p| p.id == id) {
+                    return Some((s.id.clone(), l.id.clone()));
+                }
+            }
+        }
+        None
+    }
+
+    pub fn property(&self, id: &str) -> Option<&Property> {
+        let (s, l) = self.locate_property(id)?;
+        self.symbol(&s)?.layer(&l)?.properties().into_iter().find(|p| p.id == id)
+    }
+
+    /// A property to change (its layer is copied first if a snapshot shares it).
+    pub fn property_mut(&mut self, id: &str) -> Option<&mut Property> {
+        let (s, l) = self.locate_property(id)?;
+        self.layer_mut(&s, &l)?.properties_mut().into_iter().find(|p| p.id == id)
     }
 
     /// Every property in the project by id (for modifiers that link).

@@ -7,6 +7,7 @@
 
 pub mod audio;
 pub mod codec;
+pub mod edit;
 pub mod eval;
 pub mod export;
 pub mod files;

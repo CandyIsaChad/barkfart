@@ -16,6 +16,7 @@ test {
     systemProperty 'barkfart.root', rootProject.projectDir.absolutePath
     systemProperty 'barkfart.refdump', System.getProperty('barkfart.refdump', '')
     systemProperty 'barkfart.legacydump', System.getProperty('barkfart.legacydump', '')
+    systemProperty 'barkfart.editdump', System.getProperty('barkfart.editdump', '')
     systemProperty 'barkfart.reference', rootProject.file('main/Payload/IOSLauncher.app').absolutePath
     testLogging { events 'passed', 'skipped', 'failed'; exceptionFormat 'full' }
 }
