@@ -21,7 +21,7 @@ fn renderer(order: &[wgpu::Backends]) -> Option<Renderer> {
 
 fn shot(r: &Renderer, p: &barkfart_core::model::Project, t: f64, w: u32, h: u32) -> Vec<u8> {
     let s = eval::evaluate(p, &p.root_symbol, t);
-    let d = tess::tessellate(&s, None);
+    let d = if std::env::var("BARKFART_FLAT").is_ok() { tess::tessellate(&s, None) } else { tess::layered(&s, None) };
     let (hw, hh) = (p.settings.width as f32 / 2.0, p.settings.height as f32 / 2.0);
     let bg = p.settings.background;
     r.render(&d, w, h, View { x0: -hw, y0: -hh, x1: hw, y1: hh, background: [bg.r, bg.g, bg.b, bg.a] })

@@ -112,7 +112,7 @@ class _SpikePageState extends State<SpikePage> with SingleTickerProviderStateMix
     }
     if (_frames == 0) debugPrint('rendered ${w}x$h in ${renderMs.toStringAsFixed(1)} ms');
     ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, (img) {
-      if (Platform.environment['BARKFART_TRACE'] != null) debugPrint('decoded mounted=$mounted');
+      if (Platform.environment['BARKFART_TRACE'] != null) debugPrint('decoded engine=${renderMs.toStringAsFixed(1)}ms total=${sw.elapsedMilliseconds}ms');
       if (!mounted) return;
       setState(() {
         _frame?.dispose();

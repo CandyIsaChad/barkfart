@@ -128,7 +128,8 @@ pub extern "C" fn bf_render_frame(e: *const Engine, t: f64, w: u32, h: u32, out:
     let r = catch_unwind(AssertUnwindSafe(|| {
         let start = std::time::Instant::now();
         let scene = eval::evaluate(p, &p.root_symbol, t);
-        let list = tess::tessellate(&scene, None);
+        // isolates: effects, adjustment layers, translucent groups drawn as one piece
+        let list = tess::layered(&scene, None);
         let (sw, sh) = (p.settings.width.max(1) as f32, p.settings.height.max(1) as f32);
         let aspect = w as f32 / h as f32;
         let (hw, hh) = if aspect >= sw / sh { (sh * aspect / 2.0, sh / 2.0) } else { (sw / 2.0, sw / aspect / 2.0) };

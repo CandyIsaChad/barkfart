@@ -39,6 +39,23 @@ Decision and reasons: PROGRESS.md, 2026-11-19.
 - Dev box: 4 cores, 3 GB RAM: cargo jobs = 2, no debug info in dev builds.
 - Toolchains: Rust (rustup), Flutter in `~/.local/flutter`.
 
+## Status (2026-11-19)
+- Done and checked against the Java reference (engine/testdata/ref, 107
+  projects at 3 times; planted errors are caught by every comparison):
+  model + project.json + .bark reading; evaluator (scenes number for
+  number); tessellator (all vertices); layered isolate trees (bounds and
+  membership); CPU effects reference (within 1/255 of the Java compositor);
+  GPU renderer with isolates, blend modes, adjustment layers and all nine
+  effects (Vulkan and GL, tight per-pixel tolerance after snapping the
+  reference to the GPU's 1/256 px vertex grid).
+- App: plays the bundled v1 project through the layered GPU path; draws
+  only when the project frame changes.
+- Laptop numbers (Intel HD 5500, 3 GB RAM, swapping): engine 21.5 ms per
+  1280x720 layered frame alone, ~50 ms inside the running app (Flutter
+  shares the GPU). The fix is texture sharing instead of readback.
+- Next: textures (sprite images from .bark assets, glyph atlas for text),
+  then onion skin, audio, export, legacy import, then the interface.
+
 ## Notes from device tests
 - 2026-11-19, iPad: first Barkfart Next IPA works; 2.9 ms per render.
   Later (options menu): a frame-rate cap (60 / 120 fps / display rate).
