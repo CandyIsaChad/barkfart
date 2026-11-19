@@ -1,0 +1,9 @@
+[package]
+name = "barkfart-audio"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+barkfart-core = { version = "0.1.0", path = "../core" }
+cpal = "0.18.2"
