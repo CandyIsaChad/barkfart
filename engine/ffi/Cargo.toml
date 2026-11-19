@@ -8,6 +8,8 @@ publish.workspace = true
 barkfart-audio = { version = "0.1.0", path = "../audio" }
 barkfart-core = { version = "0.1.0", path = "../core" }
 barkfart-render = { version = "0.1.0", path = "../render" }
+indexmap = "2.14.2"
+serde_json = { version = "1.0.154", features = ["preserve_order", "arbitrary_precision"] }
 
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]

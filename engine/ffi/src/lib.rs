@@ -2,7 +2,9 @@
 //! is safe to call with a null handle (it then does nothing) and never
 //! unwinds across the boundary.
 
+use barkfart_core::edit::Document;
 use barkfart_core::model::Project;
+use barkfart_core::session::Session;
 use barkfart_core::{codec, eval, tess};
 use barkfart_render::glyphs::{GlyphAtlas, PAGE};
 use barkfart_render::{Renderer, View};
@@ -19,11 +21,67 @@ pub struct Engine {
     /// Image ids uploaded for the current project.
     images: Vec<String>,
     label: Vec<u8>,
-    project: Option<Project>,
+    /// The open project with its history, selection and gestures.
+    session: Option<Session>,
+    /// Decoded sounds by asset id (the plan is rebuilt from them after edits).
+    sounds: std::collections::HashMap<String, std::sync::Arc<barkfart_core::audio::Pcm>>,
+    plan_rev: u64,
+    /// The last command's answer (NUL-terminated JSON) and the last saved file.
+    answer: Vec<u8>,
+    saved: Vec<u8>,
     error: Vec<u8>,
 }
 
 impl Engine {
+    fn project(&self) -> Option<&Project> {
+        self.session.as_ref().map(|s| s.project())
+    }
+
+    /// Opens a project: textures, sounds, a fresh session.
+    fn open(&mut self, p: Project, entries: indexmap::IndexMap<String, Vec<u8>>) {
+        for id in self.images.drain(..) {
+            self.renderer.remove_texture(&id);
+        }
+        // sprite images (anything missing or unreadable draws in plain colour)
+        for id in p.assets.keys() {
+            if let Some(img) = barkfart_core::image::asset_bytes(&p, &entries, id).and_then(barkfart_core::image::decode) {
+                self.renderer.set_texture(id, img.w, img.h, &img.px);
+                self.images.push(id.clone());
+            }
+        }
+        // sounds: decoded once
+        self.sounds.clear();
+        for (id, a) in &p.assets {
+            if a.kind != barkfart_core::model::AssetKind::Audio {
+                continue;
+            }
+            if let Some(pcm) = barkfart_core::image::asset_bytes(&p, &entries, id).and_then(barkfart_core::audio::decode_sound) {
+                self.sounds.insert(id.clone(), std::sync::Arc::new(pcm));
+            }
+        }
+        let assets = entries.into_iter().map(|(k, v)| (k, std::sync::Arc::new(v))).collect();
+        self.session = Some(Session::new(Document::with_assets(p, assets)));
+        self.player.stop();
+        self.plan_rev = 0;
+        self.refresh_plan();
+        self.set_error("");
+    }
+
+    /// Rebuilds what the audio thread plays when the project changed.
+    fn refresh_plan(&mut self) {
+        let Some(s) = &self.session else { return };
+        if s.rev() == self.plan_rev && self.plan.is_some() {
+            return;
+        }
+        let p = s.project();
+        if let Some(root) = p.root() {
+            let sounds = &self.sounds;
+            let plan = barkfart_core::audio::AudioPlan::build(p, root, &|id: &str| sounds.get(id).cloned());
+            self.player.set_plan(plan.clone());
+            self.plan = Some(plan);
+        }
+        self.plan_rev = s.rev();
+    }
     fn set_error(&mut self, e: impl std::fmt::Display) {
         self.error = format!("{e}").into_bytes();
         self.error.push(0);
@@ -43,7 +101,21 @@ pub extern "C" fn bf_engine_new() -> *mut Engine {
             let player = barkfart_audio::Player::new();
             let mut audio_label = if player.available() { format!("{} at {} Hz", player.device, player.rate) } else { player.device.clone() }.into_bytes();
             audio_label.push(0);
-            Box::into_raw(Box::new(Engine { renderer, plan: None, player, audio_label, glyphs, images: Vec::new(), label, project: None, error: vec![0] }))
+            Box::into_raw(Box::new(Engine {
+                renderer,
+                plan: None,
+                player,
+                audio_label,
+                glyphs,
+                images: Vec::new(),
+                label,
+                session: None,
+                sounds: Default::default(),
+                plan_rev: 0,
+                answer: vec![0],
+                saved: Vec::new(),
+                error: vec![0],
+            }))
         }
         _ => std::ptr::null_mut(),
     }
@@ -95,34 +167,7 @@ pub extern "C" fn bf_project_load(e: *mut Engine, data: *const u8, len: usize) -
     }));
     match r {
         Ok(Ok((p, entries))) => {
-            for id in engine.images.drain(..) {
-                engine.renderer.remove_texture(&id);
-            }
-            // sprite images (anything missing or unreadable draws in plain colour)
-            for id in p.assets.keys() {
-                if let Some(img) = barkfart_core::image::asset_bytes(&p, &entries, id).and_then(barkfart_core::image::decode) {
-                    engine.renderer.set_texture(id, img.w, img.h, &img.px);
-                    engine.images.push(id.clone());
-                }
-            }
-            // sounds: decoded once; the plan is what the audio thread plays
-            let mut sounds: std::collections::HashMap<String, std::sync::Arc<barkfart_core::audio::Pcm>> = Default::default();
-            for (id, a) in &p.assets {
-                if a.kind != barkfart_core::model::AssetKind::Audio {
-                    continue;
-                }
-                if let Some(pcm) = barkfart_core::image::asset_bytes(&p, &entries, id).and_then(barkfart_core::audio::decode_sound) {
-                    sounds.insert(id.clone(), std::sync::Arc::new(pcm));
-                }
-            }
-            if let Some(root) = p.root() {
-                let plan = barkfart_core::audio::AudioPlan::build(&p, root, &|id: &str| sounds.get(id).cloned());
-                engine.player.stop();
-                engine.player.set_plan(plan.clone());
-                engine.plan = Some(plan);
-            }
-            engine.project = Some(p);
-            engine.set_error("");
+            engine.open(p, entries);
             0
         }
         Ok(Err(err)) => {
@@ -144,7 +189,7 @@ pub extern "C" fn bf_project_info(e: *const Engine, out: *mut f64) -> i32 {
     }
     // SAFETY: live handle
     let engine = unsafe { &*e };
-    let Some(p) = &engine.project else { return 2 };
+    let Some(p) = engine.project() else { return 2 };
     let duration = p.root().map(|s| s.duration).unwrap_or(0.0);
     let v = [duration, p.settings.fps as f64, p.settings.width as f64, p.settings.height as f64];
     // SAFETY: the caller provides 4 doubles
@@ -163,7 +208,7 @@ pub extern "C" fn bf_render_frame(e: *const Engine, t: f64, w: u32, h: u32, out:
     }
     // SAFETY: live handle
     let engine = unsafe { &*e };
-    let Some(p) = &engine.project else { return 2 };
+    let Some(p) = engine.project() else { return 2 };
     let r = catch_unwind(AssertUnwindSafe(|| {
         let start = std::time::Instant::now();
         let scene = eval::evaluate(p, &p.root_symbol, t);
@@ -208,8 +253,10 @@ pub extern "C" fn bf_play(e: *const Engine, t: f64, loop_start: f64, loop_end: f
     if e.is_null() {
         return;
     }
-    // SAFETY: live handle
-    unsafe { (*e).player.play(t, loop_start, loop_end) };
+    // SAFETY: live handle; the app calls in from one thread
+    let engine = unsafe { &mut *(e as *mut Engine) };
+    engine.refresh_plan();
+    engine.player.play(t, loop_start, loop_end);
 }
 
 #[no_mangle]
@@ -275,7 +322,7 @@ pub extern "C" fn bf_export_begin(e: *mut Engine, format: i32, path: *const c_ch
     // SAFETY: live handle
     let engine = unsafe { &mut *e };
     let r = (|| -> Result<Export, String> {
-        let p = engine.project.as_ref().ok_or("no project")?;
+        let p = engine.project().ok_or("no project")?;
         let path = std::path::PathBuf::from(cstr(path).ok_or("no file name")?);
         if w == 0 || h == 0 || w > 4096 || h > 4096 {
             return Err(format!("size {w}x{h} is not allowed"));
@@ -310,7 +357,7 @@ pub extern "C" fn bf_export_step(e: *const Engine, x: *mut Export) -> i32 {
     }
     // SAFETY: live handles
     let (engine, job) = unsafe { (&*e, &mut *x) };
-    let Some(p) = &engine.project else { return -2 };
+    let Some(p) = engine.project() else { return -2 };
     let r = catch_unwind(AssertUnwindSafe(|| -> Result<bool, String> {
         if job.next >= job.count {
             match job.writer.take() {
@@ -403,7 +450,8 @@ pub extern "C" fn bf_export_soundtrack(e: *mut Engine, path: *const c_char, star
     }
     // SAFETY: live handle
     let engine = unsafe { &mut *e };
-    let (Some(p), Some(plan)) = (&engine.project, &engine.plan) else { return 2 };
+    engine.refresh_plan();
+    let (Some(p), Some(plan)) = (engine.project(), &engine.plan) else { return 2 };
     let fps = p.settings.fps.max(1.0) as f64;
     let total = ((p.root().map(|s| s.duration).unwrap_or(0.0) * fps).round() as u32).max(1);
     let count = if count == 0 { total.saturating_sub(start) } else { count };
@@ -414,6 +462,109 @@ pub extern "C" fn bf_export_soundtrack(e: *mut Engine, path: *const c_char, star
         Err(err) => {
             engine.set_error(err);
             2
+        }
+    }
+}
+
+// ---------------------------------------------------------------- editing
+
+/// Opens a new project (one frame, one figure). Returns 0.
+#[no_mangle]
+pub extern "C" fn bf_doc_new(e: *mut Engine) -> i32 {
+    if e.is_null() {
+        return 1;
+    }
+    // SAFETY: live handle
+    let engine = unsafe { &mut *e };
+    engine.open(barkfart_core::session::new_project(), Default::default());
+    0
+}
+
+/// Runs one editing command (JSON, see barkfart_core::session) and returns
+/// the editor state as JSON, valid until the next call. Null without a project.
+#[no_mangle]
+pub extern "C" fn bf_cmd(e: *mut Engine, json: *const c_char) -> *const c_char {
+    if e.is_null() {
+        return std::ptr::null();
+    }
+    // SAFETY: live handle
+    let engine = unsafe { &mut *e };
+    let Some(text) = cstr(json) else { return std::ptr::null() };
+    let Some(s) = engine.session.as_mut() else { return std::ptr::null() };
+    let out = catch_unwind(AssertUnwindSafe(|| {
+        let c: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+        s.command(&c)
+    }));
+    let v = match out {
+        Ok(v) => v,
+        Err(_) => serde_json::json!({"error": "internal error"}),
+    };
+    engine.answer = serde_json::to_vec(&v).unwrap_or_default();
+    engine.answer.push(0);
+    engine.answer.as_ptr() as *const c_char
+}
+
+/// Renders the open project at time t into `out` (w * h * 4 bytes, straight
+/// RGBA, rows top-down) showing the stage rectangle [x0, x1] x [y0, y1]
+/// (y up). flags: 1 = through the camera (as played), 2 = onion skin.
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn bf_render_view(e: *const Engine, t: f64, w: u32, h: u32, x0: f32, y0: f32, x1: f32, y1: f32, flags: u32, out: *mut u8, micros: *mut u32) -> i32 {
+    if e.is_null() || out.is_null() || w == 0 || h == 0 || w > 8192 || h > 8192 || !(x1 > x0) || !(y1 > y0) {
+        return 1;
+    }
+    // SAFETY: live handle
+    let engine = unsafe { &*e };
+    let Some(p) = engine.project() else { return 2 };
+    let r = catch_unwind(AssertUnwindSafe(|| {
+        let start = std::time::Instant::now();
+        let camera = flags & 1 != 0;
+        let scene = eval::evaluate_with(p, &p.root_symbol, t, false, camera);
+        let mut list = tess::layered(&scene, Some(&engine.glyphs));
+        if flags & 2 != 0 {
+            let onion = tess::OnionSkin { apply_camera: camera, ..Default::default() };
+            list = list.with_underlay(onion.build_layered(p, &p.root_symbol, t));
+        }
+        let bg = p.settings.background;
+        let view = View { x0, y0, x1, y1, background: [bg.r, bg.g, bg.b, bg.a] };
+        let px = engine.renderer.render(&list, w, h, view);
+        (px, start.elapsed().as_micros().min(u32::MAX as u128) as u32)
+    }));
+    match r {
+        Ok((px, us)) => {
+            // SAFETY: caller provides w * h * 4 bytes (and a u32 when micros is not null)
+            unsafe {
+                std::ptr::copy_nonoverlapping(px.as_ptr(), out, px.len());
+                if !micros.is_null() {
+                    *micros = us;
+                }
+            }
+            0
+        }
+        Err(_) => 3,
+    }
+}
+
+/// The open project as a .bark file; *len gets its size. The bytes stay
+/// valid until the next save. Null on failure (see bf_engine_error).
+#[no_mangle]
+pub extern "C" fn bf_save(e: *mut Engine, len: *mut usize) -> *const u8 {
+    if e.is_null() || len.is_null() {
+        return std::ptr::null();
+    }
+    // SAFETY: live handle
+    let engine = unsafe { &mut *e };
+    let Some(s) = engine.session.as_mut() else { return std::ptr::null() };
+    match s.save() {
+        Ok(b) => {
+            engine.saved = b;
+            // SAFETY: the caller passes a usize
+            unsafe { *len = engine.saved.len() };
+            engine.saved.as_ptr()
+        }
+        Err(err) => {
+            engine.set_error(err);
+            std::ptr::null()
         }
     }
 }

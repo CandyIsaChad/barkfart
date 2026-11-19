@@ -279,6 +279,9 @@ class EditDumpTest {
         dir = new File(d0, "frames");
         dir.mkdirs();
         frameScenarios();
+        dir = new File(d0, "starter");
+        dir.mkdirs();
+        write("new-project.json", ProjectCodec.encode(app.barkfart.BarkfartApp.newProject()));
         dir = new File(d0, "canvas");
         dir.mkdirs();
         canvasScenarios();

@@ -17,6 +17,7 @@ pub mod import;
 pub mod json;
 pub mod legacy;
 pub mod model;
+pub mod session;
 pub mod tess;
 
 pub use tess::{Batch, DrawList, Glyph, GlyphSource};

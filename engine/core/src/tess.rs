@@ -110,6 +110,33 @@ impl DrawList {
         self.isolates.first()
     }
 
+    /// Puts another layered list (onion ghosts) underneath this one's
+    /// contents: its root becomes the first child of this root.
+    pub fn with_underlay(mut self, under: DrawList) -> DrawList {
+        if self.isolates.is_empty() || under.isolates.is_empty() || under.isolates[0].empty() {
+            return self;
+        }
+        let (bo, io) = (self.batches.len(), self.isolates.len());
+        for mut b in under.batches {
+            b.owner = b.owner.map(|o| o + io);
+            self.batches.push(b);
+        }
+        let (x0, y0, x1, y1) = (under.isolates[0].min_x, under.isolates[0].min_y, under.isolates[0].max_x, under.isolates[0].max_y);
+        for mut iso in under.isolates {
+            iso.parent = Some(iso.parent.map(|p| p + io).unwrap_or(0));
+            for it in iso.items.iter_mut() {
+                *it = match *it {
+                    IsoItem::Batch(b) => IsoItem::Batch(b + bo),
+                    IsoItem::Isolate(i) => IsoItem::Isolate(i + io),
+                };
+            }
+            self.isolates.push(iso);
+        }
+        self.isolates[0].include(x0, y0, x1, y1);
+        self.isolates[0].items.insert(0, IsoItem::Isolate(io));
+        self
+    }
+
     pub(crate) fn open(&mut self, source: &str, opacity: f32, blend: Blend, adjustment: bool, effects: Vec<ResolvedEffect>) {
         let i = self.isolates.len();
         self.isolates.push(Isolate {
