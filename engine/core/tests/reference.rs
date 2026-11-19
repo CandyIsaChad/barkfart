@@ -313,3 +313,45 @@ fn isolate_trees_match_the_java_layered_tessellator() {
     }
     assert!(failures.is_empty(), "{} of {checked} isolate trees differ:\n{}", failures.len(), failures.iter().take(6).cloned().collect::<Vec<_>>().join("\n"));
 }
+
+fn read_gz_bytes(path: &std::path::Path) -> Vec<u8> {
+    use std::io::Read;
+    let mut v = Vec::new();
+    flate2::read::GzDecoder::new(std::fs::File::open(path).unwrap()).read_to_end(&mut v).unwrap();
+    v
+}
+
+#[test]
+fn cpu_renders_match_the_java_compositor() {
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    for n in cases() {
+        let dir = ref_dir().join(&n);
+        let p = barkfart_core::codec::decode(&std::fs::read_to_string(dir.join("project.json")).unwrap()).unwrap();
+        for tag in ["0.0", "0.37", "1.1"] {
+            let r = read_gz(&dir.join(format!("t{tag}.json.gz")));
+            let cpu = &r["cpu"];
+            let num = |k: &str| cpu[k].to_string().parse::<f64>().unwrap();
+            let (w, h) = (num("w") as usize, num("h") as usize);
+            let want = read_gz_bytes(&dir.join(format!("t{tag}.cpu.rgba.gz")));
+            let s = eval::evaluate_with(&p, &p.root_symbol, tag.parse().unwrap(), false, true);
+            let d = barkfart_core::tess::layered(&s, Some(&RefGlyphs));
+            let mut im = barkfart_core::fx::Image::new(w, h, num("x0") as f32, num("y0") as f32, num("scale") as f32);
+            barkfart_core::fx::render(&d, &mut im);
+            let got = im.to_premultiplied_u8();
+            let (mut worst, mut off) = (0u8, 0usize);
+            for (a, b) in want.iter().zip(&got) {
+                let dd = a.abs_diff(*b);
+                worst = worst.max(dd);
+                if dd > 1 {
+                    off += 1;
+                }
+            }
+            checked += 1;
+            if off > 0 {
+                failures.push(format!("{n} t={tag}: {off} channels off by more than 1 (worst {worst})"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} of {checked} renders differ:\n{}", failures.len(), failures.iter().take(8).cloned().collect::<Vec<_>>().join("\n"));
+}
