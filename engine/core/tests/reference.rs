@@ -181,3 +181,91 @@ fn scenes_match_the_java_evaluator() {
     }
     assert!(failures.is_empty(), "{} of {checked} scenes differ:\n{}", failures.len(), failures.iter().take(6).cloned().collect::<Vec<_>>().join("\n"));
 }
+
+/// The same stand-in glyphs as RefDumpTest.GLYPHS.
+struct RefGlyphs;
+
+impl barkfart_core::GlyphSource for RefGlyphs {
+    fn base_px(&self) -> f32 {
+        20.0
+    }
+
+    fn line_height(&self) -> f32 {
+        24.0
+    }
+
+    fn glyph(&self, c: char) -> Option<barkfart_core::Glyph> {
+        let g = |u0, v0, u1, v1, x, y, w, h, advance| barkfart_core::Glyph { texture: "glyphs:0".into(), u0, v0, u1, v1, x, y, w, h, advance };
+        if c == ' ' {
+            return Some(g(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 8.0));
+        }
+        let code = c as u32;
+        if code > 126 {
+            return None;
+        }
+        let (u, v) = ((code % 16) as f32 / 16.0, (code / 16) as f32 / 8.0);
+        Some(g(u, v + 0.125, u + 0.0625, v, 1.0, -4.0, 10.0, 16.0, 12.0))
+    }
+}
+
+fn draw_json(d: &barkfart_core::DrawList) -> J {
+    let batches: Vec<J> = d
+        .batches
+        .iter()
+        .map(|b| {
+            json!({
+                "blend": b.blend().name(),
+                "effectGroup": b.effect_group,
+                "texture": b.texture,
+                "xy": floats(&b.xy),
+                "uv": floats(&b.uv),
+                "rgba": b.rgba.iter().map(|c| format!("{c:08x}")).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    json!({ "batches": batches })
+}
+
+#[test]
+fn triangles_match_the_java_tessellator() {
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    let mut vertices = 0;
+    for n in cases() {
+        let dir = ref_dir().join(&n);
+        let p = barkfart_core::codec::decode(&std::fs::read_to_string(dir.join("project.json")).unwrap()).unwrap();
+        for tag in ["0.0", "0.37", "1.1"] {
+            let r = read_gz(&dir.join(format!("t{tag}.json.gz")));
+            let t: f64 = tag.parse().unwrap();
+            let s = eval::evaluate_with(&p, &p.root_symbol, t, false, true);
+            let d = barkfart_core::tess::tessellate(&s, Some(&RefGlyphs));
+            vertices += d.batches.iter().map(|b| b.vertex_count()).sum::<usize>();
+            let got = draw_json(&d);
+            let mut out = Vec::new();
+            // coordinates within 1e-3 px relative; colours compare as text (exact)
+            diff("", &r["draw"], &got, 1e-4, &mut out);
+            checked += 1;
+            if !out.is_empty() {
+                failures.push(format!("{n} t={tag}:\n  {}", out.join("\n  ")));
+            }
+        }
+    }
+    eprintln!("{checked} draw lists, {vertices} vertices compared");
+    assert!(failures.is_empty(), "{} of {checked} draw lists differ:\n{}", failures.len(), failures.iter().take(6).cloned().collect::<Vec<_>>().join("\n"));
+}
+
+#[test]
+fn the_locked_v1_fixture_loads_from_its_bark_file() {
+    let path = ref_dir().join("../../../core/src/test/resources/formats/v1-kitchen-sink.bark");
+    let b = barkfart_core::codec::read_bark(&std::fs::read(path).unwrap()).unwrap();
+    let p = &b.project;
+    assert_eq!(p.library.len(), 2);
+    assert_eq!(p.root().unwrap().layers.len(), 7);
+    let man = p.root().unwrap().layers[0].as_figure().unwrap();
+    assert_eq!(man.node("armR1").unwrap().rotation.track.len(), 3);
+    assert_eq!(man.polyfills.len(), 1);
+    // same scene as the exported JSON copy
+    let json = barkfart_core::codec::decode(&std::fs::read_to_string(ref_dir().join("kitchen-sink/project.json")).unwrap()).unwrap();
+    let (a, c) = (eval::evaluate(p, &p.root_symbol, 0.6), eval::evaluate(&json, &json.root_symbol, 0.6));
+    assert_eq!(a.root, c.root);
+}

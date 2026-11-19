@@ -1,32 +1,45 @@
-use barkfart_core::demo_figure;
+use barkfart_core::{codec, eval, tess};
 use barkfart_render::{Renderer, View};
 
-#[test]
-fn renders_the_demo_figure_on_this_gpu() {
-    let r = match Renderer::headless_default() {
-        Ok(r) => r,
-        Err(e) => {
-            // CI machines without a GPU: say so instead of failing silently
-            eprintln!("skipping: {e}");
-            return;
+fn kitchen_sink() -> barkfart_core::model::Project {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata/ref/kitchen-sink/project.json");
+    codec::decode(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+fn renderer(order: &[wgpu::Backends]) -> Option<Renderer> {
+    match Renderer::headless(order) {
+        Ok(r) => {
+            eprintln!("adapter: {} via {} ({})", r.adapter.name, r.adapter.backend, r.adapter.driver);
+            Some(r)
         }
-    };
-    eprintln!("adapter: {} via {} ({})", r.adapter.name, r.adapter.backend, r.adapter.driver);
-    let (w, h) = (300u32, 300u32);
-    let view = View { x0: -150.0, y0: -150.0, x1: 150.0, y1: 150.0, background: [1.0, 1.0, 1.0, 1.0] };
-    let px = r.render(&demo_figure(0.25), w, h, view);
+        Err(e) => {
+            eprintln!("skipping: {e}");
+            None
+        }
+    }
+}
+
+fn shot(r: &Renderer, p: &barkfart_core::model::Project, t: f64, w: u32, h: u32) -> Vec<u8> {
+    let s = eval::evaluate(p, &p.root_symbol, t);
+    let d = tess::tessellate(&s, None);
+    let (hw, hh) = (p.settings.width as f32 / 2.0, p.settings.height as f32 / 2.0);
+    let bg = p.settings.background;
+    r.render(&d, w, h, View { x0: -hw, y0: -hh, x1: hw, y1: hh, background: [bg.r, bg.g, bg.b, bg.a] })
+}
+
+#[test]
+fn renders_the_kitchen_sink_project() {
+    let Some(r) = renderer(&[wgpu::Backends::PRIMARY, wgpu::Backends::GL]) else { return };
+    let p = kitchen_sink();
+    let (w, h) = (640u32, 360u32);
+    let px = shot(&r, &p, 0.6, w, h);
     assert_eq!(px.len(), (w * h * 4) as usize);
-    let at = |x: u32, y: u32| {
-        let o = ((y * w + x) * 4) as usize;
-        [px[o], px[o + 1], px[o + 2], px[o + 3]]
-    };
-    assert_eq!(at(2, 2), [255, 255, 255, 255], "background");
-    // head centre at (0, 75): pixel (150, 75) from the top
-    assert_eq!(at(150, 75), [0, 0, 0, 255], "head");
-    assert_eq!(at(150, 130), [0, 0, 0, 255], "body");
-    let out = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("spike.png");
-    let f = std::fs::File::create(&out).unwrap();
-    let mut enc = png::Encoder::new(std::io::BufWriter::new(f), w, h);
+    let bg = p.settings.background.to_rgba8888().to_be_bytes();
+    assert_eq!(&px[0..4], &bg, "corner shows the project background");
+    let drawn = px.chunks_exact(4).filter(|c| *c != bg).count();
+    assert!(drawn > 2000, "something is drawn: {drawn} pixels");
+    let out = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("kitchen-sink.png");
+    let mut enc = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(&out).unwrap()), w, h);
     enc.set_color(png::ColorType::Rgba);
     enc.set_depth(png::BitDepth::Eight);
     enc.write_header().unwrap().write_image_data(&px).unwrap();
@@ -34,33 +47,52 @@ fn renders_the_demo_figure_on_this_gpu() {
 }
 
 #[test]
-fn the_gl_backend_renders_too() {
-    // cheap Android phones may only have GLES; make sure that path draws the same
-    let r = match Renderer::headless(&[wgpu::Backends::GL]) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("skipping GL: {e}");
-            return;
-        }
-    };
-    eprintln!("GL adapter: {} ({})", r.adapter.name, r.adapter.driver);
-    let view = View { x0: -150.0, y0: -150.0, x1: 150.0, y1: 150.0, background: [1.0, 1.0, 1.0, 1.0] };
-    let px = r.render(&demo_figure(0.25), 300, 300, view);
-    let o = ((75 * 300 + 150) * 4) as usize;
-    assert_eq!(&px[o..o + 4], &[0, 0, 0, 255]);
+fn the_gl_backend_renders_the_same() {
+    let (Some(gl), Some(vk)) = (renderer(&[wgpu::Backends::GL]), renderer(&[wgpu::Backends::PRIMARY])) else { return };
+    let p = kitchen_sink();
+    let (a, b) = (shot(&gl, &p, 0.6, 320, 180), shot(&vk, &p, 0.6, 320, 180));
+    let differ = a.chunks_exact(4).zip(b.chunks_exact(4)).filter(|(x, y)| x.iter().zip(y.iter()).any(|(p, q)| p.abs_diff(*q) > 8)).count();
+    assert!(differ < 320 * 180 / 200, "{differ} pixels differ between GL and Vulkan");
 }
 
 #[test]
-#[ignore] // timing only: cargo test --release -p barkfart-render -- --ignored --nocapture
+#[ignore] // timing: cargo test --release -p barkfart-render -- --ignored --nocapture
 fn timing() {
     let r = Renderer::headless_default().unwrap();
-    let view = View { x0: -150.0, y0: -150.0, x1: 150.0, y1: 150.0, background: [1.0, 1.0, 1.0, 1.0] };
-    for (w, h) in [(1280u32, 685u32), (2048, 1536)] {
-        r.render(&demo_figure(0.0), w, h, view);
+    let p = kitchen_sink();
+    for (w, h) in [(1280u32, 720u32), (2048, 1536)] {
+        shot(&r, &p, 0.0, w, h);
         let t = std::time::Instant::now();
         for i in 0..20 {
-            r.render(&demo_figure(i as f32 / 20.0), w, h, view);
+            shot(&r, &p, i as f64 / 20.0, w, h);
         }
-        eprintln!("{w}x{h}: {:.1} ms per frame", t.elapsed().as_secs_f64() * 1000.0 / 20.0);
+        eprintln!("{w}x{h}: {:.1} ms per frame (evaluate + tessellate + render + readback)", t.elapsed().as_secs_f64() * 1000.0 / 20.0);
     }
+}
+
+#[test]
+fn matches_the_locked_v1_reference_render() {
+    // FormatLockTest: Raster.fill(tessellate(evaluate(p, root, 0.6)), 320, 240, white)
+    let Some(r) = renderer(&[wgpu::Backends::PRIMARY, wgpu::Backends::GL]) else { return };
+    let p = kitchen_sink();
+    let d = tess::tessellate(&eval::evaluate(&p, &p.root_symbol, 0.6), None);
+    let px = r.render(&d, 320, 240, View { x0: -160.0, y0: -120.0, x1: 160.0, y1: 120.0, background: [1.0, 1.0, 1.0, 1.0] });
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/src/test/resources/formats/v1-kitchen-sink.png");
+    let dec = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).unwrap()));
+    let mut reader = dec.read_info().unwrap();
+    let mut buf = vec![0; reader.output_buffer_size().unwrap()];
+    let info = reader.next_frame(&mut buf).unwrap();
+    let ch = info.color_type.samples();
+    assert_eq!((info.width, info.height), (320, 240));
+    let mut bad = 0;
+    for i in 0..(320 * 240) {
+        let want = &buf[i * ch..i * ch + 3];
+        let got = &px[i * 4..i * 4 + 3];
+        if want.iter().zip(got).any(|(a, b)| a.abs_diff(*b) > 96) {
+            bad += 1;
+        }
+    }
+    // edges differ (the reference raster has no anti-aliasing); shapes must not
+    assert!(bad < 320 * 240 / 50, "{bad} pixels differ from the v1 reference");
+    eprintln!("{bad} of {} pixels differ (edges)", 320 * 240);
 }

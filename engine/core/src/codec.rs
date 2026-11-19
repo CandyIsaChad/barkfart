@@ -550,3 +550,34 @@ mod tests {
         assert!(decode(json).unwrap_err().0.contains("newer"));
     }
 }
+
+/// A .bark file: a ZIP with project.json and assets/<id>.<ext> (FORMAT.md).
+pub struct BarkFile {
+    pub project: Project,
+    /// Asset bytes by archive path ("assets/<id>.<ext>").
+    pub assets: indexmap::IndexMap<String, Vec<u8>>,
+}
+
+/// Reads a .bark file from bytes.
+pub fn read_bark(bytes: &[u8]) -> Result<BarkFile, FormatError> {
+    use std::io::Read;
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| FormatError(format!("not a .bark file: {e}")))?;
+    let mut json = None;
+    let mut assets = indexmap::IndexMap::new();
+    for i in 0..zip.len() {
+        let mut f = zip.by_index(i).map_err(|e| FormatError(e.to_string()))?;
+        let name = f.name().map_err(|e| FormatError(e.to_string()))?.to_string();
+        if f.size() > 512 * 1024 * 1024 {
+            return err(format!("{name} is too large"));
+        }
+        let mut data = Vec::with_capacity(f.size() as usize);
+        f.read_to_end(&mut data).map_err(|e| FormatError(e.to_string()))?;
+        if name == "project.json" {
+            json = Some(String::from_utf8(data).map_err(|_| FormatError("project.json is not UTF-8".into()))?);
+        } else if name.starts_with("assets/") {
+            assets.insert(name, data);
+        }
+    }
+    let project = decode(&json.ok_or_else(|| FormatError("no project.json".into()))?)?;
+    Ok(BarkFile { project, assets })
+}

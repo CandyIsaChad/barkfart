@@ -208,11 +208,19 @@ impl Renderer {
             layout: &self.layout,
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: ubuf.as_entire_binding() }],
         });
-        let mut bytes = Vec::with_capacity(list.vertices.len() * 12);
-        for v in &list.vertices {
-            bytes.extend_from_slice(&v.pos[0].to_le_bytes());
-            bytes.extend_from_slice(&v.pos[1].to_le_bytes());
-            bytes.extend_from_slice(&v.rgba);
+        // untextured batches for now (textures, blend modes and effects come next)
+        let mut bytes = Vec::new();
+        let mut count = 0u32;
+        for b in &list.batches {
+            if b.texture.is_some() {
+                continue;
+            }
+            for i in 0..b.vertex_count() {
+                bytes.extend_from_slice(&b.xy[i * 2].to_le_bytes());
+                bytes.extend_from_slice(&b.xy[i * 2 + 1].to_le_bytes());
+                bytes.extend_from_slice(&b.rgba[i].to_be_bytes()); // 0xRRGGBBAA -> r, g, b, a
+                count += 1;
+            }
         }
         if bytes.is_empty() {
             bytes.resize(12, 0);
@@ -251,11 +259,11 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            if !list.vertices.is_empty() {
+            if count > 0 {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &bind, &[]);
                 pass.set_vertex_buffer(0, vbuf.slice(..));
-                pass.draw(0..list.vertices.len() as u32, 0..1);
+                pass.draw(0..count, 0..1);
             }
         }
         enc.copy_texture_to_buffer(
