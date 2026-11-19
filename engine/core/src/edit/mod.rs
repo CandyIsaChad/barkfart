@@ -5,6 +5,10 @@
 
 pub mod editor;
 pub mod figure_ops;
+pub mod join_ops;
+pub mod layer_ops;
+pub mod symbol_ops;
+pub mod camera_ops;
 pub mod structure;
 
 use crate::model::Project;

@@ -171,3 +171,56 @@ fn figure_and_structure_operations_match_java() {
         });
     });
 }
+
+use barkfart_core::edit::{camera_ops as co, join_ops as jo, layer_ops as lo, symbol_ops as so};
+
+#[test]
+fn join_layer_movieclip_and_camera_operations_match_java() {
+    let g = "ops";
+    check(g, "join-joint", |d, _| step(d, |s| jo::join(s, "S1", "L7", "L2", Some("armR2"), true, 0.6)));
+    check(g, "join-no-rotate", |d, _| step(d, |s| jo::join(s, "S1", "L8", "L2", Some("head"), false, 0.6)));
+    check(g, "join-figure", |d, _| step(d, |s| jo::join(s, "S1", "L7", "L2", None, true, 0.0)));
+    check(g, "unjoin", |d, _| step(d, |s| jo::unjoin(s, "S1", "L5", 0.3)));
+    check(g, "flip-joined", |d, _| {
+        step(d, |s| jo::join(s, "S1", "L7", "L2", Some("armR2"), true, 0.6));
+        step(d, |s| jo::flip_joined(s, "S1", "L2", Some("armR2")));
+    });
+    check(g, "lock-camera", |d, _| step(d, |s| co::lock(s, "S1", "L7", "Lc", true, 0.2)));
+    check(g, "duplicate-joined", |d, _| step(d, |s| lo::duplicate(s, "S1", "L2", true, 30.0, -5.0).map(|_| ())));
+    check(g, "duplicate-alone", |d, _| step(d, |s| lo::duplicate(s, "S1", "L5", false, 0.0, 12.0).map(|_| ())));
+    check(g, "move-joined-forward", |d, _| step(d, |s| lo::move_with_joined(s, "S1", "L2", true)));
+    check(g, "move-joined-back", |d, _| step(d, |s| lo::move_with_joined(s, "S1", "L8", false)));
+    check(g, "paste-props", |d, e| {
+        let c = lo::copy_props(d.project(), "S1", "L2", 0.6).unwrap();
+        let ed = e.clone();
+        step(d, |s| lo::paste_props(&ed, s, "S1", "L7", &c, true, true, 0.3));
+    });
+    check(g, "paste-props-pose-only", |d, e| {
+        let c = lo::copy_props(d.project(), "S1", "L2", 0.2).unwrap();
+        let ed = e.clone();
+        step(d, |s| lo::paste_props(&ed, s, "S1", "L8", &c, false, false, 0.9));
+    });
+    check(g, "tweening-off", |d, e| {
+        let ed = e.clone();
+        step(d, |s| lo::set_tweening(&ed, s, "S1", "L2", false));
+    });
+    check(g, "convert-symbol", |d, _| step(d, |s| so::convert_to_symbol(s, "S1", &["L7".to_string(), "L8".to_string()], "clip").map(|_| ())));
+    check(g, "break-apart", |d, _| step(d, |s| so::break_apart(s, "S1", "L5", 0.4).map(|_| ())));
+    check(g, "camera-follow", |d, _| step(d, |s| co::follow(s, "S1", "Lc", "L2", 0, 12)));
+    check(g, "pin-corner", |d, e| {
+        let ed = e.clone();
+        step(d, |s| co::pin_to_corner(&ed, s, "S1", "L8", "Lc", 2, 10.0, 0.0));
+    });
+    check(g, "polyfill", |d, _| {
+        step(d, |s| {
+            let f = s.project.root().unwrap().layer("L2").unwrap().as_figure().unwrap().clone();
+            let mut b = co::PolyfillBuilder::new(&f, "torso")?;
+            b.add(&f, "armR1");
+            b.add(&f, "armR1");
+            b.add(&f, "armR2");
+            b.add(&f, "head");
+            let id = co::PolyfillBuilder::free_id(&f);
+            b.finish(s, "S1", "L2", &id, Some(Color::rgba8888(0xff000080)))
+        });
+    });
+}

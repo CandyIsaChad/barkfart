@@ -102,6 +102,47 @@ class EditDumpTest {
         });
     }
 
+    private static Layer L(Project p, String id) {
+        return p.root().layer(id);
+    }
+
+    private void opsScenarios() throws Exception {
+        scenario("join-joint", (d, e, p) -> d.apply(JoinOps.join(p, p.root(), L(p, "L7"), man(p), "armR2", true, 0.6)));
+        scenario("join-no-rotate", (d, e, p) -> d.apply(JoinOps.join(p, p.root(), L(p, "L8"), man(p), "head", false, 0.6)));
+        scenario("join-figure", (d, e, p) -> d.apply(JoinOps.join(p, p.root(), L(p, "L7"), man(p), null, true, 0)));
+        scenario("unjoin", (d, e, p) -> d.apply(JoinOps.unjoin(p, p.root(), L(p, "L5"), 0.3)));
+        scenario("flip-joined", (d, e, p) -> {
+            d.apply(JoinOps.join(p, p.root(), L(p, "L7"), man(p), "armR2", true, 0.6));
+            d.apply(JoinOps.flipJoined(p.root(), man(p), "armR2"));
+        });
+        scenario("lock-camera", (d, e, p) -> d.apply(CameraOps.lock(p, p.root(), L(p, "L7"), (Layer.CameraLayer) L(p, "Lc"), true, 0.2)));
+        scenario("duplicate-joined", (d, e, p) -> d.apply(LayerOps.duplicate(p, p.root(), man(p), true, 30, -5, null)));
+        scenario("duplicate-alone", (d, e, p) -> d.apply(LayerOps.duplicate(p, p.root(), L(p, "L5"), false, 0, 12, null)));
+        scenario("move-joined-forward", (d, e, p) -> d.apply(LayerOps.move(p, p.root(), man(p), true)));
+        scenario("move-joined-back", (d, e, p) -> d.apply(LayerOps.move(p, p.root(), L(p, "L8"), false)));
+        scenario("paste-props", (d, e, p) -> {
+            LayerOps.Props c = LayerOps.copyProps(p, p.root(), man(p), 0.6);
+            LayerOps.pasteProps(e, p.root(), L(p, "L7"), c, true, true, 0.3);
+        });
+        scenario("paste-props-pose-only", (d, e, p) -> {
+            LayerOps.Props c = LayerOps.copyProps(p, p.root(), man(p), 0.2);
+            LayerOps.pasteProps(e, p.root(), L(p, "L8"), c, false, false, 0.9);
+        });
+        scenario("tweening-off", (d, e, p) -> LayerOps.setTweening(e, man(p), false));
+        scenario("convert-symbol", (d, e, p) -> d.apply(SymbolOps.convertToSymbol(p, p.root(), Arrays.asList(L(p, "L7"), L(p, "L8")), "clip", null)));
+        scenario("break-apart", (d, e, p) -> d.apply(SymbolOps.breakApart(p, p.root(), (Layer.SymbolLayer) L(p, "L5"), 0.4, null)));
+        scenario("camera-follow", (d, e, p) -> d.apply(CameraOps.follow(p, p.root(), (Layer.CameraLayer) L(p, "Lc"), man(p), 0, 12)));
+        scenario("pin-corner", (d, e, p) -> CameraOps.pinToCorner(e, p.root(), (Layer.TextLayer) L(p, "L8"), (Layer.CameraLayer) L(p, "Lc"), 2, 10, 0));
+        scenario("polyfill", (d, e, p) -> {
+            PolyfillBuilder b = new PolyfillBuilder(man(p), "torso");
+            b.add("armR1");
+            b.add("armR1");
+            b.add("armR2");
+            b.add("head");
+            d.apply(b.finish(PolyfillBuilder.freeId(man(p)), app.barkfart.model.Color.rgba8888(0xff000080)));
+        });
+    }
+
     @Test
     void dump() throws Exception {
         String d0 = System.getProperty("barkfart.editdump", "");
@@ -112,6 +153,9 @@ class EditDumpTest {
         dir = new File(d0, "figure");
         dir.mkdirs();
         figureScenarios();
+        dir = new File(d0, "ops");
+        dir.mkdirs();
+        opsScenarios();
         dir = editorDir;
         scenario("change-autokey", (d, e, p) -> e.change(p.property("L2/armR1/rotation"), 33f, 0.5));
         scenario("change-static", (d, e, p) -> {

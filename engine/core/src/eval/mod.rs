@@ -327,6 +327,26 @@ fn local(l: &Layer, t: f64, r: &mut Resolver) -> Affine {
         .mul(&Affine::translate(-ax as f64, -ay as f64))
 }
 
+/// The transform a layer's own values are expressed in: its parent chain,
+/// joint included (stage space).
+pub fn parent_frame(project: &Project, sym: &Symbol, l: &Layer, t: f64) -> Affine {
+    let mut r = Resolver::new(project);
+    let local = local(l, t, &mut r);
+    layer_chain(sym, l, t, &mut r).mul(&local.inverse())
+}
+
+/// The layer's parent-chain transform without the camera (stage space).
+pub fn layer_stage(project: &Project, sym: &Symbol, l: &Layer, t: f64) -> Affine {
+    let mut r = Resolver::new(project);
+    layer_chain(sym, l, t, &mut r)
+}
+
+/// The layer's own transform (position, rotation, scale, anchor) at t.
+pub fn local_transform(project: &Project, l: &Layer, t: f64) -> Affine {
+    let mut r = Resolver::new(project);
+    local(l, t, &mut r)
+}
+
 /// The layer's own transform composed with its parent chain (stage space).
 pub fn layer_chain(sym: &Symbol, l: &Layer, t: f64, r: &mut Resolver) -> Affine {
     let mut acc = local(l, t, r);

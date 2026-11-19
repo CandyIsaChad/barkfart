@@ -161,6 +161,19 @@ impl ValueType {
         }
     }
 
+    /// True when a and b differ by at most eps (colours per channel, 1/255).
+    pub fn near(self, a: &Value, b: &Value, eps: f64) -> bool {
+        match (a, b) {
+            (Value::F(x), Value::F(y)) => ((*x - *y).abs() as f64) <= eps,
+            (Value::D(x), Value::D(y)) => (x - y).abs() <= eps,
+            (Value::C(x), Value::C(y)) => {
+                let e = 1.0 / 255.0;
+                ((x.r - y.r).abs() as f64) <= e && ((x.g - y.g).abs() as f64) <= e && ((x.b - y.b).abs() as f64) <= e && ((x.a - y.a).abs() as f64) <= e
+            }
+            _ => a == b,
+        }
+    }
+
     pub fn checked(self, v: &Value) -> bool {
         matches!(
             (self, v),
@@ -389,6 +402,10 @@ impl Track {
 
     pub fn clear(&mut self) {
         self.keys.clear();
+    }
+
+    pub fn remove_at(&mut self, i: usize) -> Key {
+        self.keys.remove(i)
     }
 
     /// Exact-time search: Ok(index) or Err(insertion point).
@@ -1527,4 +1544,63 @@ fn to_base36(mut v: u32) -> String {
     }
     s.reverse();
     String::from_utf8(s).expect("ascii")
+}
+
+/// Key reduction: drops interior keys when the rest reproduce the original
+/// curve within a tolerance (first and last always stay; every check is
+/// against the original, so error never accumulates).
+pub mod key_reducer {
+    use super::*;
+
+    const SAMPLES_PER_SPAN: usize = 12;
+
+    /// 0.01 units / degrees, 1e-6 for time values, 1/255 per colour channel.
+    pub fn default_epsilon(t: ValueType) -> f64 {
+        if t == ValueType::Double {
+            1e-6
+        } else {
+            0.01
+        }
+    }
+
+    fn near(a: &Track, b: &Track, t: f64, eps: f64) -> bool {
+        a.ty.near(&a.sample(t), &b.sample(t), eps)
+    }
+
+    fn matches(orig: &Track, trial: &Track, t0: f64, t1: f64, eps: f64) -> bool {
+        for k in orig.keys() {
+            if k.time >= t0 && k.time <= t1 && !near(orig, trial, k.time, eps) {
+                return false;
+            }
+        }
+        for s in 1..SAMPLES_PER_SPAN {
+            let t = t0 + (t1 - t0) * s as f64 / SAMPLES_PER_SPAN as f64;
+            if !near(orig, trial, t, eps) {
+                return false;
+            }
+        }
+        near(orig, trial, t1 - (t1 - t0) * 1e-6, eps)
+    }
+
+    /// Reduces a track in place; returns keys removed.
+    pub fn reduce(track: &mut Track, eps: f64) -> usize {
+        if track.len() < 3 {
+            return 0;
+        }
+        let orig = track.clone();
+        let mut removed = 0;
+        let mut i = 1;
+        while i < track.len() - 1 {
+            let (prev, cur, next) = (track.keys()[i - 1], track.keys()[i], track.keys()[i + 1]);
+            let mut trial = track.clone();
+            trial.remove_at(i);
+            if matches(&orig, &trial, prev.time, next.time, eps) && near(&orig, &trial, cur.time, eps) {
+                track.remove_at(i);
+                removed += 1;
+            } else {
+                i += 1;
+            }
+        }
+        removed
+    }
 }
