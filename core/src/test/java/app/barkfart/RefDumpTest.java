@@ -95,6 +95,8 @@ class RefDumpTest {
                 m.put("draw", draw(Tessellator.tessellate(s, GLYPHS)));
                 DrawList layered = Tessellator.layered(s, GLYPHS);
                 m.put("layered", layered(layered));
+                app.barkfart.geom.OnionSkin onion = new app.barkfart.geom.OnionSkin();
+                m.put("onion", layered(onion.buildLayered(p, p.rootSymbol, t)));
                 // CPU reference render (Compositor), premultiplied RGBA8, rows top-down:
                 // effect cases at scale 1 around the origin, others the whole stage at 200 px wide
                 boolean fxCase = name.startsWith("fx");

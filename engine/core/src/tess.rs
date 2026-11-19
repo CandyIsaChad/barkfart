@@ -110,7 +110,7 @@ impl DrawList {
         self.isolates.first()
     }
 
-    fn open(&mut self, source: &str, opacity: f32, blend: Blend, adjustment: bool, effects: Vec<ResolvedEffect>) {
+    pub(crate) fn open(&mut self, source: &str, opacity: f32, blend: Blend, adjustment: bool, effects: Vec<ResolvedEffect>) {
         let i = self.isolates.len();
         self.isolates.push(Isolate {
             source: source.into(),
@@ -131,7 +131,7 @@ impl DrawList {
         self.current = Some(i);
     }
 
-    fn close(&mut self) {
+    pub(crate) fn close(&mut self) {
         let done = self.current.expect("open isolate");
         self.current = self.isolates[done].parent;
         if let Some(c) = self.current {
@@ -144,7 +144,7 @@ impl DrawList {
     }
 
     /// The batch to append to for (blend, effect group, texture).
-    fn batch(&mut self, blend: Blend, effects: Option<&str>, texture: Option<&str>) -> usize {
+    pub(crate) fn batch(&mut self, blend: Blend, effects: Option<&str>, texture: Option<&str>) -> usize {
         let same = |b: &Batch| b.blend() == blend && b.effect_group.as_deref() == effects && b.texture.as_deref() == texture;
         if let Some(c) = self.current {
             if let Some(IsoItem::Batch(last)) = self.isolates[c].items.last() {
@@ -172,7 +172,7 @@ impl DrawList {
         self.batches.len() - 1
     }
 
-    fn add(&mut self, b: usize, x: f32, y: f32, c: u32, u: f32, v: f32) {
+    pub(crate) fn add(&mut self, b: usize, x: f32, y: f32, c: u32, u: f32, v: f32) {
         let batch = &mut self.batches[b];
         if let Some(o) = batch.owner {
             if x.is_finite() && y.is_finite() {
@@ -578,4 +578,60 @@ fn is_ear(p: &[f32], v: &[usize], count: usize, a: usize, b: usize, c: usize) ->
         }
     }
     true
+}
+
+/// Onion skin: tinted ghosts of the scene at earlier and later frames,
+/// fading with distance (port of Java OnionSkin). Layers with onion off are
+/// left out.
+#[derive(Clone, Debug)]
+pub struct OnionSkin {
+    pub before: i32,
+    pub after: i32,
+    /// Ghost colours (0xRRGGBB) for past and future frames.
+    pub past_rgb: u32,
+    pub future_rgb: u32,
+    pub opacity: f32,
+    pub falloff: f32,
+    /// Ghosts in stage space (editing view) unless set.
+    pub apply_camera: bool,
+}
+
+impl Default for OnionSkin {
+    fn default() -> Self {
+        OnionSkin { before: 2, after: 1, past_rgb: 0xd04040, future_rgb: 0x3070d0, opacity: 0.35, falloff: 0.6, apply_camera: false }
+    }
+}
+
+impl OnionSkin {
+    /// Ghosts as an isolate tree, farthest first: each ghost drawn solid in its
+    /// tint, then faded as one piece (its own overlaps do not show darker).
+    pub fn build_layered(&self, p: &crate::model::Project, symbol: &str, t: f64) -> DrawList {
+        let mut out = DrawList::default();
+        out.open(symbol, 1.0, Blend::Normal, false, Vec::new());
+        let fps = if p.settings.fps > 0.0 { p.settings.fps as f64 } else { 30.0 };
+        let mut k = self.before.max(self.after);
+        while k >= 1 {
+            let a = self.opacity * (self.falloff as f64).powi(k - 1) as f32;
+            for side in 0..2 {
+                if if side == 0 { k > self.before } else { k > self.after } {
+                    continue;
+                }
+                let at = if side == 0 { t - k as f64 / fps } else { t + k as f64 / fps };
+                let ghost = tessellate(&crate::eval::evaluate_with(p, symbol, at, true, self.apply_camera), None);
+                out.open("ghost", a.min(1.0), Blend::Normal, false, Vec::new());
+                let rgb = if side == 0 { self.past_rgb } else { self.future_rgb };
+                for b in &ghost.batches {
+                    let o = out.batch(Blend::Normal, None, None);
+                    for i in 0..b.vertex_count() {
+                        let src_a = b.rgba[i] & 0xff;
+                        out.add(o, b.xy[i * 2], b.xy[i * 2 + 1], (rgb << 8) | src_a, 0.0, 0.0);
+                    }
+                }
+                out.close();
+            }
+            k -= 1;
+        }
+        out.close();
+        out
+    }
 }

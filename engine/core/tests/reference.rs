@@ -355,3 +355,26 @@ fn cpu_renders_match_the_java_compositor() {
     }
     assert!(failures.is_empty(), "{} of {checked} renders differ:\n{}", failures.len(), failures.iter().take(8).cloned().collect::<Vec<_>>().join("\n"));
 }
+
+#[test]
+fn onion_skins_match_the_java_ghosts() {
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    for n in cases() {
+        let dir = ref_dir().join(&n);
+        let p = barkfart_core::codec::decode(&std::fs::read_to_string(dir.join("project.json")).unwrap()).unwrap();
+        for tag in ["0.0", "0.37", "1.1"] {
+            let r = read_gz(&dir.join(format!("t{tag}.json.gz")));
+            let d = barkfart_core::tess::OnionSkin::default().build_layered(&p, &p.root_symbol, tag.parse().unwrap());
+            let mut got = draw_json(&d);
+            got["root"] = isolate_json(&d, 0);
+            let mut out = Vec::new();
+            diff("", &r["onion"], &got, 1e-4, &mut out);
+            checked += 1;
+            if !out.is_empty() {
+                failures.push(format!("{n} t={tag}:\n  {}", out.join("\n  ")));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} of {checked} onion skins differ:\n{}", failures.len(), failures.iter().take(5).cloned().collect::<Vec<_>>().join("\n"));
+}
