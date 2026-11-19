@@ -96,8 +96,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       final err = e.load(File(open).readAsBytesSync());
       if (err != null) _say('Could not open $open: $err');
     } else {
+      final rec = await Recovery.read();
       final last = await ProjectFile.mostRecent();
-      if (last != null && e.load(await last.read()) == null) {
+      if (rec != null && e.load(rec.$1) == null) {
+        // unsaved work from last time comes back, still marked unsaved
+        _file = rec.$2 == null ? null : ProjectFile(rec.$2!);
+        e.command({'op': 'mark_unsaved'});
+        _say('Restored unsaved changes');
+      } else if (last != null && e.load(await last.read()) == null) {
         _file = last;
       } else {
         e.newProject();
@@ -112,8 +118,16 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   void didChangeAppLifecycleState(AppLifecycleState s) {
     // keep work safe when the app goes to the background
     if (s == AppLifecycleState.paused || s == AppLifecycleState.inactive) {
-      if (_st['dirty'] == true) _save(quiet: true);
+      if (_st['dirty'] == true) _writeRecovery();
     }
+  }
+
+  /// Unsaved work goes to a hidden recovery copy, never to a new animation.
+  Future<void> _writeRecovery() async {
+    final e = _engine;
+    if (e == null) return;
+    final bytes = e.saveCopy();
+    if (bytes != null) await Recovery.write(bytes, _file?.path);
   }
 
   @override
@@ -365,22 +379,93 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   double _clockOffset = 0;
 
-  Future<void> _save({bool quiet = false}) async {
+  /// Writes the project to f and forgets the recovery copy.
+  Future<bool> _saveTo(ProjectFile f, {bool quiet = false}) async {
     final e = _engine;
-    if (e == null) return;
+    if (e == null) return false;
     final bytes = e.save();
     if (bytes == null) {
       _say('Saving failed: ${e.lastError}');
-      return;
+      return false;
     }
-    _file ??= await ProjectFile.fresh();
-    await _file!.write(bytes);
+    await f.write(bytes);
+    _file = f;
+    await Recovery.clear();
     _refresh(e.command({'op': 'state'}));
-    if (!quiet) _say('Saved ${_file!.name}');
+    if (!quiet) _say('Saved ${f.name}');
+    return true;
+  }
+
+  /// The Save button: asks for a name the first time, confirms after that.
+  Future<bool> _save() async {
+    final f = _file;
+    if (f == null) return _saveAs();
+    final choice = await _ask('Save changes to "${f.name}"?', 'This replaces the saved version.', ['Cancel', 'Save as copy…', 'Save']);
+    if (choice == 'Save') return _saveTo(f);
+    if (choice == 'Save as copy…') return _saveAs();
+    return false;
+  }
+
+  Future<bool> _saveAs() async {
+    final suggestion = _file == null ? (await ProjectFile.fresh()).name : '${_file!.name} copy';
+    final name = await _askName('Save animation', suggestion);
+    if (name == null) return false;
+    final f = await named(name);
+    if (File(f.path).existsSync() && f.path != _file?.path) {
+      final ok = await _ask('"${f.name}" already exists.', 'Replace it with this animation?', ['Cancel', 'Replace']);
+      if (ok != 'Replace') return false;
+    }
+    return _saveTo(f);
+  }
+
+  /// Before leaving unsaved work: true to go on.
+  Future<bool> _leaveUnsaved() async {
+    if (_st['dirty'] != true) return true;
+    final choice = await _ask('Save changes${_file == null ? '' : ' to "${_file!.name}"'}?', 'Your changes are lost if you don\'t save them.', ['Cancel', 'Don\'t save', 'Save']);
+    if (choice == 'Save') return _file == null ? _saveAs() : _saveTo(_file!);
+    if (choice == 'Don\'t save') {
+      await Recovery.clear();
+      return true;
+    }
+    return false;
+  }
+
+  Future<String?> _ask(String title, String body, List<String> buttons) {
+    return showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: cPanel,
+        title: Text(title, style: const TextStyle(color: cText, fontSize: 17)),
+        content: Text(body, style: const TextStyle(color: cSecondary)),
+        actions: [for (final b in buttons) TextButton(onPressed: () => Navigator.pop(c, b), child: Text(b))],
+      ),
+    );
+  }
+
+  Future<String?> _askName(String title, String initial) {
+    final ctl = TextEditingController(text: initial)..selection = TextSelection(baseOffset: 0, extentOffset: initial.length);
+    return showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: cPanel,
+        title: Text(title, style: const TextStyle(color: cText, fontSize: 17)),
+        content: TextField(
+          controller: ctl,
+          autofocus: true,
+          style: const TextStyle(color: cText),
+          decoration: const InputDecoration(labelText: 'Name'),
+          onSubmitted: (v) => Navigator.pop(c, v.trim().isEmpty ? null : v.trim()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(c, ctl.text.trim().isEmpty ? null : ctl.text.trim()), child: const Text('Save')),
+        ],
+      ),
+    );
   }
 
   Future<void> _newProject() async {
-    if (_st['dirty'] == true) await _save(quiet: true);
+    if (!await _leaveUnsaved()) return;
     _engine?.newProject();
     _file = null;
     _fitted = false;
@@ -389,7 +474,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   Future<void> _openSheet() async {
-    if (_st['dirty'] == true) await _save(quiet: true);
+    if (!await _leaveUnsaved()) return;
     final files = await ProjectFile.all();
     if (!mounted) return;
     final chosen = await showModalBottomSheet<ProjectFile>(
@@ -423,7 +508,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   Future<void> _exportGif() async {
     final e = _engine;
     if (e == null || _export != null) return;
-    if (_st['dirty'] == true) await _save(quiet: true);
     final dir = await exportsDir();
     final name = (_file?.name ?? 'Animation').replaceAll(RegExp(r'[^A-Za-z0-9 _-]'), '');
     final stamp = DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
@@ -497,7 +581,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         case 'stop':
           if (_playing) _togglePlay();
         case 'save':
-          await _save();
+          // scripted: no dialog
+          await _saveTo(await named(w.length > 1 ? w.sublist(1).join(' ') : 'Script'));
         case 'shot':
           await Future<void>.delayed(const Duration(milliseconds: 400));
           await _saveShot(w[1]);

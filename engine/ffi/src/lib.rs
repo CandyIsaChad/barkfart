@@ -568,3 +568,26 @@ pub extern "C" fn bf_save(e: *mut Engine, len: *mut usize) -> *const u8 {
         }
     }
 }
+
+/// Like bf_save, but the project stays marked unsaved (recovery copies).
+#[no_mangle]
+pub extern "C" fn bf_save_copy(e: *mut Engine, len: *mut usize) -> *const u8 {
+    if e.is_null() || len.is_null() {
+        return std::ptr::null();
+    }
+    // SAFETY: live handle
+    let engine = unsafe { &mut *e };
+    let Some(s) = engine.session.as_ref() else { return std::ptr::null() };
+    match s.save_copy() {
+        Ok(b) => {
+            engine.saved = b;
+            // SAFETY: the caller passes a usize
+            unsafe { *len = engine.saved.len() };
+            engine.saved.as_ptr()
+        }
+        Err(err) => {
+            engine.set_error(err);
+            std::ptr::null()
+        }
+    }
+}

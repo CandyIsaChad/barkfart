@@ -200,6 +200,11 @@ impl Document {
         self.saved = self.revision;
     }
 
+    /// Marks the document as having unsaved changes (restored from a recovery copy).
+    pub fn mark_unsaved(&mut self) {
+        self.saved = u64::MAX;
+    }
+
     /// True when there are changes since the last save.
     pub fn dirty(&self) -> bool {
         self.saved != self.revision

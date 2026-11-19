@@ -176,6 +176,16 @@ class Engine {
     return Uint8List.fromList(p.asTypedList(n));
   }
 
+  /// The project as .bark bytes without marking it saved (recovery copies).
+  Uint8List? saveCopy() {
+    final len = calloc<IntPtr>();
+    final p = _lib.lookupFunction<_SaveC, _SaveC>('bf_save_copy')(_handle, len);
+    final n = len.value;
+    calloc.free(len);
+    if (p == nullptr) return null;
+    return Uint8List.fromList(p.asTypedList(n));
+  }
+
   /// Starts an export (0 = GIF, 1 = PNG frames in a ZIP); null with the reason in [lastError].
   ExportJob? export(int format, String path, int w, int h, {int start = 0, int count = 0, bool transparent = false}) {
     final p = path.toNativeUtf8();

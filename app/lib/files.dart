@@ -1,5 +1,6 @@
 // Where animations live: Documents/Barkfart Projects/*.bark (visible in the
 // iOS Files app), exports in Documents/Barkfart Exports.
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -67,4 +68,49 @@ class ProjectFile {
       if (!File(p).existsSync()) return ProjectFile(p);
     }
   }
+}
+
+/// The background copy of unsaved work (never shown as an animation):
+/// recovery.bark plus recovery.json naming the file it belongs to.
+class Recovery {
+  static Future<Directory> _dir() async {
+    final override = Platform.environment['BARKFART_DOCS'];
+    final base = override != null && override.isNotEmpty ? Directory('$override/.support') : await getApplicationSupportDirectory();
+    await base.create(recursive: true);
+    return base;
+  }
+
+  static Future<void> write(Uint8List bytes, String? forFile) async {
+    final d = await _dir();
+    await File('${d.path}/recovery.bark.saving').writeAsBytes(bytes, flush: true);
+    await File('${d.path}/recovery.bark.saving').rename('${d.path}/recovery.bark');
+    await File('${d.path}/recovery.json').writeAsString(jsonEncode({'file': forFile}));
+  }
+
+  /// (bytes, the file it belongs to or null) when there is unsaved work.
+  static Future<(Uint8List, String?)?> read() async {
+    final d = await _dir();
+    final f = File('${d.path}/recovery.bark');
+    if (!f.existsSync()) return null;
+    String? owner;
+    try {
+      owner = (jsonDecode(File('${d.path}/recovery.json').readAsStringSync()) as Map)['file'] as String?;
+    } catch (_) {}
+    return (await f.readAsBytes(), owner);
+  }
+
+  static Future<void> clear() async {
+    final d = await _dir();
+    for (final n in ['recovery.bark', 'recovery.json']) {
+      final f = File('${d.path}/$n');
+      if (f.existsSync()) await f.delete();
+    }
+  }
+}
+
+/// A project file named by the user (unsafe characters removed).
+Future<ProjectFile> named(String name) async {
+  final d = await projectsDir();
+  final clean = name.replaceAll(RegExp(r'[/\\:*?"<>|]'), '').trim();
+  return ProjectFile('${d.path}/${clean.isEmpty ? 'Animation' : clean}.bark');
 }
