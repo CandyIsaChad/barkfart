@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["core", "render"]
+
+[workspace.package]
+edition = "2021"
+publish = false
+
+[profile.dev]
+debug = 0
+
+[profile.dev.package."*"]
+opt-level = 2
