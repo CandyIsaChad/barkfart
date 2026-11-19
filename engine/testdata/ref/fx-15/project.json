@@ -1,0 +1,791 @@
+{
+  "format": "barkfart",
+  "formatVersion": 1,
+  "idCounter": 7,
+  "settings": {
+    "fps": 30.0,
+    "width": 160,
+    "height": 180,
+    "background": "#ffffffff"
+  },
+  "rootSymbol": "S1",
+  "library": [
+    {
+      "id": "S1",
+      "name": "Root",
+      "duration": 2.0,
+      "layers": [
+        {
+          "id": "L2",
+          "name": "sq0",
+          "type": "FIGURE",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 0.38458967
+          },
+          "transform": {
+            "x": {
+              "v": 25.0
+            },
+            "y": {
+              "v": 40.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": "fx0",
+            "nodes": [
+              {
+                "id": "fx0",
+                "type": "pixelate",
+                "enabled": true,
+                "mix": {
+                  "v": 1.0
+                },
+                "params": {
+                  "radius": {
+                    "t": "FLOAT",
+                    "v": 7.0
+                  },
+                  "strength": {
+                    "t": "FLOAT",
+                    "v": 1.9449104
+                  },
+                  "dx": {
+                    "t": "FLOAT",
+                    "v": 4.0
+                  },
+                  "dy": {
+                    "t": "FLOAT",
+                    "v": -7.0
+                  },
+                  "hue": {
+                    "t": "FLOAT",
+                    "v": 21.0
+                  },
+                  "saturation": {
+                    "t": "FLOAT",
+                    "v": 1.1002134
+                  },
+                  "brightness": {
+                    "t": "FLOAT",
+                    "v": 0.4065504
+                  },
+                  "size": {
+                    "t": "FLOAT",
+                    "v": 9.0
+                  },
+                  "width": {
+                    "t": "FLOAT",
+                    "v": 2.0
+                  },
+                  "angle": {
+                    "t": "FLOAT",
+                    "v": 108.0
+                  },
+                  "distance": {
+                    "t": "FLOAT",
+                    "v": 9.0
+                  },
+                  "amount": {
+                    "t": "FLOAT",
+                    "v": 0.48812258
+                  },
+                  "color": {
+                    "t": "COLOR",
+                    "v": "#61fc09ff"
+                  }
+                },
+                "inputs": [],
+                "mask": null
+              }
+            ]
+          },
+          "nodes": [
+            {
+              "id": "r",
+              "parent": null,
+              "shape": "NONE",
+              "draw": 0,
+              "rotation": {
+                "v": 0.0
+              },
+              "length": {
+                "v": 0.0
+              },
+              "thickness": {
+                "v": 10.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "s0",
+              "parent": "r",
+              "shape": "LINE",
+              "draw": 1,
+              "rotation": {
+                "v": 234.0
+              },
+              "length": {
+                "v": 39.0
+              },
+              "thickness": {
+                "v": 4.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#e53afaff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "s1",
+              "parent": "r",
+              "shape": "CIRCLE",
+              "draw": 2,
+              "rotation": {
+                "v": 29.0
+              },
+              "length": {
+                "v": 26.0
+              },
+              "thickness": {
+                "v": 12.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#fcefe2ff"
+              },
+              "shown": {
+                "v": true
+              }
+            }
+          ],
+          "polyfills": []
+        },
+        {
+          "id": "L3",
+          "name": "sq1",
+          "type": "FIGURE",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "ADD",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": -54.0
+            },
+            "y": {
+              "v": 6.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "nodes": [
+            {
+              "id": "r",
+              "parent": null,
+              "shape": "NONE",
+              "draw": 0,
+              "rotation": {
+                "v": 0.0
+              },
+              "length": {
+                "v": 0.0
+              },
+              "thickness": {
+                "v": 10.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "s0",
+              "parent": "r",
+              "shape": "LINE",
+              "draw": 1,
+              "rotation": {
+                "v": 15.0
+              },
+              "length": {
+                "v": 35.0
+              },
+              "thickness": {
+                "v": 14.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#1482d2ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "s1",
+              "parent": "r",
+              "shape": "SQUARE_LINE",
+              "draw": 2,
+              "rotation": {
+                "v": 138.0
+              },
+              "length": {
+                "v": 22.0
+              },
+              "thickness": {
+                "v": 9.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#5e2d4fff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "s2",
+              "parent": "r",
+              "shape": "CIRCLE",
+              "draw": 3,
+              "rotation": {
+                "v": 27.0
+              },
+              "length": {
+                "v": 13.0
+              },
+              "thickness": {
+                "v": 13.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#e42857ff"
+              },
+              "shown": {
+                "v": true
+              }
+            }
+          ],
+          "polyfills": []
+        },
+        {
+          "id": "L4",
+          "name": "sq2",
+          "type": "FIGURE",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": -6.0
+            },
+            "y": {
+              "v": 6.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": "fx0",
+            "nodes": [
+              {
+                "id": "fx0",
+                "type": "blur.motion",
+                "enabled": true,
+                "mix": {
+                  "v": 1.0
+                },
+                "params": {
+                  "radius": {
+                    "t": "FLOAT",
+                    "v": 2.0
+                  },
+                  "strength": {
+                    "t": "FLOAT",
+                    "v": 2.4216738
+                  },
+                  "dx": {
+                    "t": "FLOAT",
+                    "v": -7.0
+                  },
+                  "dy": {
+                    "t": "FLOAT",
+                    "v": 3.0
+                  },
+                  "hue": {
+                    "t": "FLOAT",
+                    "v": 73.0
+                  },
+                  "saturation": {
+                    "t": "FLOAT",
+                    "v": 0.3560815
+                  },
+                  "brightness": {
+                    "t": "FLOAT",
+                    "v": -0.13559675
+                  },
+                  "size": {
+                    "t": "FLOAT",
+                    "v": 3.0
+                  },
+                  "width": {
+                    "t": "FLOAT",
+                    "v": 5.0
+                  },
+                  "angle": {
+                    "t": "FLOAT",
+                    "v": 159.0
+                  },
+                  "distance": {
+                    "t": "FLOAT",
+                    "v": 24.0
+                  },
+                  "amount": {
+                    "t": "FLOAT",
+                    "v": 0.99992794
+                  },
+                  "color": {
+                    "t": "COLOR",
+                    "v": "#e37777ff"
+                  }
+                },
+                "inputs": [],
+                "mask": null
+              }
+            ]
+          },
+          "nodes": [
+            {
+              "id": "r",
+              "parent": null,
+              "shape": "NONE",
+              "draw": 0,
+              "rotation": {
+                "v": 0.0
+              },
+              "length": {
+                "v": 0.0
+              },
+              "thickness": {
+                "v": 10.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "s0",
+              "parent": "r",
+              "shape": "SQUARE_LINE",
+              "draw": 1,
+              "rotation": {
+                "v": 105.0
+              },
+              "length": {
+                "v": 29.0
+              },
+              "thickness": {
+                "v": 23.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#15290eff"
+              },
+              "shown": {
+                "v": true
+              }
+            }
+          ],
+          "polyfills": []
+        },
+        {
+          "id": "L5",
+          "name": "sq3",
+          "type": "FIGURE",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 0.5197164
+          },
+          "transform": {
+            "x": {
+              "v": 40.0
+            },
+            "y": {
+              "v": 48.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": "fx0",
+            "nodes": [
+              {
+                "id": "fx0",
+                "type": "blur.gaussian",
+                "enabled": true,
+                "mix": {
+                  "v": 1.0
+                },
+                "params": {
+                  "radius": {
+                    "t": "FLOAT",
+                    "v": 1.0
+                  },
+                  "strength": {
+                    "t": "FLOAT",
+                    "v": 2.4382427
+                  },
+                  "dx": {
+                    "t": "FLOAT",
+                    "v": 1.0
+                  },
+                  "dy": {
+                    "t": "FLOAT",
+                    "v": -1.0
+                  },
+                  "hue": {
+                    "t": "FLOAT",
+                    "v": 1.0
+                  },
+                  "saturation": {
+                    "t": "FLOAT",
+                    "v": 0.60371196
+                  },
+                  "brightness": {
+                    "t": "FLOAT",
+                    "v": 0.12394035
+                  },
+                  "size": {
+                    "t": "FLOAT",
+                    "v": 2.0
+                  },
+                  "width": {
+                    "t": "FLOAT",
+                    "v": 4.0
+                  },
+                  "angle": {
+                    "t": "FLOAT",
+                    "v": 86.0
+                  },
+                  "distance": {
+                    "t": "FLOAT",
+                    "v": 27.0
+                  },
+                  "amount": {
+                    "t": "FLOAT",
+                    "v": 0.9949541
+                  },
+                  "color": {
+                    "t": "COLOR",
+                    "v": "#3d7449d5"
+                  }
+                },
+                "inputs": [],
+                "mask": null
+              }
+            ]
+          },
+          "nodes": [
+            {
+              "id": "r",
+              "parent": null,
+              "shape": "NONE",
+              "draw": 0,
+              "rotation": {
+                "v": 0.0
+              },
+              "length": {
+                "v": 0.0
+              },
+              "thickness": {
+                "v": 10.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "s0",
+              "parent": "r",
+              "shape": "CIRCLE",
+              "draw": 1,
+              "rotation": {
+                "v": 37.0
+              },
+              "length": {
+                "v": 35.0
+              },
+              "thickness": {
+                "v": 4.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#0bdefaff"
+              },
+              "shown": {
+                "v": true
+              }
+            }
+          ],
+          "polyfills": []
+        },
+        {
+          "id": "L6",
+          "name": "sq4",
+          "type": "FIGURE",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "onion": true,
+          "blend": "NORMAL",
+          "parent": null,
+          "shown": {
+            "v": true
+          },
+          "opacity": {
+            "v": 1.0
+          },
+          "transform": {
+            "x": {
+              "v": -33.0
+            },
+            "y": {
+              "v": -15.0
+            },
+            "rotation": {
+              "v": 0.0
+            },
+            "scaleX": {
+              "v": 1.0
+            },
+            "scaleY": {
+              "v": 1.0
+            },
+            "anchorX": {
+              "v": 0.0
+            },
+            "anchorY": {
+              "v": 0.0
+            }
+          },
+          "effects": {
+            "output": null,
+            "nodes": []
+          },
+          "nodes": [
+            {
+              "id": "r",
+              "parent": null,
+              "shape": "NONE",
+              "draw": 0,
+              "rotation": {
+                "v": 0.0
+              },
+              "length": {
+                "v": 0.0
+              },
+              "thickness": {
+                "v": 10.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#000000ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "s0",
+              "parent": "r",
+              "shape": "LINE",
+              "draw": 1,
+              "rotation": {
+                "v": 238.0
+              },
+              "length": {
+                "v": 19.0
+              },
+              "thickness": {
+                "v": 4.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#0c2a21ff"
+              },
+              "shown": {
+                "v": true
+              }
+            },
+            {
+              "id": "s1",
+              "parent": "r",
+              "shape": "LINE",
+              "draw": 2,
+              "rotation": {
+                "v": 350.0
+              },
+              "length": {
+                "v": 33.0
+              },
+              "thickness": {
+                "v": 8.0
+              },
+              "scale": {
+                "v": 1.0
+              },
+              "color": {
+                "v": "#dc190bff"
+              },
+              "shown": {
+                "v": true
+              }
+            }
+          ],
+          "polyfills": []
+        }
+      ],
+      "markers": [],
+      "scopedEffects": []
+    }
+  ],
+  "assets": [],
+  "nodeSets": []
+}

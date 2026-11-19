@@ -269,3 +269,47 @@ fn the_locked_v1_fixture_loads_from_its_bark_file() {
     let (a, c) = (eval::evaluate(p, &p.root_symbol, 0.6), eval::evaluate(&json, &json.root_symbol, 0.6));
     assert_eq!(a.root, c.root);
 }
+
+fn isolate_json(d: &barkfart_core::DrawList, i: usize) -> J {
+    use barkfart_core::tess::IsoItem;
+    let iso = &d.isolates[i];
+    let effects: Vec<J> = group_json(&eval::Group { effects: iso.effects.clone(), ..eval::Group::new("") })["effects"].as_array().unwrap().clone();
+    let items: Vec<J> = iso
+        .items
+        .iter()
+        .map(|it| match it {
+            IsoItem::Batch(b) => json!(b),
+            IsoItem::Isolate(k) => isolate_json(d, *k),
+        })
+        .collect();
+    json!({
+        "source": iso.source, "opacity": iso.opacity, "blend": iso.blend.name(), "adjustment": iso.adjustment,
+        "effects": effects,
+        "bounds": if iso.empty() { J::Null } else { json!([iso.min_x, iso.min_y, iso.max_x, iso.max_y]) },
+        "items": items,
+    })
+}
+
+#[test]
+fn isolate_trees_match_the_java_layered_tessellator() {
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    for n in cases() {
+        let dir = ref_dir().join(&n);
+        let p = barkfart_core::codec::decode(&std::fs::read_to_string(dir.join("project.json")).unwrap()).unwrap();
+        for tag in ["0.0", "0.37", "1.1"] {
+            let r = read_gz(&dir.join(format!("t{tag}.json.gz")));
+            let s = eval::evaluate_with(&p, &p.root_symbol, tag.parse().unwrap(), false, true);
+            let d = barkfart_core::tess::layered(&s, Some(&RefGlyphs));
+            let mut got = draw_json(&d);
+            got["root"] = isolate_json(&d, 0);
+            let mut out = Vec::new();
+            diff("", &r["layered"], &got, 1e-4, &mut out);
+            checked += 1;
+            if !out.is_empty() {
+                failures.push(format!("{n} t={tag}:\n  {}", out.join("\n  ")));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} of {checked} isolate trees differ:\n{}", failures.len(), failures.iter().take(6).cloned().collect::<Vec<_>>().join("\n"));
+}

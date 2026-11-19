@@ -74,6 +74,9 @@ class RefDumpTest {
         cases.add(new Object[] {"stickman", man});
         Random r = new Random(20261119);
         for (int i = 0; i < 80; i++) cases.add(new Object[] {String.format("random-%03d", i), random(r)});
+        cases.add(new Object[] {"fx-scene", app.barkfart.fx.EffectScene.build()});
+        Random fr = new Random(4242);
+        for (int i = 0; i < 24; i++) cases.add(new Object[] {String.format("fx-%02d", i), effects(fr, i)});
         List<Object> index = new ArrayList<Object>();
         for (Object[] c : cases) {
             String name = (String) c[0];
@@ -90,6 +93,28 @@ class RefDumpTest {
                 m.put("scene", scene(s));
                 m.put("stageScene", scene(e));
                 m.put("draw", draw(Tessellator.tessellate(s, GLYPHS)));
+                DrawList layered = Tessellator.layered(s, GLYPHS);
+                m.put("layered", layered(layered));
+                // CPU reference render (Compositor), premultiplied RGBA8, rows top-down:
+                // effect cases at scale 1 around the origin, others the whole stage at 200 px wide
+                boolean fxCase = name.startsWith("fx");
+                int iw = fxCase ? app.barkfart.fx.EffectScene.W : 200;
+                float scale = fxCase ? 1 : 200f / p.settings.width;
+                int ih = fxCase ? app.barkfart.fx.EffectScene.H : Math.max(1, Math.round(p.settings.height * scale));
+                app.barkfart.fx.Image im = new app.barkfart.fx.Image(iw, ih, -iw / 2f / scale, ih / 2f / scale, scale);
+                app.barkfart.fx.Compositor.render(layered, im);
+                byte[] px = new byte[iw * ih * 4];
+                for (int k = 0; k < px.length; k++) px[k] = (byte) Math.round(Math.max(0f, Math.min(1f, im.px[k])) * 255);
+                Map<String, Object> cpu = new LinkedHashMap<String, Object>();
+                cpu.put("w", Json.num(iw));
+                cpu.put("h", Json.num(ih));
+                cpu.put("x0", Json.num(im.x0));
+                cpu.put("y0", Json.num(im.y0));
+                cpu.put("scale", Json.num(scale));
+                m.put("cpu", cpu);
+                java.util.zip.GZIPOutputStream cz = new java.util.zip.GZIPOutputStream(new FileOutputStream(new File(d, "t" + t + ".cpu.rgba.gz")));
+                cz.write(px);
+                cz.close();
                 String tag = String.valueOf(t);
                 java.util.zip.GZIPOutputStream gz = new java.util.zip.GZIPOutputStream(new FileOutputStream(new File(d, "t" + tag + ".json.gz")));
                 gz.write(Json.write(m).getBytes("UTF-8"));
@@ -183,6 +208,107 @@ class RefDumpTest {
         }
         m.put("batches", batches);
         return m;
+    }
+
+    /** The isolate tree: isolates with their fields and items (batch indices into "batches", or nested isolates). */
+    private static Map<String, Object> layered(DrawList dl) throws Exception {
+        java.util.IdentityHashMap<DrawList.Batch, Integer> ids = new java.util.IdentityHashMap<DrawList.Batch, Integer>();
+        for (int i = 0; i < dl.batches.size(); i++) ids.put(dl.batches.get(i), i);
+        Map<String, Object> m = draw(dl);
+        m.put("root", isolate(dl.root, ids));
+        return m;
+    }
+
+    private static Object isolate(DrawList.Isolate iso, java.util.IdentityHashMap<DrawList.Batch, Integer> ids) throws Exception {
+        if (iso == null) return null;
+        Map<String, Object> m = new LinkedHashMap<String, Object>();
+        m.put("source", iso.source);
+        m.put("opacity", Json.num(iso.opacity));
+        m.put("blend", iso.blend.name());
+        m.put("adjustment", iso.adjustment);
+        m.put("effects", value(iso.effects));
+        boolean empty = iso.empty();
+        m.put("bounds", empty ? null : java.util.Arrays.<Object>asList(Json.num(iso.minX), Json.num(iso.minY), Json.num(iso.maxX), Json.num(iso.maxY)));
+        List<Object> items = new ArrayList<Object>();
+        for (Object o : iso.items) items.add(o instanceof DrawList.Batch ? (Object) Json.num(ids.get(o)) : isolate((DrawList.Isolate) o, ids));
+        m.put("items", items);
+        return m;
+    }
+
+    // ---- effect corpus: squares with every effect and parameter, at scale 1 ----
+
+    private static Project effects(Random r, int index) {
+        Project p = Fixtures.empty();
+        p.settings.width = app.barkfart.fx.EffectScene.W;
+        p.settings.height = app.barkfart.fx.EffectScene.H;
+        String[] all = app.barkfart.fx.EffectTypes.ALL;
+        int n = 2 + r.nextInt(4);
+        for (int i = 0; i < n; i++) {
+            Layer.FigureLayer l = new Layer.FigureLayer(p.newId("L"), "sq" + i);
+            l.figure.add(new Node(l.id, "r", null, Node.Shape.NONE));
+            for (int k = 0; k < 1 + r.nextInt(3); k++) {
+                Node s = new Node(l.id, "s" + k, "r", Node.Shape.values()[1 + r.nextInt(4)]);
+                s.length.setValue(10f + r.nextInt(30));
+                s.thickness.setValue(4f + r.nextInt(24));
+                s.rotation.setValue((float) r.nextInt(360));
+                s.color.setValue(color(r));
+                l.figure.add(s);
+            }
+            l.transform.x.setValue((float) (r.nextInt(120) - 60));
+            l.transform.y.setValue((float) (r.nextInt(140) - 70));
+            if (r.nextInt(3) == 0) l.opacity.setValue(0.3f + r.nextFloat() * 0.6f);
+            if (r.nextInt(4) == 0) l.blend = Layer.Blend.values()[1 + r.nextInt(3)];
+            int fx = r.nextInt(3);
+            for (int q = 0; q < fx; q++) {
+                // every type comes up across the corpus: index-driven first, then random
+                String type = q == 0 ? all[(index + i) % all.length] : all[r.nextInt(all.length)];
+                EffectNode e = new EffectNode(l.id, "fx" + q, type);
+                e.param(l.id, "radius", ValueType.FLOAT, 1f + r.nextInt(14));
+                e.param(l.id, "strength", ValueType.FLOAT, 0.5f + r.nextFloat() * 2);
+                e.param(l.id, "dx", ValueType.FLOAT, (float) (r.nextInt(21) - 10));
+                e.param(l.id, "dy", ValueType.FLOAT, (float) (r.nextInt(21) - 10));
+                e.param(l.id, "hue", ValueType.FLOAT, (float) r.nextInt(360));
+                e.param(l.id, "saturation", ValueType.FLOAT, r.nextFloat() * 2);
+                e.param(l.id, "brightness", ValueType.FLOAT, r.nextFloat() - 0.5f);
+                e.param(l.id, "size", ValueType.FLOAT, 2f + r.nextInt(10));
+                e.param(l.id, "width", ValueType.FLOAT, 1f + r.nextInt(6));
+                e.param(l.id, "angle", ValueType.FLOAT, (float) r.nextInt(360));
+                e.param(l.id, "distance", ValueType.FLOAT, 4f + r.nextInt(24));
+                e.param(l.id, "amount", ValueType.FLOAT, r.nextFloat());
+                e.param(l.id, "color", ValueType.COLOR, color(r));
+                if (r.nextInt(3) == 0) e.mix.setValue(r.nextFloat());
+                l.effects.append(e);
+            }
+            p.root().layers.add(l);
+        }
+        if (r.nextBoolean()) {   // an adjustment layer over everything
+            Layer.AdjustmentLayer adj = new Layer.AdjustmentLayer(p.newId("L"), "adj");
+            EffectNode e = new EffectNode(adj.id, "fx0", r.nextBoolean() ? app.barkfart.fx.EffectTypes.INVERT : app.barkfart.fx.EffectTypes.BLUR);
+            e.param(adj.id, "radius", ValueType.FLOAT, 2f + r.nextInt(6));
+            adj.effects.append(e);
+            adj.opacity.setValue(0.4f + r.nextFloat() * 0.6f);
+            p.root().layers.add(adj);
+        }
+        if (r.nextInt(3) == 0) {   // nested: a translucent movieclip holding a glowing figure
+            Symbol inner = p.addSymbol(new Symbol(p.newId("S"), "inner", 1));
+            Layer.FigureLayer f = new Layer.FigureLayer(p.newId("L"), "in");
+            f.figure.add(new Node(f.id, "r", null, Node.Shape.NONE));
+            Node s = new Node(f.id, "s", "r", Node.Shape.LINE);
+            s.length.setValue(30f);
+            s.thickness.setValue(8f);
+            s.color.setValue(color(r));
+            f.figure.add(s);
+            EffectNode e = new EffectNode(f.id, "fx0", app.barkfart.fx.EffectTypes.GLOW);
+            e.param(f.id, "radius", ValueType.FLOAT, 6f);
+            f.effects.append(e);
+            inner.layers.add(f);
+            Layer.SymbolLayer inst = new Layer.SymbolLayer(p.newId("L"), "inst", inner.id);
+            inst.opacity.setValue(0.7f);
+            inst.transform.x.setValue((float) (r.nextInt(60) - 30));
+            p.root().layers.add(inst);
+        }
+        p.invalidateIndex();
+        return p;
     }
 
     // ---- random corpus ----
