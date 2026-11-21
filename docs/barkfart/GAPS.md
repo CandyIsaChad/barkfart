@@ -44,7 +44,8 @@ committed). Plainest behaviour where the reference is unsure.
 ## Figure editor (12)
 - [x] Special Segment Tools: reorder segment / branch, split N, copy /
       paste segment and branch
-- [ ] Modify branch window; delete one segment keeping its children
+- [x] Delete one segment keeping its children
+- [ ] Modify branch window
 - [ ] Add connector, polyfill tool
 - [ ] Trace stickfigure / frame, background image, background colour
 - [ ] Save stickfigure to a file, add to library, backups

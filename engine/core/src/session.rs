@@ -1025,6 +1025,14 @@ impl Session {
                     }
                 }
             }
+            "delete_joint" => {
+                if let Some((l, n)) = self.selected.clone() {
+                    let parent = self.project().root().and_then(|s| s.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.node(&n)).and_then(|x| x.parent.clone());
+                    if self.step("Delete segment", |s| figure_ops::delete_joint(s, &sym, &l, &n)).is_some() {
+                        self.selected = parent.map(|p| (l, p));
+                    }
+                }
+            }
             "reorder" => {
                 if let Some((l, n)) = self.selected.clone() {
                     let (branch, to) = (b("branch"), c["to"].as_i64().unwrap_or(1) as i32);

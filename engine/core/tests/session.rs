@@ -1136,3 +1136,27 @@ fn rotate_cameras_turns_every_frame() {
     let st = s.command(&json!({"op": "undo"}));
     assert!(st["cam"].is_null() || st["cam"]["rotation"] == 0.0);
 }
+
+#[test]
+fn delete_one_segment_keeps_its_children_pointing_the_same_way() {
+    let mut s = session();
+    let st = s.command(&json!({"op": "state"}));
+    let fig = st["figures"][0]["id"].as_str().unwrap().to_string();
+    let world = |s: &Session, id: &str| {
+        let p = s.project();
+        let f = p.root().unwrap().layer(&fig).unwrap().as_figure().unwrap();
+        let pose = barkfart_core::eval::FigurePose::compute(f, 0.0, &mut barkfart_core::eval::Resolver::new(p));
+        pose.angle[f.index_of(id).unwrap()]
+    };
+    let before = world(&s, "armR2");
+    s.command(&json!({"op": "build", "layer": fig}));
+    s.command(&json!({"op": "select", "layer": fig, "node": "armR1"}));
+    let st = s.command(&json!({"op": "delete_joint"}));
+    assert_eq!(st["selected"]["node"], "torso");
+    let f = s.project().root().unwrap().layer(&fig).unwrap().as_figure().unwrap();
+    assert!(f.node("armR1").is_none());
+    assert_eq!(f.node("armR2").unwrap().parent.as_deref(), Some("torso"));
+    assert!((world(&s, "armR2") - before).abs() < 1e-6);
+    s.command(&json!({"op": "undo"}));
+    assert!(s.project().root().unwrap().layer(&fig).unwrap().as_figure().unwrap().node("armR1").is_some());
+}

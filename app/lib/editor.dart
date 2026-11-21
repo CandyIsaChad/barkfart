@@ -2431,6 +2431,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _pair(_Btn('Add segment', onTap: () => _cmd({'op': 'add_segment'})), _Btn('Delete branch', danger: true, enabled: !root, onTap: () => _cmd({'op': 'delete_segment'}))),
       _gap,
       // paste a copied segment / branch onto this joint (the main node too)
+      if (!root) _Btn('Delete segment (keep what hangs off it)', danger: true, small: true, onTap: () => _cmd({'op': 'delete_joint'})),
+      if (!root) _gap,
       _Btn('Paste segment here', enabled: _st['branchCopied'] == true, onTap: () => _cmd({'op': 'paste_branch'})),
       _gap,
       if (!root) ...[

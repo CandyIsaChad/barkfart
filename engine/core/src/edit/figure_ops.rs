@@ -193,6 +193,33 @@ pub fn paste_nodes(st: &mut State, sym: &str, layer: &str, parent: &str, sub: &[
     Ok(made)
 }
 
+/// Deletes one segment and keeps what hangs off it: its children join its
+/// parent and keep their direction (their angles gain the deleted
+/// segment's), so they now start at the parent's joint.
+pub fn delete_joint(st: &mut State, sym: &str, layer: &str, node: &str) -> EditResult<()> {
+    let (f, _) = figure(st, sym, layer)?;
+    let Some(n) = f.node(node).cloned() else { return fail(format!("no node {node}")) };
+    let Some(parent) = n.parent.clone() else { return fail("the main node cannot be deleted") };
+    let kids: Vec<String> = f.nodes().iter().filter(|x| x.parent.as_deref() == Some(node)).map(|x| x.id.clone()).collect();
+    for k in kids {
+        let c = f.node_mut(&k).expect("child");
+        c.parent = Some(parent.clone());
+        // an absolute angle lock does not depend on the parent
+        if c.angle_lock == LOCK_ABSOLUTE {
+            continue;
+        }
+        let keys: Vec<Key> = c.rotation.track.keys().iter().map(|k| Key { value: Value::F(k.value.f() + n.rotation.key_value(k.time).f()), ..k.clone() }).collect();
+        c.rotation.track.clear();
+        for k in keys {
+            c.rotation.track.put(k);
+        }
+        c.rotation.value = Value::F(c.rotation.value.f() + n.rotation.value.f());
+    }
+    f.remove_subtree(node).map_err(EditError)?;
+    f.polyfills.retain(|pf| pf.anchor != node && !pf.nodes.iter().any(|x| x == node));
+    Ok(())
+}
+
 /// Draw-order moves of a segment (or its whole branch): one step back or
 /// forward, or to the very back or front. `to`: -2 back end, -1 back one,
 /// 1 forward one, 2 front end.
