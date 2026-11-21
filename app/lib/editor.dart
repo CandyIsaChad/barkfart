@@ -245,7 +245,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       // a steady clock started with the sound: the sound player only knows its
       // position per audio buffer (tens of ms, and ahead of what is heard), which
       // made tweened playback hold and jump
-      final secs = _clockOffset + _clock.elapsedMicroseconds / 1e6;
+      var secs = _clockOffset + _clock.elapsedMicroseconds / 1e6;
+      // past the loop end, round again from the loop start ("Loop to")
+      final (ls, le) = (_loopStartWall, _loopEndWall > 0 ? _loopEndWall : dur);
+      if (secs >= le && le > ls) secs = ls + (secs - le) % (le - ls);
       // one picture per frame, or more with tweening on (Animation Tools)
       final rate = (_st['rate'] as num?)?.toDouble() ?? _fps;
       t = e.wallTime(dur > 0 ? secs % dur : 0, rate);
@@ -440,17 +443,58 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       } else {
         _playing = true;
         final start = e.frameWall(_frame);
+        // "Loop to": back to frame 1 or to the start frame; stop after the end frame
+        _loopStartWall = _loopToStart ? start : 0;
+        _loopEndWall = (_loopEnd > 0 && _loopEnd < _frames) ? e.frameWall(_loopEnd) : 0;
+        if (_loopEndWall <= _loopStartWall) _loopEndWall = 0;
         _clock
           ..reset()
           ..start();
         // the clock starts at the current frame
         _clockOffset = start;
-        e.play(start, loopStart: 0, loopEnd: e.wallTotal);
+        e.play(start, loopStart: _loopStartWall, loopEnd: _loopEndWall > 0 ? _loopEndWall : e.wallTotal);
       }
     });
   }
 
   double _clockOffset = 0;
+
+  // "Loop to" (long-press Play): where playback goes round
+  bool _loopToStart = false;
+  int _loopEnd = 0;
+  double _loopStartWall = 0, _loopEndWall = 0;
+
+  Future<void> _loopToPopup() async {
+    final play = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, set) => AlertDialog(
+          backgroundColor: cPanel,
+          title: const Text('Loop to', style: TextStyle(color: cText, fontSize: 16)),
+          content: SizedBox(
+            width: 300,
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              _hint('After the end frame, playback goes back to:'),
+              const SizedBox(height: 6),
+              _Segmented(const ['Frame 1', 'Start frame'], _loopToStart ? 1 : 0, (i) => set(() => _loopToStart = i == 1)),
+              const SizedBox(height: 10),
+              _stepper('End frame', _loopEnd == 0 ? 'last' : '$_loopEnd', () => set(() => _loopEnd = math.max(0, _loopEnd - 1)), () => set(() => _loopEnd = math.min(_frames, _loopEnd + 1))),
+              const SizedBox(height: 10),
+              _Btn('Reset all', onTap: () => set(() {
+                    _loopToStart = false;
+                    _loopEnd = 0;
+                  })),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Close')),
+            TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Play')),
+          ],
+        ),
+      ),
+    );
+    if (play == true && !_playing) _togglePlay();
+  }
 
   /// Writes the project to f and forgets the recovery copy.
   Future<bool> _saveTo(ProjectFile f, {bool quiet = false}) async {
@@ -691,6 +735,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         case 'colorpicker':
           // scripted: the picker on the selected segment's colour
           unawaited(_colorPicker(((_sel?['color'] as num?) ?? 0xff).toInt(), (c) => _cmd({'op': 'segment', 'color': c})));
+        case 'loopto':
+          unawaited(_loopToPopup());
         case 'settings':
           unawaited(_settingsDialog());
         case 'set':
@@ -1261,7 +1307,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           Row(children: [
             _gridButton(Icons.add_box_outlined, 'Add frame', _playing ? null : () => _cmd({'op': 'insert_frame'})),
             _gridButton(Icons.copy, 'Copy frame', _playing ? null : () => _cmd({'op': 'copy_frame'})),
-            _gridButton(Icons.play_arrow, 'Play', _playing ? null : _togglePlay, accent: true),
+            GestureDetector(onLongPress: _playing ? null : _loopToPopup, child: _gridButton(Icons.play_arrow, 'Play (hold: loop to…)', _playing ? null : _togglePlay, accent: true)),
           ]),
           Row(children: [
             _gridButton(Icons.delete_outline, 'Delete frame', _playing || _frames <= 1 ? null : () => _cmd({'op': 'delete_frame'})),

@@ -11,7 +11,7 @@ committed). Plainest behaviour where the reference is unsure.
 - [ ] Expand gradient (8.4)
 - [x] Node counter "Nodes: N" at the top of Frame Tools (8.4)
 - [ ] "?" help for tweened frames, and the bar that picks 10% / 90% only (8.4)
-- [ ] Play long-press: "Loop to" start / end frame popup (7.3)
+- [x] Play long-press: "Loop to" start / end frame popup (7.3)
 - [ ] Animation Tools: looping on/off (7.1)
 
 ## Stickfigure Tools (9.2)
