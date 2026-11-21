@@ -46,6 +46,28 @@ fn rewrite(st: &mut State, layer: &str, id: &str, f: impl FnOnce(&Property) -> O
     }
 }
 
+/// The audio layer holding the frames' own sounds (Frame Tools > Sounds).
+pub const FRAME_SOUNDS: &str = "Frame sounds";
+
+/// The frames' own sounds follow their frames like keys: `f(start)` gives
+/// the new start, or None to remove the clip. (Other audio layers stay on
+/// the timeline, like the Java editor.)
+fn move_clips(st: &mut State, f: impl Fn(f64) -> Option<f64>) {
+    let root = st.project.root_symbol.clone();
+    let ids: Vec<String> = st.project.root().map(|s| s.layers.iter().filter(|l| matches!(l.kind, LayerKind::Audio(_)) && l.name.as_deref() == Some(FRAME_SOUNDS)).map(|l| l.id.clone()).collect()).unwrap_or_default();
+    for id in ids {
+        let Some(l) = st.project.layer_mut(&root, &id) else { continue };
+        let LayerKind::Audio(clips) = &mut l.kind else { continue };
+        clips.retain_mut(|c| match f(c.start) {
+            Some(v) => {
+                c.start = v;
+                true
+            }
+            None => false,
+        });
+    }
+}
+
 fn set_duration(st: &mut State, seconds: f64) {
     if let Some(s) = st.project.root_mut() {
         s.duration = seconds;
@@ -64,6 +86,7 @@ pub fn insert_after(st: &mut State, frame: i32, copy_pose: bool) -> EditResult<(
     let (t, dt, eps) = (time(st, frame), 1.0 / fps(st), 0.25 / fps(st));
     let n = frame_count(st);
     set_duration(st, (n + 1) as f64 / fps(st));
+    move_clips(st, |c| Some(if c > t + eps { c + dt } else { c }));
     for (l, id) in props(st) {
         rewrite(st, &l, &id, |p| {
             if p.track.is_empty() {
@@ -88,6 +111,8 @@ pub fn delete(st: &mut State, frame: i32) -> EditResult<bool> {
         return Ok(false);
     }
     let (t, dt, eps) = (time(st, frame), 1.0 / fps(st), 0.25 / fps(st));
+    // a sound starting on the deleted frame goes with it
+    move_clips(st, |c| if c > t - eps && c < t + dt - eps { None } else if c > t { Some(c - dt) } else { Some(c) });
     for (l, id) in props(st) {
         rewrite(st, &l, &id, |p| {
             if p.track.is_empty() {
@@ -170,6 +195,7 @@ pub fn hold(st: &mut State, frame: i32, frames: i32, camera_moves: bool) -> Edit
     };
     let n = frame_count(st);
     set_duration(st, (n + frames) as f64 / fps(st));
+    move_clips(st, |c| Some(if c > t + eps { c + dt } else { c }));
     for (l, id) in props(st) {
         let is_cam = cams.contains(&id);
         rewrite(st, &l, &id, |p| {
@@ -203,6 +229,7 @@ pub fn insert_tweened(st: &mut State, frame: i32, frames: i32) -> EditResult<()>
     let (t, dt, eps) = (time(st, frame), frames as f64 / fps(st), 0.25 / fps(st));
     let n = frame_count(st);
     set_duration(st, (n + frames) as f64 / fps(st));
+    move_clips(st, |c| Some(if c > t + eps { c + dt } else { c }));
     for (l, id) in props(st) {
         rewrite(st, &l, &id, |p| {
             if p.track.is_empty() {

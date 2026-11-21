@@ -61,6 +61,7 @@ pub struct Session {
     props_clip: Option<layer_ops::Props>,
     textfield_clip: Option<Layer>,
     filter_clip: Option<crate::edit::filters::Snapshot>,
+    sound_clip: Option<Clip>,
     /// Copied frame: its keys (times relative to the frame).
     frame_clip: Option<(crate::edit::editor::KeyClip, i32)>,
     /// Bumped on every change the app should redraw for (drags included).
@@ -110,7 +111,7 @@ impl Session {
         let mut doc = doc;
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
-        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, textfield_clip: None, filter_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, textfield_clip: None, filter_clip: None, sound_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -1293,6 +1294,79 @@ impl Session {
                     Ok(())
                 });
             }
+            "frame_sound" => {
+                // this frame's sound: a clip on the "Frame sounds" layer starting here
+                let c2 = c.clone();
+                let label = if c2.get("asset").is_some_and(|a| a.is_null()) { "Clear sound" } else { "Frame sound" };
+                self.step(label, move |s| {
+                    let lid = frame_sounds_layer(s, &sym)?;
+                    let fps = st_fps(&s.project);
+                    let new_cid = s.project.new_id("C");
+                    let clear = c2.get("asset").is_some_and(J::is_null);
+                    let pick = match c2["asset"].as_str() {
+                        Some(id) if s.project.assets.get(id).is_some_and(|x| x.kind == AssetKind::Audio) => Some(id.to_string()),
+                        Some(_) => return crate::edit::fail("no such sound"),
+                        None => None,
+                    };
+                    let l = s.project.layer_mut(&sym, &lid).expect("frame sounds");
+                    let LayerKind::Audio(clips) = &mut l.kind else { return crate::edit::fail("not a sound layer") };
+                    let at = clips.iter().position(|x| (x.start - t).abs() < 0.25 / fps);
+                    if clear {
+                        if let Some(i) = at {
+                            clips.remove(i);
+                        }
+                        return Ok(());
+                    }
+                    let i = match (at, pick) {
+                        (Some(i), Some(a)) => {
+                            clips[i].asset = Some(a);
+                            i
+                        }
+                        (Some(i), None) => i,
+                        (None, Some(a)) => {
+                            clips.push(Clip::new(&lid, &new_cid, Some(a), t, 0.0, 0.0));
+                            clips.len() - 1
+                        }
+                        (None, None) => return crate::edit::fail("pick a sound for this frame first"),
+                    };
+                    let cl = &mut clips[i];
+                    if let Some(v) = c2["volume"].as_f64() {
+                        cl.volume.value = Value::F(v.clamp(0.0, 1.0) as f32);
+                    }
+                    if let Some(v) = c2["pan"].as_f64() {
+                        cl.pan.value = Value::F(v.clamp(-1.0, 1.0) as f32);
+                    }
+                    if let Some(v) = c2["pitch"].as_f64() {
+                        cl.pitch = v.clamp(0.25, 4.0);
+                    }
+                    Ok(())
+                });
+            }
+            "copy_sound" => {
+                if let Some(cl) = frame_sound(self.project(), t) {
+                    self.sound_clip = Some(cl.clone());
+                    self.message = "Sound copied.".into();
+                    self.rev += 1;
+                }
+            }
+            "paste_sound" => {
+                if let Some(src) = self.sound_clip.clone() {
+                    self.step("Paste sound", move |s| {
+                        let lid = frame_sounds_layer(s, &sym)?;
+                        let fps = st_fps(&s.project);
+                        let cid = s.project.new_id("C");
+                        let l = s.project.layer_mut(&sym, &lid).expect("frame sounds");
+                        let LayerKind::Audio(clips) = &mut l.kind else { return crate::edit::fail("not a sound layer") };
+                        clips.retain(|x| (x.start - t).abs() >= 0.25 / fps);
+                        let mut c = Clip::new(&lid, &cid, src.asset.clone(), t, src.in_, src.out);
+                        c.pitch = src.pitch;
+                        c.volume.value = src.volume.value;
+                        c.pan.value = src.pan.value;
+                        clips.push(c);
+                        Ok(())
+                    });
+                }
+            }
             "frame_bg" => {
                 let c2 = c.clone();
                 self.step("Background colour", move |s| {
@@ -1361,6 +1435,9 @@ impl Session {
         if self.dragging() {
             self.end_gesture(false);
         }
+        if crate::files::kind_of(file_name) == crate::files::Kind::Sound {
+            return self.import_sound(file_name, bytes);
+        }
         let fr_now = self.frame;
         let made = self.step("Import", |s| {
             let before: std::collections::HashSet<String> = s.project.root().map(|r| r.layers.iter().map(|l| l.id.clone()).collect()).unwrap_or_default();
@@ -1384,6 +1461,36 @@ impl Session {
             }
         }
         self.state()
+    }
+
+    /// A sound joins the project's sound list (Frame Tools > Sounds); frames
+    /// then pick it.
+    fn import_sound(&mut self, file_name: &str, bytes: &[u8]) -> J {
+        let Some(pcm) = crate::audio::decode_sound(bytes) else {
+            self.message = format!("Can't play {file_name}. Use mp3, m4a, ogg, flac or wav.");
+            self.rev += 1;
+            return self.state();
+        };
+        let lower = file_name.to_lowercase();
+        let ext = lower.rfind('.').map(|i| lower[i..].to_string()).unwrap_or_default();
+        let name = file_name.rsplit(['/', '\\']).next().unwrap_or(file_name).to_string();
+        let data = std::sync::Arc::new(bytes.to_vec());
+        let made = self.step("Import sound", move |s| {
+            let aid = s.project.new_id("A");
+            let path = format!("assets/{aid}{ext}");
+            s.project.assets.insert(aid.clone(), Asset { id: aid.clone(), kind: AssetKind::Audio, path: path.clone(), name: Some(name.clone()) });
+            s.assets.insert(path, data);
+            Ok(name)
+        });
+        if let Some(name) = made {
+            self.message = format!("Imported sound {name} ({:.1} s).", pcm.seconds());
+        }
+        self.state()
+    }
+
+    /// The stored bytes of an asset file (sounds are decoded from these).
+    pub fn asset_bytes(&self, path: &str) -> Option<std::sync::Arc<Vec<u8>>> {
+        self.doc.state.assets.get(path).cloned()
     }
 
     /// Everything the app draws besides the picture.
@@ -1458,6 +1565,13 @@ impl Session {
             let (c, g, u) = frame_bg(p, t);
             json!({"color": c, "gradient": g, "useGradient": u})
         };
+        let sound_list: Vec<J> = p.assets.values().filter(|a| a.kind == AssetKind::Audio).map(|a| json!({"id": a.id, "name": sound_name(p, &a.id)})).collect();
+        let frame_snd = frame_sound(p, t).map(|c| {
+            let a = c.asset.clone().unwrap_or_default();
+            let vol = if let Value::F(v) = c.volume.value { v } else { 1.0 };
+            let pan = if let Value::F(v) = c.pan.value { v } else { 0.0 };
+            json!({"asset": a, "name": sound_name(p, &a), "volume": round2(vol), "pan": round2(pan), "pitch": (c.pitch * 100.0).round() / 100.0})
+        });
         let fset = crate::timing::frame_settings(p, self.frame);
         // per thumbnail: [delay, repeat] flags
         let rep = json!({"back": fset.1, "times": fset.2});
@@ -1481,6 +1595,7 @@ impl Session {
             "textfield": textfield, "textfieldCopied": self.textfield_clip.is_some(),
             "filtersCopied": self.filter_clip.is_some(),
             "frameBg": bg,
+            "soundList": sound_list, "frameSound": frame_snd, "soundCopied": self.sound_clip.is_some(),
             "frameDelay": fset.0, "frameRepeat": rep,
             "frameMarks": marks,
             "hasCamera": p.root().is_some_and(|s| s.layers.iter().any(|l| matches!(l.kind, LayerKind::Camera(_)))),
@@ -1816,6 +1931,30 @@ fn align_name(align: i32, corner: i32) -> &'static str {
 
 fn round2(v: f32) -> f64 {
     (v as f64 * 100.0).round() / 100.0
+}
+
+/// The root's "Frame sounds" audio layer, added (at the bottom) when missing.
+fn frame_sounds_layer(s: &mut crate::edit::State, sym: &str) -> EditResult<String> {
+    let name = frame_ops::FRAME_SOUNDS;
+    if let Some(id) = s.project.root().and_then(|r| r.layers.iter().find(|l| matches!(l.kind, LayerKind::Audio(_)) && l.name.as_deref() == Some(name)).map(|l| l.id.clone())) {
+        return Ok(id);
+    }
+    let id = s.project.new_id("L");
+    structure::add_layer(s, sym, Layer::audio(&id, Some(name)), 0)?;
+    Ok(id)
+}
+
+/// The sound starting on the frame at t.
+fn frame_sound(p: &Project, t: f64) -> Option<&Clip> {
+    let fps = st_fps(p);
+    p.root()?.layers.iter().filter(|l| l.name.as_deref() == Some(frame_ops::FRAME_SOUNDS)).find_map(|l| match &l.kind {
+        LayerKind::Audio(clips) => clips.iter().find(|c| (c.start - t).abs() < 0.25 / fps),
+        _ => None,
+    })
+}
+
+fn sound_name(p: &Project, id: &str) -> String {
+    p.assets.get(id).map(|a| a.name.clone().unwrap_or_else(|| a.path.rsplit('/').next().unwrap_or(&a.path).to_string())).unwrap_or_else(|| id.to_string())
 }
 
 /// The root's camera, added (at the stage, changing nothing) when there is

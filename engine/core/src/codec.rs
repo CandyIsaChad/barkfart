@@ -506,7 +506,7 @@ pub fn decode(json: &str) -> R<Project> {
             "FONT" => AssetKind::Font,
             x => return err(format!("asset kind {x}")),
         };
-        let a = Asset { id: req(am, "id")?.into(), kind, path: req(am, "path")?.into() };
+        let a = Asset { id: req(am, "id")?.into(), kind, path: req(am, "path")?.into(), name: str_(am, "name")?.map(Into::into) };
         p.assets.insert(a.id.clone(), a);
     }
     for o in list(m, "library")? {
@@ -1004,6 +1004,9 @@ pub fn encode(p: &Project) -> String {
                     }),
                 )
                 .put("path", json::s(&a.path));
+            if let Some(n) = &a.name {
+                am.put("name", json::s(n));
+            }
             am.done()
         })
         .collect();

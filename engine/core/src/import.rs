@@ -105,7 +105,7 @@ pub fn import_file(p: &mut Project, file_name: &str, bytes: &[u8]) -> Result<Imp
         };
         let aid = legacy::new_id(p, "A");
         let path = format!("assets/{aid}{ext}");
-        p.assets.insert(aid.clone(), Asset { id: aid.clone(), kind: AssetKind::Audio, path: path.clone() });
+        p.assets.insert(aid.clone(), Asset { id: aid.clone(), kind: AssetKind::Audio, path: path.clone(), name: None });
         let lid = legacy::new_id(p, "L");
         let mut al = Layer::audio(&lid, Some(&name));
         let cid = legacy::new_id(p, "C");
@@ -138,7 +138,7 @@ pub fn import_file(p: &mut Project, file_name: &str, bytes: &[u8]) -> Result<Imp
         };
         let aid = legacy::new_id(p, "A");
         let path = format!("assets/{aid}{ext}");
-        p.assets.insert(aid.clone(), Asset { id: aid.clone(), kind: AssetKind::Image, path: path.clone() });
+        p.assets.insert(aid.clone(), Asset { id: aid.clone(), kind: AssetKind::Image, path: path.clone(), name: None });
         let lid = legacy::new_id(p, "L");
         let mut sl = Layer::sprite(&lid, Some(&name));
         let fit = 1f32.min((p.settings.width as f32 * 0.6 / w as f32).min(p.settings.height as f32 * 0.6 / h as f32));
@@ -170,7 +170,7 @@ fn import_gif(p: &mut Project, root_id: &str, name: &str, gif: &crate::image::Gi
     for (k, fr) in gif.frames.iter().enumerate() {
         let aid = legacy::new_id(p, "A");
         let path = format!("assets/{aid}.png");
-        p.assets.insert(aid.clone(), Asset { id: aid.clone(), kind: AssetKind::Image, path: path.clone() });
+        p.assets.insert(aid.clone(), Asset { id: aid.clone(), kind: AssetKind::Image, path: path.clone(), name: None });
         assets.push((path, crate::export::png(&fr.rgba, gif.w, gif.h, true)));
         let lid = legacy::new_id(p, "L");
         let mut sl = Layer::sprite(&lid, Some(&format!("{name} {}", k + 1)));

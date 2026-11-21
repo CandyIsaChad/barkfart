@@ -76,6 +76,14 @@ impl Engine {
             return;
         }
         let p = s.project();
+        // sounds imported since the project was opened
+        for (id, a) in &p.assets {
+            if a.kind == barkfart_core::model::AssetKind::Audio && !self.sounds.contains_key(id) {
+                if let Some(pcm) = s.asset_bytes(&a.path).and_then(|b| barkfart_core::audio::decode_sound(&b)) {
+                    self.sounds.insert(id.clone(), std::sync::Arc::new(pcm));
+                }
+            }
+        }
         if let Some(root) = p.root() {
             let sounds = &self.sounds;
             let plan = barkfart_core::audio::AudioPlan::build(p, root, &|id: &str| sounds.get(id).cloned());

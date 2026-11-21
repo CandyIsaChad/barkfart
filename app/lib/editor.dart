@@ -669,6 +669,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           unawaited(_figurePicker());
         case 'back':
           if (mounted) Navigator.of(context).maybePop();
+        case 'sounds':
+          unawaited(_importSounds());
+        case 'framesound':
+          // scripted: this frame plays the first imported sound
+          final l = (_st['soundList'] as List?) ?? const [];
+          if (l.isNotEmpty) _cmd({'op': 'frame_sound', 'asset': (l.first as Map)['id']});
         case 'frametools':
           setState(() => _frameSelected = true);
         case 'tab':
@@ -1267,9 +1273,118 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _stepper('Back', '$back frames', () => _cmd({'op': 'frame_repeat', 'back': math.max(1, back - 1), 'times': times}), () => _cmd({'op': 'frame_repeat', 'back': math.min(_frame, back + 1), 'times': times})),
         _stepper('Repeat', '$times times', () => _cmd({'op': 'frame_repeat', 'back': back, 'times': math.max(1, times - 1)}), () => _cmd({'op': 'frame_repeat', 'back': back, 'times': times + 1})),
       ],
+      _gap,
+      ..._soundsBlock(),
     ];
   }
 
+
+  /// Frame Tools > Sounds: the sound this frame starts, and its settings.
+  List<Widget> _soundsBlock() {
+    final list = ((_st['soundList'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    final snd = _st['frameSound'] as Map<String, dynamic>?;
+    final has = snd != null;
+    double v(String k, double d) => (snd?[k] as num?)?.toDouble() ?? d;
+    void set(Map<String, Object?> m) => _cmd({'op': 'frame_sound', ...m});
+    return [
+      Container(
+        key: _sectionKey('Sounds'),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(color: const Color(0x33FF2D92), borderRadius: BorderRadius.circular(6)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const Text('Sounds', style: TextStyle(color: cText, fontSize: 13, fontWeight: FontWeight.w600)),
+          _gap,
+          _Btn('Import a sound...', onTap: _importSounds),
+          _gap,
+          _label('Sound this frame plays'),
+          _Btn(has ? snd['name'] as String : '(none)', enabled: list.isNotEmpty, onTap: () => _pickFrameSound(list, snd?['asset'] as String?)),
+          _gap,
+          Opacity(
+            opacity: has ? 1 : 0.4,
+            child: IgnorePointer(
+              ignoring: !has,
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                _stepper('Volume', '${(v('volume', 1) * 100).round()}', () => set({'volume': math.max(0, v('volume', 1) - 0.05)}), () => set({'volume': math.min(1, v('volume', 1) + 0.05)})),
+                _stepper('Pan', v('pan', 0).toStringAsFixed(1), () => set({'pan': math.max(-1, v('pan', 0) - 0.1)}), () => set({'pan': math.min(1, v('pan', 0) + 0.1)})),
+                _stepper('Pitch', v('pitch', 1).toStringAsFixed(2), () => set({'pitch': math.max(0.25, v('pitch', 1) - 0.05)}), () => set({'pitch': math.min(4, v('pitch', 1) + 0.05)})),
+                _gap,
+                _Btn('Clear sound', danger: true, onTap: () => set({'asset': null})),
+              ]),
+            ),
+          ),
+          _gap,
+          _pair(_Btn('Copy sound', enabled: has, onTap: () => _cmd({'op': 'copy_sound'})), _Btn('Paste sound', enabled: _st['soundCopied'] == true, onTap: () => _cmd({'op': 'paste_sound'}))),
+        ]),
+      ),
+    ];
+  }
+
+  Future<void> _pickFrameSound(List<Map<String, dynamic>> list, String? current) async {
+    final picked = await showDialog<String>(
+      context: context,
+      builder: (c) => SimpleDialog(
+        backgroundColor: cPanel,
+        title: const Text('Sound this frame plays', style: TextStyle(color: cText, fontSize: 15)),
+        children: [
+          SimpleDialogOption(onPressed: () => Navigator.pop(c, ''), child: const Text('(none)', style: TextStyle(color: cSecondary))),
+          for (final s in list)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(c, s['id'] as String),
+              child: Text(s['name'] as String, style: TextStyle(color: s['id'] == current ? cAccent : cText)),
+            ),
+        ],
+      ),
+    );
+    if (picked == null) return;
+    _cmd({'op': 'frame_sound', 'asset': picked.isEmpty ? null : picked});
+  }
+
+  /// Import a sound: the sound files in the Barkfart Sounds folder, several
+  /// at once.
+  Future<void> _importSounds() async {
+    final e = _engine;
+    if (e == null) return;
+    final files = await soundFiles();
+    if (!mounted) return;
+    final chosen = <String>{};
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, set) => AlertDialog(
+          backgroundColor: cPanel,
+          title: const Text('Import sounds', style: TextStyle(color: cText, fontSize: 16)),
+          content: SizedBox(
+            width: 380,
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              const Text('Put sound files (mp3, m4a, wav, ogg, flac) in the Barkfart Sounds folder, then pick them here. The project keeps its own copy.',
+                  style: TextStyle(color: cSecondary, fontSize: 12)),
+              const SizedBox(height: 8),
+              if (files.isEmpty) const Padding(padding: EdgeInsets.all(12), child: Text('No sound files in the folder yet.', style: TextStyle(color: cText))),
+              Flexible(
+                child: ListView(shrinkWrap: true, children: [
+                  for (final f in files)
+                    CheckboxListTile(
+                      dense: true,
+                      value: chosen.contains(f.path),
+                      onChanged: (v) => set(() => v == true ? chosen.add(f.path) : chosen.remove(f.path)),
+                      title: Text(f.path.split(Platform.pathSeparator).last, style: const TextStyle(color: cText, fontSize: 13)),
+                    ),
+                ]),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+            TextButton(onPressed: chosen.isEmpty ? null : () => Navigator.pop(c, true), child: Text('Import (${chosen.length})')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    for (final path in chosen) {
+      _refresh(e.importFile(path.split(Platform.pathSeparator).last, await File(path).readAsBytes()));
+    }
+  }
 
   int _tweenCount = 3;
 

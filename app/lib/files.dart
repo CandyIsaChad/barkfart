@@ -131,3 +131,22 @@ Future<List<File>> figureFiles() async {
     ..sort((a, b) => a.path.toLowerCase().compareTo(b.path.toLowerCase()));
   return out;
 }
+
+/// Sound files the user keeps for Frame Tools > Import a sound.
+Future<Directory> soundsDir() async {
+  final d = Directory('${(await _docs()).path}/Barkfart Sounds');
+  await d.create(recursive: true);
+  return d;
+}
+
+const soundExtensions = ['.wav', '.mp3', '.m4a', '.aac', '.caf', '.aif', '.aiff', '.ogg', '.flac'];
+
+Future<List<File>> soundFiles() async {
+  final d = await soundsDir();
+  final out = d.listSync().whereType<File>().where((f) {
+    final n = f.path.toLowerCase();
+    return soundExtensions.any(n.endsWith);
+  }).toList()
+    ..sort((a, b) => a.path.toLowerCase().compareTo(b.path.toLowerCase()));
+  return out;
+}

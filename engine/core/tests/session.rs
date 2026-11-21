@@ -840,3 +840,59 @@ fn frame_delay_and_repeat_follow_their_frames() {
     }
     assert!(without_ids(&s) == before, "undo restores the project");
 }
+
+#[test]
+fn frames_play_their_own_sounds() {
+    use barkfart_core::audio::{encode_wav, tone, AudioPlan};
+    let mut s = session();
+    let without_ids = |s: &Session| codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
+    let before = without_ids(&s);
+    s.command(&json!({"op": "insert_frame"}));
+    s.command(&json!({"op": "insert_frame"}));
+    let wav = encode_wav(&tone(440.0, 0.2, 8000, 0.5));
+    let st = s.import("beep.wav", &wav);
+    assert_eq!(st["soundList"][0]["name"], "beep.wav");
+    let id = st["soundList"][0]["id"].as_str().unwrap().to_string();
+    // importing adds no layer and no sound on any frame
+    assert!(st["frameSound"].is_null());
+
+    // frame 2 (index 1) plays it, quieter and to the left
+    s.command(&json!({"op": "frame", "i": 1}));
+    let st = s.command(&json!({"op": "frame_sound", "asset": id, "volume": 0.5, "pan": -0.5, "pitch": 2.0}));
+    assert_eq!(st["frameSound"]["name"], "beep.wav");
+    assert_eq!(st["frameSound"]["volume"], 0.5);
+    assert_eq!(st["frameSound"]["pitch"], 2.0);
+    let fps = s.project().settings.fps as f64;
+    let sounds = |_: &str| Some(std::sync::Arc::new(tone(440.0, 0.2, 8000, 0.5)));
+    let plan = AudioPlan::build(s.project(), s.project().root().unwrap(), &sounds);
+    assert_eq!(plan.entries.len(), 1);
+    assert!((plan.entries[0].start - 1.0 / fps).abs() < 1e-9);
+    // the file keeps the sound's name
+    let back = codec::decode(&codec::encode(s.project())).unwrap();
+    assert_eq!(back.assets[&id].name.as_deref(), Some("beep.wav"));
+
+    // a frame inserted before it moves it; deleting its frame removes it
+    s.command(&json!({"op": "frame", "i": 0}));
+    s.command(&json!({"op": "insert_frame"}));
+    let st = s.command(&json!({"op": "frame", "i": 2}));
+    assert_eq!(st["frameSound"]["name"], "beep.wav");
+    // copy and paste it onto the last frame
+    s.command(&json!({"op": "copy_sound"}));
+    s.command(&json!({"op": "frame", "i": 3}));
+    let st = s.command(&json!({"op": "paste_sound"}));
+    assert_eq!(st["frameSound"]["volume"], 0.5);
+    s.command(&json!({"op": "frame", "i": 2}));
+    s.command(&json!({"op": "delete_frame"}));
+    let plan = AudioPlan::build(s.project(), s.project().root().unwrap(), &sounds);
+    assert_eq!(plan.entries.len(), 1, "the deleted frame's sound went with it");
+    assert!((plan.entries[0].start - 2.0 / fps).abs() < 1e-9);
+    // clear
+    s.command(&json!({"op": "frame", "i": 2}));
+    let st = s.command(&json!({"op": "frame_sound", "asset": null}));
+    assert!(st["frameSound"].is_null());
+
+    while s.state()["canUndo"] == true {
+        s.command(&json!({"op": "undo"}));
+    }
+    assert!(without_ids(&s) == before, "undo restores the project");
+}

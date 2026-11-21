@@ -1413,6 +1413,8 @@ pub struct Asset {
     pub id: String,
     pub kind: AssetKind,
     pub path: String,
+    /// The file it came from (shown in sound lists); None for older projects.
+    pub name: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
