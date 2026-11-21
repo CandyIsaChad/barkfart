@@ -2141,6 +2141,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         setState(() => _easing = (_easing + 1) % _easings.length);
         _cmd({'op': 'easing', 'v': _easings[_easing].$1});
       }),
+      _Toggle('Keep stickfigure during tween', sel['keepInTween'] != false, (v) => _cmd({'op': 'figure', 'keepInTween': v})),
+      _Toggle('Tween stickfigure colours', sel['tweenColors'] != false, (v) => _cmd({'op': 'figure', 'tweenColors': v})),
+      _hint('Tweening options only apply if the animation has tweening on. Keep: the figure stays during the in-betweens before a frame it is not on. Colours: they blend between frames instead of changing at the next one.'),
     ];
   }
 

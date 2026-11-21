@@ -1234,6 +1234,25 @@ impl Session {
                         if let Some(v) = c2["onion"].as_bool() {
                             layer.onion = v;
                         }
+                        if let Some(v) = c2["keepInTween"].as_bool() {
+                            layer.vanish_in_tween = !v;
+                        }
+                        if let Some(v) = c2["tweenColors"].as_bool() {
+                            // colours blend between frames, or jump at each frame
+                            layer.colors_jump = !v;
+                            if let LayerKind::Figure(f) = &mut layer.kind {
+                                let (nodes, fills) = f.parts_mut();
+                                let props = nodes.iter_mut().flat_map(|n| [&mut n.color, &mut n.gradient_color, &mut n.outline_color]).chain(fills.iter_mut().map(|p| &mut p.color));
+                                for q in props {
+                                    let keys: Vec<Key> = q.track.keys().to_vec();
+                                    for mut k in keys {
+                                        // on: held keys tween again (eased ones keep their easing)
+                                        k.interp = if !v { Interp::Hold } else if k.interp == Interp::Hold { Interp::Linear } else { k.interp };
+                                        q.track.put(k);
+                                    }
+                                }
+                            }
+                        }
                         if let Some(v) = c2["color"].as_u64() {
                             // the stickfigure colour: segments without their own colour follow it
                             if let LayerKind::Figure(f) = &mut layer.kind {
@@ -1886,6 +1905,8 @@ impl Session {
                 "scale": round2(r.f(&layer.transform.scale_y, t).abs()), "figAngle": round2(r.f(&layer.transform.rotation, t)),
                 "locked": layer.locked, "onion": layer.onion,
                 "joinedTo": layer.parent.as_ref().and_then(|pid| p.root()?.layer(pid)).map(|x| x.name.clone().unwrap_or_else(|| x.id.clone())),
+                "keepInTween": !layer.vanish_in_tween,
+                "tweenColors": !layer.colors_jump,
                 "figColor": f.color.map(|c| c.to_rgba8888()).unwrap_or_else(|| f.nodes().get(1).map(|n| color_of(&mut r, &n.color, t)).unwrap_or(0x000000ff)),
                 "layerPos": p.root()?.layers.iter().filter(|x| x.as_figure().is_some()).position(|x| x.id == *l).map(|i| i + 1),
                 "figureCount": p.root()?.layers.iter().filter(|x| x.as_figure().is_some()).count(),

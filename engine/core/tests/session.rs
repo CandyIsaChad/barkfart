@@ -1411,3 +1411,38 @@ fn segments_with_their_own_colour_ignore_the_figure_colour() {
     let back = codec::decode(&text).unwrap();
     assert_eq!(codec::encode(&back), text, "round trip");
 }
+
+/// Stickfigure Tools "Tween stickfigure colors" and "Keep stickfigure
+/// during tween" (both on by default, as Barkfart always behaved).
+#[test]
+fn tween_colours_and_keep_during_tween() {
+    let mut s = two_poses();
+    s.command(&json!({"op": "animation", "tweening": true}));
+    let fps = s.project().settings.fps as f64;
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    let st = s.state();
+    assert_eq!(st["selected"]["tweenColors"], true);
+    assert_eq!(st["selected"]["keepInTween"], true);
+    let st = s.command(&json!({"op": "figure", "tweenColors": false}));
+    assert_eq!(st["selected"]["tweenColors"], false);
+    assert!(codec::encode(s.project()).contains("colorsJump"));
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(s.state()["selected"]["tweenColors"], true);
+
+    // keep during tween: the figure is not on frame 2
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    s.command(&json!({"op": "delete_here"}));
+    let drawn = |s: &Session, t: f64| {
+        let p = s.project();
+        barkfart_core::tess::tessellate(&barkfart_core::eval::evaluate(p, &p.root_symbol, t), None).triangle_count()
+    };
+    let with = drawn(&s, 0.5 / fps);
+    s.command(&json!({"op": "frame", "i": 0}));
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    let st = s.command(&json!({"op": "figure", "keepInTween": false}));
+    assert_eq!(st["selected"]["keepInTween"], false);
+    assert!(drawn(&s, 0.5 / fps) < with, "gone during the in-betweens");
+    assert_eq!(drawn(&s, 0.0), with, "still on its own frame");
+    assert!(codec::encode(s.project()).contains("vanishInTween"));
+}

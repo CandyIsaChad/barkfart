@@ -1183,6 +1183,11 @@ pub struct Layer {
     pub parent_node_rotate: bool,
     pub inherit_effects: bool,
     pub parallax: f32,
+    /// "Keep stickfigure during tween" off: during the in-between pictures
+    /// before a frame the figure is not on, it is already gone.
+    pub vanish_in_tween: bool,
+    /// "Tween stickfigure colors" off: colour keys hold until the next frame.
+    pub colors_jump: bool,
     pub transform: Transform,
     pub effects: EffectStack,
     pub kind: LayerKind,
@@ -1205,6 +1210,8 @@ impl Layer {
             parent_node_rotate: true,
             inherit_effects: false,
             parallax: 0.0,
+            vanish_in_tween: false,
+            colors_jump: false,
             transform: Transform::new(id),
             effects: EffectStack::default(),
             kind,

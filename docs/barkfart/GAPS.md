@@ -17,7 +17,10 @@ committed). Plainest behaviour where the reference is unsure.
 ## Stickfigure Tools (9.2)
 - [x] Paste stickfigure with layering (long-press)
 - [x] Paste all properties: the window with a checkbox per property
-- [ ] Keep stickfigure during tween, Tween stickfigure colours, tween easing
+- [x] Keep stickfigure during tween, Tween stickfigure colours, tween easing
+      (both on by default, Barkfart's old behaviour; segment colours are not
+      keyed per frame in Barkfart, so colour tweening only shows on imported
+      animations with colour keys)
 - [x] Use segment colour (own colour vs the figure colour)
 
 ## View options (8.6)

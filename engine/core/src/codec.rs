@@ -419,6 +419,8 @@ fn layer(m: &Obj) -> R<Layer> {
     l.parent_node_rotate = b(m, "parentNodeRotate", true)?;
     l.inherit_effects = b(m, "inheritEffects", false)?;
     l.parallax = f(m, "parallax", 0.0)?;
+    l.vanish_in_tween = b(m, "vanishInTween", false)?;
+    l.colors_jump = b(m, "colorsJump", false)?;
     read_prop(m, "shown", &mut l.shown)?;
     read_prop(m, "opacity", &mut l.opacity)?;
     if let Some(t) = m.get("transform") {
@@ -830,6 +832,12 @@ fn layer_json(l: &Layer) -> Json {
     }
     if l.inherit_effects {
         m.put("inheritEffects", Json::Bool(true));
+    }
+    if l.vanish_in_tween {
+        m.put("vanishInTween", Json::Bool(true));
+    }
+    if l.colors_jump {
+        m.put("colorsJump", Json::Bool(true));
     }
     if l.parallax != 0.0 {
         m.put("parallax", json::f32(l.parallax));

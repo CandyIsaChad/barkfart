@@ -227,6 +227,14 @@ fn eval_symbol<'p>(ctx: &mut Ctx<'p>, w: Work<'p>, stack: &mut Vec<Work<'p>>, on
         if !ctx.r.b(&l.shown, t) {
             continue;
         }
+        if l.vanish_in_tween && sym.id == ctx.project.root_symbol {
+            // between frame k and k + 1, where it is not on frame k + 1
+            let fps = if ctx.project.settings.fps > 0.0 { ctx.project.settings.fps as f64 } else { 30.0 };
+            let k = (t * fps + 1e-6).floor();
+            if t * fps - k > 1e-6 && !ctx.r.b(&l.shown, (k + 1.0) / fps) && (k + 1.0) / fps < sym.duration - 1e-9 {
+                continue;
+            }
+        }
         if !ctx.spend(&l.id) {
             break;
         }
