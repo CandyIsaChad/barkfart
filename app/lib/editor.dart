@@ -793,6 +793,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           setState(() => _arrows = true);
         case 'pastelayering':
           unawaited(_pasteLayeringPopup());
+        case 'library':
+          if (w.length > 1) setState(() => _libType = int.parse(w[1]));
+          unawaited(_libraryDialog());
         case 'modifybranch':
           unawaited(_modifyBranchDialog());
         case 'viewoptions':
@@ -1669,11 +1672,141 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     ];
   }
 
-  List<Widget> _libraryTools() => [
-        _Btn('Add stickfigure…', accent: true, onTap: _figurePicker),
-        _gap,
-        GestureDetector(onLongPress: _pasteLayeringPopup, child: _Btn('Paste stickfigure', enabled: _st['figureCopied'] == true, onTap: _pasteFigure)),
-      ];
+  /// Library Tools type: 0 stickfigures, 1 movieclips, 2 sprites (the
+  /// reference's [<] / [>] switcher).
+  int _libType = 0;
+  static const _libTypes = ['Stickfigure', 'Movieclip', 'Sprite'];
+  static const _libKinds = ['figure', 'movieclip', 'sprite'];
+
+  List<Widget> _libraryTools() {
+    final type = _libTypes[_libType];
+    return [
+      Row(children: [
+        SizedBox(width: 40, child: _Btn('<', onTap: () => setState(() => _libType = (_libType + 2) % 3))),
+        Expanded(child: Center(child: Text('${type}s', style: const TextStyle(color: cText, fontSize: 13)))),
+        SizedBox(width: 40, child: _Btn('>', onTap: () => setState(() => _libType = (_libType + 1) % 3))),
+      ]),
+      _gap,
+      if (_libType == 0) GestureDetector(onLongPress: _pasteLayeringPopup, child: _Btn('Paste stickfigure', enabled: _st['figureCopied'] == true, onTap: _pasteFigure)),
+      if (_libType == 0) _gap,
+      Row(children: [
+        Expanded(
+          child: _libType == 2
+              ? _Btn('Create sprite…', accent: true, onTap: _importImages)
+              : _Btn(_libType == 0 ? 'Add stickfigure…' : 'Add movieclip…', accent: true, onTap: _figurePicker),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(width: 44, child: _Btn('', icon: Icons.edit, onTap: _libraryDialog)),
+      ]),
+      _hint(_libType == 2 ? 'Put pictures in the Barkfart Images folder; each becomes a sprite on this frame.' : 'The pencil lists the ${type.toLowerCase()}s in this project: rename them, or delete one from every frame.'),
+    ];
+  }
+
+  Future<void> _importImages() async {
+    final e = _engine;
+    if (e == null) return;
+    final files = await imageFiles();
+    if (!mounted) return;
+    final chosen = <String>{};
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, set) => AlertDialog(
+          backgroundColor: cPanel,
+          title: const Text('Create sprites', style: TextStyle(color: cText, fontSize: 16)),
+          content: SizedBox(
+            width: 380,
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              const Text('Put pictures (png, jpg, gif, webp) in the Barkfart Images folder, then pick them here. Each becomes a sprite on this frame.', style: TextStyle(color: cSecondary, fontSize: 12)),
+              const SizedBox(height: 8),
+              if (files.isEmpty) const Padding(padding: EdgeInsets.all(12), child: Text('No pictures in the folder yet.', style: TextStyle(color: cText))),
+              Flexible(
+                child: ListView(shrinkWrap: true, children: [
+                  for (final f in files)
+                    CheckboxListTile(
+                      dense: true,
+                      value: chosen.contains(f.path),
+                      onChanged: (v) => set(() => v == true ? chosen.add(f.path) : chosen.remove(f.path)),
+                      title: Text(f.path.split(Platform.pathSeparator).last, style: const TextStyle(color: cText, fontSize: 13)),
+                    ),
+                ]),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+            TextButton(onPressed: chosen.isEmpty ? null : () => Navigator.pop(c, true), child: Text('Create (${chosen.length})')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    for (final path in chosen) {
+      _refresh(e.importFile(path.split(Platform.pathSeparator).last, await File(path).readAsBytes()));
+    }
+    _thumbsChanged('import');
+  }
+
+  /// The pencil: this project's figures / movieclips / sprites, with the
+  /// frames each is on; rename, or delete from every frame.
+  Future<void> _libraryDialog() => showDialog<void>(
+        context: context,
+        builder: (c) => StatefulBuilder(builder: (c, set) {
+          final kind = _libKinds[_libType];
+          final items = ((_st['library'] as List?) ?? const []).cast<Map>().where((m) => m['kind'] == kind).toList();
+          return AlertDialog(
+            backgroundColor: cPanel,
+            title: Text('${_libTypes[_libType]}s in this project', style: const TextStyle(color: cText, fontSize: 16)),
+            content: SizedBox(
+              width: 420,
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                const Text('Rename one, or delete it from every frame of the project. Deleting unused ones keeps the project small; undo brings one back.', style: TextStyle(color: cSecondary, fontSize: 12)),
+                const SizedBox(height: 8),
+                if (items.isEmpty) Padding(padding: const EdgeInsets.all(12), child: Text('No ${_libTypes[_libType].toLowerCase()}s yet.', style: const TextStyle(color: cText))),
+                Flexible(
+                  child: ListView(shrinkWrap: true, children: [
+                    for (final m in items)
+                      Row(children: [
+                        Expanded(
+                          child: Text('${m['name']}  ·  ${m['frames']} frame${m['frames'] == 1 ? '' : 's'}${kind == 'figure' ? '  ·  ${m['nodes']} nodes' : ''}',
+                              style: const TextStyle(color: cText, fontSize: 13), overflow: TextOverflow.ellipsis),
+                        ),
+                        IconButton(
+                          tooltip: 'Rename',
+                          icon: const Icon(Icons.edit, size: 18, color: cText),
+                          onPressed: () async {
+                            final n = await _askName('Rename', '${m['name']}');
+                            if (n == null || n.trim().isEmpty) return;
+                            _cmd({'op': 'rename', 'layer': m['layer'], 'name': n.trim()});
+                            set(() {});
+                          },
+                        ),
+                        IconButton(
+                          tooltip: 'Delete from the project',
+                          icon: const Icon(Icons.close, size: 18, color: cDanger),
+                          onPressed: () async {
+                            final used = (m['frames'] as num) > 0, joined = (m['joined'] as num) > 0;
+                            final ok = await _ask(
+                                'Are you sure?',
+                                'Name: ${m['name']}\n'
+                                    '${kind == 'figure' ? 'Nodes: ${m['nodes']}\n' : ''}'
+                                    '${used ? 'On ${m['frames']} frame${m['frames'] == 1 ? '' : 's'}: it disappears from all of them.' : 'Not on any frame: safe to delete.'}'
+                                    '${joined ? '\n${m['joined']} figure(s) joined to it stay where they are, unjoined.' : ''}',
+                                ['Cancel', 'Delete']);
+                            if (ok != 'Delete') return;
+                            _cmd({'op': 'library_delete', 'layer': m['layer']});
+                            set(() {});
+                          },
+                        ),
+                      ]),
+                  ]),
+                ),
+              ]),
+            ),
+            actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Okay'))],
+          );
+        }),
+      );
 
   List<Widget> _frameToolsPanel() {
     final last = _frame >= _frames - 1;

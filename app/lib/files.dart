@@ -175,6 +175,21 @@ Future<Directory> soundsDir() async {
 
 const soundExtensions = ['.wav', '.mp3', '.m4a', '.aac', '.caf', '.aif', '.aiff', '.ogg', '.flac'];
 
+Future<Directory> imagesDir() async {
+  final d = Directory('${(await _docs()).path}/Barkfart Images');
+  await d.create(recursive: true);
+  return d;
+}
+
+const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'];
+
+/// Pictures for sprites, from the Barkfart Images folder.
+Future<List<File>> imageFiles() async {
+  final d = await imagesDir();
+  return d.listSync().whereType<File>().where((f) => imageExtensions.any(f.path.toLowerCase().endsWith)).toList()
+    ..sort((a, b) => a.path.toLowerCase().compareTo(b.path.toLowerCase()));
+}
+
 Future<List<File>> soundFiles() async {
   final d = await soundsDir();
   final out = d.listSync().whereType<File>().where((f) {

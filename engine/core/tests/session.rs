@@ -1359,3 +1359,26 @@ fn show_filters_strips_effects_from_the_stage_only() {
     assert!(tys(&list().without_effects(|_| false)).is_empty());
     assert_eq!(tys(&list()), all, "the project still has them");
 }
+
+/// Library Tools: the project's figures with their frame counts; rename one
+/// by id; delete one from every frame (one undo step brings it back).
+#[test]
+fn library_lists_renames_and_deletes_figures() {
+    let mut s = Session::new(Document::new(barkfart_core::session::new_editor_project()));
+    s.command(&json!({"op": "insert_frame"}));
+    let st = s.command(&json!({"op": "add_figure"}));
+    let lib = st["library"].as_array().unwrap().clone();
+    assert_eq!(lib.len(), 2, "{lib:?}");
+    assert_eq!(lib[0]["kind"], "figure");
+    assert_eq!(lib[0]["frames"], 2, "the starter figure is on both frames");
+    assert_eq!(lib[1]["frames"], 1, "the new one only on this frame");
+    let id = lib[1]["layer"].as_str().unwrap().to_string();
+    let st = s.command(&json!({"op": "rename", "layer": id, "name": "Hero"}));
+    assert_eq!(st["library"][1]["name"], "Hero");
+    let before = codec::encode(s.project());
+    let st = s.command(&json!({"op": "library_delete", "layer": id}));
+    assert_eq!(st["undo"], "Delete from project");
+    assert_eq!(st["library"].as_array().unwrap().len(), 1);
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(codec::encode(s.project()), before);
+}

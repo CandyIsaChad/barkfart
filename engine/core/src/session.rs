@@ -1478,8 +1478,25 @@ impl Session {
                     self.changed();
                 }
             }
+            "library_delete" => {
+                // Library Tools: a figure, movieclip or sprite off every frame (the
+                // ones joined to it stay where they are, unjoined)
+                if let Some(id) = c["layer"].as_str().map(str::to_string) {
+                    self.step("Delete from project", |s| {
+                        let kids: Vec<String> = s.project.root().map(|r| r.layers.iter().filter(|x| x.parent.as_deref() == Some(id.as_str())).map(|x| x.id.clone()).collect()).unwrap_or_default();
+                        for k in kids {
+                            crate::edit::join_ops::unjoin(s, &sym, &k, t)?;
+                        }
+                        structure::remove_layer(s, &sym, &id)
+                    });
+                    if self.selected.as_ref().is_some_and(|(l, _)| l == c["layer"].as_str().unwrap_or("")) {
+                        self.selected = None;
+                    }
+                    self.validate();
+                }
+            }
             "rename" => {
-                if let Some(l) = self.sel_layer() {
+                if let Some(l) = c["layer"].as_str().map(str::to_string).or_else(|| self.sel_layer()) {
                     let name = c["name"].as_str().unwrap_or("").trim().to_string();
                     self.step("Rename", |s| {
                         if let Some(x) = s.project.layer_mut(&sym, &l) {
@@ -1884,6 +1901,22 @@ impl Session {
                 "x0": round2(x0), "y0": round2(y0), "x1": round2(x1), "y1": round2(y1),
             }))
         });
+        // Library Tools: every figure, movieclip and sprite with the frames it is on
+        let library: Vec<J> = p.root().map(|r| {
+            let mut res = Resolver::new(p);
+            let fps = st_fps(p);
+            let n = ((r.duration * fps).round() as i32).max(1);
+            r.layers.iter().filter_map(|l| {
+                let (kind, nodes) = match &l.kind {
+                    LayerKind::Figure(f) => ("figure", f.nodes().len()),
+                    LayerKind::Symbol(_) => ("movieclip", 0),
+                    LayerKind::Sprite(_) => ("sprite", 0),
+                    _ => return None,
+                };
+                let on = (0..n).filter(|i| res.b(&l.shown, *i as f64 / fps)).count();
+                Some(json!({"layer": l.id, "kind": kind, "name": l.name.clone().unwrap_or_else(|| l.id.clone()), "nodes": nodes, "frames": on, "joined": r.layers.iter().filter(|x| x.parent.as_deref() == Some(l.id.as_str())).count()}))
+            }).collect()
+        }).unwrap_or_default();
         let bg = {
             let (c, g, u) = frame_bg(p, t);
             let fps = st_fps(p);
@@ -1931,7 +1964,7 @@ impl Session {
             "propsFrom": self.props_clip.as_ref().and_then(|c| p.root()?.layer(&c.source).map(|l| l.name.clone().unwrap_or_else(|| l.id.clone()))),
             "textfield": textfield, "textfieldCopied": self.textfield_clip.is_some(),
             "filtersCopied": self.filter_clip.is_some(),
-            "frameBg": bg,
+            "frameBg": bg, "library": library,
             "drawTool": self.draw.map(shape_name).unwrap_or("none"), "drawLine": draw_line,
             "soundList": sound_list, "frameSound": frame_snd, "soundCopied": self.sound_clip.is_some(),
             "frameDelay": fset.0, "frameRepeat": rep,

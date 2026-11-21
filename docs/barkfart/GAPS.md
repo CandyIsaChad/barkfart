@@ -39,7 +39,8 @@ committed). Plainest behaviour where the reference is unsure.
 - [x] Open: sort, delete, past saves (backups)
 
 ## Library Tools (11)
-- [ ] Stickfigure / movieclip / sprite switcher, rename, hide, delete
+- [x] Stickfigure / movieclip / sprite switcher, rename, delete (Barkfart has no
+      separate imported-figure list, so "hide from the list" does not apply)
 - [ ] Movieclip editor
 
 ## Figure editor (12)
