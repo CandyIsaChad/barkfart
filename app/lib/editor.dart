@@ -143,6 +143,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       }
     }
     _refresh(e.command({'op': 'state'}));
+    // draw every frame picture for the project just opened
+    _thumbsChanged('open');
     final script = Platform.environment['BARKFART_SCRIPT'];
     if (script != null) Timer(const Duration(milliseconds: 1500), () => _runScript(script));
   }
@@ -840,7 +842,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// After a change: during a drag only the current frame's picture is stale.
   void _thumbsChanged(String op) {
     final rev = (_st['rev'] as num?)?.toInt() ?? 0;
-    if (rev == _thumbRev) return;
+    // a project just opened, made or imported into always redraws everything
+    final whole = op == 'open' || op == 'new' || op == 'import';
+    if (rev == _thumbRev && !whole) return;
     _thumbRev = rev;
     if (op == 'move' || op == 'down') return;
     if (op == 'up') {
