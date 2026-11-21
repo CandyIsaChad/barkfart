@@ -83,3 +83,27 @@ fn handles_touches_and_picture_agree() {
     assert_eq!(st["canUndo"], false);
     bf_engine_free(e);
 }
+
+#[test]
+fn export_follows_tweening() {
+    let e = bf_engine_new();
+    if e.is_null() {
+        eprintln!("skipping: no GPU");
+        return;
+    }
+    bf_doc_new(e);
+    cmd(e, r#"{"op":"insert_frame"}"#);
+    let path = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("tween.gif");
+    let c = CString::new(path.to_str().unwrap()).unwrap();
+    let count = |e| {
+        let job = bf_export_begin(e, 0, c.as_ptr(), 64, 36, 0, 0, 0);
+        assert!(!job.is_null());
+        let n = bf_export_count(job);
+        bf_export_free(job);
+        n
+    };
+    assert_eq!(count(e), 2, "2 frames at 10 fps, no tweening");
+    cmd(e, r#"{"op":"animation","tweening":true,"tweened":5}"#);
+    assert_eq!(count(e), 12, "0.2 s at 60 pictures a second");
+    bf_engine_free(e);
+}

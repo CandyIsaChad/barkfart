@@ -1415,11 +1415,32 @@ pub struct Settings {
     pub background: Color,
     /// Widescreen bars: the shot's aspect ratio, or 0.
     pub letterbox: f32,
+    /// Playback and export tween between frames (Stick Nodes "Tweening on"):
+    /// off shows each frame for 1/fps; on samples tweened_frames extra
+    /// pictures between frames (at most 60 per second).
+    pub tweening: bool,
+    pub tweened_frames: i32,
+    /// With tweening, the last frame tweens into the first.
+    pub loop_tween: bool,
 }
+
+pub const DEFAULT_TWEENED_FRAMES: i32 = 5;
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { fps: 30.0, width: 1280, height: 720, background: Color::WHITE, letterbox: 0.0 }
+        Settings { fps: 30.0, width: 1280, height: 720, background: Color::WHITE, letterbox: 0.0, tweening: false, tweened_frames: DEFAULT_TWEENED_FRAMES, loop_tween: false }
+    }
+}
+
+impl Settings {
+    /// Pictures per second for playback and export.
+    pub fn sample_rate(&self) -> f64 {
+        let fps = if self.fps > 0.0 { self.fps as f64 } else { 30.0 };
+        if self.tweening {
+            (fps * (self.tweened_frames.clamp(0, 8) + 1) as f64).min(60.0f64.max(fps))
+        } else {
+            fps
+        }
     }
 }
 

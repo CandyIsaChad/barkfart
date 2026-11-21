@@ -327,10 +327,15 @@ pub extern "C" fn bf_export_begin(e: *mut Engine, format: i32, path: *const c_ch
         if w == 0 || h == 0 || w > 4096 || h > 4096 {
             return Err(format!("size {w}x{h} is not allowed"));
         }
+        // pictures per second: the frame rate, or more with tweening on;
+        // start and count are in frames, converted to pictures
         let fps = p.settings.fps.max(1.0) as f64;
-        let total = ((p.root().map(|s| s.duration).unwrap_or(0.0) * fps).round() as u32).max(1);
-        let start = start.min(total - 1);
-        let count = if count == 0 { total - start } else { count.min(total - start) };
+        let rate = p.settings.sample_rate();
+        let per = rate / fps;
+        let total = ((p.root().map(|s| s.duration).unwrap_or(0.0) * rate).round() as u32).max(1);
+        let start = ((start as f64 * per).round() as u32).min(total - 1);
+        let count = if count == 0 { total - start } else { ((count as f64 * per).round() as u32).max(1).min(total - start) };
+        let fps = rate;
         let file = std::io::BufWriter::new(std::fs::File::create(&path).map_err(|e| e.to_string())?);
         let writer = match format {
             0 => Writer::Gif(barkfart_core::export::Gif::new(file, w as u16, h as u16, fps, true).map_err(|e| e.to_string())?),
@@ -373,8 +378,7 @@ pub extern "C" fn bf_export_step(e: *const Engine, x: *mut Export) -> i32 {
             }
             return Ok(true);
         }
-        let fps = p.settings.fps.max(1.0) as f64;
-        let t = barkfart_core::export::frame_time(job.start, job.next, fps);
+        let t = barkfart_core::export::frame_time(job.start, job.next, p.settings.sample_rate());
         let scene = eval::evaluate(p, &p.root_symbol, t);
         let list = tess::layered(&scene, Some(&engine.glyphs));
         let (hw, hh) = (p.settings.width as f32 / 2.0, p.settings.height as f32 / 2.0);
@@ -476,7 +480,7 @@ pub extern "C" fn bf_doc_new(e: *mut Engine) -> i32 {
     }
     // SAFETY: live handle
     let engine = unsafe { &mut *e };
-    engine.open(barkfart_core::session::new_project(), Default::default());
+    engine.open(barkfart_core::session::new_editor_project(), Default::default());
     0
 }
 

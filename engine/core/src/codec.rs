@@ -479,6 +479,9 @@ pub fn decode(json: &str) -> R<Project> {
             p.settings.background = parse_color(bg)?;
         }
         p.settings.letterbox = f(s, "letterbox", 0.0)?;
+        p.settings.tweening = b(s, "tweening", false)?;
+        p.settings.tweened_frames = i(s, "tweenedFrames", DEFAULT_TWEENED_FRAMES)?.clamp(0, 8);
+        p.settings.loop_tween = b(s, "loopTween", false)?;
     }
     if let Some(vw) = m.get("view") {
         let vw = as_map(vw, "view")?;
@@ -945,6 +948,16 @@ pub fn encode(p: &Project) -> String {
     s.put("fps", json::f32(st.fps)).put("width", json::int(st.width as i64)).put("height", json::int(st.height as i64)).put("background", color_hex(&st.background));
     if st.letterbox != 0.0 {
         s.put("letterbox", json::f32(st.letterbox));
+    }
+    // written only when not the default, so older project texts stay the same
+    if st.tweening {
+        s.put("tweening", Json::Bool(true));
+    }
+    if st.tweened_frames != DEFAULT_TWEENED_FRAMES {
+        s.put("tweenedFrames", json::int(st.tweened_frames as i64));
+    }
+    if st.loop_tween {
+        s.put("loopTween", Json::Bool(true));
     }
     m.put("settings", s.done());
     let v = &p.view;

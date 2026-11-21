@@ -47,6 +47,8 @@ pub struct Session {
     /// The last tap (no drag): where, and which handle, for node digging.
     last_tap: Option<(f32, f32, String, String)>,
     pose_clip: Option<(IndexMap<String, f32>, IndexMap<String, f32>)>,
+    /// Copied frame: its keys (times relative to the frame).
+    frame_clip: Option<crate::edit::editor::KeyClip>,
     /// Bumped on every change the app should redraw for (drags included).
     rev: u64,
     pub message: String,
@@ -59,12 +61,22 @@ pub fn new_project() -> Project {
     crate::codec::decode(STARTER).expect("starter project")
 }
 
+/// A new project as the editor starts it: like the original app, 10 frames per second.
+pub fn new_editor_project() -> Project {
+    let mut p = new_project();
+    p.settings.fps = 10.0;
+    if let Some(r) = p.root_mut() {
+        r.duration = 0.1;
+    }
+    p
+}
+
 impl Session {
     pub fn new(doc: Document) -> Session {
         let mut tools = CanvasTools::default();
         tools.key_scope = KeyScope::Figure;
         let frame = doc.project().view.frame.max(0);
-        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, onion: true, building: None, gesture: Gesture::None, last_tap: None, pose_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, onion: true, building: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -335,6 +347,70 @@ impl Session {
             "delete_frame" => {
                 let fr = self.frame;
                 self.step("Delete frame", |s| frame_ops::delete(s, fr));
+            }
+            "animation" => {
+                // Animation Tools: tweening on/off and tweened frames (playback and export only)
+                let (tw, n) = (c["tweening"].as_bool(), c["tweened"].as_i64());
+                self.step("Animation settings", |s| {
+                    if let Some(v) = tw {
+                        s.project.settings.tweening = v;
+                    }
+                    if let Some(v) = n {
+                        s.project.settings.tweened_frames = (v as i32).clamp(0, 8);
+                    }
+                    Ok(())
+                });
+            }
+            "tween_add" => {
+                // "Add tweened frame": new real frames between this one and the next,
+                // each the pose a fraction of the way there
+                let fracs: Vec<f64> = match c["n"].as_i64() {
+                    Some(n) => {
+                        let n = n.clamp(1, 240);
+                        (1..=n).map(|k| k as f64 / (n + 1) as f64).collect()
+                    }
+                    None => c["at"].as_array().map(|a| a.iter().filter_map(|v| v.as_f64()).collect()).unwrap_or_else(|| vec![0.5]),
+                };
+                let (fr, n) = (self.frame, self.frame_count());
+                if fr + 1 >= n {
+                    self.message = "Tweened frames go between two frames: add the next frame first.".into();
+                } else if let Some(k) = self.step("Add tweened frame", |s| add_tweened(s, fr, &fracs)) {
+                    self.frame = fr + k;
+                    self.changed();
+                }
+            }
+            "no_tween" => {
+                let (fr, on, ed) = (self.frame, b("on"), self.tools.editor.clone());
+                self.step(if on { "Do not tween" } else { "Tween" }, |s| frame_ops::set_tween(&ed, s, fr, !on));
+            }
+            "copy_frame" => {
+                let sel = self.keys_at(t, None);
+                self.frame_clip = Some(self.tools.editor.copy(self.project(), &sel));
+                self.message = "Frame copied.".into();
+                self.rev += 1;
+            }
+            "paste_frame" => {
+                if let Some(clip) = self.frame_clip.clone() {
+                    let fr = self.frame;
+                    let made = self.step("Paste frame", |s| {
+                        frame_ops::insert_after(s, fr, true)?;
+                        let at = frame_ops::time(s, fr + 1);
+                        for (id, keys) in &clip.keys {
+                            let Some(p) = s.project.property_mut(id) else { continue };
+                            if keys.is_empty() || !p.ty.checked(&keys[0].value) {
+                                continue;
+                            }
+                            for k in keys {
+                                p.track.put(Key { time: at + k.time, ..*k });
+                            }
+                        }
+                        Ok(())
+                    });
+                    if made.is_some() {
+                        self.frame = fr + 1;
+                        self.changed();
+                    }
+                }
             }
             "inbetween" => {
                 let (fr, n) = (self.frame, c["n"].as_i64().unwrap_or(1).clamp(1, 240) as i32);
@@ -787,6 +863,10 @@ impl Session {
             }))
         });
         let cam = self.camera_frame();
+        let no_tween = {
+            let k = self.keys_at(t, None);
+            !k.is_empty() && k.iter().all(|r| p.property(&r.property).and_then(|q| q.track.keys().iter().find(|x| x.time == r.time)).is_some_and(|x| x.interp == Interp::Hold))
+        };
         json!({
             "rev": self.rev, "frame": self.frame, "frames": frames, "fps": p.settings.fps,
             "w": p.settings.width, "h": p.settings.height, "keyed": keyed,
@@ -801,6 +881,9 @@ impl Session {
                 "tweenNew": self.tools.editor.default_interp != Interp::Hold, "mainOnly": self.tools.main_nodes_only,
             },
             "pose": self.pose_clip.is_some(),
+            "frameCopied": self.frame_clip.is_some(),
+            "tweening": p.settings.tweening, "tweenedFrames": p.settings.tweened_frames, "rate": p.settings.sample_rate(),
+            "frameNoTween": no_tween,
             "building": self.building.as_ref().and_then(|b| p.root()?.layer(b)).map(|l| json!({"layer": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone())})),
             "builtins": crate::figures::ALL.iter().map(|(id, name)| json!({"id": id, "name": name})).collect::<Vec<_>>(),
             "message": self.message,
@@ -881,6 +964,44 @@ impl Session {
         self.rev += 1;
         Ok(bytes)
     }
+}
+
+/// Inserts one real frame per fraction after `frame`, each keyed with the
+/// pose that fraction of the way to the next frame. Returns frames added.
+pub fn add_tweened(st: &mut crate::edit::State, frame: i32, fracs: &[f64]) -> EditResult<i32> {
+    let k = fracs.len() as i32;
+    if k == 0 {
+        return Ok(0);
+    }
+    anchor_poses(st);
+    let (t0, t1) = (frame_ops::time(st, frame), frame_ops::time(st, frame + 1));
+    // the poses, sampled before anything moves
+    let mut poses: Vec<(String, Vec<Value>, Interp)> = Vec::new();
+    if let Some(s) = st.project.root() {
+        for l in &s.layers {
+            for q in l.properties() {
+                if q.track.is_empty() {
+                    continue;
+                }
+                let vals = fracs.iter().map(|f| q.key_value(t0 + (t1 - t0) * f)).collect();
+                poses.push((q.id.clone(), vals, crate::edit::editor::interp_at(q, t0, Interp::Linear)));
+            }
+        }
+    }
+    frame_ops::insert_tweened(st, frame, k)?;
+    let fps = st_fps(&st.project);
+    for (id, vals, interp) in poses {
+        let Some(q) = st.project.property_mut(&id) else { continue };
+        for (j, v) in vals.into_iter().enumerate() {
+            let at = frame_ops::time_of(fps, frame + 1 + j as i32);
+            q.track.put(Key::new(at, v, interp));
+        }
+    }
+    Ok(k)
+}
+
+fn st_fps(p: &Project) -> f64 {
+    if p.settings.fps > 0.0 { p.settings.fps as f64 } else { 30.0 }
 }
 
 /// Frames are poses: once there is more than one frame, every pose property

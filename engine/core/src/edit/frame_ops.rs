@@ -15,6 +15,10 @@ pub fn frame_count(st: &State) -> i32 {
     1.max((d * fps(st)).round() as i32)
 }
 
+pub fn time_of(fps: f64, frame: i32) -> f64 {
+    frame as f64 / fps
+}
+
 pub fn time(st: &State, frame: i32) -> f64 {
     frame as f64 / fps(st)
 }

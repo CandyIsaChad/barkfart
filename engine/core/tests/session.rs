@@ -270,3 +270,88 @@ fn importing_a_stick_nodes_figure_is_one_step() {
     back.id_counter = codec::decode(&before).unwrap().id_counter;
     assert_eq!(codec::encode(&back), before);
 }
+
+/// Two frames, the right arm swung and the figure moved on the second.
+fn two_poses() -> Session {
+    let mut s = Session::new(Document::new(barkfart_core::session::new_editor_project()));
+    s.command(&json!({"op": "insert_frame"}));
+    let st = s.command(&json!({"op": "state"}));
+    let (x, y) = handle(&st, 6);
+    s.command(&json!({"op": "down", "x": x, "y": y, "r": 20}));
+    s.command(&json!({"op": "move", "x": x + 60.0, "y": y + 40.0}));
+    s.command(&json!({"op": "up"}));
+    let (x, y) = handle(&s.state(), 0);
+    s.command(&json!({"op": "down", "x": x, "y": y, "r": 20}));
+    s.command(&json!({"op": "move", "x": x + 120.0, "y": y}));
+    s.command(&json!({"op": "up"}));
+    s.command(&json!({"op": "frame", "i": 0}));
+    s
+}
+
+/// The picture at time t (not a frame).
+fn picture_at(s: &Session, t: f64) -> Vec<f32> {
+    let p = s.project();
+    barkfart_core::tess::tessellate(&barkfart_core::eval::evaluate(p, &p.root_symbol, t), None).batches.iter().flat_map(|b| b.xy.clone()).collect()
+}
+
+#[test]
+fn tweened_frames_are_real_frames_with_the_in_between_pose() {
+    for (cmd, fracs) in [(json!({"op": "tween_add"}), vec![0.5]), (json!({"op": "tween_add", "at": [0.1, 0.9]}), vec![0.1, 0.9]), (json!({"op": "tween_add", "n": 3}), vec![0.25, 0.5, 0.75])] {
+        let mut s = two_poses();
+        assert_eq!(s.state()["fps"], 10.0);
+        let (a, b) = (picture(&s, 0), picture(&s, 1));
+        let want: Vec<Vec<f32>> = fracs.iter().map(|f| picture_at(&s, 0.1 * f)).collect();
+        let st = s.command(&cmd);
+        let k = fracs.len() as i64;
+        assert_eq!(st["frames"], 2 + k, "{cmd}");
+        assert_eq!(st["frame"], k, "{cmd}: the last new frame is shown");
+        assert_eq!(st["undo"], "Add tweened frame");
+        assert!(same(&picture(&s, 0), &a) && same(&picture(&s, 1 + k as i32), &b), "{cmd}: the two frames are unchanged");
+        for (j, w) in want.iter().enumerate() {
+            assert!(same(&picture(&s, 1 + j as i32), w), "{cmd}: new frame {} is the pose at {}", j + 1, fracs[j]);
+        }
+        // a real frame: every pose property is keyed on it
+        assert!(st["keyed"].as_array().unwrap().iter().all(|v| v == true), "{cmd}: every frame is a key frame");
+        s.command(&json!({"op": "undo"}));
+        assert_eq!(s.state()["frames"], 2);
+    }
+    // only between two frames
+    let mut s = two_poses();
+    s.command(&json!({"op": "frame", "i": 1}));
+    let st = s.command(&json!({"op": "tween_add"}));
+    assert_eq!(st["frames"], 2);
+    assert!(!st["message"].as_str().unwrap().is_empty());
+}
+
+#[test]
+fn tweening_settings_save_and_change_the_picture_rate() {
+    let mut s = two_poses();
+    assert_eq!(s.state()["rate"], 10.0);
+    let st = s.command(&json!({"op": "animation", "tweening": true, "tweened": 5}));
+    assert_eq!(st["rate"], 60.0);
+    let st = s.command(&json!({"op": "animation", "tweened": 2}));
+    assert_eq!(st["rate"], 30.0);
+    let st = s.command(&json!({"op": "fps", "v": 30}));
+    assert_eq!(st["rate"], 60.0, "at most 60 pictures a second");
+    s.command(&json!({"op": "undo"}));
+    let text = codec::encode(s.project());
+    assert!(text.contains("\"tweening\": true") && text.contains("\"tweenedFrames\": 2"));
+    let back = codec::decode(&text).unwrap();
+    assert_eq!(codec::encode(&back), text);
+    // defaults are not written
+    assert!(!codec::encode(&new_project()).contains("tween"));
+}
+
+#[test]
+fn copy_paste_and_no_tween_frames() {
+    let mut s = two_poses();
+    let first = picture(&s, 0);
+    s.command(&json!({"op": "copy_frame"}));
+    s.command(&json!({"op": "frame", "i": 1}));
+    let st = s.command(&json!({"op": "paste_frame"}));
+    assert_eq!(st["frames"], 3);
+    assert_eq!(st["frame"], 2);
+    assert!(same(&picture(&s, 2), &first), "the pasted frame is the copied pose");
+    let st = s.command(&json!({"op": "no_tween", "on": true}));
+    assert_eq!(st["frameNoTween"], true);
+}
