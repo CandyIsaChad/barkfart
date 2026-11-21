@@ -114,7 +114,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     } catch (e) {
       _fatal = 'The engine failed to load: $e';
     }
-    _ticker = createTicker((_) => _tick())..start();
+    _ticker = createTicker((_) {
+      _tick();
+      _thumbTick();
+    })..start();
     _start();
   }
 
@@ -184,6 +187,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (e == null) return null;
     final st = e.command(c);
     _refresh(st);
+    _thumbsChanged(c['op'] as String? ?? '');
     return st;
   }
 
@@ -229,8 +233,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       final dur = _frames / _fps;
       final secs = e.playbackTime ?? _clockOffset + _clock.elapsedMicroseconds / 1e6;
       t = dur > 0 ? secs % dur : 0;
-      // draw on frame boundaries only (the engine draws one picture per frame)
-      t = (t * _fps).floor() / _fps;
+      // one picture per frame, or more with tweening on (Animation Tools)
+      final rate = (_st['rate'] as num?)?.toDouble() ?? _fps;
+      t = (t * rate).floor() / rate;
       if (t != _playT) setState(() => _playT = t);
     } else {
       t = _frame / _fps;
@@ -257,7 +262,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     }
     final key = '${_st['rev']} $t $w $h $x0 $y0 $x1 $y1 $camera $onion';
     if (key == _drawn) return;
-    final fi = (t * _fps).round();
+    final fi = (t * ((_st['rate'] as num?)?.toDouble() ?? _fps)).round();
     if (camera) {
       final ck = '${_st['rev']} $w $h';
       if (ck != _cacheKey) {
@@ -289,7 +294,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       }
       setState(() {
         _setImage(img, owned: !keep);
-        _engineMs = _engineMs == 0 ? ms : _engineMs * 0.9 + ms * 0.1;
+        _engineMs = ms;
       });
       if (Platform.environment['BARKFART_TRACE'] != null) debugPrint('picture ${w}x$h engine ${ms.toStringAsFixed(1)} ms, total ${sw.elapsedMicroseconds / 1000} ms${camera ? ' (cached ${_frameCache.length})' : ''}');
       _busy = false;
@@ -317,6 +322,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       return;
     }
     _pointers[ev.pointer] = ev.localPosition;
+    if (_frameSelected) setState(() => _frameSelected = false);
     if (_pointers.length == 1) {
       _downAt = ev.localPosition;
       _moved = false;
@@ -520,26 +526,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _engine?.newProject();
     _file = null;
     _fitted = false;
+    _frameSelected = false;
     _refresh(_engine?.command({'op': 'state'}));
+    _thumbsChanged('new');
     _say('New animation');
   }
 
-  /// A list shown in the left panel in place of the tools (no overlay): 'figures' or 'open'.
-  String? _panel;
-  List<ProjectFile> _panelFiles = const [];
-
-  Future<void> _openSheet() async {
-    if (!await _leaveUnsaved()) return;
-    final files = await ProjectFile.all();
-    if (!mounted) return;
-    setState(() {
-      _panelFiles = files;
-      _panel = 'open';
-    });
-  }
-
   Future<void> _openFile(ProjectFile chosen) async {
-    setState(() => _panel = null);
     final err = _engine?.load(await chosen.read());
     if (err != null) {
       _say('Could not open ${chosen.name}: $err');
@@ -547,34 +540,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     }
     _file = chosen;
     _fitted = false;
+    _frameSelected = false;
     _refresh(_engine?.command({'op': 'state'}));
-  }
-
-  List<Widget> _panelList() {
-    final back = _Btn('◀ Back', onTap: () => setState(() => _panel = null));
-    if (_panel == 'never') {
-      final list = ((_st['builtins'] as List?) ?? const []).cast<Map<String, dynamic>>();
-      return [
-        back,
-        _title('Add a figure'),
-        for (final f in list) ...[
-          _Btn(f['name'] as String, onTap: () {
-            setState(() => _panel = null);
-            _cmd({'op': 'add_figure', 'kind': f['id']});
-          }),
-          _gap,
-        ],
-      ];
-    }
-    return [
-      back,
-      _title('Open an animation'),
-      if (_panelFiles.isEmpty) const Text('Nothing saved yet.', style: TextStyle(color: cSecondary, fontSize: 13)),
-      for (final f in _panelFiles) ...[
-        _FileRow(f.name, f.when, f.path == _file?.path, () => _openFile(f)),
-        _gap,
-      ],
-    ];
+    _thumbsChanged('open');
   }
 
   ExportJob? _export;
@@ -667,7 +635,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         case 'picker':
           unawaited(_figurePicker());
         case 'back':
-          setState(() => _panel = null);
+          if (mounted) Navigator.of(context).maybePop();
+        case 'frametools':
+          setState(() => _frameSelected = true);
+        case 'viewoptions':
+          setState(() => _viewOptions = true);
         case 'quit':
           exit(0);
       }
@@ -694,6 +666,61 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   // ---------------------------------------------------------------- layout
+  //
+  // Arrangement after the original (docs/barkfart/UI-SPEC.md): left panel
+  // with a fixed header and one scrolling list of sections that follows the
+  // selection; section tabs above the stage; filmstrip of frame pictures on
+  // top with the frame/play grid at the top right.
+
+  /// A frame thumbnail was tapped: the panel shows Frame Tools.
+  bool _frameSelected = false;
+  bool _viewOptions = false;
+  bool _showTabs = true;
+  final ScrollController _panelScroll = ScrollController();
+  final Map<String, GlobalKey> _sectionKeys = {};
+  /// "Add tweened frame" positions: 50%, 33/67%, 10/90%.
+  String _tweenAt = '50';
+
+  GlobalKey _sectionKey(String name) => _sectionKeys.putIfAbsent(name, () => GlobalKey());
+
+  /// The sections the panel shows now (also the tabs above the stage).
+  List<String> _sections() {
+    if (_st['building'] != null) return const ['Figure editor'];
+    if (_st['mode'] == 'camera') return const ['Camera Tools'];
+    if (_frameSelected) return const ['Frame Tools'];
+    final sel = _sel;
+    if (sel != null) return const ['Stickfigure Tools', 'Segment Tools'];
+    return const ['App Tools', 'Project Tools', 'Animation Tools', 'Library Tools'];
+  }
+
+  List<Widget> _sectionBody(String name) {
+    switch (name) {
+      case 'App Tools':
+        return _appTools();
+      case 'Project Tools':
+        return _projectTools();
+      case 'Animation Tools':
+        return _animationTools();
+      case 'Library Tools':
+        return _libraryTools();
+      case 'Frame Tools':
+        return _frameToolsPanel();
+      case 'Stickfigure Tools':
+        return _stickfigureTools(_sel!);
+      case 'Segment Tools':
+        return _segmentTools(_sel!);
+      case 'Camera Tools':
+        return _cameraTools();
+      case 'Figure editor':
+        return _builder(_sel);
+    }
+    return const [];
+  }
+
+  void _jumpTo(String name) {
+    final c = _sectionKey(name).currentContext;
+    if (c != null) Scrollable.ensureVisible(c, duration: const Duration(milliseconds: 200), alignment: 0);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -703,13 +730,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     }
     final big = MediaQuery.sizeOf(context).shortestSide > 600;
     final pad = MediaQuery.paddingOf(context);
+    final stripH = big ? 112.0 : 92.0;
     return Scaffold(
       backgroundColor: cSurround,
       body: RepaintBoundary(
         key: _shot,
         child: Row(children: [
           Container(
-            width: (big ? 200 : 168) + pad.left,
+            width: (big ? 220 : 180) + pad.left,
             color: cPanel,
             padding: EdgeInsets.only(left: pad.left, top: pad.top, bottom: pad.bottom),
             child: _sidebar(),
@@ -717,16 +745,45 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           Expanded(
             child: Column(children: [
               Container(
-                height: (big ? 76 : 64) + pad.top,
+                height: stripH + pad.top,
                 color: cPanel,
                 padding: EdgeInsets.only(top: pad.top, right: pad.right),
-                child: _strip(big),
+                child: _st['building'] != null ? _buildBar() : _topBar(stripH),
               ),
-              Expanded(child: Padding(padding: EdgeInsets.only(right: pad.right, bottom: pad.bottom), child: _stage())),
+              if (_showTabs && !_playing) _tabStrip(),
+              Expanded(
+                child: Padding(
+                  padding: EdgeInsets.only(right: pad.right, bottom: pad.bottom),
+                  child: Stack(children: [
+                    Positioned.fill(child: _stage()),
+                    if (_viewOptions) Positioned(top: 0, right: 0, bottom: 0, width: 240, child: _viewOptionsPanel()),
+                  ]),
+                ),
+              ),
             ]),
           ),
         ]),
       ),
+    );
+  }
+
+  Widget _tabStrip() {
+    final names = _sections();
+    return Container(
+      height: 30,
+      color: cSurround,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(children: [
+        for (final n in names)
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _jumpTo(n),
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Center(child: Text(n, style: const TextStyle(color: cAccent, fontSize: 12, fontWeight: FontWeight.w600))),
+            ),
+          ),
+      ]),
     );
   }
 
@@ -737,7 +794,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         if (!_fitted) _fit();
       }
       return Listener(
-        onPointerDown: _down,
+        onPointerDown: (ev) {
+          if (_viewOptions) setState(() => _viewOptions = false);
+          _down(ev);
+        },
         onPointerMove: _move,
         onPointerUp: _up,
         onPointerCancel: _up,
@@ -753,113 +813,221 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     });
   }
 
-  Widget _strip(bool big) {
-    final building = _st['building'] as Map<String, dynamic>?;
-    if (building != null) {
-      return Row(children: [
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Editing ${building['name']}', style: const TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w600)),
-            const Text('Segment changes apply to this figure on every frame.', style: TextStyle(color: cSecondary, fontSize: 11)),
-          ]),
-        ),
-        SizedBox(width: 96, child: _Btn('Done', accent: true, onTap: () => _cmd({'op': 'build_done'}))),
-        const SizedBox(width: 8),
-      ]);
+  Widget _buildBar() {
+    final building = _st['building'] as Map<String, dynamic>;
+    return Row(children: [
+      const SizedBox(width: 12),
+      Expanded(
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Editing ${building['name']}', style: const TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w600)),
+          const Text('Changes here apply to this figure on every frame.', style: TextStyle(color: cSecondary, fontSize: 11)),
+        ]),
+      ),
+      SizedBox(width: 96, child: _Btn('Done', accent: true, onTap: () => _cmd({'op': 'build_done'}))),
+      const SizedBox(width: 8),
+    ]);
+  }
+
+  // ---------------------------------------------------------------- filmstrip and grid
+
+  final Map<int, ui.Image> _thumbs = {};
+  final Set<int> _thumbDirty = {};
+  int _thumbRev = -1;
+
+  /// After a change: during a drag only the current frame's picture is stale.
+  void _thumbsChanged(String op) {
+    final rev = (_st['rev'] as num?)?.toInt() ?? 0;
+    if (rev == _thumbRev) return;
+    _thumbRev = rev;
+    if (op == 'move' || op == 'down') return;
+    if (op == 'up') {
+      _thumbDirty.add(_frame);
+      return;
     }
-    final cell = big ? 64.0 : 52.0;
-    final keyed = (_st['keyed'] as List?) ?? const [];
+    for (var i = 0; i < _frames; i++) {
+      _thumbDirty.add(i);
+    }
+    _thumbs.keys.where((k) => k >= _frames).toList().forEach((k) => _thumbs.remove(k)?.dispose());
+  }
+
+  /// Draws one stale frame picture (nearest the current frame first).
+  void _thumbTick() {
+    final e = _engine;
+    if (e == null || _thumbDirty.isEmpty || _playing || _oneFinger == 1 || _st.isEmpty) return;
+    final i = _thumbDirty.reduce((a, b) => (a - _frame).abs() <= (b - _frame).abs() ? a : b);
+    _thumbDirty.remove(i);
+    if (i >= _frames) return;
+    final sw = (_st['w'] as num).toDouble(), sh = (_st['h'] as num).toDouble();
+    final w = (120 * math.min(_dpr, 2.0)).round(), h = (w * sh / sw).round();
+    final px = e.renderView(i / _fps, w, h, -sw / 2, -sh / 2, sw / 2, sh / 2, camera: true);
+    if (px == null) return;
+    ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, (img) {
+      if (!mounted) return;
+      setState(() {
+        _thumbs.remove(i)?.dispose();
+        _thumbs[i] = img;
+      });
+    });
+  }
+
+  Widget _topBar(double h) {
+    final cellH = h - 16;
+    final cellW = cellH * 16 / 9;
     return Row(children: [
       Expanded(
         child: ListView.builder(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          padding: const EdgeInsets.all(8),
           itemCount: _frames,
           itemBuilder: (c, i) {
-            final cur = _playing ? (_playT * _fps).round() == i : i == _frame;
-            final key = i == 0 || (i < keyed.length && keyed[i] == true);
+            final cur = _playing ? (_playT * _fps).floor() == i : i == _frame;
+            final img = _thumbs[i];
             return GestureDetector(
               onTap: () {
                 if (_playing) _togglePlay();
+                setState(() => _frameSelected = true);
                 _cmd({'op': 'frame', 'i': i});
+                _cmd({'op': 'select'});
               },
               child: Container(
-                width: key ? cell : cell * 0.6,
-                margin: const EdgeInsets.only(right: 4),
-                decoration: BoxDecoration(
-                  color: cur ? cSelected : (key ? cControl : const Color(0xFF24272B)),
-                  border: Border.all(color: cur ? cAccent : const Color(0x00000000), width: 2),
-                ),
-                child: Stack(children: [
-                  Positioned(left: 5, top: 3, child: Text('${i + 1}', style: TextStyle(color: cur ? cText : (key ? cSecondary : const Color(0xFF5F646B)), fontSize: 12, fontFeatures: const [ui.FontFeature.tabularFigures()]))),
-                  if (key)
-                    Positioned(left: 0, right: 0, bottom: 6, child: Center(child: Transform.rotate(angle: math.pi / 4, child: Container(width: 7, height: 7, color: cur ? cAccent : cSecondary))))
-                  else
-                    const Positioned(left: 0, right: 0, bottom: 4, child: Center(child: Text('~', style: TextStyle(color: Color(0xFF5F646B), fontSize: 12)))),
+                width: cellW,
+                margin: const EdgeInsets.only(right: 6),
+                decoration: BoxDecoration(color: const Color(0xFFF2F2F2), border: Border.all(color: cur ? cAccent : cControl, width: cur ? 3 : 1)),
+                child: Stack(fit: StackFit.expand, children: [
+                  if (img != null) RawImage(image: img, fit: BoxFit.contain),
+                  Positioned(
+                    left: 0,
+                    top: 0,
+                    child: Container(
+                      color: cur ? cAccent : const Color(0xCC2B2E33),
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      child: Text('${i + 1}', style: const TextStyle(color: cText, fontSize: 11, fontFeatures: [ui.FontFeature.tabularFigures()])),
+                    ),
+                  ),
                 ]),
               ),
             );
           },
         ),
       ),
-      _iconButton(Icons.add, 'Add frame', () => _cmd({'op': 'insert_frame'})),
-      const SizedBox(width: 4),
-      _iconButton(_playing ? Icons.stop : Icons.play_arrow, _playing ? 'Stop' : 'Play', _togglePlay, accent: true),
-      const SizedBox(width: 8),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(4, 6, 8, 6),
+        child: Column(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Row(children: [
+            _gridButton(Icons.add_box_outlined, 'Add frame', _playing ? null : () => _cmd({'op': 'insert_frame'})),
+            _gridButton(Icons.copy, 'Copy frame', _playing ? null : () => _cmd({'op': 'copy_frame'})),
+            _gridButton(Icons.play_arrow, 'Play', _playing ? null : _togglePlay, accent: true),
+          ]),
+          Row(children: [
+            _gridButton(Icons.delete_outline, 'Delete frame', _playing || _frames <= 1 ? null : () => _cmd({'op': 'delete_frame'})),
+            _gridButton(Icons.content_paste, 'Paste frame', _playing || _st['frameCopied'] != true ? null : () => _cmd({'op': 'paste_frame'})),
+            _gridButton(Icons.stop, 'Stop', _playing ? _togglePlay : null),
+          ]),
+          SizedBox(
+            width: 3 * 40 + 8,
+            height: 24,
+            child: _Btn('View options', onTap: _playing ? null : () => setState(() => _viewOptions = !_viewOptions), small: true),
+          ),
+        ]),
+      ),
     ]);
   }
 
-  Widget _iconButton(IconData icon, String tip, VoidCallback onTap, {bool accent = false}) {
-    return Tooltip(
-      message: tip,
-      child: Material(
-        color: accent ? cAccent : cControl,
-        borderRadius: BorderRadius.circular(4),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(4),
-          onTap: onTap,
-          child: SizedBox(width: 44, height: 44, child: Icon(icon, color: cText)),
+  Widget _gridButton(IconData icon, String tip, VoidCallback? onTap, {bool accent = false}) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4),
+      child: Tooltip(
+        message: tip,
+        child: Opacity(
+          opacity: onTap == null ? 0.35 : 1,
+          child: Material(
+            color: accent && onTap != null ? cAccent : cControl,
+            borderRadius: BorderRadius.circular(4),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(4),
+              onTap: onTap,
+              child: SizedBox(width: 36, height: 26, child: Icon(icon, size: 18, color: cText)),
+            ),
+          ),
         ),
       ),
     );
   }
 
-  // ---------------------------------------------------------------- sidebar
+  // ---------------------------------------------------------------- left panel
 
   Widget _sidebar() {
-    final sel = _sel;
+    final mode = _st['mode'] as String? ?? 'figure';
+    final fit = _fitScale();
+    final zoom = fit > 0 ? (_view.s / fit * 100).round() : 100;
+    final modeName = _playing ? 'Playing…' : {'figure': 'Normal', 'all': 'Panning', 'camera': 'Camera'}[mode] ?? 'Normal';
+    final names = _sections();
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Padding(
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 4),
         child: _pair(
-          _Btn('Undo', enabled: _st['canUndo'] == true, onTap: () => _cmd({'op': 'undo'})),
-          _Btn('Redo', enabled: _st['canRedo'] == true, onTap: () => _cmd({'op': 'redo'})),
+          _Btn('Undo', enabled: !_playing && _st['canUndo'] == true, onTap: () => _cmd({'op': 'undo'})),
+          _Btn('Redo', enabled: !_playing && _st['canRedo'] == true, onTap: () => _cmd({'op': 'redo'})),
         ),
       ),
+      Center(child: Text(_playing ? modeName : 'Mode: $modeName ($zoom%)', style: const TextStyle(color: cSecondary, fontSize: 12))),
+      const SizedBox(height: 4),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10),
-        child: _Segmented(
-          ['Figure', 'All', 'Camera'],
-          ['figure', 'all', 'camera'].indexOf(_st['mode'] as String? ?? 'figure'),
-          (i) {
-            if (i == 2 && _st['hasCamera'] != true) {
-              _cmd({'op': 'add_camera'});
-            } else {
-              _cmd({'op': 'mode', 'v': ['figure', 'all', 'camera'][i]});
-            }
-          },
-        ),
+        child: Row(children: [
+          for (final m in const [('figure', Icons.accessibility_new, 'Normal: pose figures'), ('all', Icons.groups, 'Panning: move everything'), ('camera', Icons.videocam_outlined, 'Camera')]) ...[
+            Expanded(
+              child: Tooltip(
+                message: m.$3,
+                child: Opacity(
+                  opacity: _playing ? 0.35 : 1,
+                  child: Material(
+                    color: mode == m.$1 ? cSelected : cControl,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4), side: mode == m.$1 ? const BorderSide(color: cAccent) : BorderSide.none),
+                    child: InkWell(
+                      onTap: _playing
+                          ? null
+                          : () {
+                              setState(() => _frameSelected = false);
+                              if (m.$1 == 'camera' && _st['hasCamera'] != true) {
+                                _cmd({'op': 'add_camera'});
+                              } else {
+                                _cmd({'op': 'mode', 'v': m.$1});
+                              }
+                              if (m.$1 != 'figure') _cmd({'op': 'select'});
+                            },
+                      child: SizedBox(height: 40, child: Icon(m.$2, color: mode == m.$1 ? cAccent : cText)),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            if (m.$1 != 'camera') const SizedBox(width: 4),
+          ],
+        ]),
       ),
       const SizedBox(height: 6),
       Expanded(
-        child: ListView(padding: const EdgeInsets.fromLTRB(10, 4, 10, 10), children: _panel != null ? _panelList() : _st['building'] != null ? _builder(sel) : (sel == null ? _nothingSelected() : _selected(sel))),
+        child: _playing
+            ? ListView(padding: const EdgeInsets.fromLTRB(10, 4, 10, 10), children: _playbackPanel())
+            : SingleChildScrollView(
+                controller: _panelScroll,
+                padding: const EdgeInsets.fromLTRB(10, 4, 10, 40),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  for (final n in names) ...[
+                    Container(key: _sectionKey(n), padding: const EdgeInsets.only(top: 10, bottom: 6), child: Text(n, style: const TextStyle(color: cAccent, fontSize: 14, fontWeight: FontWeight.w700))),
+                    ..._sectionBody(n),
+                    const SizedBox(height: 10),
+                    const Divider(height: 1, color: cControl),
+                  ],
+                ]),
+              ),
       ),
       Container(
         color: cControl,
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         child: Text(
-          _status.isNotEmpty ? _status : 'Frame ${(_playing ? (_playT * _fps).round() : _frame) + 1} / $_frames · ${(_frame / _fps).toStringAsFixed(2)} s${_st['dirty'] == true ? ' · not saved' : ''}',
+          _status.isNotEmpty ? _status : 'Frame ${(_playing ? (_playT * _fps).floor() : _frame) + 1} / $_frames${_st['dirty'] == true ? ' · not saved' : ''}',
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(color: cSecondary, fontSize: 11, fontFeatures: [ui.FontFeature.tabularFigures()]),
@@ -868,56 +1036,272 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     ]);
   }
 
-  List<Widget> _nothingSelected() {
-    final onion = _opts['onion'] == true;
+  double _fitScale() {
+    final size = _view.size;
+    if (size.isEmpty || _st.isEmpty) return 0;
+    final sw = (_st['w'] as num).toDouble(), sh = (_st['h'] as num).toDouble();
+    return math.min(size.width / (sw * 1.08), size.height / (sh * 1.08));
+  }
+
+  List<Widget> _playbackPanel() {
     return [
-      _title('Animation'),
-      _Btn('Add figure…', accent: true, onTap: _figurePicker),
+      _title('Animation Tools'),
+      ..._animationTools(),
       _gap,
-      _Toggle('Onion skin', onion, (v) => _cmd({'op': 'set', 'k': 'onion', 'v': v})),
-      _gap,
-      _stepper('FPS', _fps.round().toString(), () => _cmd({'op': 'fps', 'v': _fps - 1}), () => _cmd({'op': 'fps', 'v': _fps + 1})),
-      ..._frameTools(),
-      _title('Camera'),
-      if (_st['hasCamera'] != true) _Btn('Add camera', onTap: () => _cmd({'op': 'add_camera'})) else _Btn('Reset camera', onTap: () => _cmd({'op': 'reset_camera'})),
-      _title('View'),
-      _Toggle('Joints of other figures', _opts['mainOnly'] != true, (v) => _cmd({'op': 'set', 'k': 'mainonly', 'v': !v})),
-      _gap,
-      _label('Playback quality'),
-      _Segmented(const ['Full', 'Half', 'Fast'], _quality == 1 ? 0 : _quality == 0.5 ? 1 : 2, (i) => setState(() {
-            _quality = [1.0, 0.5, 0.3][i];
-            _clearCache();
-          })),
-      _title('File'),
-      _pair(_Btn('New', onTap: _newProject), _Btn('Open', onTap: _openSheet)),
-      _gap,
-      _pair(_Btn('Save…', onTap: _save), _Btn('Export GIF', onTap: _exportGif)),
-      _gap,
-      Text(_file?.name ?? 'Not saved yet', style: const TextStyle(color: cSecondary, fontSize: 11)),
-      if (_engineMs > 0) Text('${_engineMs.toStringAsFixed(1)} ms per picture', style: const TextStyle(color: cSecondary, fontSize: 11)),
+      const Text('Playback in the editor can stutter on big animations; exports never do.', style: TextStyle(color: cSecondary, fontSize: 11)),
     ];
   }
 
-  /// Frame tools: frames, in-betweens, easing (also under a selected figure).
-  List<Widget> _frameTools() {
+  List<Widget> _appTools() => [
+        _pair(_Btn('New project…', onTap: _newProject), _Btn('Open…', onTap: _openDialog)),
+      ];
+
+  List<Widget> _projectTools() => [
+        Text(_file?.name ?? '(Not saved yet)', style: const TextStyle(color: cSecondary, fontSize: 12)),
+        _gap,
+        _pair(_Btn('Save', onTap: _save), _Btn('Save as…', onTap: _saveAs)),
+        _gap,
+        _Btn('Export GIF…', onTap: _exportGif),
+      ];
+
+  List<Widget> _animationTools() {
+    final tween = _st['tweening'] == true;
+    final n = (_st['tweenedFrames'] as num?)?.toInt() ?? 5;
+    final rate = (_st['rate'] as num?)?.toDouble() ?? _fps;
     return [
-      _title('Frame ${_frame + 1}'),
-      _pair(_Btn('New frame', onTap: () => _cmd({'op': 'insert_frame'})), _Btn('Delete', danger: true, enabled: _frames > 1, onTap: () => _cmd({'op': 'delete_frame'}))),
+      _stepper('FPS', _fps.round().toString(), () => _cmd({'op': 'fps', 'v': _fps - 1}), () => _cmd({'op': 'fps', 'v': _fps + 1})),
       _gap,
-      _label('Add in-betweens after this frame'),
-      Row(children: [
-        for (final n in const [1, 2, 3, 5]) ...[
-          Expanded(child: _Btn('+$n', onTap: () => _cmd({'op': 'inbetween', 'n': n}))),
-          if (n != 5) const SizedBox(width: 4),
-        ],
-      ]),
+      _Toggle('Tweening on', tween, (v) => _cmd({'op': 'animation', 'tweening': v})),
+      Opacity(
+        opacity: tween ? 1 : 0.4,
+        child: IgnorePointer(
+          ignoring: !tween,
+          child: _stepper('Tweened frames', '$n', () => _cmd({'op': 'animation', 'tweened': n - 1}), () => _cmd({'op': 'animation', 'tweened': n + 1})),
+        ),
+      ),
       _gap,
-      _label('Easing to the next key frame'),
-      Wrap(spacing: 4, runSpacing: 4, children: [
-        for (final e in const [('linear', 'Even'), ('smooth', 'Smooth'), ('in', 'Speed up'), ('out', 'Slow down'), ('hold', 'No tween')])
-          _Chip(e.$2, false, () => _cmd({'op': 'easing', 'v': e.$1})),
-      ]),
+      Text(tween ? 'Plays and exports $n in-between pictures per frame (${rate.round()} a second).' : 'Each frame shows for 1/${_fps.round()} s.', style: const TextStyle(color: cSecondary, fontSize: 11)),
     ];
+  }
+
+  List<Widget> _libraryTools() => [
+        _Btn('Add stickfigure…', accent: true, onTap: _figurePicker),
+        _gap,
+        _Btn('Paste stickfigure', enabled: _st['figureCopied'] == true, onTap: () => _cmd({'op': 'paste_figure'})),
+      ];
+
+  List<Widget> _frameToolsPanel() {
+    final last = _frame >= _frames - 1;
+    final label = {'50': '50%', '33/67': '33%, 67%', '10/90': '10%, 90%'}[_tweenAt];
+    final at = {'50': [0.5], '33/67': [1 / 3, 2 / 3], '10/90': [0.1, 0.9]}[_tweenAt];
+    return [
+      Text('Frame ${_frame + 1} of $_frames', style: const TextStyle(color: cSecondary, fontSize: 12)),
+      _gap,
+      GestureDetector(
+        onLongPress: last ? null : _tweenCountPopup,
+        child: _Btn('Add tweened frame ($label)', enabled: !last, onTap: () => _cmd({'op': 'tween_add', 'at': at})),
+      ),
+      if (last) const Padding(padding: EdgeInsets.only(top: 4), child: Text('Tweened frames go between two frames.', style: TextStyle(color: cSecondary, fontSize: 11))),
+      _gap,
+      _Segmented(const ['50', '33/67', '10/90'], ['50', '33/67', '10/90'].indexOf(_tweenAt), (i) => setState(() => _tweenAt = ['50', '33/67', '10/90'][i])),
+      _gap,
+      const Text('Hold the button to add several evenly spaced frames.', style: TextStyle(color: cSecondary, fontSize: 11)),
+      _gap,
+      _Toggle('Do not tween this frame', _st['frameNoTween'] == true, (v) => _cmd({'op': 'no_tween', 'on': v})),
+    ];
+  }
+
+  int _tweenCount = 3;
+
+  Future<void> _tweenCountPopup() async {
+    final n = await showDialog<int>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, set) => AlertDialog(
+          backgroundColor: cPanel,
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('Add evenly spaced tweened frames between this frame and the next.', style: TextStyle(color: cSecondary, fontSize: 13)),
+            const SizedBox(height: 12),
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              SizedBox(width: 44, child: _Btn('−', onTap: () => set(() => _tweenCount = math.max(1, _tweenCount - 1)))),
+              const SizedBox(width: 8),
+              SizedBox(width: 140, child: _Btn('$_tweenCount frames', accent: true, onTap: () => Navigator.pop(c, _tweenCount))),
+              const SizedBox(width: 8),
+              SizedBox(width: 44, child: _Btn('+', onTap: () => set(() => _tweenCount = math.min(60, _tweenCount + 1)))),
+            ]),
+          ]),
+        ),
+      ),
+    );
+    if (n != null) _cmd({'op': 'tween_add', 'n': n});
+  }
+
+  static const _easings = [('linear', 'Linear'), ('smooth', 'Ease'), ('in', 'Ease in'), ('out', 'Ease out'), ('hold', 'None')];
+  int _easing = 0;
+
+  List<Widget> _stickfigureTools(Map<String, dynamic> sel) {
+    final scale = (sel['scale'] as num?)?.toDouble() ?? 1;
+    final angle = (sel['figAngle'] as num?)?.toDouble() ?? 0;
+    final pos = sel['layerPos'], count = sel['figureCount'];
+    final stretch = _opts['stretch'] == true;
+    return [
+      Text(sel['name'] as String? ?? 'Figure', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 13)),
+      _gap,
+      Row(children: [
+        Expanded(
+          child: GestureDetector(
+            onLongPress: () async {
+              final ok = await _ask('Delete on every frame?', 'The figure is removed from the whole animation (Undo brings it back).', ['Cancel', 'Delete everywhere']);
+              if (ok == 'Delete everywhere') _cmd({'op': 'delete_everywhere'});
+            },
+            child: _Btn('Delete stickfigure', danger: true, onTap: () => _cmd({'op': 'delete_here'})),
+          ),
+        ),
+        const SizedBox(width: 6),
+        SizedBox(width: 44, child: _Btn('✎', onTap: () => _cmd({'op': 'build'}))),
+      ]),
+      const Padding(padding: EdgeInsets.only(top: 3), child: Text('Deletes it from this frame. Hold to delete everywhere. ✎ edits its segments.', style: TextStyle(color: cSecondary, fontSize: 11))),
+      _gap,
+      _pair(_Btn('◀', onTap: () => _cmd({'op': 'cycle_figure', 'dir': -1})), _Btn('▶', onTap: () => _cmd({'op': 'cycle_figure', 'dir': 1}))),
+      _gap,
+      _label('Stickfigure'),
+      _pair(_Btn('Copy', onTap: () => _cmd({'op': 'copy_figure', 'joined': true})), _Btn('Paste', enabled: _st['figureCopied'] == true, onTap: () => _cmd({'op': 'paste_figure'}))),
+      _gap,
+      _label('All properties'),
+      _pair(_Btn('Copy', onTap: () => _cmd({'op': 'copy_props'})), _Btn('Paste', enabled: _st['propsCopied'] == true, onTap: () => _cmd({'op': 'paste_props'}))),
+      _gap,
+      _label('Pose'),
+      _pair(_Btn('Copy', onTap: () => _cmd({'op': 'copy_pose'})), _Btn('Paste', enabled: _st['pose'] == true, onTap: () => _cmd({'op': 'paste_pose'}))),
+      _gap,
+      _pair(_Btn('Flip ↔', onTap: () => _cmd({'op': 'flip_figure', 'h': true})), _Btn('Flip ↕', onTap: () => _cmd({'op': 'flip_figure', 'h': false}))),
+      _gap,
+      Row(children: [
+        Expanded(child: _Btn('Layer down', onTap: () => _cmd({'op': 'layer_order', 'forward': false}))),
+        Padding(padding: const EdgeInsets.symmetric(horizontal: 6), child: Text('$pos / $count', style: const TextStyle(color: cSecondary, fontSize: 12))),
+        Expanded(child: _Btn('Layer up', onTap: () => _cmd({'op': 'layer_order', 'forward': true}))),
+      ]),
+      _gap,
+      _Btn('Center stickfigure', onTap: () => _cmd({'op': 'figure', 'center': true})),
+      _gap,
+      _label('Stickfigure colour'),
+      _swatches((sel['figColor'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'figure', 'color': c})),
+      _gap,
+      _stepper('Scale', scale.toStringAsFixed(2), () => _cmd({'op': 'figure', 'scale': math.max(0.05, scale - 0.05)}), () => _cmd({'op': 'figure', 'scale': scale + 0.05})),
+      _gap,
+      Row(children: [
+        Expanded(child: Text('Angle  ${angle.round()}°', style: const TextStyle(color: cText, fontSize: 13))),
+        SizedBox(width: 60, child: _Btn('+45°', onTap: () => _cmd({'op': 'figure', 'turn': 45}))),
+      ]),
+      _gap,
+      _Toggle('Locked', sel['locked'] == true, (v) => _cmd({'op': 'figure', 'locked': v})),
+      _Toggle('Visible in onion skin', sel['onion'] != false, (v) => _cmd({'op': 'figure', 'onion': v})),
+      _gap,
+      _label('Drag'),
+      _Segmented(const ['Rotate', 'Stretch'], stretch ? 1 : 0, (i) => _cmd({'op': 'set', 'k': 'stretch', 'v': i == 1})),
+      _gap,
+      _label('Tween to the next frame'),
+      _Btn('Tween: ${_easings[_easing].$2}', onTap: () {
+        setState(() => _easing = (_easing + 1) % _easings.length);
+        _cmd({'op': 'easing', 'v': _easings[_easing].$1});
+      }),
+      _gap,
+      _Btn('Cut here', enabled: _frame > 0, onTap: () => _cmd({'op': 'cut'})),
+      const Padding(padding: EdgeInsets.only(top: 3), child: Text('Splits it into two separate figures from this frame on.', style: TextStyle(color: cSecondary, fontSize: 11))),
+    ];
+  }
+
+  List<Widget> _segmentTools(Map<String, dynamic> sel) {
+    final root = sel['root'] == true;
+    if (root) {
+      return [
+        const Text('The main node moves the whole figure. Tap a joint for its segment.', style: TextStyle(color: cSecondary, fontSize: 12)),
+        _gap,
+        _Toggle('Drag lock', sel['dragLock'] == true, (v) => _cmd({'op': 'node', 'dragLock': v})),
+      ];
+    }
+    final thick = (sel['thickness'] as num?)?.toDouble() ?? 0;
+    final len = (sel['length'] as num?)?.toDouble() ?? 0;
+    return [
+      _pair(_Btn('Flip ↔', onTap: () => _cmd({'op': 'flip_branch', 'h': true})), _Btn('Flip ↕', onTap: () => _cmd({'op': 'flip_branch', 'h': false}))),
+      _gap,
+      _label('Segment colour'),
+      _swatches((sel['color'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'segment', 'color': c})),
+      _gap,
+      _stepper('Thickness', thick.round().toString(), () => _cmd({'op': 'segment', 'thickness': math.max(0, thick - 2)}), () => _cmd({'op': 'segment', 'thickness': thick + 2})),
+      _gap,
+      _stepper('Length', len.round().toString(), () => _cmd({'op': 'node', 'length': math.max(0, len - 5)}), () => _cmd({'op': 'node', 'length': len + 5})),
+      _gap,
+      _Toggle('Is stretchy', sel['stretchy'] == true, (v) => _cmd({'op': 'node', 'stretchy': v})),
+      _Toggle('Lock node', sel['pinned'] == true, (v) => _cmd({'op': 'pin', 'v': v})),
+      _Toggle('Drag lock', sel['dragLock'] == true, (v) => _cmd({'op': 'node', 'dragLock': v})),
+    ];
+  }
+
+  List<Widget> _cameraTools() {
+    final cam = _st['cam'] as Map<String, dynamic>?;
+    final zoom = (cam?['zoom'] as num?)?.toDouble() ?? 1;
+    final rot = (cam?['rotation'] as num?)?.toDouble() ?? 0;
+    return [
+      const Text('Drag on the stage to move the camera on this frame.', style: TextStyle(color: cSecondary, fontSize: 12)),
+      _gap,
+      _stepper('Zoom', zoom.toStringAsFixed(2), () => _cmd({'op': 'camera', 'zoom': math.max(0.05, zoom - 0.05)}), () => _cmd({'op': 'camera', 'zoom': zoom + 0.05})),
+      _gap,
+      _stepper('Rotation', '${rot.round()}°', () => _cmd({'op': 'camera', 'rotation': rot - 5}), () => _cmd({'op': 'camera', 'rotation': rot + 5})),
+      _gap,
+      _pair(_Btn('Center camera', onTap: () => _cmd({'op': 'camera', 'center': true})), _Btn('Reset', onTap: () => _cmd({'op': 'reset_camera'}))),
+    ];
+  }
+
+  Widget _swatches(int current, void Function(int) pick) {
+    return Wrap(spacing: 6, runSpacing: 6, children: [
+      for (final c in const [0x000000ff, 0xffffffff, 0xff453aff, 0xff9f0aff, 0xffd60aff, 0x30d158ff, 0x0a84ffff, 0xbf5af2ff, 0x8e8e93ff, 0x7a4a2aff, 0xf2c09aff])
+        GestureDetector(
+          onTap: () => pick(c),
+          child: Container(
+            width: 26,
+            height: 26,
+            decoration: BoxDecoration(
+              color: Color(((c & 0xff) << 24) | (c >> 8)),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: c == current ? cAccent : cSelected, width: c == current ? 3 : 1),
+            ),
+          ),
+        ),
+    ]);
+  }
+
+  Widget _viewOptionsPanel() {
+    return Material(
+      color: cPanel,
+      elevation: 8,
+      child: ListView(padding: const EdgeInsets.all(12), children: [
+        Row(children: [
+          const Expanded(child: Text('View options', style: TextStyle(color: cText, fontSize: 14, fontWeight: FontWeight.w600))),
+          IconButton(icon: const Icon(Icons.close, color: cSecondary), onPressed: () => setState(() => _viewOptions = false)),
+        ]),
+        _Toggle('Show only main nodes', _opts['mainOnly'] == true, (v) => _cmd({'op': 'set', 'k': 'mainonly', 'v': v})),
+        _Toggle('Onion skin', _opts['onion'] == true, (v) => _cmd({'op': 'set', 'k': 'onion', 'v': v})),
+        _Toggle('Show section tabs', _showTabs, (v) => setState(() => _showTabs = v)),
+        _gap,
+        _label('Playback quality'),
+        _Segmented(const ['Full', 'Half', 'Fast'], _quality == 1 ? 0 : _quality == 0.5 ? 1 : 2, (i) => setState(() {
+              _quality = [1.0, 0.5, 0.3][i];
+              _clearCache();
+            })),
+        _gap,
+        _Btn('Fit stage', onTap: () => setState(_fit)),
+        if (_engineMs > 0) Padding(padding: const EdgeInsets.only(top: 8), child: Text('${_engineMs.toStringAsFixed(1)} ms per picture', style: const TextStyle(color: cSecondary, fontSize: 11))),
+      ]),
+    );
+  }
+
+  /// Open: a window listing saved animations (filter, sort, open, delete).
+  Future<void> _openDialog() async {
+    if (!await _leaveUnsaved()) return;
+    final files = await ProjectFile.all();
+    if (!mounted) return;
+    final chosen = await showDialog<ProjectFile>(context: context, builder: (c) => _OpenDialog(files, _file?.path, _ask));
+    if (chosen != null) await _openFile(chosen);
   }
 
   final Map<String, ui.Image> _previews = {};
@@ -965,9 +1349,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       if (k.startsWith('file:')) {
         final path = k.substring(5);
         _refresh(e.importFile(path.split(Platform.pathSeparator).last, await File(path).readAsBytes()));
+        _thumbsChanged('import');
       } else if (k.startsWith('asset:')) {
         final path = k.substring(6);
         _refresh(e.importFile(Uri.decodeComponent(path.split('/').last), (await rootBundle.load(path)).buffer.asUint8List()));
+        _thumbsChanged('import');
       } else {
         _cmd({'op': 'add_figure', 'kind': k});
       }
@@ -976,45 +1362,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
 
 
-
-  /// A figure is selected: posing and figure tools only (segments live in the figure editor).
-  List<Widget> _selected(Map<String, dynamic> sel) {
-    final stretch = _opts['stretch'] == true;
-    final scope = _opts['scope'] as String? ?? 'figure';
-    final snap = (_opts['snap'] as num?)?.toDouble() ?? 0;
-    return [
-      _title(sel['name'] as String? ?? 'Figure'),
-      _pair(_Btn('◀ Figure', onTap: () => _cmd({'op': 'cycle_figure', 'dir': -1})), _Btn('Figure ▶', onTap: () => _cmd({'op': 'cycle_figure', 'dir': 1}))),
-      _gap,
-      _Btn('Edit figure…', accent: true, onTap: () => _cmd({'op': 'build'})),
-      _gap,
-      _pair(_Btn('Copy pose', onTap: () => _cmd({'op': 'copy_pose'})), _Btn('Paste pose', enabled: _st['pose'] == true, onTap: () => _cmd({'op': 'paste_pose'}))),
-      _gap,
-      _label('Drag'),
-      _Segmented(const ['Rotate', 'Stretch'], stretch ? 1 : 0, (i) => _cmd({'op': 'set', 'k': 'stretch', 'v': i == 1})),
-      _gap,
-      _label('Keys'),
-      _Segmented(const ['Joint', 'Pose'], scope == 'joint' ? 0 : 1, (i) => _cmd({'op': 'set', 'k': 'scope', 'v': i == 0 ? 'joint' : 'figure'})),
-      _gap,
-      _label('Angle snap'),
-      _Segmented(const ['Off', '15°', '45°'], snap == 15 ? 1 : snap == 45 ? 2 : 0, (i) => _cmd({'op': 'set', 'k': 'snap', 'v': [0, 15, 45][i]})),
-      _gap,
-      _pair(_Btn('Turn -15°', onTap: () => _cmd({'op': 'rotate_figure', 'deg': 15})), _Btn('Turn +15°', onTap: () => _cmd({'op': 'rotate_figure', 'deg': -15}))),
-      _gap,
-      _pair(_Btn('Flip', onTap: () => _cmd({'op': 'flip_figure', 'h': true})), _Btn('Duplicate', onTap: () => _cmd({'op': 'duplicate_figure'}))),
-      _gap,
-      _pair(_Btn('To back', onTap: () => _cmd({'op': 'layer_order', 'forward': false})), _Btn('To front', onTap: () => _cmd({'op': 'layer_order', 'forward': true}))),
-      _gap,
-      _pair(_Btn('Cut here', enabled: _frame > 0, onTap: () => _cmd({'op': 'cut'})), _Btn('Delete here', danger: true, onTap: () => _cmd({'op': 'delete_here'}))),
-      _gap,
-      const Text('Cut: the figure becomes two separate figures from this frame. Delete here: gone on this frame only.', style: TextStyle(color: cSecondary, fontSize: 11)),
-      _gap,
-      _Btn('Delete on every frame', danger: true, onTap: () => _cmd({'op': 'delete_everywhere'})),
-      ..._frameTools(),
-      _gap,
-      _Btn('Done', onTap: () => _cmd({'op': 'select'})),
-    ];
-  }
 
   /// The figure editor: structure tools for the selected segment.
   List<Widget> _builder(Map<String, dynamic>? sel) {
@@ -1160,13 +1507,13 @@ class _Overlay extends CustomPainter {
 class _Btn extends StatelessWidget {
   final String label;
   final VoidCallback? onTap;
-  final bool enabled, accent, danger;
-  const _Btn(this.label, {this.onTap, this.enabled = true, this.accent = false, this.danger = false});
+  final bool enabled, accent, danger, small;
+  const _Btn(this.label, {this.onTap, this.enabled = true, this.accent = false, this.danger = false, this.small = false});
 
   @override
   Widget build(BuildContext context) {
     return Opacity(
-      opacity: enabled ? 1 : 0.4,
+      opacity: enabled && onTap != null ? 1 : 0.4,
       child: Material(
         color: cControl,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4), side: accent ? const BorderSide(color: cAccent) : BorderSide.none),
@@ -1174,11 +1521,11 @@ class _Btn extends StatelessWidget {
           borderRadius: BorderRadius.circular(4),
           onTap: enabled ? onTap : null,
           child: SizedBox(
-            height: 40,
+            height: small ? 24 : 40,
             child: Center(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: danger ? cDanger : cText, fontSize: 13)),
+                child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: danger ? cDanger : cText, fontSize: small ? 11 : 13)),
               ),
             ),
           ),
@@ -1400,6 +1747,94 @@ class _FigurePickerState extends State<_FigurePicker> {
                 width: 110,
                 child: _Btn(_picked.isEmpty ? 'Add' : 'Add (${_picked.length})', accent: true, enabled: _picked.isNotEmpty, onTap: () => Navigator.pop(context, List<String>.from(_picked))),
               ),
+            ]),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// Open: saved animations with a filter and sort, Open / Delete / Cancel.
+class _OpenDialog extends StatefulWidget {
+  final List<ProjectFile> files;
+  final String? current;
+  final Future<String?> Function(String, String, List<String>) ask;
+  const _OpenDialog(this.files, this.current, this.ask);
+
+  @override
+  State<_OpenDialog> createState() => _OpenDialogState();
+}
+
+class _OpenDialogState extends State<_OpenDialog> {
+  late final List<ProjectFile> _files = List.of(widget.files);
+  String _filter = '';
+  int _sort = 0;
+  ProjectFile? _picked;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final list = _files.where((f) => f.name.toLowerCase().contains(_filter.toLowerCase())).toList();
+    if (_sort == 0) {
+      list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    } else {
+      list.sort((a, b) => File(b.path).lastModifiedSync().compareTo(File(a.path).lastModifiedSync()) * (_sort == 1 ? 1 : -1));
+    }
+    return Dialog(
+      backgroundColor: cPanel,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      child: SizedBox(
+        width: math.min(560, size.width * 0.8),
+        height: math.min(520, size.height * 0.85),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const Text('Open an animation', style: TextStyle(color: cText, fontSize: 17, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(
+                child: TextField(
+                  style: const TextStyle(color: cText),
+                  decoration: const InputDecoration(hintText: 'Filter', isDense: true, prefixIcon: Icon(Icons.search, size: 18)),
+                  onChanged: (v) => setState(() => _filter = v),
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(width: 210, child: _Segmented(const ['A–Z', 'Newest', 'Oldest'], _sort, (i) => setState(() => _sort = i))),
+            ]),
+            const SizedBox(height: 10),
+            Expanded(
+              child: list.isEmpty
+                  ? const Center(child: Text('Nothing saved yet.', style: TextStyle(color: cSecondary)))
+                  : ListView(children: [
+                      for (final f in list)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: _FileRow(f.name, f.when + (f.path == widget.current ? '  ·  open now' : ''), identical(f, _picked), () => setState(() => _picked = f)),
+                        ),
+                    ]),
+            ),
+            const SizedBox(height: 10),
+            Row(children: [
+              SizedBox(
+                width: 150,
+                child: _Btn('Delete from device', danger: true, enabled: _picked != null, onTap: () async {
+                  final f = _picked!;
+                  final ok = await widget.ask('Delete "${f.name}"?', 'The file is removed from this device. This cannot be undone.', ['Cancel', 'Delete']);
+                  if (ok == 'Delete') {
+                    await File(f.path).delete();
+                    setState(() {
+                      _files.remove(f);
+                      _picked = null;
+                    });
+                  }
+                }),
+              ),
+              const Spacer(),
+              SizedBox(width: 100, child: _Btn('Cancel', onTap: () => Navigator.pop(context))),
+              const SizedBox(width: 8),
+              SizedBox(width: 100, child: _Btn('Open', accent: true, enabled: _picked != null, onTap: () => Navigator.pop(context, _picked))),
             ]),
           ]),
         ),

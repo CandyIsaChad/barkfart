@@ -110,3 +110,40 @@ original's per-frame snapshots but stores sparse keys.
 
 ## Out of scope for this screen
 Curve editor, layers panel, creation mode, effects, sound, export, files.
+
+## v3 (2026-11-21): layout after the user's reference of the original
+The user documented the original editor control by control (kept locally in
+docs/barkfart/research/local, not committed because it quotes the app).
+Barkfart now follows its layout and flow, in its own words and style:
+- Left panel: fixed header (Undo, Redo, "Mode: Normal (zoom %)", three mode
+  buttons Normal / Panning / Camera), then one scrolling list of sections
+  that follows the selection, and a status line.
+  Nothing selected: App Tools, Project Tools, Animation Tools, Library Tools.
+  A frame picture tapped: Frame Tools. A figure: Stickfigure Tools, Segment
+  Tools. Camera mode: Camera Tools.
+- Section tabs above the stage jump to each section (can be hidden).
+- Filmstrip of frame pictures (drawn through the camera); top-right grid:
+  Add frame, Copy frame, Play / Delete frame, Paste frame, Stop; View
+  options opens a panel on the right edge.
+- Frames are whole poses. Animation Tools: FPS (new projects 10), Tweening
+  on, Tweened frames 0-8: playback and export add in-between pictures
+  (at most 60 a second). Frame Tools: Add tweened frame at 50%, 33/67% or
+  10/90% (hold for N evenly spaced frames), only between two frames; Do not
+  tween this frame.
+- Stickfigure Tools: delete (this frame; hold for every frame), edit (pencil),
+  previous / next, copy / paste figure, properties and pose, flip both ways,
+  layer down / up with position, centre, colour, scale, angle (+45), locked,
+  visible in onion skin, drag rotate / stretch, tween easing cycle (Linear,
+  Ease, Ease in, Ease out, None), cut here.
+- Segment Tools (the segment ending at the selected joint): flip, colour,
+  thickness, length, stretchy, lock node, drag lock. Adding, deleting,
+  splitting and shapes are in the figure editor only (as in the original's
+  creation mode).
+- Camera Tools: zoom, rotation, centre, reset; drag on the stage moves the
+  camera.
+Deliberate differences: the pencil edits the figure itself on every frame
+(the original makes a new library figure); Open and the figure picker are
+windows with a filter (the picker shows pictures); playback quality and the
+frame cache are ours.
+Not yet: textfields, movieclip editor, filters, sounds per frame, frame
+delay and repeat, settings, magnifier and arrows windows, join, loop tween.
