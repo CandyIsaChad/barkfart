@@ -1111,6 +1111,10 @@ impl Session {
                                 BranchChange::Shape(shape_named(v))
                             } else if let Some(v) = c2["static"].as_bool() {
                                 BranchChange::Static(v)
+                            } else if let Some(v) = c2["stretchy"].as_bool() {
+                                BranchChange::Stretchy(v)
+                            } else if let Some(v) = c2["scaleLength"].as_f64() {
+                                BranchChange::ScaleLength(v as f32)
                             } else {
                                 return Ok(());
                             };

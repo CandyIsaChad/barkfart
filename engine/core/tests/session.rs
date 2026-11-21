@@ -332,6 +332,50 @@ fn stickfigure_segment_and_camera_tools() {
     assert_eq!(st["undo"], "Camera");
 }
 
+/// "Modify branch" applies one property to the selected joint and everything
+/// below it, one undo step per Set.
+#[test]
+fn modify_branch_changes_a_property_down_the_whole_branch() {
+    let mut s = session();
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    let before = codec::encode(s.project());
+    let read = |s: &Session, n: &str| {
+        let p = s.project();
+        let f = p.root().unwrap().layer("L2").unwrap().as_figure().unwrap();
+        let node = f.node(n).unwrap();
+        let mut r = barkfart_core::eval::Resolver::new(p);
+        (r.f(&node.thickness, 0.0), r.f(&node.length, 0.0), node.stretchy, node.is_static)
+    };
+    let torso = read(&s, "torso");
+
+    let st = s.command(&json!({"op": "segment", "branch": true, "thickness": 7.0}));
+    assert_eq!(st["undo"], "Segment");
+    assert_eq!(read(&s, "armR1").0, 7.0);
+    assert_eq!(read(&s, "armR2").0, 7.0, "the child takes the new thickness too");
+    assert_eq!(read(&s, "torso").0, torso.0, "a joint above the branch is untouched");
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(codec::encode(s.project()), before, "one undo step");
+
+    s.command(&json!({"op": "segment", "branch": true, "stretchy": true}));
+    assert!(read(&s, "armR1").2 && read(&s, "armR2").2);
+    assert!(!read(&s, "torso").2);
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(codec::encode(s.project()), before, "one undo step");
+
+    s.command(&json!({"op": "segment", "branch": true, "scaleLength": 1.5}));
+    assert_eq!(read(&s, "armR1").1, 67.5);
+    assert_eq!(read(&s, "armR2").1, 67.5);
+    assert_eq!(read(&s, "torso").1, torso.1);
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(codec::encode(s.project()), before, "one undo step");
+
+    s.command(&json!({"op": "segment", "branch": true, "static": true}));
+    assert!(read(&s, "armR1").3 && read(&s, "armR2").3);
+    assert!(!read(&s, "torso").3);
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(codec::encode(s.project()), before);
+}
+
 /// The original's "Stickfigure (IK)" is a rig: stretchy limbs whose static
 /// detail segments smart-stretch. Dragging a limb end in Barkfart must bend
 /// it the same way (lengths of the static children follow).

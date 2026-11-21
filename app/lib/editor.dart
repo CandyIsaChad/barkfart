@@ -787,6 +787,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           setState(() {});
         case 'arrows':
           setState(() => _arrows = true);
+        case 'modifybranch':
+          unawaited(_modifyBranchDialog());
         case 'viewoptions':
           setState(() => _viewOptions = true);
         case 'quit':
@@ -2411,6 +2413,77 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   int _splitN = 1;
   bool _reorderBranch = false;
 
+  /// "Modify branch": one property at a time to the selected joint and every
+  /// joint below it. Each Set is its own undo step.
+  Future<void> _modifyBranchDialog() async {
+    final sel = _sel;
+    if (sel == null) return;
+    var color = (sel['color'] as num?)?.toInt() ?? 0xff;
+    var thickness = ((sel['thickness'] as num?)?.toDouble() ?? 32).round();
+    var shape = sel['shape'] as String? ?? 'line';
+    var staticOn = sel['static'] == true;
+    var stretchy = sel['stretchy'] == true;
+    var scale = 1.0;
+    void apply(Map<String, Object?> change) => _cmd({'op': 'segment', 'branch': true, ...change});
+    await showDialog<void>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, set) {
+          Widget row(String label, Widget control, VoidCallback onSet) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  _label(label),
+                  Row(children: [
+                    Expanded(child: control),
+                    const SizedBox(width: 8),
+                    SizedBox(width: 56, child: _Btn('Set', small: true, onTap: onSet)),
+                  ]),
+                ]),
+              );
+          Widget numberRow(String label, String value, VoidCallback minus, VoidCallback plus, VoidCallback onSet) => row(
+                label,
+                Row(children: [
+                  Expanded(child: Text(value, style: const TextStyle(color: cText, fontSize: 13))),
+                  SizedBox(width: 40, child: _Btn('−', onTap: minus)),
+                  const SizedBox(width: 4),
+                  SizedBox(width: 40, child: _Btn('+', onTap: plus)),
+                ]),
+                onSet,
+              );
+          return AlertDialog(
+            backgroundColor: cPanel,
+            title: const Text('Modify branch', style: TextStyle(color: cText, fontSize: 16)),
+            content: SizedBox(
+              width: 380,
+              child: ListView(shrinkWrap: true, children: [
+                _hint('Each Set applies one value to the selected joint and every joint below it.'),
+                const SizedBox(height: 12),
+                row('Segment colour', _swatches(color, (v) => set(() => color = v)), () => apply({'color': color})),
+                numberRow('Thickness', '$thickness', () => set(() => thickness = math.max(0, thickness - 2)), () => set(() => thickness = math.min(400, thickness + 2)), () => apply({'thickness': thickness})),
+                row('Shape', Wrap(spacing: 4, runSpacing: 4, children: [
+                  for (final s in const ['line', 'circle', 'square', 'ellipse', 'triangle', 'trapezoid', 'polygon'])
+                    _Chip(s[0].toUpperCase() + s.substring(1), s == shape, () => set(() => shape = s)),
+                ]), () => apply({'shape': shape})),
+                numberRow('Scale of lengths', scale.toStringAsFixed(2), () => set(() => scale = math.max(0.1, scale - 0.1)), () => set(() => scale = math.min(10, scale + 0.1)), () => apply({'scaleLength': scale})),
+                Row(children: [
+                  Expanded(child: _Toggle('Static (non-moving)', staticOn, (v) => set(() => staticOn = v))),
+                  const SizedBox(width: 8),
+                  SizedBox(width: 56, child: _Btn('Set', small: true, onTap: () => apply({'static': staticOn}))),
+                ]),
+                Row(children: [
+                  Expanded(child: _Toggle('Stretchy', stretchy, (v) => set(() => stretchy = v))),
+                  const SizedBox(width: 8),
+                  SizedBox(width: 56, child: _Btn('Set', small: true, onTap: () => apply({'stretchy': stretchy}))),
+                ]),
+              ]),
+            ),
+            actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Done'))],
+          );
+        },
+      ),
+    );
+  }
+
   /// The figure editor: structure tools for the selected segment.
   List<Widget> _builder(Map<String, dynamic>? sel) {
     if (sel == null) return [_title('Figure editor'), const Text('Tap a joint of this figure.', style: TextStyle(color: cSecondary, fontSize: 13))];
@@ -2471,6 +2544,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _gap,
         _Btn('Colour whole branch', onTap: () => _cmd({'op': 'segment', 'branch': true, 'color': color})),
       ],
+      _gap,
+      _Btn('Modify branch…', onTap: _modifyBranchDialog),
       _gap,
       _Btn('Done', accent: true, onTap: () => _cmd({'op': 'build_done'})),
     ];

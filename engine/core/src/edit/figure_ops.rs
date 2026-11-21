@@ -301,6 +301,7 @@ pub fn flip_figure(st: &mut State, sym: &str, layer: &str, horizontal: bool) -> 
 #[derive(Clone, Debug)]
 pub enum BranchChange {
     Static(bool),
+    Stretchy(bool),
     Thickness(f32),
     Color(Color),
     Shape(Shape),
@@ -319,6 +320,7 @@ pub fn modify_branch(st: &mut State, sym: &str, layer: &str, node: &str, change:
         }
         match change {
             BranchChange::Static(on) => x.is_static = *on,
+            BranchChange::Stretchy(on) => x.stretchy = *on,
             BranchChange::Thickness(w) => {
                 x.thickness.track.clear();
                 x.thickness.value = Value::F(*w);
