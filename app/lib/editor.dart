@@ -464,6 +464,46 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   int _loopEnd = 0;
   double _loopStartWall = 0, _loopEndWall = 0;
 
+  /// Paste Stickfigure Properties: what to paste, every part ticked at first.
+  Future<void> _pastePropsDialog() async {
+    const parts = [
+      ('position', 'Position', 'Puts this figure where the copied one stood.'),
+      ('scale', 'Stickfigure scale', ''),
+      ('color', 'Stickfigure colour', ''),
+      ('rotation', 'Stickfigure rotation', ''),
+      ('filters', 'Stickfigure filters', 'Opacity and every filter.'),
+      ('layering', 'Layering', 'Tries to put it at the same place in front / behind.'),
+      ('nodes', 'Node properties', 'Every joint\'s angle, length, colour and thickness; only for the same kind of figure.'),
+    ];
+    final on = {for (final p in parts) p.$1: true};
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, set) => AlertDialog(
+          backgroundColor: cPanel,
+          title: const Text('Paste properties', style: TextStyle(color: cText, fontSize: 16)),
+          content: SizedBox(
+            width: 340,
+            child: ListView(shrinkWrap: true, children: [
+              Text('Copied from: ${_st['propsFrom'] ?? '?'}', style: const TextStyle(color: cSecondary, fontSize: 12)),
+              const SizedBox(height: 8),
+              for (final p in parts) ...[
+                _Toggle(p.$2, on[p.$1]!, (v) => set(() => on[p.$1] = v)),
+                if (p.$3.isNotEmpty) _hint(p.$3),
+                const SizedBox(height: 4),
+              ],
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Paste')),
+          ],
+        ),
+      ),
+    );
+    if (go == true) _cmd({'op': 'paste_props', ...on});
+  }
+
   Future<void> _loopToPopup() async {
     final play = await showDialog<bool>(
       context: context,
@@ -1787,7 +1827,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _pair(_Btn('Copy', onTap: () => _cmd({'op': 'copy_figure', 'joined': true})), _Btn('Paste', enabled: _st['figureCopied'] == true, onTap: () => _cmd({'op': 'paste_figure'}))),
       _gap,
       _label('All properties'),
-      _pair(_Btn('Copy', onTap: () => _cmd({'op': 'copy_props'})), _Btn('Paste', enabled: _st['propsCopied'] == true, onTap: () => _cmd({'op': 'paste_props'}))),
+      _pair(_Btn('Copy', onTap: () => _cmd({'op': 'copy_props'})), _Btn('Paste', enabled: _st['propsCopied'] == true, onTap: _pastePropsDialog)),
       _gap,
       _label('Pose'),
       _pair(_Btn('Copy', onTap: () => _cmd({'op': 'copy_pose'})), _Btn('Paste', enabled: _st['pose'] == true, onTap: () => _cmd({'op': 'paste_pose'}))),

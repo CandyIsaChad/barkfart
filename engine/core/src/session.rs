@@ -63,6 +63,9 @@ pub struct Session {
     /// Copied figures and the time they were copied at (their pose there).
     figure_clip: Option<(Vec<Layer>, f64)>,
     props_clip: Option<layer_ops::Props>,
+    /// With copied properties: the figure colour and every joint's
+    /// (id, angle, length, colour, thickness) for "Node properties".
+    props_nodes: Option<(u32, Vec<(String, f32, f32, u32, f32)>)>,
     textfield_clip: Option<Layer>,
     filter_clip: Option<crate::edit::filters::Snapshot>,
     sound_clip: Option<Clip>,
@@ -115,7 +118,7 @@ impl Session {
         let mut doc = doc;
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
-        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, textfield_clip: None, filter_clip: None, sound_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -1327,6 +1330,12 @@ impl Session {
                     match layer_ops::copy_props(self.project(), &sym, &l, t) {
                         Ok(p) => {
                             self.props_clip = Some(p);
+                            let pr = self.project();
+                            self.props_nodes = pr.root().and_then(|s| s.layer(&l)).and_then(|x| x.as_figure()).map(|f| {
+                                let mut r = Resolver::new(pr);
+                                let nodes: Vec<(String, f32, f32, u32, f32)> = f.nodes().iter().map(|n| (n.id.clone(), r.f(&n.rotation, t), r.f(&n.length, t), color_of(&mut r, &n.color, t), r.f(&n.thickness, t))).collect();
+                                (nodes.get(1).map(|n| n.3).unwrap_or(0x000000ff), nodes)
+                            });
                             self.message = "Properties copied.".into();
                         }
                         Err(e) => self.message = e.0,
@@ -1337,8 +1346,45 @@ impl Session {
             "paste_props" => {
                 if let (Some(l), Some(pc)) = (self.sel_layer(), self.props_clip.clone()) {
                     let ed = self.tools.editor.clone();
-                    let (pos, lay) = (c.get("position").and_then(|v| v.as_bool()).unwrap_or(true), c.get("layering").and_then(|v| v.as_bool()).unwrap_or(true));
-                    self.step("Paste properties", |s| layer_ops::paste_props(&ed, s, &sym, &l, &pc, pos, lay, t));
+                    let on = |k: &str| c.get(k).and_then(|v| v.as_bool()).unwrap_or(true);
+                    let parts = layer_ops::Parts { position: on("position"), scale: on("scale"), rotation: on("rotation"), filters: on("filters"), layering: on("layering") };
+                    let (color, nodes) = (on("color"), on("nodes"));
+                    let extra = self.props_nodes.clone();
+                    self.step("Paste properties", |s| {
+                        if nodes {
+                            anchor_poses(s);
+                        }
+                        layer_ops::paste_parts(&ed, s, &sym, &l, &pc, parts, t)?;
+                        let Some((fig_color, list)) = extra else { return Ok(()) };
+                        if color && !nodes {
+                            let root = s.project.root().and_then(|r| r.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
+                            if let Some(root) = root {
+                                figure_ops::modify_branch(s, &sym, &l, &root, &BranchChange::Color(Color::rgba8888(fig_color)))?;
+                            }
+                        }
+                        if nodes {
+                            // only between figures of the same make (the same joints)
+                            let same = s.project.root().and_then(|r| r.layer(&l)).and_then(|x| x.as_figure()).is_some_and(|f| f.nodes().len() == list.len() && f.nodes().iter().zip(&list).all(|(n, c)| n.id == c.0));
+                            if !same {
+                                return crate::edit::fail("Node properties paste only onto the same kind of figure.");
+                            }
+                            for (id, rot, len, col, thick) in &list {
+                                let ids = s.project.root().and_then(|r| r.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.node(id)).filter(|n| n.parent.is_some()).map(|n| (n.rotation.id.clone(), n.length.id.clone()));
+                                if let Some((ri, li)) = ids {
+                                    ed.change_in(s, &ri, Value::F(*rot), t)?;
+                                    ed.change_in(s, &li, Value::F(*len), t)?;
+                                }
+                                let lay = s.project.layer_mut(&sym, &l).expect("figure");
+                                if let LayerKind::Figure(f) = &mut lay.kind {
+                                    if let Some(n) = f.node_mut(id) {
+                                        set_static(&mut n.color, Value::C(Color::rgba8888(*col)));
+                                        set_static(&mut n.thickness, Value::F(*thick));
+                                    }
+                                }
+                            }
+                        }
+                        Ok(())
+                    });
                 }
             }
             "copy_pose" => {
@@ -1753,6 +1799,7 @@ impl Session {
             "undo": self.doc.undo_label(), "redo": self.doc.redo_label(), "dirty": self.doc.dirty(),
             "mode": match self.mode { Mode::Figure => "figure", Mode::All => "all", Mode::Camera => "camera" },
             "handles": handles, "selected": sel, "figures": figures, "camera": cam,
+            "propsFrom": self.props_clip.as_ref().and_then(|c| p.root()?.layer(&c.source).map(|l| l.name.clone().unwrap_or_else(|| l.id.clone()))),
             "textfield": textfield, "textfieldCopied": self.textfield_clip.is_some(),
             "filtersCopied": self.filter_clip.is_some(),
             "frameBg": bg,

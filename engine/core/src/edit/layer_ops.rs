@@ -131,16 +131,43 @@ pub fn copy_props(p: &Project, sym: &str, id: &str, t: f64) -> EditResult<Props>
     Ok(Props { transform, opacity, blend: l.blend, effects, source: l.id.clone(), stack_index: s.layer_index(id).expect("found") })
 }
 
+/// Which copied properties a paste applies (Paste Stickfigure Properties).
+#[derive(Clone, Copy, Debug)]
+pub struct Parts {
+    pub position: bool,
+    pub scale: bool,
+    pub rotation: bool,
+    /// Opacity, blend and effects.
+    pub filters: bool,
+    pub layering: bool,
+}
+
 /// Pastes properties at time t (keyed like a pose edit): position (optional),
 /// rotation, scale, opacity, blend and effects; with `layer`, its stack place.
+#[allow(clippy::too_many_arguments)]
 pub fn paste_props(ed: &Editor, st: &mut State, sym: &str, id: &str, c: &Props, position: bool, layer: bool, t: f64) -> EditResult<()> {
+    paste_parts(ed, st, sym, id, c, Parts { position, scale: true, rotation: true, filters: true, layering: layer }, t)
+}
+
+/// Pastes the chosen parts of copied properties at time t.
+pub fn paste_parts(ed: &Editor, st: &mut State, sym: &str, id: &str, c: &Props, parts: Parts, t: f64) -> EditResult<()> {
     let ids: Vec<String> = {
         let Some(l) = st.project.symbol(sym).and_then(|s| s.layer(id)) else { return fail("no layer") };
         let tr = &l.transform;
         [&tr.x, &tr.y, &tr.rotation, &tr.scale_x, &tr.scale_y, &l.opacity].iter().map(|q| q.id.clone()).collect()
     };
-    for i in if position { 0 } else { 2 }..5 {
-        ed.change_in(st, &ids[i], Value::F(c.transform[i]), t)?;
+    for i in 0..5 {
+        let on = match i {
+            0 | 1 => parts.position,
+            2 => parts.rotation,
+            _ => parts.scale,
+        };
+        if on {
+            ed.change_in(st, &ids[i], Value::F(c.transform[i]), t)?;
+        }
+    }
+    if !parts.filters {
+        return layering(st, sym, id, c, parts.layering);
     }
     ed.change_in(st, &ids[5], Value::F(c.opacity), t)?;
     let chain: Vec<String> = st.project.symbol(sym).and_then(|s| s.layer(id)).map(|l| l.effects.chain().iter().map(|e| e.id.clone()).collect()).unwrap_or_default();
@@ -163,7 +190,11 @@ pub fn paste_props(ed: &Editor, st: &mut State, sym: &str, id: &str, c: &Props, 
         }
         super::structure::add_effect(st, sym, id, n)?;
     }
-    if layer {
+    layering(st, sym, id, c, parts.layering)
+}
+
+fn layering(st: &mut State, sym: &str, id: &str, c: &Props, on: bool) -> EditResult<()> {
+    if on {
         let len = st.project.symbol(sym).map(|s| s.layers.len()).unwrap_or(1);
         let to = c.stack_index.min(len.saturating_sub(1));
         if st.project.symbol(sym).and_then(|s| s.layer_index(id)) != Some(to) {

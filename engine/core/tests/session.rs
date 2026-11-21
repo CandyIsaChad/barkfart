@@ -1059,3 +1059,36 @@ fn silence_and_clear_frame() {
     let st = s.command(&json!({"op": "undo"}));
     assert_eq!(st["handles"].as_array().unwrap().len(), 11);
 }
+
+#[test]
+fn paste_properties_applies_only_the_ticked_parts() {
+    let mut s = session();
+    let st = s.command(&json!({"op": "state"}));
+    let a = st["figures"][0]["id"].as_str().unwrap().to_string();
+    s.command(&json!({"op": "select", "layer": a}));
+    s.command(&json!({"op": "figure", "scale": 3.0, "angle": 30.0}));
+    // bend the right arm of A
+    let st = s.state();
+    let (x, y) = handle(&st, 6);
+    s.command(&json!({"op": "down", "x": x, "y": y, "r": 20}));
+    s.command(&json!({"op": "move", "x": x + 40.0, "y": y + 40.0}));
+    s.command(&json!({"op": "up"}));
+    s.command(&json!({"op": "select", "layer": a}));
+    let st = s.command(&json!({"op": "copy_props"}));
+    assert!(st["propsFrom"].is_string());
+    let st = s.command(&json!({"op": "add_figure"}));
+    let b = st["selected"]["layer"].as_str().unwrap().to_string();
+    // scale only
+    let st = s.command(&json!({"op": "paste_props", "position": false, "scale": true, "rotation": false, "color": false, "filters": false, "layering": false, "nodes": false}));
+    assert_eq!(st["selected"]["scale"], 3.0);
+    assert_eq!(st["selected"]["figAngle"], 0.0);
+    // then the joints too
+    s.command(&json!({"op": "paste_props", "position": false, "scale": false, "rotation": true, "color": false, "filters": false, "layering": false, "nodes": true}));
+    let p = s.project();
+    let fa = p.root().unwrap().layer(&a).unwrap().as_figure().unwrap();
+    let fb = p.root().unwrap().layer(&b).unwrap().as_figure().unwrap();
+    let mut r = barkfart_core::eval::Resolver::new(p);
+    for (na, nb) in fa.nodes().iter().zip(fb.nodes()) {
+        assert!((r.f(&na.rotation, 0.0) - r.f(&nb.rotation, 0.0)).abs() < 1e-3, "{}", na.id);
+    }
+}

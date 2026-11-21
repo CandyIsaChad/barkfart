@@ -16,7 +16,7 @@ committed). Plainest behaviour where the reference is unsure.
 
 ## Stickfigure Tools (9.2)
 - [ ] Paste stickfigure with layering (long-press)
-- [ ] Paste all properties: the window with a checkbox per property
+- [x] Paste all properties: the window with a checkbox per property
 - [ ] Keep stickfigure during tween, Tween stickfigure colours, tween easing
 - [ ] Use segment colour (own colour vs the figure colour): needs a model flag
 
