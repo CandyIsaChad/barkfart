@@ -1642,10 +1642,10 @@ impl Session {
                     });
                 }
             }
-            "frame_delay" | "frame_repeat" | "frame_silence" | "frame_slow" => {
+            "frame_delay" | "frame_repeat" | "frame_silence" | "frame_slow" | "camera_fx" => {
                 let c2 = c.clone();
                 let delay = op == "frame_delay";
-                let label = match op { "frame_delay" => "Frame delay", "frame_repeat" => "Repeat frames", "frame_slow" => "Slow motion", _ => "Silence sounds" };
+                let label = match op { "frame_delay" => "Frame delay", "frame_repeat" => "Repeat frames", "frame_slow" => "Slow motion", "camera_fx" => "Camera effects", _ => "Silence sounds" };
                 self.step(label, move |s| {
                     let cam = ensure_camera(s, &sym)?;
                     let (n, fps) = (frame_ops::frame_count(s), st_fps(&s.project));
@@ -1664,6 +1664,25 @@ impl Session {
                     };
                     if let Some(v) = c2["on"].as_bool().filter(|_| c2["op"] == "frame_silence") {
                         set(&mut cm.silence, if v { 1.0 } else { 0.0 });
+                        return Ok(());
+                    }
+                    if c2["op"] == "camera_fx" {
+                        // Camera Tools: widescreen and wobble of this frame
+                        if let Some(v) = c2["widescreen"].as_bool() {
+                            set(&mut cm.widescreen, if v { 1.0 } else { 0.0 });
+                        }
+                        if let Some(v) = c2["wobbleXY"].as_f64() {
+                            set(&mut cm.wobble_xy, v.clamp(0.0, 500.0) as f32);
+                        }
+                        if let Some(v) = c2["wobbleRot"].as_f64() {
+                            set(&mut cm.wobble_rot, ((v.clamp(0.0, 90.0) * 100.0).round() / 100.0) as f32);
+                        }
+                        if let Some(v) = c2["wobbleSpeed"].as_f64() {
+                            set(&mut cm.wobble_speed, ((v.clamp(0.1, 60.0) * 100.0).round() / 100.0) as f32);
+                        }
+                        if let Some(v) = c2["wobbleZoom"].as_bool() {
+                            set(&mut cm.wobble_no_zoom, if v { 0.0 } else { 1.0 });
+                        }
                         return Ok(());
                     }
                     if c2["op"] == "frame_slow" {
@@ -1973,6 +1992,13 @@ impl Session {
                 "x0": round2(x0), "y0": round2(y0), "x1": round2(x1), "y1": round2(y1),
             }))
         });
+        // Camera Tools: this frame's widescreen and wobble
+        let cam_fx = p.root().and_then(|r| r.layers.iter().find_map(|l| if let LayerKind::Camera(c) = &l.kind { Some(c) } else { None })).map(|c| {
+            let fps = st_fps(p);
+            let g = |q: &Property| crate::timing::setting(q, fps, self.frame);
+            let speed = g(&c.wobble_speed);
+            json!({"widescreen": g(&c.widescreen) > 0.5, "wobbleXY": g(&c.wobble_xy), "wobbleRot": g(&c.wobble_rot), "wobbleSpeed": if speed > 0.0 { speed } else { 3.0 }, "wobbleZoom": g(&c.wobble_no_zoom) < 0.5})
+        });
         // Lock Figure To Camera: the locked ones (parallax in the original's units)
         let camera_locks: Vec<J> = p.root().map(|r| {
             r.layers.iter().filter(|l| l.parent.as_ref().is_some_and(|pid| r.layer(pid).is_some_and(|x| matches!(x.kind, LayerKind::Camera(_))))).map(|l| {
@@ -2042,7 +2068,7 @@ impl Session {
             "propsFrom": self.props_clip.as_ref().and_then(|c| p.root()?.layer(&c.source).map(|l| l.name.clone().unwrap_or_else(|| l.id.clone()))),
             "textfield": textfield, "textfieldCopied": self.textfield_clip.is_some(),
             "filtersCopied": self.filter_clip.is_some(),
-            "frameBg": bg, "library": library, "cameraLocks": camera_locks,
+            "frameBg": bg, "camFx": cam_fx, "library": library, "cameraLocks": camera_locks,
             "drawTool": self.draw.map(shape_name).unwrap_or("none"), "drawLine": draw_line,
             "soundList": sound_list, "frameSound": frame_snd, "soundCopied": self.sound_clip.is_some(),
             "frameDelay": fset.0, "frameRepeat": rep,

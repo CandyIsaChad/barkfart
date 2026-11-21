@@ -33,7 +33,7 @@ committed). Plainest behaviour where the reference is unsure.
 - [x] Copy / paste camera
 - [ ] Auto-camera (tween across frames with easing)
 - [x] Lock figure to camera
-- [ ] Widescreen effect, wobble (export / playback only)
+- [x] Widescreen effect, wobble (export / playback only)
 
 ## Project and export (6)
 - [x] Make vertical, rotate cameras 90 degrees

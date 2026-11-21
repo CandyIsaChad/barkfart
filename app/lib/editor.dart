@@ -2358,6 +2358,44 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _pair(_Btn('Center camera', onTap: () => _cmd({'op': 'camera', 'center': true})), _Btn('Reset', onTap: () => _cmd({'op': 'reset_camera'}))),
       _gap,
       _Btn('Lock figure to camera…', onTap: _cameraLockDialog),
+      _gap,
+      ..._cameraFx(),
+    ];
+  }
+
+  /// Copied wobble: XY, rotation, speed, scale with zoom.
+  (double, double, double, bool)? _wobbleClip;
+
+  /// Camera Tools: this frame's widescreen bars and wobble (playback and
+  /// export only).
+  List<Widget> _cameraFx() {
+    final fx = (_st['camFx'] as Map?) ?? const {};
+    final xy = (fx['wobbleXY'] as num?)?.toDouble() ?? 0, rot = (fx['wobbleRot'] as num?)?.toDouble() ?? 0;
+    final speed = (fx['wobbleSpeed'] as num?)?.toDouble() ?? 3, zoom = fx['wobbleZoom'] != false;
+    final any = xy > 0 || rot > 0;
+    void fxCmd(Map<String, Object?> m) => _cmd({'op': 'camera_fx', ...m});
+    return [
+      _Toggle('Widescreen effect', fx['widescreen'] == true, (v) => fxCmd({'widescreen': v})),
+      _gap,
+      _Toggle('Wobble camera XY', xy > 0, (v) => fxCmd({'wobbleXY': v ? 8 : 0})),
+      if (xy > 0) _stepper('Amount', xy.round().toString(), () => fxCmd({'wobbleXY': math.max(1, xy - 1)}), () => fxCmd({'wobbleXY': xy + 1})),
+      _Toggle('Wobble camera rotation', rot > 0, (v) => fxCmd({'wobbleRot': v ? 0.5 : 0})),
+      if (rot > 0) _stepper('Degrees', rot.toStringAsFixed(2), () => fxCmd({'wobbleRot': math.max(0.1, rot - 0.1)}), () => fxCmd({'wobbleRot': rot + 0.1})),
+      Opacity(
+        opacity: any ? 1 : 0.4,
+        child: IgnorePointer(
+          ignoring: !any,
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            _stepper('Wobble speed', speed.toStringAsFixed(2), () => fxCmd({'wobbleSpeed': math.max(0.1, speed - 0.5)}), () => fxCmd({'wobbleSpeed': speed + 0.5})),
+            _Toggle('Scale wobble with zoom', zoom, (v) => fxCmd({'wobbleZoom': v})),
+          ]),
+        ),
+      ),
+      _pair(
+        _Btn('Copy wobble', onTap: () => setState(() => _wobbleClip = (xy, rot, speed, zoom))),
+        _Btn('Paste wobble', enabled: _wobbleClip != null, onTap: () => fxCmd({'wobbleXY': _wobbleClip!.$1, 'wobbleRot': _wobbleClip!.$2, 'wobbleSpeed': _wobbleClip!.$3, 'wobbleZoom': _wobbleClip!.$4})),
+      ),
+      _hint('Widescreen and wobble belong to this frame and show when playing and in exports, not while editing.'),
     ];
   }
 

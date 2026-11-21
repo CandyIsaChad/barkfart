@@ -1477,3 +1477,42 @@ fn lock_figure_to_camera() {
     assert_eq!(st["cameraLocks"].as_array().unwrap().len(), 0);
     assert!(codec::encode(s.project()).contains("\"parallax\"") == false, "unlocked: no parallax left");
 }
+
+/// Camera Tools "Widescreen effect" and "Wobble camera": per frame, only in
+/// the played / exported picture (the editing view is untouched).
+#[test]
+fn widescreen_and_wobble_are_per_frame_playback_effects() {
+    let mut s = two_poses();
+    s.command(&json!({"op": "add_camera"}));
+    let p0 = s.project().clone();
+    let shot = |s: &Session, t: f64| {
+        let p = s.project();
+        barkfart_core::tess::tessellate(&barkfart_core::eval::evaluate(p, &p.root_symbol, t), None).batches.iter().flat_map(|b| b.xy.clone()).collect::<Vec<f32>>()
+    };
+    let stage = |s: &Session, t: f64| {
+        let p = s.project();
+        barkfart_core::tess::tessellate(&barkfart_core::eval::evaluate_with(p, &p.root_symbol, t, false, false), None).batches.iter().flat_map(|b| b.xy.clone()).collect::<Vec<f32>>()
+    };
+    let fps = p0.settings.fps as f64;
+    let (a0, e0) = (shot(&s, 0.0), stage(&s, 0.0));
+    let st = s.command(&json!({"op": "camera_fx", "widescreen": true}));
+    assert_eq!(st["undo"], "Camera effects");
+    assert_eq!(st["camFx"]["widescreen"], true);
+    assert!(shot(&s, 0.0).len() > a0.len(), "bars drawn");
+    assert_eq!(stage(&s, 0.0), e0, "not in the editing view");
+    assert_eq!(shot(&s, 1.0 / fps), {
+        let mut s2 = Session::new(Document::new(p0.clone()));
+        s2.command(&json!({"op": "frame", "i": 1}));
+        shot(&s2, 1.0 / fps)
+    }, "only this frame");
+    s.command(&json!({"op": "camera_fx", "widescreen": false}));
+    let calm = shot(&s, 0.3 / fps);
+    s.command(&json!({"op": "camera_fx", "wobbleXY": 20.0, "wobbleRot": 2.0}));
+    let st = s.state();
+    assert_eq!(st["camFx"]["wobbleXY"], 20.0);
+    assert_eq!(st["camFx"]["wobbleSpeed"], 3.0);
+    assert_ne!(shot(&s, 0.3 / fps), calm, "it shakes");
+    assert_eq!(stage(&s, 0.0), e0);
+    let text = codec::encode(s.project());
+    assert!(text.contains("wobbleXY") && text.contains("widescreen"));
+}

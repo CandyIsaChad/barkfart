@@ -78,7 +78,7 @@ pub fn evaluate_with(project: &Project, symbol_id: &str, t: f64, onion_only: boo
         ctx.r.diag(DiagnosticKind::MissingRef, symbol_id);
         return Scene { root: ctx.root, time: t, diagnostics: ctx.r.diagnostics, primitives: 0 };
     };
-    let view = if apply_camera { camera_view(sym, t, &mut ctx.r) } else { Affine::IDENTITY };
+    let view = if apply_camera { wobble(project, sym, t, &mut ctx.r).mul(&camera_view(sym, t, &mut ctx.r)) } else { Affine::IDENTITY };
     let mut stack = vec![Work { symbol: sym, time: t, xf: view, into: Vec::new(), path: vec![sym.id.as_str()] }];
     while let Some(w) = stack.pop() {
         let top = w.path.len() == 1;
@@ -87,7 +87,7 @@ pub fn evaluate_with(project: &Project, symbol_id: &str, t: f64, onion_only: boo
     if !onion_only {
         background(&mut ctx, sym, t, apply_camera);
     }
-    if apply_camera && !onion_only && letterbox(project, &mut ctx.root) {
+    if apply_camera && !onion_only && letterbox(project, widescreen_at(project, sym, t, &mut ctx.r), &mut ctx.root) {
         for l in &sym.layers {
             let LayerKind::Text(tl) = &l.kind else { continue };
             if !tl.above_bars {
@@ -152,8 +152,41 @@ fn map_point(m: &Affine, p: &mut [f32], i: usize) {
     p[i + 1] = (m.b * x + m.d * y + m.ty) as f32;
 }
 
-fn letterbox(project: &Project, root: &mut Group) -> bool {
-    let aspect = project.settings.letterbox;
+/// Camera Tools "Widescreen effect": bars to this shape on the frames that have it.
+pub const WIDESCREEN: f32 = 2.35;
+
+fn frame_of(project: &Project, t: f64) -> (f64, i32) {
+    let fps = if project.settings.fps > 0.0 { project.settings.fps as f64 } else { 30.0 };
+    (fps, (t * fps + 1e-6).floor() as i32)
+}
+
+fn widescreen_at(project: &Project, sym: &Symbol, t: f64, r: &mut Resolver) -> bool {
+    let (fps, k) = frame_of(project, t);
+    sym.id == project.root_symbol && active_camera(sym, t, r).is_some_and(|c| crate::timing::setting(&c.widescreen, fps, k) > 0.5)
+}
+
+/// Camera Tools "Wobble camera": a shake in screen space (playback and
+/// export), smooth noise at the frame's wobble speed.
+fn wobble(project: &Project, sym: &Symbol, t: f64, r: &mut Resolver) -> Affine {
+    if sym.id != project.root_symbol {
+        return Affine::IDENTITY;
+    }
+    let Some(c) = active_camera(sym, t, r) else { return Affine::IDENTITY };
+    let (fps, k) = frame_of(project, t);
+    let set = |p: &Property| crate::timing::setting(p, fps, k) as f64;
+    let (xy, rot) = (set(&c.wobble_xy), set(&c.wobble_rot));
+    if xy == 0.0 && rot == 0.0 {
+        return Affine::IDENTITY;
+    }
+    let speed = if set(&c.wobble_speed) > 0.0 { set(&c.wobble_speed) } else { 3.0 };
+    let zoom = if set(&c.wobble_no_zoom) > 0.5 { 1.0 } else { (r.f(&c.zoom, t) as f64).max(1e-6) };
+    let u = t * speed;
+    let (dx, dy) = (resolve::fbm(u, 11, 2) * xy * zoom, resolve::fbm(u, 23, 2) * xy * zoom);
+    Affine::translate(dx, dy).mul(&Affine::rotate_deg(resolve::fbm(u, 37, 2) * rot))
+}
+
+fn letterbox(project: &Project, widescreen: bool, root: &mut Group) -> bool {
+    let aspect = if widescreen { project.settings.letterbox.max(WIDESCREEN) } else { project.settings.letterbox };
     let (w, h) = (project.settings.width as f32, project.settings.height as f32);
     if !(aspect > 0.0) || !(w > 0.0) || !(h > 0.0) || aspect <= w / h {
         return false;
