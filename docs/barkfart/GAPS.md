@@ -21,8 +21,9 @@ committed). Plainest behaviour where the reference is unsure.
 - [ ] Use segment colour (own colour vs the figure colour): needs a model flag
 
 ## View options (8.6)
-- [ ] Show figure IDs, outline selection, neighbour / joined neighbour lines
-- [ ] Zoom buttons, guides, stage box, show filters, filter quality
+- [x] Show figure names, neighbour lines (outline selection: still to do)
+- [x] Zoom buttons, guides, stage box
+- [ ] Show filters, filter quality
 
 ## Camera (10.3, 10.4)
 - [ ] Copy / paste camera

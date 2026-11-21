@@ -1714,7 +1714,11 @@ impl Session {
         let keyed = self.keyed_frames(frames);
         let figures: Vec<J> = p
             .root()
-            .map(|s| s.layers.iter().filter(|l| l.as_figure().is_some()).map(|l| json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone())})).collect())
+            .map(|s| {
+                // where each figure's main joint is (View options > figure IDs)
+                let roots: std::collections::HashMap<String, (f32, f32)> = self.tools.handles(p, t).into_iter().filter(|h| h.root).map(|h| (h.layer, (h.x, h.y))).collect();
+                s.layers.iter().filter(|l| l.as_figure().is_some()).map(|l| json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone()), "at": roots.get(&l.id).map(|(x, y)| json!([round2(*x), round2(*y)]))})).collect()
+            })
             .unwrap_or_default();
         let sel = self.selected.as_ref().and_then(|(l, n)| {
             let layer = p.root()?.layer(l)?;

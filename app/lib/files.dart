@@ -162,6 +162,12 @@ class AppSettings {
     'padRight': 0,
     'nerd': false,
     'saveReminder': 5,
+    // View options
+    'showIds': false,
+    'neighbourLines': true,
+    'zoomButtons': false,
+    'guides': false,
+    'stageBox': true,
   };
 
   static Future<File> _file() async {

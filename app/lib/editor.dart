@@ -1102,6 +1102,33 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           child: Stack(fit: StackFit.expand, children: [
             if (_image != null) RawImage(image: _image, fit: BoxFit.fill, filterQuality: FilterQuality.low),
             CustomPaint(painter: _Overlay(_pictureSt ?? _st, _view, _playing)),
+            if (AppSettings.flag('zoomButtons') && !_playing)
+              Positioned(
+                right: 10,
+                bottom: 10,
+                child: Column(children: [
+                  for (final (icon, k) in [(Icons.zoom_in, 1.2), (Icons.zoom_out, 1 / 1.2)])
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Material(
+                        color: cControl,
+                        shape: const CircleBorder(),
+                        child: InkWell(
+                          customBorder: const CircleBorder(),
+                          onTap: () => setState(() {
+                            // zoom about the middle of the view
+                            final c = _view.toStage(_view.size.center(Offset.zero));
+                            _view.s = (_view.s * k).clamp(0.02, 40.0);
+                            final c2 = _view.toStage(_view.size.center(Offset.zero));
+                            _view.cx += c.dx - c2.dx;
+                            _view.cy += c.dy - c2.dy;
+                          }),
+                          child: Padding(padding: const EdgeInsets.all(8), child: Icon(icon, color: cText)),
+                        ),
+                      ),
+                    ),
+                ]),
+              ),
             if (_st['mode'] == 'camera') IgnorePointer(child: Container(decoration: BoxDecoration(border: Border.all(color: cAccent, width: 2)))),
           ]),
         ),
@@ -2212,6 +2239,17 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           IconButton(icon: const Icon(Icons.close, color: cSecondary), onPressed: () => setState(() => _viewOptions = false)),
         ]),
         _Toggle('Show only main nodes', _opts['mainOnly'] == true, (v) => _cmd({'op': 'set', 'k': 'mainonly', 'v': v})),
+        for (final (k, label) in const [
+          ('showIds', 'Show figure names'),
+          ('neighbourLines', 'Show neighbour lines'),
+          ('zoomButtons', 'Show zoom buttons'),
+          ('guides', 'Show guides'),
+          ('stageBox', 'Show stage box'),
+        ])
+          _Toggle(label, AppSettings.flag(k), (v) => setState(() {
+                AppSettings.values[k] = v;
+                unawaited(AppSettings.save());
+              })),
         _Toggle('Onion skin', _opts['onion'] == true, (v) => _cmd({'op': 'set', 'k': 'onion', 'v': v})),
         if (_opts['onion'] == true) ...[
           _stepper('Frames before', '${_opts['onionBefore'] ?? 1}', () => _cmd({'op': 'set', 'k': 'onion_before', 'v': ((_opts['onionBefore'] as num?) ?? 1) - 1}), () => _cmd({'op': 'set', 'k': 'onion_before', 'v': ((_opts['onionBefore'] as num?) ?? 1) + 1})),
@@ -2473,7 +2511,7 @@ class _Overlay extends CustomPainter {
       return;
     }
     final cam = (st['camera'] as List?)?.map((x) => (x as num).toDouble()).toList();
-    if (cam != null && cam.length == 8) {
+    if (cam != null && cam.length == 8 && AppSettings.flag('stageBox')) {
       final frame = Path()..moveTo(v.toScreen(cam[0], cam[1]).dx, v.toScreen(cam[0], cam[1]).dy);
       for (var i = 2; i < 8; i += 2) {
         final p = v.toScreen(cam[i], cam[i + 1]);
@@ -2500,6 +2538,29 @@ class _Overlay extends CustomPainter {
         ..strokeWidth = 1.5
         ..color = cAccent);
     }
+    // guides: a vertical and a horizontal line through the stage centre
+    if (AppSettings.flag('guides')) {
+      final c = v.toScreen(0, 0);
+      canvas.drawLine(Offset(c.dx, 0), Offset(c.dx, size.height), Paint()
+        ..color = const Color(0xCC30D158)
+        ..strokeWidth = 1.5);
+      canvas.drawLine(Offset(0, c.dy), Offset(size.width, c.dy), Paint()
+        ..color = const Color(0xCCFF9F0A)
+        ..strokeWidth = 1.5);
+    }
+    // figure names under their main joints
+    if (AppSettings.flag('showIds')) {
+      for (final f in (st['figures'] as List?) ?? const []) {
+        final at = (f as Map)['at'] as List?;
+        if (at == null) continue;
+        final p = v.toScreen((at[0] as num).toDouble(), (at[1] as num).toDouble());
+        final tp = TextPainter(
+          text: TextSpan(text: '${f['name']}', style: const TextStyle(color: Colors.white, fontSize: 11, backgroundColor: Color(0xCC2B2E33))),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        tp.paint(canvas, p + Offset(-tp.width / 2, 12));
+      }
+    }
     // creation mode: the segment being drawn
     final dl = (st['drawLine'] as List?)?.map((x) => (x as num).toDouble()).toList();
     if (dl != null && dl.length == 4) {
@@ -2525,7 +2586,7 @@ class _Overlay extends CustomPainter {
       if (f & 2 != 0) selAt = p;
       if (f & 8 != 0) near.add(p);
     }
-    if (selAt != null) {
+    if (selAt != null && AppSettings.flag('neighbourLines')) {
       final line = Paint()
         ..color = purple
         ..strokeWidth = 2.5
