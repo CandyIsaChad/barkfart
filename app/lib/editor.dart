@@ -688,6 +688,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           _jumpTo(w.sublist(1).join(' '));
         case 'magnifier':
           setState(() => _magnifier = true);
+        case 'colorpicker':
+          // scripted: the picker on the selected segment's colour
+          unawaited(_colorPicker(((_sel?['color'] as num?) ?? 0xff).toInt(), (c) => _cmd({'op': 'segment', 'color': c})));
         case 'settings':
           unawaited(_settingsDialog());
         case 'set':
@@ -1887,6 +1890,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     }
     final thick = (sel['thickness'] as num?)?.toDouble() ?? 0;
     final len = (sel['length'] as num?)?.toDouble() ?? 0;
+    // the length the segment was made with
+    final rest = (sel['restLength'] as num?)?.toDouble() ?? 0;
     return [
       _pair(_Btn('Flip ↔', onTap: () => _cmd({'op': 'flip_branch', 'h': true})), _Btn('Flip ↕', onTap: () => _cmd({'op': 'flip_branch', 'h': false}))),
       _gap,
@@ -1894,8 +1899,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _swatches((sel['color'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'segment', 'color': c})),
       _gap,
       _stepper('Thickness', thick.round().toString(), () => _cmd({'op': 'segment', 'thickness': math.max(0, thick - 2)}), () => _cmd({'op': 'segment', 'thickness': thick + 2})),
+      _Btn('Reset thickness', small: true, enabled: thick != 32, onTap: () => _cmd({'op': 'segment', 'thickness': 32})),
       _gap,
       _stepper('Length', len.round().toString(), () => _cmd({'op': 'node', 'length': math.max(0, len - 5)}), () => _cmd({'op': 'node', 'length': len + 5})),
+      _Btn('Reset length', small: true, enabled: rest > 0 && (len - rest).abs() > 0.01, onTap: () => _cmd({'op': 'node', 'length': rest})),
       _gap,
       _Toggle('Is stretchy', sel['stretchy'] == true, (v) => _cmd({'op': 'node', 'stretchy': v})),
       _Toggle('Lock node', sel['pinned'] == true, (v) => _cmd({'op': 'pin', 'v': v})),
@@ -1918,22 +1925,135 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     ];
   }
 
+  /// A colour control: the current colour; a tap opens the colour picker.
   Widget _swatches(int current, void Function(int) pick) {
-    return Wrap(spacing: 6, runSpacing: 6, children: [
-      for (final c in const [0x000000ff, 0xffffffff, 0xff453aff, 0xff9f0aff, 0xffd60aff, 0x30d158ff, 0x0a84ffff, 0xbf5af2ff, 0x8e8e93ff, 0x7a4a2aff, 0xf2c09aff])
-        GestureDetector(
-          onTap: () => pick(c),
-          child: Container(
-            width: 26,
-            height: 26,
-            decoration: BoxDecoration(
-              color: Color(((c & 0xff) << 24) | (c >> 8)),
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: c == current ? cAccent : cSelected, width: c == current ? 3 : 1),
-            ),
-          ),
+    final hex = '#${(current >> 8).toRadixString(16).padLeft(6, '0').toUpperCase()}';
+    return GestureDetector(
+      onTap: () => _colorPicker(current, pick),
+      child: Row(children: [
+        Container(
+          width: 56,
+          height: 28,
+          decoration: BoxDecoration(color: _rgba(current), borderRadius: BorderRadius.circular(4), border: Border.all(color: cSelected)),
         ),
-    ]);
+        const SizedBox(width: 8),
+        Text(hex, style: const TextStyle(color: cSecondary, fontSize: 12, fontFeatures: [ui.FontFeature.tabularFigures()])),
+        const Spacer(),
+        const Icon(Icons.palette_outlined, size: 18, color: cSecondary),
+      ]),
+    );
+  }
+
+  static Color _rgba(int c) => Color(((c & 0xff) << 24) | (c >> 8));
+  static int _toRgba(Color c, int alpha) => ((c.toARGB32() & 0xffffff) << 8) | alpha;
+
+  /// Colours kept with "Copy colour" (newest first; reset when the app restarts).
+  static final List<int> _copiedColors = [0xff3b30ff, 0xff9500ff, 0xffcc00ff, 0x34c759ff, 0x007affff, 0xff2d92ff, 0x000000ff];
+
+  /// The shared colour picker: copied colours, a hue / saturation square, a
+  /// brightness bar and a hex field. A colour applies when the finger lifts
+  /// (one undo step), so a drag through the square is not dozens of steps.
+  Future<void> _colorPicker(int current, void Function(int) pick) async {
+    final alpha = current & 0xff == 0 ? 0xff : current & 0xff;
+    var hsv = HSVColor.fromColor(_rgba(current | 0xff));
+    final hexCtl = TextEditingController(text: (current >> 8).toRadixString(16).padLeft(6, '0').toUpperCase());
+    void apply(StateSetter set, HSVColor c, {bool commit = true}) {
+      set(() => hsv = c);
+      hexCtl.text = (_toRgba(c.toColor(), alpha) >> 8).toRadixString(16).padLeft(6, '0').toUpperCase();
+      if (commit) pick(_toRgba(c.toColor(), alpha));
+    }
+
+    const sq = 200.0, bar = 28.0;
+    await showDialog<void>(
+      context: context,
+      builder: (c) => StatefulBuilder(builder: (c, set) {
+        void square(Offset p, {bool commit = false}) {
+          final h = (p.dx / sq).clamp(0.0, 1.0) * 360;
+          final sat = 1 - (p.dy / sq).clamp(0.0, 1.0);
+          apply(set, HSVColor.fromAHSV(1, h.clamp(0, 359.99), sat, hsv.value), commit: commit);
+        }
+
+        void bright(Offset p, {bool commit = false}) => apply(set, hsv.withValue(1 - (p.dy / sq).clamp(0.0, 1.0)), commit: commit);
+        return AlertDialog(
+          backgroundColor: cPanel,
+          contentPadding: const EdgeInsets.all(14),
+          content: SizedBox(
+            width: sq + bar + 60,
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              _label('Copied colours'),
+              Row(children: [
+                for (final k in _copiedColors)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: GestureDetector(
+                      onTap: () => apply(set, HSVColor.fromColor(_rgba(k | 0xff))),
+                      child: Container(width: 26, height: 26, decoration: BoxDecoration(color: _rgba(k | 0xff), borderRadius: BorderRadius.circular(4), border: Border.all(color: cSelected))),
+                    ),
+                  ),
+              ]),
+              const SizedBox(height: 10),
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                // hue across, saturation down
+                GestureDetector(
+                  onPanDown: (d) => square(d.localPosition),
+                  onPanUpdate: (d) => square(d.localPosition),
+                  onPanEnd: (_) => apply(set, hsv),
+                  onTapUp: (d) => square(d.localPosition, commit: true),
+                  child: SizedBox(
+                    width: sq,
+                    height: sq,
+                    child: CustomPaint(painter: _HueSatPainter(hsv)),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // brightness
+                GestureDetector(
+                  onPanDown: (d) => bright(d.localPosition),
+                  onPanUpdate: (d) => bright(d.localPosition),
+                  onPanEnd: (_) => apply(set, hsv),
+                  onTapUp: (d) => bright(d.localPosition, commit: true),
+                  child: SizedBox(width: bar, height: sq, child: CustomPaint(painter: _BrightPainter(hsv))),
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: Container(height: sq, decoration: BoxDecoration(color: hsv.toColor(), borderRadius: BorderRadius.circular(4), border: Border.all(color: cSelected)))),
+              ]),
+              const SizedBox(height: 10),
+              Row(children: [
+                const Text('#', style: TextStyle(color: cSecondary)),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: TextField(
+                    controller: hexCtl,
+                    style: const TextStyle(color: cText, fontSize: 14),
+                    maxLength: 6,
+                    decoration: const InputDecoration(isDense: true, counterText: ''),
+                    onSubmitted: (v) {
+                      final n = int.tryParse(v.trim().replaceAll('#', ''), radix: 16);
+                      if (n != null && v.trim().replaceAll('#', '').length == 6) apply(set, HSVColor.fromColor(Color(0xff000000 | n)));
+                    },
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Use this hex colour',
+                  icon: const Icon(Icons.check, color: Color(0xFF30D158)),
+                  onPressed: () {
+                    final t = hexCtl.text.trim().replaceAll('#', '');
+                    final n = int.tryParse(t, radix: 16);
+                    if (n != null && t.length == 6) apply(set, HSVColor.fromColor(Color(0xff000000 | n)));
+                  },
+                ),
+              ]),
+              const SizedBox(height: 6),
+              _Btn('Copy colour', onTap: () => set(() {
+                    _copiedColors.insert(0, _toRgba(hsv.toColor(), 0xff));
+                    if (_copiedColors.length > 7) _copiedColors.removeLast();
+                  })),
+            ]),
+          ),
+          actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Done'))],
+        );
+      }),
+    );
   }
 
   Widget _viewOptionsPanel() {
@@ -2081,21 +2201,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _stepper('Thickness', thick.round().toString(), () => _cmd({'op': 'segment', 'thickness': math.max(0, thick - 2)}), () => _cmd({'op': 'segment', 'thickness': thick + 2})),
         _gap,
         _label('Colour'),
-        Wrap(spacing: 6, runSpacing: 6, children: [
-          for (final c in const [0x000000ff, 0xffffffff, 0xff453aff, 0xff9f0aff, 0xffd60aff, 0x30d158ff, 0x0a84ffff, 0xbf5af2ff, 0x8e8e93ff, 0x7a4a2aff])
-            GestureDetector(
-              onTap: () => _cmd({'op': 'segment', 'color': c}),
-              child: Container(
-                width: 26,
-                height: 26,
-                decoration: BoxDecoration(
-                  color: Color(((c & 0xff) << 24) | (c >> 8)),
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(color: c == color ? cAccent : cSelected, width: c == color ? 3 : 1),
-                ),
-              ),
-            ),
-        ]),
+        _swatches(color, (c) => _cmd({'op': 'segment', 'color': c})),
         _gap,
         _Btn('Colour whole branch', onTap: () => _cmd({'op': 'segment', 'branch': true, 'color': color})),
       ],
@@ -2124,6 +2230,52 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 }
 
 // ---------------------------------------------------------------- stage overlay
+
+class _HueSatPainter extends CustomPainter {
+  final HSVColor c;
+  _HueSatPainter(this.c);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = Offset.zero & size;
+    final hues = [for (var i = 0; i <= 6; i++) HSVColor.fromAHSV(1, (i * 60.0) % 360, 1, c.value).toColor()];
+    canvas.drawRect(r, Paint()..shader = LinearGradient(colors: hues).createShader(r));
+    // toward the bottom: no saturation (grey at this brightness)
+    final grey = HSVColor.fromAHSV(1, 0, 0, c.value).toColor();
+    canvas.drawRect(r, Paint()..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [grey.withValues(alpha: 0), grey]).createShader(r));
+    final p = Offset(c.hue / 360 * size.width, (1 - c.saturation) * size.height);
+    canvas.drawCircle(p, 7, Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5
+      ..color = Colors.white);
+    canvas.drawCircle(p, 8.5, Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = Colors.black);
+  }
+
+  @override
+  bool shouldRepaint(_HueSatPainter o) => o.c != c;
+}
+
+class _BrightPainter extends CustomPainter {
+  final HSVColor c;
+  _BrightPainter(this.c);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = Offset.zero & size;
+    canvas.drawRect(r, Paint()..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [c.withValue(1).toColor(), Colors.black]).createShader(r));
+    final y = (1 - c.value) * size.height;
+    canvas.drawRect(Rect.fromLTWH(-2, y - 3, size.width + 4, 6), Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..color = Colors.white);
+  }
+
+  @override
+  bool shouldRepaint(_BrightPainter o) => o.c != c;
+}
 
 /// Panel help text (hidden with Settings > Fewer explanations).
 Widget _hint(String text) => AppSettings.flag('nerd') ? const SizedBox.shrink() : Text(text, style: const TextStyle(color: cSecondary, fontSize: 11));

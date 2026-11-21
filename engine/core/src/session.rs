@@ -1616,7 +1616,7 @@ impl Session {
                 "root": node.parent.is_none(), "static": node.is_static, "pinned": node.pinned,
                 "smart": node.smart_stretch, "shape": shape_name(node.shape),
                 "thickness": r.f(&node.thickness, t), "color": color_of(&mut r, &node.color, t),
-                "angle": round2(r.f(&node.rotation, t)), "length": round2(r.f(&node.length, t)),
+                "angle": round2(r.f(&node.rotation, t)), "length": round2(r.f(&node.length, t)), "restLength": round2(node.rest_length),
                 "stretchy": node.stretchy, "dragLock": node.drag_lock != 0,
                 "scale": round2(r.f(&layer.transform.scale_y, t).abs()), "figAngle": round2(r.f(&layer.transform.rotation, t)),
                 "locked": layer.locked, "onion": layer.onion,
