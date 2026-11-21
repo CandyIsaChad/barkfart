@@ -26,7 +26,7 @@ committed). Plainest behaviour where the reference is unsure.
 - [ ] Show filters, filter quality
 
 ## Camera (10.3, 10.4)
-- [ ] Copy / paste camera
+- [x] Copy / paste camera
 - [ ] Auto-camera (tween across frames with easing)
 - [ ] Lock figure to camera
 - [ ] Widescreen effect, wobble (export / playback only)

@@ -2083,12 +2083,20 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     ];
   }
 
+  (double, double)? _camClip;
+
   List<Widget> _cameraTools() {
     final cam = _st['cam'] as Map<String, dynamic>?;
     final zoom = (cam?['zoom'] as num?)?.toDouble() ?? 1;
     final rot = (cam?['rotation'] as num?)?.toDouble() ?? 0;
     return [
       const Text('Drag on the stage to move the camera on this frame.', style: TextStyle(color: cSecondary, fontSize: 12)),
+      _gap,
+      // this frame's zoom and rotation onto another frame
+      _pair(
+        _Btn('Copy camera', onTap: () => setState(() => _camClip = (zoom, rot))),
+        _Btn('Paste camera', enabled: _camClip != null, onTap: () => _cmd({'op': 'camera', 'zoom': _camClip!.$1, 'rotation': _camClip!.$2})),
+      ),
       _gap,
       _stepper('Zoom', zoom.toStringAsFixed(2), () => _cmd({'op': 'camera', 'zoom': math.max(0.05, zoom - 0.05)}), () => _cmd({'op': 'camera', 'zoom': zoom + 0.05})),
       _gap,
