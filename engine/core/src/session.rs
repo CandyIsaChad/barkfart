@@ -1262,6 +1262,44 @@ impl Session {
                     });
                 }
             }
+            "frame_bg" => {
+                let c2 = c.clone();
+                self.step("Background colour", move |s| {
+                    let cam = s.project.root().and_then(|r| r.layers.iter().find(|l| matches!(l.kind, LayerKind::Camera(_))).map(|l| l.id.clone()));
+                    let cam = match cam {
+                        Some(id) => id,
+                        None => {
+                            // the camera holds the per-frame background; a new one sits at the stage
+                            let id = s.project.new_id("L");
+                            let at = s.project.root().map(|r| r.layers.len()).unwrap_or(0);
+                            structure::add_layer(s, &sym, Layer::camera(&id, Some("Camera")), at)?;
+                            id
+                        }
+                    };
+                    let (mut color, mut gradient, mut use_gradient) = frame_bg(&s.project, t);
+                    if let Some(v) = c2["color"].as_u64() {
+                        color = v as u32;
+                    }
+                    if let Some(v) = c2["gradient"].as_u64() {
+                        gradient = v as u32;
+                    }
+                    if let Some(v) = c2["useGradient"].as_bool() {
+                        use_gradient = v;
+                    }
+                    // no gradient: the fill is `background` and `background2` keeps the
+                    // gradient colour with zero alpha; with one, top is the gradient colour
+                    let (top, bottom) = if use_gradient { (gradient | 0xff, color | 0xff) } else { (color, gradient & !0xff) };
+                    let (n, fps) = (frame_ops::frame_count(s), st_fps(&s.project));
+                    let l = s.project.layer_mut(&sym, &cam).expect("camera");
+                    let LayerKind::Camera(cm) = &mut l.kind else { return crate::edit::fail("not a camera") };
+                    for (q, v) in [(&mut cm.background, top), (&mut cm.background2, bottom)] {
+                        key_every_frame(q, n, fps);
+                        let interp = q.track.keys().iter().find(|k| k.time == t).map(|k| k.interp).unwrap_or(Interp::Linear);
+                        q.track.put(Key::new(t, Value::C(Color::rgba8888(v)), interp));
+                    }
+                    Ok(())
+                });
+            }
             "filter" => {
                 if let Some(l) = self.sel_layer() {
                     let c2 = c.clone();
@@ -1395,6 +1433,10 @@ impl Session {
                 "x0": round2(x0), "y0": round2(y0), "x1": round2(x1), "y1": round2(y1),
             }))
         });
+        let bg = {
+            let (c, g, u) = frame_bg(p, t);
+            json!({"color": c, "gradient": g, "useGradient": u})
+        };
         let cam = self.camera_frame();
         let cam_vals = p.root().and_then(|s| s.layers.iter().find_map(|l| if let LayerKind::Camera(c) = &l.kind { Some(c) } else { None })).map(|c| {
             let mut r = Resolver::new(p);
@@ -1413,6 +1455,7 @@ impl Session {
             "handles": handles, "selected": sel, "figures": figures, "camera": cam,
             "textfield": textfield, "textfieldCopied": self.textfield_clip.is_some(),
             "filtersCopied": self.filter_clip.is_some(),
+            "frameBg": bg,
             "hasCamera": p.root().is_some_and(|s| s.layers.iter().any(|l| matches!(l.kind, LayerKind::Camera(_)))),
             "opts": {
                 "stretch": self.stretch_all, "scope": if self.tools.key_scope == KeyScope::Joint { "joint" } else { "figure" },
@@ -1745,6 +1788,22 @@ fn align_name(align: i32, corner: i32) -> &'static str {
 
 fn round2(v: f32) -> f64 {
     (v as f64 * 100.0).round() / 100.0
+}
+
+/// The frame's background (colour, gradient colour, gradient on) at t, read
+/// from the camera's two background colours (see the "frame_bg" command).
+fn frame_bg(p: &Project, t: f64) -> (u32, u32, bool) {
+    let cam = p.root().and_then(|s| s.layers.iter().find_map(|l| if let LayerKind::Camera(c) = &l.kind { Some(c) } else { None }));
+    let Some(c) = cam else { return (0xffffffff, 0x808080ff, false) };
+    let mut r = Resolver::new(p);
+    let (top, bottom) = (color_of(&mut r, &c.background, t), color_of(&mut r, &c.background2, t));
+    if bottom & 0xff != 0 {
+        (bottom, top, true)
+    } else {
+        let color = if top & 0xff == 0 { 0xffffffff } else { top };
+        let gradient = if bottom == 0 { 0x808080ff } else { bottom | 0xff };
+        (color, gradient, false)
+    }
 }
 
 fn color_of(r: &mut Resolver, p: &Property, t: f64) -> u32 {

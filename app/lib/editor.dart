@@ -1221,6 +1221,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final last = _frame >= _frames - 1;
     final label = {'50': '50%', '33/67': '33%, 67%', '10/90': '10%, 90%'}[_tweenAt];
     final at = {'50': [0.5], '33/67': [1 / 3, 2 / 3], '10/90': [0.1, 0.9]}[_tweenAt];
+    final bg = (_st['frameBg'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+    final bgColor = (bg['color'] as num?)?.toInt() ?? 0xffffffff;
+    final bgTop = (bg['gradient'] as num?)?.toInt() ?? 0x808080ff;
+    final bgGradient = bg['useGradient'] == true;
     return [
       Text('Frame ${_frame + 1} of $_frames', style: const TextStyle(color: cSecondary, fontSize: 12)),
       _gap,
@@ -1233,6 +1237,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _Segmented(const ['50', '33/67', '10/90'], ['50', '33/67', '10/90'].indexOf(_tweenAt), (i) => setState(() => _tweenAt = ['50', '33/67', '10/90'][i])),
       _gap,
       const Text('Hold the button to add several evenly spaced frames.', style: TextStyle(color: cSecondary, fontSize: 11)),
+      _gap,
+      _label('Background colour'),
+      _swatches(bgColor, (c) => _cmd({'op': 'frame_bg', 'color': c})),
+      _gap,
+      _Toggle('Use gradient', bgGradient, (v) => _cmd({'op': 'frame_bg', 'useGradient': v})),
+      if (bgGradient) ...[
+        _label('Gradient colour (top)'),
+        _swatches(bgTop, (c) => _cmd({'op': 'frame_bg', 'gradient': c})),
+      ],
       _gap,
       _Toggle('Do not tween this frame', _st['frameNoTween'] == true, (v) => _cmd({'op': 'no_tween', 'on': v})),
     ];

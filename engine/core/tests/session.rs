@@ -730,3 +730,42 @@ fn stickfigure_filters_map_to_effect_nodes_on_this_frame() {
     let l = s.project().root().unwrap().layer(&second).unwrap();
     assert!(l.effects.is_empty());
 }
+
+#[test]
+fn frame_background_is_per_frame_and_undoable() {
+    let mut s = session();
+    s.command(&json!({"op": "insert_frame"}));
+    let st = s.command(&json!({"op": "state"}));
+    assert_eq!(st["frameBg"]["color"], 0xffffffffu32);
+    assert_eq!(st["frameBg"]["useGradient"], false);
+    let without_ids = |s: &Session| codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
+    let before = without_ids(&s);
+
+    // frame 2 gets a red background; frame 1 stays white
+    let st = s.command(&json!({"op": "frame_bg", "color": 0xff0000ffu32}));
+    assert_eq!(st["frameBg"]["color"], 0xff0000ffu32);
+    assert_eq!(st["hasCamera"], true);
+    let st = s.command(&json!({"op": "frame", "i": 0}));
+    assert_eq!(st["frameBg"]["color"], 0xffffffffu32);
+    s.command(&json!({"op": "frame", "i": 1}));
+
+    // a gradient keeps both colours, and turning it off brings back the plain colour
+    let st = s.command(&json!({"op": "frame_bg", "useGradient": true, "gradient": 0x0000ffffu32}));
+    assert_eq!(st["frameBg"]["color"], 0xff0000ffu32);
+    assert_eq!(st["frameBg"]["gradient"], 0x0000ffffu32);
+    assert_eq!(st["frameBg"]["useGradient"], true);
+    let st = s.command(&json!({"op": "frame_bg", "useGradient": false}));
+    assert_eq!(st["frameBg"]["color"], 0xff0000ffu32);
+    assert_eq!(st["frameBg"]["gradient"], 0x0000ffffu32);
+    assert_eq!(st["frameBg"]["useGradient"], false);
+
+    // a new frame copies this frame's background
+    let st = s.command(&json!({"op": "insert_frame"}));
+    assert_eq!(st["frame"], 2);
+    assert_eq!(st["frameBg"]["color"], 0xff0000ffu32);
+
+    for _ in 0..4 {
+        s.command(&json!({"op": "undo"}));
+    }
+    assert!(without_ids(&s) == before, "undo restores the project");
+}
