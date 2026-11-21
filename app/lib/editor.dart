@@ -1910,6 +1910,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     ];
   }
 
+  String? _textClip;
+
   List<Widget> _textfieldTools(Map<String, dynamic>? tf) {
     if (tf == null) {
       return [
@@ -1926,6 +1928,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       Text(tf['name'] as String? ?? 'Textfield', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 13)),
       _gap,
       _TextFieldBox(text: tf['text'] as String? ?? '', onChanged: (v) => _cmd({'op': 'textfield', 'text': v})),
+      const SizedBox(height: 4),
+      // the words alone, between textfields
+      _pair(
+        _Btn('Copy text', small: true, onTap: () => setState(() => _textClip = tf['text'] as String? ?? '')),
+        _Btn('Paste text', small: true, enabled: _textClip != null, onTap: () => _cmd({'op': 'textfield', 'text': _textClip})),
+      ),
       _gap,
       _label('Alignment'),
       _Segmented(const ['Left', 'Center', 'Right'], align, (i) => _cmd({'op': 'textfield', 'align': i})),
@@ -1939,6 +1947,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _gap,
       _pair(_Btn('Copy', onTap: () => _cmd({'op': 'copy_textfield'})), _Btn('Paste', enabled: _st['textfieldCopied'] == true, onTap: () => _cmd({'op': 'paste_textfield'}))),
       _gap,
+      _Btn('Add textfield', onTap: () => _cmd({'op': 'add_textfield'})),
+      _gap,
       _Btn('Delete textfield', danger: true, onTap: () => _cmd({'op': 'delete_textfield'})),
       const Padding(padding: EdgeInsets.only(top: 3), child: Text('Removes it from this frame.', style: TextStyle(color: cSecondary, fontSize: 11))),
     ];
@@ -1951,7 +1961,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     int col(String k, int d) => (f[k] as num?)?.toInt() ?? d;
     void shadow({double? distance, double? angle}) => _cmd({'op': 'filter', 'shadowDistance': distance ?? v('shadowDistance', 10), 'shadowAngle': angle ?? v('shadowAngle', 135)});
     return [
-      _hint('These filters show on the stage and may slow the editor; exports are unaffected.'),
+      _hint('Filters show on the stage and in exports; many of them can slow the editor down.'),
       _gap,
       _stepper('Opacity', v('opacity', 1).toStringAsFixed(2), () => _cmd({'op': 'filter', 'opacity': math.max(0, v('opacity', 1) - 0.05)}), () => _cmd({'op': 'filter', 'opacity': math.min(1, v('opacity', 1) + 0.05)})),
       _gap,
