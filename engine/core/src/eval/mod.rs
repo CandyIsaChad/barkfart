@@ -494,7 +494,10 @@ fn emit_figure(ctx: &mut Ctx, layer_id: &str, f: &Figure, xf: &Affine, t: f64, s
             }
             crate::model::Shape::Circle => {
                 let (cx, cy) = ((ax + bx) / 2.0, (ay + by) / 2.0);
-                let rad2 = (((bx - ax) as f64).hypot((by - ay) as f64) / 2.0) as f32;
+                let rim = (((bx - ax) as f64).hypot((by - ay) as f64) / 2.0) as f32;
+                // the fill reaches out by half the thickness, like a stroke around the disc
+                // (user-observed on the original, 2026-11-21)
+                let rad2 = rim + w / 2.0;
                 let (mut start, mut span) = (0f32, (2.0 * PI) as f32);
                 if node.half_arc != 0 {
                     let to_b = ((by - cy) as f64).atan2((bx - cx) as f64) as f32;
@@ -510,7 +513,7 @@ fn emit_figure(ctx: &mut Ctx, layer_id: &str, f: &Figure, xf: &Affine, t: f64, s
                 if node.circle_outline || node.circle_hollow {
                     let oc = if node.circle_outline { ctx.r.color(&node.outline_color, t) } else { c };
                     let ow = w.max(sf as f32);
-                    out.push(Item::Shape(Shape::new(ShapeKind::Ring { cx, cy, r: rad2, width: ow, start, span }, oc, src.clone())));
+                    out.push(Item::Shape(Shape::new(ShapeKind::Ring { cx, cy, r: rim, width: ow, start, span }, oc, src.clone())));
                 }
             }
             _ => {

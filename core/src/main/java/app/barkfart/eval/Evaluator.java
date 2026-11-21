@@ -471,7 +471,10 @@ public final class Evaluator {
                     // to the left (1) or right (-1) of parent -> node. Hollow drops the fill;
                     // the outline is a band of width = thickness on the rim (unverified, NOTES.md).
                     float cx = (ax + bx) / 2, cy = (ay + by) / 2;
-                    float rad2 = (float) (Math.hypot(bx - ax, by - ay) / 2);
+                    float rim = (float) (Math.hypot(bx - ax, by - ay) / 2);
+                    // the fill reaches out by half the thickness, like a stroke around the disc
+                    // (user-observed on the original, 2026-11-21; the fit could not tell them apart)
+                    float rad2 = rim + w / 2;
                     float start = 0, span = (float) (2 * Math.PI);
                     if (node.halfArc != 0) {
                         float toB = (float) Math.atan2(by - cy, bx - cx);
@@ -483,7 +486,7 @@ public final class Evaluator {
                     if (node.circleOutline || node.circleHollow) {
                         Color oc = node.circleOutline ? (Color) r.resolve(node.outlineColor, t) : c;
                         float ow = Math.max(w, (float) sf);
-                        g.children.add(new Shape.Ring(cx, cy, rad2, ow, start, span, oc, src));
+                        g.children.add(new Shape.Ring(cx, cy, rim, ow, start, span, oc, src));
                     }
                     break;
                 }

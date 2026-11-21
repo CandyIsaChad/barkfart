@@ -200,10 +200,12 @@ outlines or hollow circles.
   applies the rule while stretching. Traversal stops at non-static nodes
   and "do not smart-stretch" branches (changelog wording; the instruction
   image shows the fist keeping its size).
-- Circle type 2 is a filled disc on the segment as diameter: a ring of width
-  = thickness scored lower on Ground Dust (0.936 vs 0.967); "diameter +
-  thickness" was indistinguishable (0.968), so thickness stays unused for
-  fills. Type 4 ("filled circle") is drawn the same; only .nodes figures
+- Circle type 2 is a filled disc whose radius is half the segment length
+  plus half the thickness (2026-11-21: the user saw thick-circle figures,
+  e.g. hair, fill solidly in the original; the earlier fit could not tell
+  this apart from "diameter only", 0.968 vs 0.967 on Ground Dust; a ring of
+  width = thickness scored lower, 0.936). Hollow / outline rings stay on
+  the rim (half the length). Type 4 ("filled circle") is drawn the same; only .nodes figures
   without previews use it, so it is unverified.
 - Hollow / outline (changelog: hollow = no fill; separate outline colour,
   per-frame @39 in movieclips): drawn as a band of width = thickness centred
