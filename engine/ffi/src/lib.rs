@@ -526,8 +526,10 @@ pub extern "C" fn bf_render_view(e: *const Engine, t: f64, w: u32, h: u32, x0: f
         let scene = eval::evaluate_with(p, &p.root_symbol, t, false, camera);
         let mut list = tess::layered(&scene, Some(&engine.glyphs));
         if flags & 2 != 0 {
-            let onion = tess::OnionSkin { apply_camera: camera, ..Default::default() };
-            list = list.with_underlay(onion.build_layered(p, &p.root_symbol, t));
+            let v = &p.view;
+            let onion = tess::OnionSkin { apply_camera: camera, before: v.onion_before.clamp(0, 3), after: v.onion_after.clamp(0, 3), ..Default::default() };
+            let ghosts = onion.build_layered(p, &p.root_symbol, t);
+            list = if v.onion_in_front { list.with_overlay(ghosts) } else { list.with_underlay(ghosts) };
         }
         let cpu = start.elapsed();
         let bg = p.settings.background;

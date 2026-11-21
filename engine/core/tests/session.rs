@@ -487,3 +487,59 @@ fn pasting_onto_a_frame_without_the_figure_brings_the_same_figure_back() {
     assert_eq!(st["figures"].as_array().unwrap().len(), 2);
     assert_ne!(st["selected"]["layer"], "L2");
 }
+
+#[test]
+fn joining_a_figure_to_a_joint() {
+    let mut s = session();
+    let st = s.command(&json!({"op": "add_figure", "kind": "ball"}));
+    let ball = st["selected"]["layer"].as_str().unwrap().to_string();
+    let ball_at = |s: &Session| s.tools.handles(s.project(), 0.0).into_iter().find(|h| h.layer == ball && h.root).map(|h| (h.x, h.y)).unwrap();
+    // Join to... then tap the man's right hand
+    s.command(&json!({"op": "join"}));
+    assert_eq!(s.state()["joining"], true);
+    let hand = s.tools.handles(s.project(), 0.0).into_iter().find(|h| h.layer == "L2" && h.node == "armR2").unwrap();
+    let before = ball_at(&s);
+    let st = s.command(&json!({"op": "down", "x": hand.x, "y": hand.y, "r": 20}));
+    s.command(&json!({"op": "up"}));
+    assert_eq!(st["joining"], false);
+    assert_eq!(st["undo"], "Join");
+    assert_eq!(st["selected"]["joinedTo"], "Figure 1");
+    let after = ball_at(&s);
+    assert!((after.0 - before.0).abs() < 0.01 && (after.1 - before.1).abs() < 0.01, "joining keeps the ball in place");
+    // move the man: the ball follows
+    let (hx, hy) = (s.tools.handles(s.project(), 0.0).into_iter().find(|h| h.layer == "L2" && h.root).unwrap().x, 0.0);
+    let hip = s.tools.handles(s.project(), 0.0).into_iter().find(|h| h.layer == "L2" && h.root).unwrap();
+    let _ = (hx, hy);
+    s.command(&json!({"op": "down", "x": hip.x, "y": hip.y, "r": 10}));
+    s.command(&json!({"op": "move", "x": hip.x + 80.0, "y": hip.y}));
+    s.command(&json!({"op": "up"}));
+    let moved = ball_at(&s);
+    assert!((moved.0 - after.0 - 80.0).abs() < 0.5, "the ball moved with the man: {after:?} -> {moved:?}");
+    s.command(&json!({"op": "select", "layer": ball}));
+    let st = s.command(&json!({"op": "unjoin"}));
+    assert!(st["selected"]["joinedTo"].is_null());
+    let still = ball_at(&s);
+    assert!((still.0 - moved.0).abs() < 0.01, "unjoin keeps it in place");
+}
+
+#[test]
+fn copying_a_frame_and_the_ones_after_it() {
+    let mut s = animated(); // 4 frames, the last one posed differently
+    let pics: Vec<Vec<f32>> = (0..4).map(|f| picture(&s, f)).collect();
+    s.command(&json!({"op": "frame", "i": 2}));
+    let st = s.command(&json!({"op": "copy_frame", "n": 1}));
+    assert_eq!(st["frameClipCount"], 2);
+    s.command(&json!({"op": "frame", "i": 3}));
+    let st = s.command(&json!({"op": "paste_frame"}));
+    assert_eq!(st["frames"], 6);
+    assert_eq!(st["frame"], 5);
+    for (f, want) in [(4, 2), (5, 3)] {
+        assert!(same(&picture(&s, f), &pics[want]), "frame {} is a copy of frame {}", f + 1, want + 1);
+    }
+    for f in 0..4 {
+        assert!(same(&picture(&s, f), &pics[f as usize]), "frame {} unchanged", f + 1);
+    }
+    let st = s.command(&json!({"op": "no_tween", "on": true}));
+    assert_eq!(st["noTweenFrames"][5], true);
+    assert_eq!(st["noTweenFrames"][4], false);
+}

@@ -43,6 +43,8 @@ pub struct Session {
     pub onion: bool,
     /// Every drag stretches (the Drag: Stretch switch); otherwise only stretchy segments do.
     pub stretch_all: bool,
+    /// "Join to...": the figure waiting for a joint to be tapped.
+    pub joining: Option<String>,
     /// The figure open in the figure editor (structure tools, its joints only).
     pub building: Option<String>,
     gesture: Gesture,
@@ -54,7 +56,7 @@ pub struct Session {
     figure_clip: Option<(Vec<Layer>, f64)>,
     props_clip: Option<layer_ops::Props>,
     /// Copied frame: its keys (times relative to the frame).
-    frame_clip: Option<crate::edit::editor::KeyClip>,
+    frame_clip: Option<(crate::edit::editor::KeyClip, i32)>,
     /// Bumped on every change the app should redraw for (drags included).
     rev: u64,
     pub message: String,
@@ -85,7 +87,7 @@ impl Session {
         let mut doc = doc;
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
-        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, onion: true, stretch_all: false, building: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, onion: true, stretch_all: false, joining: None, building: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -175,6 +177,24 @@ impl Session {
                 let prev = self.last_tap.as_ref().filter(|(tx, ty, _, _)| (tx - x).hypot(ty - y) <= radius).map(|(_, _, l, n)| (l.clone(), n.clone()));
                 // nearest joint wins; tapping the same spot again steps to the next one under the finger
                 self.sync_tools();
+                if let Some(child) = self.joining.clone() {
+                    // pick a joint of another figure (the figure itself and what hangs off it excluded)
+                    let own = layer_ops::with_joined(self.project().root().expect("root"), &child);
+                    let near = self.tools.handles(self.project(), t).into_iter().filter(|h| !own.contains(&h.layer)).min_by(|a, b| {
+                        let d = |h: &Handle| (h.x - x).hypot(h.y - y);
+                        d(a).partial_cmp(&d(b)).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    if let Some(h) = near.filter(|h| (h.x - x).hypot(h.y - y) <= radius * 1.5) {
+                        let sym = self.sym();
+                        self.step("Join", |s| crate::edit::join_ops::join(s, &sym, &child, &h.layer, Some(&h.node), true, t));
+                        self.joining = None;
+                        self.selected = self.project().root().and_then(|s| s.layer(&child)).and_then(|l| l.as_figure()).and_then(|f| f.nodes().first().map(|n| (child.clone(), n.id.clone())));
+                    } else {
+                        self.message = "Tap a joint on another figure.".into();
+                        self.rev += 1;
+                    }
+                    return true;
+                }
                 let mut hit = self.tools.pick_cycling(self.project(), x, y, radius, t, None, prev.as_ref().map(|(l, n)| (l.as_str(), n.as_str())));
                 if let (Some(b), Some(h)) = (&self.building, &hit) {
                     if h.layer != *b {
@@ -398,30 +418,41 @@ impl Session {
                 self.step(if on { "Do not tween" } else { "Tween" }, |s| frame_ops::set_tween(&ed, s, fr, !on));
             }
             "copy_frame" => {
-                let sel = self.keys_at(t, None);
-                self.frame_clip = Some(self.tools.editor.copy(self.project(), &sel));
-                self.message = "Frame copied.".into();
+                // this frame plus n after it
+                let n = (c["n"].as_i64().unwrap_or(0) as i32).clamp(0, self.frame_count() - 1 - self.frame);
+                let fps = st_fps(self.project());
+                let mut sel = Vec::new();
+                for k in 0..=n {
+                    sel.extend(self.keys_at(t + k as f64 / fps, None));
+                }
+                self.frame_clip = Some((self.tools.editor.copy(self.project(), &sel), n + 1));
+                self.message = if n == 0 { "Frame copied.".into() } else { format!("{} frames copied.", n + 1) };
                 self.rev += 1;
             }
             "paste_frame" => {
-                if let Some(clip) = self.frame_clip.clone() {
+                if let Some((clip, count)) = self.frame_clip.clone() {
                     let fr = self.frame;
                     let made = self.step("Paste frame", |s| {
-                        frame_ops::insert_after(s, fr, true)?;
+                        for k in 0..count {
+                            frame_ops::insert_after(s, fr + k, true)?;
+                        }
                         let at = frame_ops::time(s, fr + 1);
+                        let fps = st_fps(&s.project);
                         for (id, keys) in &clip.keys {
                             let Some(p) = s.project.property_mut(id) else { continue };
                             if keys.is_empty() || !p.ty.checked(&keys[0].value) {
                                 continue;
                             }
                             for k in keys {
-                                p.track.put(Key { time: at + k.time, ..*k });
+                                // onto the frame grid (clip times are relative to the first copied frame)
+                                let tt = at + ((k.time * fps).round() / fps);
+                                p.track.put(Key { time: tt, ..*k });
                             }
                         }
                         Ok(())
                     });
                     if made.is_some() {
-                        self.frame = fr + 1;
+                        self.frame = fr + count;
                         self.changed();
                     }
                 }
@@ -521,6 +552,10 @@ impl Session {
                     "axis" => self.tools.axis_lock = b("v"),
                     "static" => self.tools.show_static = b("v"),
                     "mainonly" => self.tools.main_nodes_only = b("v"),
+                    // onion skin view settings (saved with the project, not undo steps)
+                    "onion_before" => self.doc.project_mut().view.onion_before = (c["v"].as_i64().unwrap_or(1) as i32).clamp(0, 3),
+                    "onion_after" => self.doc.project_mut().view.onion_after = (c["v"].as_i64().unwrap_or(1) as i32).clamp(0, 3),
+                    "onion_front" => self.doc.project_mut().view.onion_in_front = b("v"),
                     "tween_new" => self.tools.editor.default_interp = if b("v") { Interp::Linear } else { Interp::Hold },
                     _ => {}
                 }
@@ -910,6 +945,19 @@ impl Session {
                     }
                 }
             }
+            "join" => {
+                self.joining = self.sel_layer();
+                self.rev += 1;
+            }
+            "join_cancel" => {
+                self.joining = None;
+                self.rev += 1;
+            }
+            "unjoin" => {
+                if let Some(l) = self.sel_layer() {
+                    self.step("Unjoin", |s| crate::edit::join_ops::unjoin(s, &sym, &l, t));
+                }
+            }
             "copy_props" => {
                 if let Some(l) = self.sel_layer() {
                     match layer_ops::copy_props(self.project(), &sym, &l, t) {
@@ -1073,6 +1121,7 @@ impl Session {
                 "stretchy": node.stretchy, "dragLock": node.drag_lock != 0,
                 "scale": round2(r.f(&layer.transform.scale_y, t).abs()), "figAngle": round2(r.f(&layer.transform.rotation, t)),
                 "locked": layer.locked, "onion": layer.onion,
+                "joinedTo": layer.parent.as_ref().and_then(|pid| p.root()?.layer(pid)).map(|x| x.name.clone().unwrap_or_else(|| x.id.clone())),
                 "figColor": f.nodes().get(1).map(|n| color_of(&mut r, &n.color, t)).unwrap_or(0x000000ff),
                 "layerPos": p.root()?.layers.iter().filter(|x| x.as_figure().is_some()).position(|x| x.id == *l).map(|i| i + 1),
                 "figureCount": p.root()?.layers.iter().filter(|x| x.as_figure().is_some()).count(),
@@ -1099,13 +1148,17 @@ impl Session {
                 "stretch": self.stretch_all, "scope": if self.tools.key_scope == KeyScope::Joint { "joint" } else { "figure" },
                 "snap": self.tools.snap_degrees, "onion": self.onion, "axis": self.tools.axis_lock, "static": self.tools.show_static,
                 "tweenNew": self.tools.editor.default_interp != Interp::Hold, "mainOnly": self.tools.main_nodes_only,
+                "onionBefore": p.view.onion_before, "onionAfter": p.view.onion_after, "onionFront": p.view.onion_in_front,
             },
             "pose": self.pose_clip.is_some(),
+            "joining": self.joining.is_some(),
             "frameCopied": self.frame_clip.is_some(),
             "figureCopied": self.figure_clip.is_some(), "propsCopied": self.props_clip.is_some(),
             "cam": cam_vals,
             "tweening": p.settings.tweening, "tweenedFrames": p.settings.tweened_frames, "rate": p.settings.sample_rate(),
             "frameNoTween": no_tween,
+            "noTweenFrames": self.no_tween_frames(frames),
+            "frameClipCount": self.frame_clip.as_ref().map(|c| c.1).unwrap_or(0),
             "building": self.building.as_ref().and_then(|b| p.root()?.layer(b)).map(|l| json!({"layer": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone())})),
             "builtins": crate::figures::ALL.iter().map(|(id, name)| json!({"id": id, "name": name})).collect::<Vec<_>>(),
             "message": self.message,
@@ -1134,6 +1187,31 @@ impl Session {
             }
         }
         out
+    }
+
+    /// Frames whose keys all hold (Do not tween this frame), one pass over every key.
+    fn no_tween_frames(&self, frames: i32) -> Vec<bool> {
+        let p = self.project();
+        let n = frames.clamp(0, 100_000) as usize;
+        let fps = st_fps(p);
+        let (mut any, mut hold) = (vec![false; n], vec![true; n]);
+        if let Some(s) = p.root() {
+            for l in &s.layers {
+                for q in l.properties() {
+                    if !q.ty.continuous() {
+                        continue;
+                    }
+                    for k in q.track.keys() {
+                        let i = (k.time * fps).round();
+                        if i >= 0.0 && (i as usize) < n {
+                            any[i as usize] = true;
+                            hold[i as usize] &= k.interp == Interp::Hold;
+                        }
+                    }
+                }
+            }
+        }
+        (0..n).map(|i| any[i] && hold[i]).collect()
     }
 
     /// Every key at time t (of one layer, or all), for easing.

@@ -112,6 +112,19 @@ impl DrawList {
 
     /// Puts another layered list (onion ghosts) underneath this one's
     /// contents: its root becomes the first child of this root.
+    /// Like with_underlay, but drawn on top (onion skin in front).
+    pub fn with_overlay(self, over: DrawList) -> DrawList {
+        let n = self.isolates.first().map(|r| r.items.len()).unwrap_or(0);
+        let mut out = self.with_underlay(over);
+        if let Some(root) = out.isolates.first_mut() {
+            if root.items.len() > n {
+                let first = root.items.remove(0);
+                root.items.push(first);
+            }
+        }
+        out
+    }
+
     pub fn with_underlay(mut self, under: DrawList) -> DrawList {
         if self.isolates.is_empty() || under.isolates.is_empty() || under.isolates[0].empty() {
             return self;
