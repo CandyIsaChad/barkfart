@@ -10,7 +10,7 @@ committed). Plainest behaviour where the reference is unsure.
 - [ ] Slow-motion tweening per frame (schedule slot, tweening on only) (8.4)
 - [ ] Expand gradient (8.4)
 - [x] Node counter "Nodes: N" at the top of Frame Tools (8.4)
-- [ ] "?" help for tweened frames, and the bar that picks 10% / 90% only (8.4)
+- [x] "?" help for tweened frames, and the bar that picks 10% / 90% only (8.4)
 - [x] Play long-press: "Loop to" start / end frame popup (7.3)
 - [ ] Animation Tools: looping on/off (7.1)
 

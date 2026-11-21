@@ -968,6 +968,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   final Map<String, GlobalKey> _sectionKeys = {};
   /// "Add tweened frame" positions: 50%, 33/67%, 10/90%.
   String _tweenAt = '50';
+  // which of the two new frames 33/67 and 10/90 add: 0 both, 1 the first, 2 the second
+  int _tweenPick = 0;
 
   GlobalKey _sectionKey(String name) => _sectionKeys.putIfAbsent(name, () => GlobalKey());
 
@@ -1654,8 +1656,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   List<Widget> _frameToolsPanel() {
     final last = _frame >= _frames - 1;
-    final label = {'50': '50%', '33/67': '33%, 67%', '10/90': '10%, 90%'}[_tweenAt];
-    final at = {'50': [0.5], '33/67': [1 / 3, 2 / 3], '10/90': [0.1, 0.9]}[_tweenAt];
+    final both = {'50': [0.5], '33/67': [1 / 3, 2 / 3], '10/90': [0.1, 0.9]}[_tweenAt]!;
+    final at = both.length == 2 && _tweenPick > 0 ? [both[_tweenPick - 1]] : both;
+    final label = at.map((f) => '${(f * 100).round()}%').join(', ');
     final bg = (_st['frameBg'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
     final bgColor = (bg['color'] as num?)?.toInt() ?? 0xffffffff;
     final bgTop = (bg['gradient'] as num?)?.toInt() ?? 0x808080ff;
@@ -1673,7 +1676,19 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ),
       if (last) const Padding(padding: EdgeInsets.only(top: 4), child: Text('Tweened frames go between two frames.', style: TextStyle(color: cSecondary, fontSize: 11))),
       _gap,
-      _Segmented(const ['50', '33/67', '10/90'], ['50', '33/67', '10/90'].indexOf(_tweenAt), (i) => setState(() => _tweenAt = ['50', '33/67', '10/90'][i])),
+      Row(children: [
+        Expanded(
+          child: _Segmented(const ['50', '33/67', '10/90'], ['50', '33/67', '10/90'].indexOf(_tweenAt), (i) => setState(() {
+                final v = ['50', '33/67', '10/90'][i];
+                // tapping the chosen pair again: both, then the first, then the second
+                _tweenPick = v == _tweenAt && v != '50' ? (_tweenPick + 1) % 3 : 0;
+                _tweenAt = v;
+              })),
+        ),
+        const SizedBox(width: 4),
+        SizedBox(width: 36, child: _Btn('?', onTap: _tweenHelp)),
+      ]),
+      if (_tweenAt != '50') _hint('Tap ${_tweenAt.replaceAll('/', ' / ')} again to add only one of the two frames.'),
       _gap,
       _hint('Hold the button to add several evenly spaced frames.'),
       _gap,
@@ -1819,6 +1834,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   int _tweenCount = 3;
+
+  Future<void> _tweenHelp() => _ask(
+        'Adding a tweened frame',
+        'A tweened frame is a new frame between this one and the next, where every figure stands part of the way from its pose here to its pose on the next frame: halfway (50), a third and two thirds (33/67), or close to either end (10/90). Because it needs a next frame, it cannot be added after the last one. Hold the button to add several evenly spaced frames at once.',
+        ['Okay'],
+      );
 
   Future<void> _tweenCountPopup() async {
     final n = await showDialog<int>(
