@@ -2839,7 +2839,29 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   /// The figure editor: structure tools for the selected segment.
+  /// Polyfill Tools: while a polyfill is edited, taps on joints add polynodes.
+  List<Widget> _polyfillTools(Map pf) {
+    final own = pf['own'] == true;
+    return [
+      _title('Polyfill Tools'),
+      _hint('Use polyfills to fill a large area by connecting joints. Tap joints of this figure one after another, clockwise, to add polynodes; the fill appears as you go. A polyfill is drawn right before its anchor joint: move that joint back or forward in the draw order to move the fill.'),
+      _gap,
+      Text('Polynode count: ${pf['count']}', style: const TextStyle(color: cText, fontSize: 13)),
+      _gap,
+      _Btn('Finish polyfill', accent: true, onTap: () => _cmd({'op': 'polyfill_edit', 'id': null})),
+      _gap,
+      _Toggle('Use polyfill colour', own, (v) => _cmd({'op': 'polyfill_color', 'own': v})),
+      Opacity(opacity: own ? 1 : 0.4, child: _swatches((pf['color'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'polyfill_color', 'color': c, 'own': true}))),
+      _gap,
+      _Btn('Remove last polynode', enabled: (pf['count'] as num) > 0, onTap: () => _cmd({'op': 'polyfill_undo'})),
+      _gap,
+      _Btn('Delete polyfill', danger: true, onTap: () => _cmd({'op': 'polyfill_delete'})),
+    ];
+  }
+
   List<Widget> _builder(Map<String, dynamic>? sel) {
+    final pf = _st['polyfill'] as Map?;
+    if (pf != null) return _polyfillTools(pf);
     if (sel == null) return [_title('Figure editor'), const Text('Tap a joint of this figure.', style: TextStyle(color: cSecondary, fontSize: 13))];
     final root = sel['root'] == true;
     final shape = sel['shape'] as String? ?? 'line';
@@ -2900,6 +2922,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ],
       _gap,
       _Btn('Modify branch…', onTap: _modifyBranchDialog),
+      _gap,
+      _Btn('Add polyfill…', onTap: () => _cmd({'op': 'polyfill_new'})),
+      for (final f in ((_st['polyfills'] as List?) ?? const []).cast<Map>())
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: _Btn('Edit polyfill ${f['id']} (${f['count']} polynodes)', small: true, onTap: () => _cmd({'op': 'polyfill_edit', 'id': f['id']})),
+        ),
       _gap,
       _Btn('Done', accent: true, onTap: () => _cmd({'op': 'build_done'})),
     ];

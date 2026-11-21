@@ -53,6 +53,8 @@ pub struct Session {
     pub joining: Option<String>,
     /// The figure open in the figure editor (structure tools, its joints only).
     pub building: Option<String>,
+    /// Figure editor: the polyfill being edited (taps on joints add polynodes).
+    pub polyfill: Option<String>,
     /// Creation mode's draw tool (None: select and move).
     pub draw: Option<Shape>,
     gesture: Gesture,
@@ -120,7 +122,7 @@ impl Session {
         let mut doc = doc;
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
-        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -257,6 +259,23 @@ impl Session {
                     } else {
                         self.message = "Tap a joint on another figure.".into();
                         self.rev += 1;
+                    }
+                    return true;
+                }
+                // Polyfill Tools: a tap on a joint of this figure adds it as a polynode
+                if let (Some(b), Some(pf)) = (self.building.clone(), self.polyfill.clone()) {
+                    let near = self.tools.handles(self.project(), t).into_iter().filter(|h| h.layer == b && (h.x - x).hypot(h.y - y) <= radius).min_by(|p, q| {
+                        let d = |h: &Handle| (h.x - x).hypot(h.y - y);
+                        d(p).partial_cmp(&d(q)).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    if let Some(h) = near {
+                        let sym = self.project().root_symbol.clone();
+                        self.step("Add polynode", |s| {
+                            let Some(LayerKind::Figure(f)) = s.project.layer_mut(&sym, &b).map(|l| &mut l.kind) else { return crate::edit::fail("no figure") };
+                            let Some(fill) = f.polyfills.iter_mut().find(|p| p.id == pf) else { return crate::edit::fail("no polyfill") };
+                            fill.nodes.push(h.node.clone());
+                            Ok(())
+                        });
                     }
                     return true;
                 }
@@ -837,7 +856,70 @@ impl Session {
             "build_done" => {
                 self.draw = None;
                 self.building = None;
+                self.polyfill = None;
                 self.rev += 1;
+            }
+            "polyfill_new" => {
+                // Add polyfill...: drawn right before the selected joint (its anchor)
+                if let (Some(b), Some((l, n))) = (self.building.clone(), self.selected.clone()) {
+                    if l == b {
+                        let made = self.step("Add polyfill", |s| {
+                            let Some(LayerKind::Figure(f)) = s.project.layer_mut(&sym, &b).map(|x| &mut x.kind) else { return crate::edit::fail("no figure") };
+                            let mut k = f.polyfills.len() + 1;
+                            while f.polyfills.iter().any(|p| p.id == format!("pf{k}")) {
+                                k += 1;
+                            }
+                            let id = format!("pf{k}");
+                            let mut pf = Polyfill::new(&b, &id);
+                            pf.anchor = n.clone();
+                            pf.use_own_color = true;
+                            pf.color.value = Value::C(Color::rgba8888(0x8fd3ffff));
+                            f.polyfills.push(pf);
+                            Ok(id)
+                        });
+                        if let Some(id) = made {
+                            self.polyfill = Some(id);
+                            self.draw = None;
+                        }
+                    }
+                }
+            }
+            "polyfill_edit" => {
+                // an existing polyfill of the joint's figure, or none (Finish)
+                self.polyfill = c["id"].as_str().map(str::to_string);
+                self.rev += 1;
+            }
+            "polyfill_undo" | "polyfill_delete" | "polyfill_color" => {
+                if let (Some(b), Some(pf)) = (self.building.clone(), self.polyfill.clone()) {
+                    let c2 = c.clone();
+                    let label = match op { "polyfill_undo" => "Remove polynode", "polyfill_delete" => "Delete polyfill", _ => "Polyfill colour" };
+                    self.step(label, |s| {
+                        let Some(LayerKind::Figure(f)) = s.project.layer_mut(&sym, &b).map(|x| &mut x.kind) else { return crate::edit::fail("no figure") };
+                        let Some(i) = f.polyfills.iter().position(|p| p.id == pf) else { return crate::edit::fail("no polyfill") };
+                        match c2["op"].as_str() {
+                            Some("polyfill_undo") => {
+                                f.polyfills[i].nodes.pop();
+                            }
+                            Some("polyfill_delete") => {
+                                f.polyfills.remove(i);
+                            }
+                            _ => {
+                                let fill = &mut f.polyfills[i];
+                                if let Some(v) = c2["own"].as_bool() {
+                                    fill.use_own_color = v;
+                                }
+                                if let Some(v) = c2["color"].as_u64() {
+                                    fill.color.track.clear();
+                                    fill.color.value = Value::C(Color::rgba8888(v as u32));
+                                }
+                            }
+                        }
+                        Ok(())
+                    });
+                    if op == "polyfill_delete" {
+                        self.polyfill = None;
+                    }
+                }
             }
             "add_figure" => {
                 let n = self.figure_ids().len() + 1;
@@ -2135,6 +2217,12 @@ impl Session {
             "frameNoTween": no_tween,
             "noTweenFrames": self.no_tween_frames(frames),
             "frameClipCount": self.frame_clip.as_ref().map(|c| c.1).unwrap_or(0),
+            "polyfill": self.polyfill.as_ref().and_then(|id| {
+                let f = p.root()?.layer(self.building.as_ref()?)?.as_figure()?;
+                let pf = f.polyfills.iter().find(|x| &x.id == id)?;
+                Some(json!({"id": pf.id, "anchor": pf.anchor, "count": pf.nodes.len(), "own": pf.use_own_color, "color": pf.color.value.color().to_rgba8888()}))
+            }),
+            "polyfills": self.building.as_ref().and_then(|b| p.root()?.layer(b)?.as_figure()).map(|f| f.polyfills.iter().map(|x| json!({"id": x.id, "anchor": x.anchor, "count": x.nodes.len()})).collect::<Vec<_>>()),
             "building": self.building.as_ref().and_then(|b| p.root()?.layer(b)).map(|l| json!({"layer": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone())})),
             "builtins": crate::figures::ALL.iter().map(|(id, name)| json!({"id": id, "name": name})).collect::<Vec<_>>(),
             "message": self.message,

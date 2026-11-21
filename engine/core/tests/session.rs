@@ -1559,3 +1559,42 @@ fn auto_camera_tweens_across_frames() {
     assert_eq!(s.state()["autoCam"]["end"], 4);
     assert!(codec::encode(s.project()).contains("autoCamEnd"));
 }
+
+/// Figure editor "Add polyfill...": taps on joints add polynodes and the
+/// area fills; remove the last one, recolour, finish, delete; undoable.
+#[test]
+fn polyfill_tool_fills_between_joints() {
+    let mut s = session();
+    s.command(&json!({"op": "select", "layer": "L2", "node": "torso"}));
+    s.command(&json!({"op": "build", "layer": "L2"}));
+    let st = s.command(&json!({"op": "polyfill_new"}));
+    assert_eq!(st["undo"], "Add polyfill");
+    assert_eq!(st["polyfill"]["count"], 0);
+    let tris = |s: &Session| {
+        let p = s.project();
+        barkfart_core::tess::tessellate(&barkfart_core::eval::evaluate(p, &p.root_symbol, 0.0), None).triangle_count()
+    };
+    let before = tris(&s);
+    let hs: Vec<_> = s.tools.handles(s.project(), 0.0).into_iter().filter(|h| h.layer == "L2").collect();
+    for h in hs.iter().filter(|h| ["armR1", "armR2", "torso"].contains(&h.node.as_str())) {
+        s.command(&json!({"op": "down", "x": h.x, "y": h.y, "r": 4}));
+        s.command(&json!({"op": "up"}));
+    }
+    let st = s.state();
+    assert_eq!(st["polyfill"]["count"], 3, "three polynodes");
+    assert_eq!(st["undo"], "Add polynode");
+    assert!(tris(&s) > before, "the area is filled");
+    let st = s.command(&json!({"op": "polyfill_undo"}));
+    assert_eq!(st["polyfill"]["count"], 2);
+    let st = s.command(&json!({"op": "polyfill_color", "color": 0xff0000ffu32}));
+    assert_eq!(st["polyfill"]["color"], 0xff0000ffu32);
+    let st = s.command(&json!({"op": "polyfill_edit", "id": null}));
+    assert!(st["polyfill"].is_null());
+    assert_eq!(st["polyfills"].as_array().unwrap().len(), 1);
+    let id = st["polyfills"][0]["id"].as_str().unwrap().to_string();
+    s.command(&json!({"op": "polyfill_edit", "id": id}));
+    let st = s.command(&json!({"op": "polyfill_delete"}));
+    assert_eq!(st["polyfills"].as_array().unwrap().len(), 0);
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(s.state()["polyfills"].as_array().unwrap().len(), 1);
+}

@@ -51,7 +51,8 @@ committed). Plainest behaviour where the reference is unsure.
       paste segment and branch
 - [x] Delete one segment keeping its children
 - [x] Modify branch window
-- [ ] Add connector, polyfill tool
+- [x] Polyfill tool (Add polyfill..., Polyfill Tools)
+- [ ] Add connector
 - [ ] Trace stickfigure / frame, background image, background colour
 - [ ] Save stickfigure to a file, add to library, backups
 
