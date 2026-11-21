@@ -33,7 +33,7 @@ committed). Plainest behaviour where the reference is unsure.
 
 ## Project and export (6)
 - [x] Make vertical, rotate cameras 90 degrees
-- [ ] Watermark
+- [x] Watermark
 - [ ] MP4 export (iOS: AVAssetWriter)
 - [ ] Open: sort, delete, past saves (backups)
 

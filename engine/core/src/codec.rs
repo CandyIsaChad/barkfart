@@ -487,6 +487,10 @@ pub fn decode(json: &str) -> R<Project> {
         p.settings.tweening = b(s, "tweening", false)?;
         p.settings.tweened_frames = i(s, "tweenedFrames", DEFAULT_TWEENED_FRAMES)?.clamp(0, 8);
         p.settings.loop_tween = b(s, "loopTween", false)?;
+        if let Some(t) = str_(s, "watermark")? {
+            let c = str_(s, "watermarkColor")?.and_then(|h| u32::from_str_radix(h.trim_start_matches('#'), 16).ok()).map(Color::rgba8888).unwrap_or(Color::rgba8888(0xff3b30ff));
+            p.settings.watermark = Some((t.to_string(), c));
+        }
     }
     if let Some(vw) = m.get("view") {
         let vw = as_map(vw, "view")?;
@@ -971,6 +975,9 @@ pub fn encode(p: &Project) -> String {
     }
     if st.loop_tween {
         s.put("loopTween", Json::Bool(true));
+    }
+    if let Some((t, c)) = &st.watermark {
+        s.put("watermark", json::s(t)).put("watermarkColor", json::s(&format!("#{:08x}", c.to_rgba8888())));
     }
     m.put("settings", s.done());
     let v = &p.view;

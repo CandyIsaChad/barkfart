@@ -437,7 +437,15 @@ pub extern "C" fn bf_export_step(e: *const Engine, x: *mut Export) -> i32 {
             Some(v) => v[job.next as usize],
             None => (barkfart_core::export::frame_time(job.start, job.next, p.settings.sample_rate()), 0.0),
         };
-        let scene = eval::evaluate(p, &p.root_symbol, t);
+        let mut scene = eval::evaluate(p, &p.root_symbol, t);
+        // Project Tools > watermark: small, at the top right of every exported picture
+        if let Some((text, color)) = p.settings.watermark.as_ref().filter(|w| !w.0.trim().is_empty()) {
+            let (hw, hh) = (p.settings.width as f64 / 2.0, p.settings.height as f64 / 2.0);
+            let size = (p.settings.height as f32 * 0.045).max(8.0);
+            let margin = size as f64 * 0.5;
+            let shape = eval::Shape::new(eval::ShapeKind::Text { text: text.clone(), font: None, size, xf: eval::Affine::translate(hw - margin, hh - margin), corner: 2, align: 2 }, *color, "watermark");
+            scene.root.children.push(eval::Item::Shape(shape));
+        }
         let list = tess::layered(&scene, Some(&engine.glyphs));
         let (hw, hh) = (p.settings.width as f32 / 2.0, p.settings.height as f32 / 2.0);
         let bg = p.settings.background;

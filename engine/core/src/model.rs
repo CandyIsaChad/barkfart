@@ -1442,13 +1442,15 @@ pub struct Settings {
     pub tweened_frames: i32,
     /// With tweening, the last frame tweens into the first.
     pub loop_tween: bool,
+    /// Text drawn small at the top right of exported pictures (None: off).
+    pub watermark: Option<(String, Color)>,
 }
 
 pub const DEFAULT_TWEENED_FRAMES: i32 = 5;
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { fps: 30.0, width: 1280, height: 720, background: Color::WHITE, letterbox: 0.0, tweening: false, tweened_frames: DEFAULT_TWEENED_FRAMES, loop_tween: false }
+        Settings { fps: 30.0, width: 1280, height: 720, background: Color::WHITE, letterbox: 0.0, tweening: false, tweened_frames: DEFAULT_TWEENED_FRAMES, loop_tween: false, watermark: None }
     }
 }
 

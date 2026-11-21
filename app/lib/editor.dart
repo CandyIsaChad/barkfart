@@ -1607,6 +1607,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _gap,
         _Btn('Export…', onTap: _exportDialog),
         _gap,
+        _Toggle('Show watermark', _st['watermark'] != null, (v) => _cmd({'op': 'watermark', 'on': v})),
+        if (_st['watermark'] != null) ...[
+          _hint('Drawn small at the top right of exported pictures.'),
+          _TextFieldBox(text: (_st['watermark'] as Map)['text'] as String? ?? '', onChanged: (v) => _cmd({'op': 'watermark', 'text': v})),
+          const SizedBox(height: 4),
+          _swatches(((_st['watermark'] as Map)['color'] as num?)?.toInt() ?? 0xff3b30ff, (c) => _cmd({'op': 'watermark', 'color': c})),
+        ],
+        _gap,
         _Toggle('Make vertical (phone video)', _vertical, (v) => setState(() => _vertical = v)),
         if (_vertical) ...[
           _hint('Turns the camera of every frame a quarter turn; the right edge becomes the top of the video.'),

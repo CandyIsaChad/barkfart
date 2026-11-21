@@ -1468,6 +1468,27 @@ impl Session {
                     self.mode = Mode::Camera;
                 }
             }
+            "watermark" => {
+                // Project Tools: on / off, text, colour (exports only)
+                let c2 = c.clone();
+                self.step("Watermark", move |s| {
+                    let cur = s.project.settings.watermark.clone();
+                    let on = c2["on"].as_bool().unwrap_or(cur.is_some());
+                    if !on {
+                        s.project.settings.watermark = None;
+                        return Ok(());
+                    }
+                    let (mut text, mut color) = cur.unwrap_or((":)".into(), Color::rgba8888(0xff3b30ff)));
+                    if let Some(v) = c2["text"].as_str() {
+                        text = v.chars().take(200).collect();
+                    }
+                    if let Some(v) = c2["color"].as_u64() {
+                        color = Color::rgba8888(v as u32);
+                    }
+                    s.project.settings.watermark = Some((text, color));
+                    Ok(())
+                });
+            }
             "rotate_cameras" => {
                 // Make vertical: every frame's camera turns 90 degrees (one step)
                 self.step("Rotate cameras", |s| {
@@ -1850,6 +1871,7 @@ impl Session {
             "mode": match self.mode { Mode::Figure => "figure", Mode::All => "all", Mode::Camera => "camera" },
             "handles": handles, "selected": sel, "figures": figures, "camera": cam,
             "branchCopied": self.branch_clip.is_some(),
+            "watermark": p.settings.watermark.as_ref().map(|(t, c)| json!({"text": t, "color": c.to_rgba8888()})),
             "propsFrom": self.props_clip.as_ref().and_then(|c| p.root()?.layer(&c.source).map(|l| l.name.clone().unwrap_or_else(|| l.id.clone()))),
             "textfield": textfield, "textfieldCopied": self.textfield_clip.is_some(),
             "filtersCopied": self.filter_clip.is_some(),
