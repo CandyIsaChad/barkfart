@@ -394,3 +394,36 @@ fn stickfigure_segment_and_camera_tools() {
     assert_eq!(st["cam"]["zoom"], 1.5);
     assert_eq!(st["undo"], "Camera");
 }
+
+/// The original's "Stickfigure (IK)" is a rig: stretchy limbs whose static
+/// detail segments smart-stretch. Dragging a limb end in Barkfart must bend
+/// it the same way (lengths of the static children follow).
+#[test]
+#[ignore = "smart-stretch impulse (reset / multiplier) not modelled yet: waiting for ground truth from the original (a .nodemc posed at several stretches)"]
+fn the_ik_stickfigure_bends_by_smart_stretch() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../app/assets/stock/figures/Stickfigure (IK).nodes");
+    let Ok(bytes) = std::fs::read(path) else { return };
+    let mut p = barkfart_core::session::new_editor_project();
+    p.root_mut().unwrap().layers.clear();
+    let mut s = Session::new(Document::new(p));
+    let st = s.import("Stickfigure (IK).nodes", &bytes);
+    let layer = st["selected"]["layer"].as_str().unwrap().to_string();
+    let len = |s: &Session, n: &str| {
+        let p = s.project();
+        let f = p.root().unwrap().layer(&layer).unwrap().as_figure().unwrap();
+        let mut r = barkfart_core::eval::Resolver::new(p);
+        r.f(&f.node(n).unwrap().length, 0.0)
+    };
+    // n31: a stretchy leg straight from the hip; n2 its smart-stretch knee detail
+    let (leg0, knee0) = (len(&s, "n31"), len(&s, "n2"));
+    let h = s.tools.handles(s.project(), 0.0).into_iter().find(|h| h.node == "n31").expect("the leg end has a handle");
+    let (hx, hy) = (h.x, h.y);
+    s.command(&json!({"op": "down", "x": hx, "y": hy, "r": 5}));
+    // pull the foot halfway towards the hip: the leg gets shorter
+    let hip = s.tools.handles(s.project(), 0.0).into_iter().find(|h| h.node == "n0").unwrap();
+    s.command(&json!({"op": "move", "x": (hx + hip.x) / 2.0, "y": (hy + hip.y) / 2.0}));
+    s.command(&json!({"op": "up"}));
+    let (leg1, knee1) = (len(&s, "n31"), len(&s, "n2"));
+    assert!(leg1 < leg0 * 0.7, "the stretchy leg shortened: {leg0} -> {leg1}");
+    assert!((knee1 - knee0).abs() > 1.0, "the smart-stretch detail followed: {knee0} -> {knee1}");
+}

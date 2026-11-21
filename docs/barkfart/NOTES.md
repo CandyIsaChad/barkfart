@@ -217,3 +217,15 @@ outlines or hollow circles.
   non-static parent) and drag lock (one axis) are implemented as described;
   their legacy fields (angleLocked, angleLockMain, offsets, multiplier,
   dragLocked) are kept raw and not mapped, since no file shows their meaning.
+
+## Smart-stretch impulse (open, 2026-11-21)
+The original's "Stickfigure (IK)" is a rig: a stretchy segment from the hip
+to the foot, then a static child with the smart-stretch flag pointing back
+up, then static segments drawing the leg; one of them has "reset stretch
+impulse" with multiplier -1 (the knee bends outward as the leg shortens).
+Our smart-stretch (fitted on Rain / Action Lines) triggers only on the
+dragged node's flag and has no impulse reset or multiplier, so the IK leg
+stretches but does not bend. Ground truth needed: a movieclip from the
+original with this figure posed at several leg lengths (its frames store
+the lengths and angles the original computed). Test waiting:
+session.rs the_ik_stickfigure_bends_by_smart_stretch (ignored).
