@@ -859,15 +859,56 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     });
   }
 
+  static const _drawTools = [
+    ('none', 'None', Icons.near_me_outlined),
+    ('square', 'Segment', Icons.horizontal_rule),
+    ('line', 'Rounded', Icons.remove),
+    ('circle', 'Circle', Icons.circle_outlined),
+    ('ellipse', 'Ellipse', Icons.egg_outlined),
+    ('triangle', 'Triangle', Icons.change_history),
+    ('trapezoid', 'Trapezoid', Icons.filter_list),
+    ('polygon', 'Polygon', Icons.pentagon_outlined),
+  ];
+
   Widget _buildBar() {
     final building = _st['building'] as Map<String, dynamic>;
+    final tool = _st['drawTool'] as String? ?? 'none';
     return Row(children: [
       const SizedBox(width: 12),
-      Expanded(
+      SizedBox(
+        width: 170,
         child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Editing ${building['name']}', style: const TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w600)),
-          const Text('Changes here apply to this figure on every frame.', style: TextStyle(color: cSecondary, fontSize: 11)),
+          Text('Editing ${building['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w600)),
+          const Text('Changes apply on every frame. Pick a draw tool, then drag from a joint.', style: TextStyle(color: cSecondary, fontSize: 11)),
         ]),
+      ),
+      const SizedBox(width: 8),
+      // Draw Tools: one at a time; a tool stays picked for the next drag
+      Expanded(
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(children: [
+            for (final (id, label, icon) in _drawTools)
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Material(
+                  color: tool == id ? cAccent : cControl,
+                  borderRadius: BorderRadius.circular(4),
+                  child: InkWell(
+                    onTap: () => _cmd({'op': 'draw_tool', 'shape': id}),
+                    child: SizedBox(
+                      width: 62,
+                      height: 52,
+                      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        Icon(icon, size: 20, color: cText),
+                        Text(label, style: const TextStyle(color: cText, fontSize: 10)),
+                      ]),
+                    ),
+                  ),
+                ),
+              ),
+          ]),
+        ),
       ),
       SizedBox(width: 96, child: _Btn('Done', accent: true, onTap: () => _cmd({'op': 'build_done'}))),
       const SizedBox(width: 8),
@@ -1872,6 +1913,18 @@ class _Overlay extends CustomPainter {
       canvas.drawRect(r, Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.5
+        ..color = cAccent);
+    }
+    // creation mode: the segment being drawn
+    final dl = (st['drawLine'] as List?)?.map((x) => (x as num).toDouble()).toList();
+    if (dl != null && dl.length == 4) {
+      canvas.drawLine(v.toScreen(dl[0], dl[1]), v.toScreen(dl[2], dl[3]), Paint()
+        ..color = const Color(0xCC1A1A1A)
+        ..strokeWidth = 6
+        ..strokeCap = StrokeCap.round);
+      canvas.drawCircle(v.toScreen(dl[2], dl[3]), 7, Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
         ..color = cAccent);
     }
     final hs = (st['handles'] as List?) ?? const [];

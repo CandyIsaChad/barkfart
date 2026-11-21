@@ -896,3 +896,40 @@ fn frames_play_their_own_sounds() {
     }
     assert!(without_ids(&s) == before, "undo restores the project");
 }
+
+#[test]
+fn creation_mode_draws_a_segment_from_a_joint() {
+    let mut s = session();
+    s.command(&json!({"op": "insert_frame"}));
+    let st = s.command(&json!({"op": "state"}));
+    let fig = st["figures"][0]["id"].as_str().unwrap().to_string();
+    let before = codec::encode(s.project());
+    s.command(&json!({"op": "build", "layer": fig}));
+    let st = s.command(&json!({"op": "draw_tool", "shape": "circle"}));
+    assert_eq!(st["drawTool"], "circle");
+    // from the right hand to a point up and to the right of it
+    let (x, y) = handle(&st, 6);
+    let st = s.command(&json!({"op": "down", "x": x, "y": y, "r": 20}));
+    assert_eq!(st["hit"], true);
+    s.command(&json!({"op": "move", "x": x + 30.0, "y": y + 10.0}));
+    let st = s.command(&json!({"op": "move", "x": x + 60.0, "y": y + 40.0}));
+    assert!((st["drawLine"][2].as_f64().unwrap() - (x + 60.0) as f64).abs() < 0.01);
+    let st = s.command(&json!({"op": "up"}));
+    assert_eq!(st["undo"], "Draw segment");
+    assert!(st["drawLine"].is_null());
+    assert_eq!(st["handles"].as_array().unwrap().len(), 12);
+    assert_eq!(st["selected"]["shape"], "circle");
+    // the new joint is where the finger let go, on both frames
+    let (nx, ny) = handle(&st, 11);
+    assert!((nx - (x + 60.0)).abs() < 0.05 && (ny - (y + 40.0)).abs() < 0.05, "{nx},{ny}");
+    let st = s.command(&json!({"op": "frame", "i": 0}));
+    let (nx, ny) = handle(&st, 11);
+    assert!((nx - (x + 60.0)).abs() < 0.05 && (ny - (y + 40.0)).abs() < 0.05);
+    // a tap on a joint (no drag) draws nothing
+    s.command(&json!({"op": "down", "x": x, "y": y, "r": 20}));
+    let st = s.command(&json!({"op": "up"}));
+    assert_eq!(st["handles"].as_array().unwrap().len(), 12);
+    s.command(&json!({"op": "build_done"}));
+    s.command(&json!({"op": "undo"}));
+    assert!(codec::encode(s.project()) == before, "undo takes the segment away");
+}

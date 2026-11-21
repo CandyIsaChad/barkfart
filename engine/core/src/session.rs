@@ -31,6 +31,8 @@ enum Gesture {
     Handle { hit: Handle, x: f32, y: f32, slop: f32, started: bool },
     /// A textfield is held; the drag starts past the slop and keys its position.
     Textfield { layer: String, x: f32, y: f32, tx: f32, ty: f32, slop: f32, started: bool },
+    /// Creation mode: a new segment is being drawn from a joint.
+    Draw { layer: String, from: String, x0: f32, y0: f32, x: f32, y: f32, slop: f32 },
     All { x: f32, y: f32 },
     Camera { xi: String, yi: String, x: f32, y: f32, cx: f32, cy: f32 },
 }
@@ -51,6 +53,8 @@ pub struct Session {
     pub joining: Option<String>,
     /// The figure open in the figure editor (structure tools, its joints only).
     pub building: Option<String>,
+    /// Creation mode's draw tool (None: select and move).
+    pub draw: Option<Shape>,
     gesture: Gesture,
     /// The last tap (no drag): where, and which handle, for node digging.
     last_tap: Option<(f32, f32, String, String)>,
@@ -111,7 +115,7 @@ impl Session {
         let mut doc = doc;
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
-        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, textfield_clip: None, filter_clip: None, sound_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, textfield_clip: None, filter_clip: None, sound_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -251,6 +255,15 @@ impl Session {
                     }
                     return true;
                 }
+                // creation mode with a draw tool: a drag from a joint draws a segment
+                if let (Some(b), Some(_)) = (self.building.clone(), self.draw) {
+                    if let Some(h) = self.tools.pick(self.project(), x, y, radius, t).filter(|h| h.layer == b) {
+                        self.selected = Some((b.clone(), h.node.clone()));
+                        self.gesture = Gesture::Draw { layer: b, from: h.node, x0: h.x, y0: h.y, x, y, slop: radius * 0.5 };
+                        self.rev += 1;
+                        return true;
+                    }
+                }
                 // textfields are drawn on top, so tapping one selects it; a
                 // selected textfield is dragged even when a figure is under it
                 if self.building.is_none() {
@@ -366,6 +379,10 @@ impl Session {
                 }
                 self.rev += 1;
             }
+            Gesture::Draw { layer, from, x0, y0, slop, .. } => {
+                self.gesture = Gesture::Draw { layer, from, x0, y0, x, y, slop };
+                self.rev += 1;
+            }
             Gesture::All { x: x0, y: y0 } => {
                 let _ = self.tools.move_all(&mut self.doc, x - x0, y - y0, t);
                 self.gesture = Gesture::All { x, y };
@@ -406,6 +423,18 @@ impl Session {
                 } else {
                     self.last_tap = Some((x, y, hit.layer, hit.node));
                 }
+            }
+            Gesture::Draw { layer, from, x0, y0, x, y, slop } => {
+                if !cancel && (x - x0).hypot(y - y0) >= slop {
+                    let shape = self.draw.unwrap_or(Shape::Line);
+                    let sym = self.sym();
+                    let t = self.time();
+                    let made = self.step("Draw segment", |s| draw_segment(s, &sym, &layer, &from, shape, x, y, t));
+                    if let Some(id) = made {
+                        self.selected = Some((layer, id));
+                    }
+                }
+                self.rev += 1;
             }
             Gesture::Textfield { started, .. } => {
                 if started {
@@ -727,7 +756,15 @@ impl Session {
                     }
                 }
             }
+            "draw_tool" => {
+                self.draw = match c["shape"].as_str() {
+                    None | Some("none") => None,
+                    Some(x) => Some(shape_named(x)),
+                };
+                self.rev += 1;
+            }
             "build_done" => {
+                self.draw = None;
                 self.building = None;
                 self.rev += 1;
             }
@@ -1572,6 +1609,10 @@ impl Session {
             let pan = if let Value::F(v) = c.pan.value { v } else { 0.0 };
             json!({"asset": a, "name": sound_name(p, &a), "volume": round2(vol), "pan": round2(pan), "pitch": (c.pitch * 100.0).round() / 100.0})
         });
+        let draw_line = match &self.gesture {
+            Gesture::Draw { x0, y0, x, y, .. } => json!([x0, y0, x, y]),
+            _ => J::Null,
+        };
         let fset = crate::timing::frame_settings(p, self.frame);
         // per thumbnail: [delay, repeat] flags
         let rep = json!({"back": fset.1, "times": fset.2});
@@ -1595,6 +1636,7 @@ impl Session {
             "textfield": textfield, "textfieldCopied": self.textfield_clip.is_some(),
             "filtersCopied": self.filter_clip.is_some(),
             "frameBg": bg,
+            "drawTool": self.draw.map(shape_name).unwrap_or("none"), "drawLine": draw_line,
             "soundList": sound_list, "frameSound": frame_snd, "soundCopied": self.sound_clip.is_some(),
             "frameDelay": fset.0, "frameRepeat": rep,
             "frameMarks": marks,
@@ -1931,6 +1973,41 @@ fn align_name(align: i32, corner: i32) -> &'static str {
 
 fn round2(v: f32) -> f64 {
     (v as f64 * 100.0).round() / 100.0
+}
+
+/// Creation mode: a new segment from joint `from` of the figure, ending at
+/// stage point (x, y), with the draw tool's shape. Returns the new joint.
+#[allow(clippy::too_many_arguments)]
+fn draw_segment(s: &mut crate::edit::State, sym: &str, layer: &str, from: &str, shape: Shape, x: f32, y: f32, t: f64) -> EditResult<String> {
+    let id = figure_ops::add_segment(s, sym, layer, from, 0.0, 1.0)?;
+    let p = &s.project;
+    let sy = p.symbol(sym).ok_or_else(|| crate::edit::EditError("no symbol".into()))?;
+    let l = sy.layer(layer).ok_or_else(|| crate::edit::EditError("no figure".into()))?;
+    let f = l.as_figure().ok_or_else(|| crate::edit::EditError("not a figure".into()))?;
+    let mut r = Resolver::new(p);
+    let pose = crate::eval::FigurePose::compute(f, t, &mut r);
+    let (i, pi) = (f.index_of(&id).expect("new joint"), f.index_of(from).expect("start joint"));
+    // the drop point in the figure's own space
+    let inv = eval::layer_stage(p, sy, l, t).inverse();
+    let (lx, ly) = (inv.map_x(x as f64, y as f64), inv.map_y(x as f64, y as f64));
+    let (dx, dy) = (lx - pose.x[pi], ly - pose.y[pi]);
+    let scale = (r.f(&f.nodes()[i].scale, t) as f64).abs().max(1e-6);
+    let len = (dx.hypot(dy) / scale) as f32;
+    let rel = (dy.atan2(dx).to_degrees() - pose.base_angle(f.nodes(), i)) as f32;
+    let fresh = matches!(f.node(from).map(|n| n.parent.is_none()), Some(true));
+    let l = s.project.layer_mut(sym, layer).ok_or_else(|| crate::edit::EditError("no figure".into()))?;
+    let LayerKind::Figure(f) = &mut l.kind else { return crate::edit::fail("not a figure") };
+    let n = f.node_mut(&id).ok_or_else(|| crate::edit::EditError("no joint".into()))?;
+    n.rotation.value = Value::F(rel);
+    n.length.value = Value::F(len);
+    n.rest_length = len;
+    n.shape = shape;
+    if fresh {
+        // drawn from the main node: the original's defaults
+        n.thickness.value = Value::F(32.0);
+        n.color.value = Value::C(Color::rgba8888(0x1a1a1aff));
+    }
+    Ok(id)
 }
 
 /// The root's "Frame sounds" audio layer, added (at the bottom) when missing.
