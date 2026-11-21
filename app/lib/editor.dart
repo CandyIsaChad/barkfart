@@ -261,6 +261,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (w <= 0 || h <= 0) return;
     final camera = _playing;
     final onion = !_playing && _opts['onion'] == true && _frames > 1;
+    // View options: outline the selected figure (editing only)
+    final outline = !_playing && AppSettings.flag('outlineSelection') && _sel != null;
     double x0, y0, x1, y1;
     if (camera) {
       // the shot fitted into the stage area
@@ -276,7 +278,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       x1 = _view.x1;
       y1 = _view.y1;
     }
-    final key = '${_st['rev']} $t $w $h $x0 $y0 $x1 $y1 $camera $onion';
+    final key = '${_st['rev']} $t $w $h $x0 $y0 $x1 $y1 $camera $onion ${outline ? _sel!['layer'] : ''}';
     if (key == _drawn) return;
     final fi = (t * ((_st['rate'] as num?)?.toDouble() ?? _fps)).round();
     if (camera) {
@@ -295,7 +297,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _drawn = key;
     _busy = true;
     final sw = Stopwatch()..start();
-    final px = e.renderView(t, w, h, x0, y0, x1, y1, camera: camera, onion: onion);
+    final px = e.renderView(t, w, h, x0, y0, x1, y1, camera: camera, onion: onion, outline: outline);
     if (px == null) {
       _busy = false;
       return;
@@ -2732,23 +2734,6 @@ class _Overlay extends CustomPainter {
         ..color = cAccent);
     }
     final hs = (st['handles'] as List?) ?? const [];
-    // View options: a thin outline around the selected figure's joints
-    if (AppSettings.flag('outlineSelection')) {
-      Rect? box;
-      for (final h in hs) {
-        final l = h as List;
-        if ((l[2] as num).toInt() & 4 == 0) continue;
-        final p = v.toScreen((l[0] as num).toDouble(), (l[1] as num).toDouble());
-        final r = Rect.fromLTWH(p.dx, p.dy, 0, 0);
-        box = box == null ? r : box.expandToInclude(r);
-      }
-      if (box != null) {
-        canvas.drawRect(box.inflate(10), Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5
-          ..color = const Color(0xCCFF2D92));
-      }
-    }
     // selected joint red, the joints connected to it purple with a line to
     // each, everything else blue rings (after the original's look)
     const purple = Color(0xFFA43BE0), red = Color(0xFFE0383A), blue = Color(0xFF2F6BE8);

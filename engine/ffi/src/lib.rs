@@ -609,6 +609,13 @@ pub extern "C" fn bf_render_view(e: *const Engine, t: f64, w: u32, h: u32, x0: f
             let ghosts = onion.build_layered(p, &p.root_symbol, t);
             list = if v.onion_in_front { list.with_overlay(ghosts) } else { list.with_underlay(ghosts) };
         }
+        // View options "Outline selection": a thin magenta band around the selected figure
+        if flags & 4 != 0 {
+            if let Some((layer, _)) = engine.session.as_ref().and_then(|s| s.selected.as_ref()) {
+                let pad = 2.0 * (x1 - x0) / w as f32;
+                list = list.with_overlay(tess::selection_outline(&scene, layer, pad, 0xff2d92));
+            }
+        }
         let cpu = start.elapsed();
         let bg = p.settings.background;
         let view = View { x0, y0, x1, y1, background: [bg.r, bg.g, bg.b, bg.a] };

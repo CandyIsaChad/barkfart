@@ -1204,3 +1204,20 @@ fn delete_one_segment_keeps_its_children_pointing_the_same_way() {
     s.command(&json!({"op": "undo"}));
     assert!(s.project().root().unwrap().layer(&fig).unwrap().as_figure().unwrap().node("armR1").is_some());
 }
+
+/// View options "Outline selection": the selected figure's shapes, fattened
+/// in the outline colour, then the figure again on top. Nothing for a layer
+/// that is not there.
+#[test]
+fn selection_outline_follows_the_selected_figure() {
+    let s = session();
+    let scene = barkfart_core::eval::evaluate(s.project(), &s.project().root_symbol, 0.0);
+    let own = barkfart_core::tess::tessellate(&scene, None).triangle_count();
+    let out = barkfart_core::tess::selection_outline(&scene, "L2", 2.0, 0xff2d92);
+    assert!(out.root().is_some_and(|r| !r.empty()), "layered, so the stage can put it over the scene");
+    assert!(out.triangle_count() > 0);
+    let magenta = out.batches.iter().flat_map(|b| b.rgba.iter()).filter(|c| **c >> 8 == 0xff2d92).count();
+    assert!(magenta > 0, "the band is drawn in the outline colour");
+    assert!(out.triangle_count() < own * 4, "only the selected figure, not the whole scene");
+    assert_eq!(barkfart_core::tess::selection_outline(&scene, "nope", 2.0, 0xff2d92).triangle_count(), 0);
+}

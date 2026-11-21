@@ -189,14 +189,14 @@ class Engine {
 
   /// The stage rectangle [x0, x1] x [y0, y1] (y up) as straight RGBA rows.
   /// camera: as played (through the camera); onion: ghosts of nearby frames.
-  Uint8List? renderView(double t, int w, int h, double x0, double y0, double x1, double y1, {bool camera = false, bool onion = false}) {
+  Uint8List? renderView(double t, int w, int h, double x0, double y0, double x1, double y1, {bool camera = false, bool onion = false, bool outline = false}) {
     final need = w * h * 4;
     if (need > _bufLen) {
       if (_buf != nullptr) calloc.free(_buf);
       _buf = calloc<Uint8>(need);
       _bufLen = need;
     }
-    final flags = (camera ? 1 : 0) | (onion ? 2 : 0);
+    final flags = (camera ? 1 : 0) | (onion ? 2 : 0) | (outline ? 4 : 0);
     if (_view(_handle, t, w, h, x0, y0, x1, y1, flags, _buf, _micros) != 0) return null;
     return Uint8List.fromList(_buf.asTypedList(need));
   }

@@ -694,3 +694,68 @@ impl OnionSkin {
         out
     }
 }
+
+/// View options "Outline selection": the shapes of one layer (group source
+/// ending in "/<layer>"), each fattened by `pad` stage units and drawn in
+/// `rgb`, then the shapes themselves again on top, so a thin band of that
+/// colour follows the figure's silhouette. Editing view only.
+pub fn selection_outline(scene: &Scene, layer: &str, pad: f32, rgb: u32) -> DrawList {
+    fn find<'a>(g: &'a Group, suffix: &str) -> Option<&'a Group> {
+        if g.source.ends_with(suffix) {
+            return Some(g);
+        }
+        g.children.iter().find_map(|i| if let Item::Group(c) = i { find(c, suffix) } else { None })
+    }
+    fn shapes<'a>(g: &'a Group, out: &mut Vec<&'a Shape>) {
+        for i in &g.children {
+            match i {
+                Item::Shape(s) => out.push(s),
+                Item::Group(c) => shapes(c, out),
+            }
+        }
+    }
+    let out = DrawList::default();
+    let Some(g) = find(&scene.root, &format!("/{layer}")) else { return out };
+    let mut own = Vec::new();
+    shapes(g, &mut own);
+    let color = Color { r: ((rgb >> 16) & 0xff) as f32 / 255.0, g: ((rgb >> 8) & 0xff) as f32 / 255.0, b: (rgb & 0xff) as f32 / 255.0, a: 1.0 };
+    let mut fat = Group::new("outline");
+    let edge = |fat: &mut Group, p: &[f32], closed: bool| {
+        let n = p.len() / 2;
+        for i in 0..n {
+            if !closed && i + 1 == n {
+                break;
+            }
+            let j = (i + 1) % n;
+            fat.children.push(Item::Shape(Shape::new(ShapeKind::Line { x1: p[i * 2], y1: p[i * 2 + 1], x2: p[j * 2], y2: p[j * 2 + 1], width: pad * 2.0, bend: 0.0 }, color, "outline")));
+        }
+    };
+    for s in &own {
+        let kind = match &s.kind {
+            ShapeKind::Line { x1, y1, x2, y2, width, bend } => ShapeKind::Line { x1: *x1, y1: *y1, x2: *x2, y2: *y2, width: width + pad * 2.0, bend: *bend },
+            ShapeKind::Circle { cx, cy, r, start, span } => {
+                if *span < std::f32::consts::TAU - 1e-3 {
+                    // a part of a disc: its edges as well
+                    let (a, b) = (*start, start + span);
+                    edge(&mut fat, &[cx + r * a.cos(), cy + r * a.sin(), *cx, *cy, cx + r * b.cos(), cy + r * b.sin()], false);
+                }
+                ShapeKind::Ring { cx: *cx, cy: *cy, r: *r, width: pad * 2.0, start: *start, span: *span }
+            }
+            ShapeKind::Ring { cx, cy, r, width, start, span } => ShapeKind::Ring { cx: *cx, cy: *cy, r: *r, width: width + pad * 2.0, start: *start, span: *span },
+            ShapeKind::Polygon { points, .. } => {
+                edge(&mut fat, points, true);
+                continue;
+            }
+            ShapeKind::Quad { corners, .. } => {
+                edge(&mut fat, corners, true);
+                continue;
+            }
+            _ => continue,
+        };
+        fat.children.push(Item::Shape(Shape::new(kind, color, "outline")));
+    }
+    let mut top = Group::new("outline");
+    top.children.push(Item::Group(fat));
+    top.children.push(Item::Group(g.clone()));
+    layered(&Scene { root: top, time: scene.time, diagnostics: Vec::new(), primitives: 0 }, None)
+}
