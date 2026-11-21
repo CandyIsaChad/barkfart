@@ -200,6 +200,7 @@ class AppSettings {
     'showIds': false,
     'neighbourLines': true,
     'outlineSelection': false,
+    'pasteLayering': false,
     'zoomButtons': false,
     'guides': false,
     'stageBox': true,

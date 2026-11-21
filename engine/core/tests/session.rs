@@ -1313,3 +1313,30 @@ fn expand_gradient_stretches_the_background_fade() {
     s.command(&json!({"op": "undo"}));
     assert_eq!(format!("{:?}", bg(&s)), plain, "one undo step");
 }
+
+/// Stickfigure Tools, long-press Paste: "Paste with layering" puts the new
+/// figure where the original stood among the frame's figures; plain paste
+/// puts it on top.
+#[test]
+fn paste_with_layering_keeps_the_stacking_place() {
+    let mut s = Session::new(Document::new(barkfart_core::session::new_editor_project()));
+    s.command(&json!({"op": "add_figure"}));
+    s.command(&json!({"op": "add_figure"}));
+    let order = |s: &Session| -> Vec<String> { s.project().root().unwrap().layers.iter().filter(|l| l.as_figure().is_some()).map(|l| l.id.clone()).collect() };
+    let figs = order(&s);
+    assert!(figs.len() >= 3);
+    let bottom = figs[0].clone();
+    let root = s.project().root().unwrap().layer(&bottom).unwrap().as_figure().unwrap().nodes()[0].id.clone();
+    s.command(&json!({"op": "select", "layer": bottom, "node": root}));
+    s.command(&json!({"op": "copy_figure"}));
+    s.command(&json!({"op": "paste_figure"}));
+    let plain = order(&s);
+    assert!(!figs.contains(plain.last().unwrap()), "a plain paste goes on top");
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(order(&s), figs);
+    s.command(&json!({"op": "paste_figure", "layering": true}));
+    let layered = order(&s);
+    assert_eq!(layered.len(), figs.len() + 1);
+    assert!(!figs.contains(&layered[0]), "the copy of the bottom figure is at the bottom: {layered:?}");
+    assert_eq!(&layered[1..], &figs[..]);
+}

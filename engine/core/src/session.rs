@@ -1307,6 +1307,15 @@ impl Session {
                 // neighbours); where it is already present, the paste is a new figure.
                 if let Some((clip, t_copy)) = self.figure_clip.clone() {
                     let fr_now = self.frame;
+                    // "Paste with layering": the original's place among the figures shown
+                    // on the frame it was copied from
+                    let rank = c["layering"].as_bool().unwrap_or(false).then(|| {
+                        let p = self.project();
+                        let root = p.root()?;
+                        let at = root.layer_index(&clip.first()?.id)?;
+                        let mut r = Resolver::new(p);
+                        Some(root.layers[..at].iter().filter(|x| r.b(&x.shown, t_copy)).count())
+                    }).flatten();
                     let made = self.step("Paste stickfigure", |s| {
                         let sym2 = s.project.root_symbol.clone();
                         let here = |s: &crate::edit::State, id: &str| s.project.root().and_then(|r| r.layer(id)).map(|x| Resolver::new(&s.project).b(&x.shown, t));
@@ -1332,6 +1341,7 @@ impl Session {
                             ids.insert(l.id.clone(), n);
                         }
                         let mut first = None;
+                        let mut last_at: Option<usize> = None;
                         for l in &clip {
                             let mut c = structure::copy_layer(l, &ids)?;
                             // the new figure holds the copied pose
@@ -1344,8 +1354,19 @@ impl Session {
                             }
                             let id = c.id.clone();
                             first.get_or_insert(id.clone());
-                            let at = s.project.root().map(|r| r.layers.len()).unwrap_or(0);
+                            let at = s.project.root().map(|r| {
+                                let top = r.layers.len();
+                                // joined figures keep their order: each right above the last
+                                if let Some(prev) = first.as_ref().and_then(|_| last_at) {
+                                    return prev + 1;
+                                }
+                                let Some(k) = rank else { return top };
+                                // before the k-th figure shown on this frame (k shown below it)
+                                let mut res = Resolver::new(&s.project);
+                                r.layers.iter().enumerate().filter(|(_, x)| res.b(&x.shown, t)).nth(k).map_or(top, |(i, _)| i)
+                            }).unwrap_or(0);
                             structure::add_layer(s, &sym2, c, at)?;
+                            last_at = Some(at);
                             only_on_frame(s, &sym2, &id, fr_now);
                         }
                         Ok(first)

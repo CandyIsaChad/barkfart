@@ -789,6 +789,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           setState(() {});
         case 'arrows':
           setState(() => _arrows = true);
+        case 'pastelayering':
+          unawaited(_pasteLayeringPopup());
         case 'modifybranch':
           unawaited(_modifyBranchDialog());
         case 'viewoptions':
@@ -1662,7 +1664,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   List<Widget> _libraryTools() => [
         _Btn('Add stickfigure…', accent: true, onTap: _figurePicker),
         _gap,
-        _Btn('Paste stickfigure', enabled: _st['figureCopied'] == true, onTap: () => _cmd({'op': 'paste_figure'})),
+        GestureDetector(onLongPress: _pasteLayeringPopup, child: _Btn('Paste stickfigure', enabled: _st['figureCopied'] == true, onTap: _pasteFigure)),
       ];
 
   List<Widget> _frameToolsPanel() {
@@ -1863,6 +1865,30 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   int _tweenCount = 3;
 
+  void _pasteFigure() => _cmd({'op': 'paste_figure', 'layering': AppSettings.flag('pasteLayering')});
+
+  /// Long-press on Paste stickfigure: the "Paste with layering" switch.
+  Future<void> _pasteLayeringPopup() => showDialog<void>(
+        context: context,
+        builder: (c) => StatefulBuilder(
+          builder: (c, set) => AlertDialog(
+            backgroundColor: cPanel,
+            content: SizedBox(
+              width: 340,
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                const Text('The app will try to paste the copied figure at the same layering it had on the frame it was copied from.', style: TextStyle(color: cText, fontSize: 13)),
+                const SizedBox(height: 12),
+                _Toggle('Paste with layering', AppSettings.flag('pasteLayering'), (v) {
+                  set(() => AppSettings.values['pasteLayering'] = v);
+                  unawaited(AppSettings.save());
+                }),
+              ]),
+            ),
+            actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Done'))],
+          ),
+        ),
+      );
+
   Future<void> _tweenHelp() => _ask(
         'Adding a tweened frame',
         'A tweened frame is a new frame between this one and the next, where every figure stands part of the way from its pose here to its pose on the next frame: halfway (50), a third and two thirds (33/67), or close to either end (10/90). Because it needs a next frame, it cannot be added after the last one. Hold the button to add several evenly spaced frames at once.',
@@ -1918,7 +1944,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _pair(_Btn('◀', onTap: () => _cmd({'op': 'cycle_figure', 'dir': -1})), _Btn('▶', onTap: () => _cmd({'op': 'cycle_figure', 'dir': 1}))),
       _gap,
       _label('Stickfigure'),
-      _pair(_Btn('Copy', onTap: () => _cmd({'op': 'copy_figure', 'joined': true})), _Btn('Paste', enabled: _st['figureCopied'] == true, onTap: () => _cmd({'op': 'paste_figure'}))),
+      _pair(_Btn('Copy', onTap: () => _cmd({'op': 'copy_figure', 'joined': true})), GestureDetector(onLongPress: _pasteLayeringPopup, child: _Btn('Paste', enabled: _st['figureCopied'] == true, onTap: _pasteFigure))),
       _gap,
       _label('All properties'),
       _pair(_Btn('Copy', onTap: () => _cmd({'op': 'copy_props'})), _Btn('Paste', enabled: _st['propsCopied'] == true, onTap: _pastePropsDialog)),

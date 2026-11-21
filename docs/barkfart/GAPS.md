@@ -15,7 +15,7 @@ committed). Plainest behaviour where the reference is unsure.
 - [x] Animation Tools: looping on/off (7.1)
 
 ## Stickfigure Tools (9.2)
-- [ ] Paste stickfigure with layering (long-press)
+- [x] Paste stickfigure with layering (long-press)
 - [x] Paste all properties: the window with a checkbox per property
 - [ ] Keep stickfigure during tween, Tween stickfigure colours, tween easing
 - [ ] Use segment colour (own colour vs the figure colour): needs a model flag
