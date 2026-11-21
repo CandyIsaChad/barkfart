@@ -1672,3 +1672,25 @@ fn textfield_locks_to_the_camera() {
     s.command(&json!({"op": "camera", "zoom": 1.7, "rotation": 20.0}));
     assert_eq!(shot(&s), before, "same place in the shot");
 }
+
+/// Figure editor "Trace frame / stickfigure": a faint copy to draw over
+/// (one figure, or a whole frame); cleared on Done, never saved.
+#[test]
+fn trace_ghost_of_a_frame_or_a_figure() {
+    let mut s = two_poses();
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    s.command(&json!({"op": "build", "layer": "L2"}));
+    let st = s.command(&json!({"op": "trace", "frame": 1}));
+    assert_eq!(st["trace"]["frame"], 1);
+    let p = s.project();
+    let scene = barkfart_core::eval::evaluate_with(p, &p.root_symbol, 1.0 / p.settings.fps as f64, false, false);
+    let all = barkfart_core::tess::trace_ghost(&scene, None, 0x5a6270, 0.35);
+    let one = barkfart_core::tess::trace_ghost(&scene, Some("L2"), 0x5a6270, 0.35);
+    assert!(all.triangle_count() >= one.triangle_count() && one.triangle_count() > 0);
+    assert!(all.batches.iter().flat_map(|b| b.rgba.iter()).all(|c| c >> 8 == 0x5a6270), "all grey");
+    assert_eq!(barkfart_core::tess::trace_ghost(&scene, Some("nope"), 0, 0.3).triangle_count(), 0);
+    let before = codec::encode(s.project());
+    let st = s.command(&json!({"op": "build_done"}));
+    assert!(st["trace"].is_null());
+    assert_eq!(codec::encode(s.project()), before, "nothing saved");
+}

@@ -768,3 +768,35 @@ pub fn selection_outline(scene: &Scene, layer: &str, pad: f32, rgb: u32) -> Draw
     top.children.push(Item::Group(g.clone()));
     layered(&Scene { root: top, time: scene.time, diagnostics: Vec::new(), primitives: 0 }, None)
 }
+
+/// Figure editor "Trace": a faint grey copy of a scene (or of one layer of
+/// it, group source ending in "/<layer>") to draw over; layered, for
+/// with_underlay.
+pub fn trace_ghost(scene: &Scene, layer: Option<&str>, rgb: u32, opacity: f32) -> DrawList {
+    fn find<'a>(g: &'a Group, suffix: &str) -> Option<&'a Group> {
+        if g.source.ends_with(suffix) {
+            return Some(g);
+        }
+        g.children.iter().find_map(|i| if let Item::Group(c) = i { find(c, suffix) } else { None })
+    }
+    let src = match layer {
+        Some(id) => match find(&scene.root, &format!("/{id}")) {
+            Some(g) => Scene { root: g.clone(), time: scene.time, diagnostics: Vec::new(), primitives: 0 },
+            None => return DrawList::default(),
+        },
+        None => scene.clone(),
+    };
+    let flat = tessellate(&src, None);
+    let mut out = DrawList::default();
+    out.open("trace", 1.0, Blend::Normal, false, Vec::new());
+    out.open("ghost", opacity.clamp(0.0, 1.0), Blend::Normal, false, Vec::new());
+    for b in &flat.batches {
+        let o = out.batch(Blend::Normal, None, None);
+        for i in 0..b.vertex_count() {
+            out.add(o, b.xy[i * 2], b.xy[i * 2 + 1], (rgb << 8) | (b.rgba[i] & 0xff), 0.0, 0.0);
+        }
+    }
+    out.close();
+    out.close();
+    out
+}

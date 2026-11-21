@@ -53,7 +53,8 @@ committed). Plainest behaviour where the reference is unsure.
 - [x] Modify branch window
 - [x] Polyfill tool (Add polyfill..., Polyfill Tools)
 - [x] Add connector (Connector Tools: percent, reversed, delete)
-- [ ] Trace stickfigure / frame, background image, background colour
+- [x] Trace stickfigure / frame
+- [ ] Background image, background colour in the figure editor
 - [x] Save stickfigure to a file (.nodes in Barkfart Figures)
 
 ## Textfields (13)

@@ -2874,6 +2874,68 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _say('Saved ${f.path.split(Platform.pathSeparator).last} in Barkfart Figures.');
   }
 
+  /// Figure editor: trace over another frame or figure (shown faintly behind).
+  List<Widget> _traceTools() {
+    final tr = _st['trace'] as Map?;
+    return [
+      _hint('Load a stickfigure or frame to be the background, and trace over the top of it.'),
+      _pair(_Btn('Trace stickfigure…', small: true, onTap: _traceFigureDialog), _Btn('Trace frame…', small: true, onTap: _traceFrameDialog)),
+      if (tr != null) ...[
+        const SizedBox(height: 4),
+        _Btn(tr['frame'] != null ? 'Clear trace (frame ${(tr['frame'] as num) + 1})' : 'Clear trace', small: true, onTap: () => _cmd({'op': 'trace'})),
+      ],
+    ];
+  }
+
+  Future<void> _traceFrameDialog() async {
+    var f = ((_st['trace'] as Map?)?['frame'] as num?)?.toInt() ?? _frame;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, set) => AlertDialog(
+          backgroundColor: cPanel,
+          title: const Text('Select a frame to trace', style: TextStyle(color: cText, fontSize: 16)),
+          content: SizedBox(
+            width: 340,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text('A frame (1 to $_frames) shown faintly behind, to trace from.', style: const TextStyle(color: cSecondary, fontSize: 12)),
+              const SizedBox(height: 8),
+              _stepper('Frame', '${f + 1}', () => set(() => f = math.max(0, f - 1)), () => set(() => f = math.min(_frames - 1, f + 1))),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Trace this')),
+          ],
+        ),
+      ),
+    );
+    if (ok == true) {
+      _cmd({'op': 'trace', 'frame': f});
+    } else if (ok == false) {
+      _cmd({'op': 'trace'});
+    }
+  }
+
+  Future<void> _traceFigureDialog() async {
+    final figs = ((_st['library'] as List?) ?? const []).cast<Map>().where((m) => m['kind'] == 'figure').toList();
+    final pick = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: cPanel,
+        title: const Text('Select a stickfigure to trace', style: TextStyle(color: cText, fontSize: 16)),
+        content: SizedBox(
+          width: 340,
+          child: ListView(shrinkWrap: true, children: [
+            for (final m in figs) Padding(padding: const EdgeInsets.only(bottom: 4), child: _Btn('${m['name']}', small: true, onTap: () => Navigator.pop(c, '${m['layer']}'))),
+          ]),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel'))],
+      ),
+    );
+    if (pick != null) _cmd({'op': 'trace', 'layer': pick});
+  }
+
   /// Polyfill Tools: while a polyfill is edited, taps on joints add polynodes.
   List<Widget> _polyfillTools(Map pf) {
     final own = pf['own'] == true;
@@ -2916,7 +2978,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             _Btn('Delete connector', danger: true, onTap: () => _cmd({'op': 'delete_joint'})),
             _gap,
           ];
-    if (sel == null) return [_title('Figure editor'), const Text('Tap a joint of this figure.', style: TextStyle(color: cSecondary, fontSize: 13))];
+    if (sel == null) return [_title('Figure editor'), const Text('Tap a joint of this figure.', style: TextStyle(color: cSecondary, fontSize: 13)), _gap, ..._traceTools()];
     final root = sel['root'] == true;
     final shape = sel['shape'] as String? ?? 'line';
     final thick = (sel['thickness'] as num?)?.toDouble() ?? 0;
@@ -2978,7 +3040,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _gap,
       _Btn('Modify branch…', onTap: _modifyBranchDialog),
       _gap,
-      _Btn('Save stickfigure…', icon: null, onTap: _saveFigureFile),
+      ..._traceTools(),
+      _gap,
+      _Btn('Save stickfigure…', onTap: _saveFigureFile),
       _gap,
       _Btn('Add connector…', onTap: () => _cmd({'op': 'connect_start'})),
       _gap,

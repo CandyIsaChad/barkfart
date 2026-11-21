@@ -57,6 +57,9 @@ pub struct Session {
     pub polyfill: Option<String>,
     /// Figure editor "Add connector...": the next joint tapped is the endpoint.
     pub connecting: bool,
+    /// Figure editor "Trace": a frame (index) or a figure (layer id) shown
+    /// faintly behind, to draw over. Editing view only, never saved.
+    pub trace: Option<(Option<i32>, Option<String>)>,
     /// Creation mode's draw tool (None: select and move).
     pub draw: Option<Shape>,
     gesture: Gesture,
@@ -124,7 +127,7 @@ impl Session {
         let mut doc = doc;
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
-        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -887,6 +890,8 @@ impl Session {
                 self.draw = None;
                 self.building = None;
                 self.polyfill = None;
+                self.connecting = false;
+                self.trace = None;
                 self.rev += 1;
             }
             "polyfill_new" => {
@@ -913,6 +918,13 @@ impl Session {
                         }
                     }
                 }
+            }
+            "trace" => {
+                // {"frame": i} or {"layer": id}; neither clears it
+                let fr = c["frame"].as_i64().map(|v| v as i32);
+                let ly = c["layer"].as_str().map(str::to_string);
+                self.trace = if fr.is_some() || ly.is_some() { Some((fr, ly)) } else { None };
+                self.rev += 1;
             }
             "connect_start" => {
                 self.connecting = self.building.is_some() && self.selected.is_some();
@@ -2282,6 +2294,7 @@ impl Session {
             "noTweenFrames": self.no_tween_frames(frames),
             "frameClipCount": self.frame_clip.as_ref().map(|c| c.1).unwrap_or(0),
             "connecting": self.connecting,
+            "trace": self.trace.as_ref().map(|(f, l)| json!({"frame": f, "layer": l})),
             "polyfill": self.polyfill.as_ref().and_then(|id| {
                 let f = p.root()?.layer(self.building.as_ref()?)?.as_figure()?;
                 let pf = f.polyfills.iter().find(|x| &x.id == id)?;

@@ -609,6 +609,13 @@ pub extern "C" fn bf_render_view(e: *const Engine, t: f64, w: u32, h: u32, x0: f
             let ghosts = onion.build_layered(p, &p.root_symbol, t);
             list = if v.onion_in_front { list.with_overlay(ghosts) } else { list.with_underlay(ghosts) };
         }
+        // Figure editor "Trace": a frame or a figure faintly behind
+        if let Some((fr, ly)) = engine.session.as_ref().filter(|s| s.building.is_some()).and_then(|s| s.trace.clone()) {
+            let fps = p.settings.fps.max(1.0) as f64;
+            let at = fr.map_or(t, |f| f as f64 / fps);
+            let ghost_scene = eval::evaluate_with(p, &p.root_symbol, at, false, camera);
+            list = list.with_underlay(tess::trace_ghost(&ghost_scene, ly.as_deref(), 0x5a6270, 0.35));
+        }
         // View options "Show filters": 8 = none, 16 = no blur
         if flags & 8 != 0 {
             list = list.without_effects(|_| false);
