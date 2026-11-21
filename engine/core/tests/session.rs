@@ -1651,3 +1651,24 @@ fn save_stickfigure_writes_a_nodes_file() {
     let mut s2 = Session::new(Document::new(p));
     assert_eq!(s2.command(&json!({"op": "state"}))["library"].as_array().unwrap().len(), n0 + 1);
 }
+
+/// Textfield Tools "Locked (to camera)": the text keeps its place in the shot.
+#[test]
+fn textfield_locks_to_the_camera() {
+    let mut s = Session::new(Document::new(barkfart_core::session::new_editor_project()));
+    s.command(&json!({"op": "add_camera"}));
+    let st = s.command(&json!({"op": "add_textfield"}));
+    let id = st["textfield"]["layer"].as_str().unwrap().to_string();
+    assert_eq!(st["textfield"]["cameraLocked"], false);
+    let st = s.command(&json!({"op": "camera_lock", "layer": id, "on": true}));
+    assert_eq!(st["textfield"]["cameraLocked"], true);
+    let shot = |s: &Session| {
+        let p = s.project();
+        let scene = barkfart_core::eval::evaluate(p, &p.root_symbol, 0.0);
+        format!("{:?}", scene.root.children.iter().filter_map(|i| if let barkfart_core::eval::Item::Group(g) = i { g.source.ends_with(&id).then(|| g.clone()) } else { None }).collect::<Vec<_>>())
+    };
+    let before = shot(&s);
+    assert!(before.contains("Text"), "the textfield is drawn: {before}");
+    s.command(&json!({"op": "camera", "zoom": 1.7, "rotation": 20.0}));
+    assert_eq!(shot(&s), before, "same place in the shot");
+}

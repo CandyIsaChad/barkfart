@@ -2168,6 +2168,7 @@ impl Session {
             let (x0, y0, x1, y1) = text_rect(tl, cx, cy, w * sx, h * sy);
             Some(json!({
                 "layer": id, "name": layer.name.clone().unwrap_or_else(|| id.clone()),
+                "cameraLocked": layer.parent.as_ref().is_some_and(|pid| p.root().and_then(|r| r.layer(pid)).is_some_and(|x| matches!(x.kind, LayerKind::Camera(_)))),
                 "text": tl.text.clone().unwrap_or_default(),
                 "color": color_of(&mut r, &tl.color, t),
                 "scale": round2(sy),

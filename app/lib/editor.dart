@@ -2190,7 +2190,16 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _gap,
       _stepper('Scale', scale.toStringAsFixed(2), () => _cmd({'op': 'textfield', 'scale': math.max(0.05, scale - 0.05)}), () => _cmd({'op': 'textfield', 'scale': scale + 0.05})),
       _gap,
-      _Toggle('Locked', tf['locked'] == true, (v) => _cmd({'op': 'textfield', 'locked': v})),
+      _Toggle('Locked', tf['locked'] == true, (v) {
+        // the two locks exclude each other
+        if (v && tf['cameraLocked'] == true) _cmd({'op': 'camera_lock', 'layer': tf['layer'], 'on': false});
+        _cmd({'op': 'textfield', 'locked': v});
+      }),
+      _Toggle('Locked to camera', tf['cameraLocked'] == true, (v) {
+        if (v && tf['locked'] == true) _cmd({'op': 'textfield', 'locked': false});
+        _cmd({'op': 'camera_lock', 'layer': tf['layer'], 'on': v});
+      }),
+      _hint('Locked to camera: the text stays put in the shot however the camera moves (a title, a caption).'),
       _gap,
       _pair(_Btn('Copy', onTap: () => _cmd({'op': 'copy_textfield'})), _Btn('Paste', enabled: _st['textfieldCopied'] == true, onTap: () => _cmd({'op': 'paste_textfield'}))),
       _gap,

@@ -57,7 +57,9 @@ committed). Plainest behaviour where the reference is unsure.
 - [x] Save stickfigure to a file (.nodes in Barkfart Figures)
 
 ## Textfields (13)
-- [ ] Fonts, outline, background box (check the reference table)
+- [x] Locked to camera (textfields)
+- [ ] Fonts (the original bundles third-party fonts; Barkfart would need
+      openly licensed ones), outline, background box
 
 ## Done today
 - [x] Colour picker (copied colours, hue / saturation, brightness, hex)
