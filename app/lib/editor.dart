@@ -2862,6 +2862,25 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   List<Widget> _builder(Map<String, dynamic>? sel) {
     final pf = _st['polyfill'] as Map?;
     if (pf != null) return _polyfillTools(pf);
+    if (_st['connecting'] == true) {
+      return [
+        _title('Add connector'),
+        _hint('Tap the joint this connector ends on. The connector is a new joint on the straight line from the selected joint to it, and stays on that line however the two move.'),
+        _gap,
+        _Btn('Cancel', onTap: () => _cmd({'op': 'connect_cancel'})),
+      ];
+    }
+    final con = sel?['connector'] as Map?;
+    final connectorTools = con == null
+        ? const <Widget>[]
+        : <Widget>[
+            _title('Connector Tools'),
+            Text('Ends on joint ${con['to']}', style: const TextStyle(color: cSecondary, fontSize: 12)),
+            _stepper('Percent', ((con['percent'] as num).toDouble()).toStringAsFixed(2), () => _cmd({'op': 'connector_set', 'percent': math.max(0, (con['percent'] as num) - 0.05)}), () => _cmd({'op': 'connector_set', 'percent': math.min(1, (con['percent'] as num) + 0.05)})),
+            _Toggle('Reversed', con['reversed'] == true, (v) => _cmd({'op': 'connector_set', 'reversed': v})),
+            _Btn('Delete connector', danger: true, onTap: () => _cmd({'op': 'delete_joint'})),
+            _gap,
+          ];
     if (sel == null) return [_title('Figure editor'), const Text('Tap a joint of this figure.', style: TextStyle(color: cSecondary, fontSize: 13))];
     final root = sel['root'] == true;
     final shape = sel['shape'] as String? ?? 'line';
@@ -2869,6 +2888,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final color = (sel['color'] as num?)?.toInt() ?? 0xff;
     final stretch = _opts['stretch'] == true;
     return [
+      ...connectorTools,
       _title(root ? 'Main node' : 'Segment'),
       _pair(_Btn('◀ Joint', onTap: () => _cmd({'op': 'cycle_joint', 'dir': -1})), _Btn('Joint ▶', onTap: () => _cmd({'op': 'cycle_joint', 'dir': 1}))),
       _gap,
@@ -2922,6 +2942,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ],
       _gap,
       _Btn('Modify branch…', onTap: _modifyBranchDialog),
+      _gap,
+      _Btn('Add connector…', onTap: () => _cmd({'op': 'connect_start'})),
       _gap,
       _Btn('Add polyfill…', onTap: () => _cmd({'op': 'polyfill_new'})),
       for (final f in ((_st['polyfills'] as List?) ?? const []).cast<Map>())

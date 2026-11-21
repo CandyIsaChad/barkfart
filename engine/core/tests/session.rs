@@ -1598,3 +1598,36 @@ fn polyfill_tool_fills_between_joints() {
     s.command(&json!({"op": "undo"}));
     assert_eq!(s.state()["polyfills"].as_array().unwrap().len(), 1);
 }
+
+/// Figure editor "Add connector...": the next joint tapped is the endpoint;
+/// the connector joint sits on the line between, halfway, and Connector
+/// Tools moves it along that line.
+#[test]
+fn connector_sits_between_two_joints() {
+    let mut s = session();
+    s.command(&json!({"op": "select", "layer": "L2", "node": "torso"}));
+    s.command(&json!({"op": "build", "layer": "L2"}));
+    let st = s.command(&json!({"op": "connect_start"}));
+    assert_eq!(st["connecting"], true);
+    let at = |s: &Session, n: &str| {
+        let h = s.tools.handles(s.project(), 0.0).into_iter().find(|h| h.layer == "L2" && h.node == n).unwrap();
+        (h.x, h.y)
+    };
+    let (a, b) = (at(&s, "torso"), at(&s, "armR2"));
+    s.command(&json!({"op": "down", "x": b.0, "y": b.1, "r": 4}));
+    s.command(&json!({"op": "up"}));
+    let st = s.state();
+    assert_eq!(st["undo"], "Add connector");
+    assert_eq!(st["connecting"], false);
+    assert_eq!(st["selected"]["connector"]["to"], "armR2");
+    let id = st["selected"]["node"].as_str().unwrap().to_string();
+    let c = at(&s, &id);
+    assert!((c.0 - (a.0 + b.0) / 2.0).abs() < 1.0 && (c.1 - (a.1 + b.1) / 2.0).abs() < 1.0, "halfway: {c:?} between {a:?} and {b:?}");
+    s.command(&json!({"op": "connector_set", "percent": 0.25}));
+    let c = at(&s, &id);
+    assert!((c.0 - (a.0 + (b.0 - a.0) * 0.25)).abs() < 1.0, "a quarter of the way: {c:?}");
+    // it follows when the endpoint moves
+    s.command(&json!({"op": "undo"}));
+    s.command(&json!({"op": "undo"}));
+    assert!(s.state()["selected"]["connector"].is_null() || s.state()["selected"]["node"] != id.as_str());
+}

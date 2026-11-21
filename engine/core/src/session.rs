@@ -55,6 +55,8 @@ pub struct Session {
     pub building: Option<String>,
     /// Figure editor: the polyfill being edited (taps on joints add polynodes).
     pub polyfill: Option<String>,
+    /// Figure editor "Add connector...": the next joint tapped is the endpoint.
+    pub connecting: bool,
     /// Creation mode's draw tool (None: select and move).
     pub draw: Option<Shape>,
     gesture: Gesture,
@@ -122,7 +124,7 @@ impl Session {
         let mut doc = doc;
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
-        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -258,6 +260,34 @@ impl Session {
                         self.selected = self.project().root().and_then(|s| s.layer(&child)).and_then(|l| l.as_figure()).and_then(|f| f.nodes().first().map(|n| (child.clone(), n.id.clone())));
                     } else {
                         self.message = "Tap a joint on another figure.".into();
+                        self.rev += 1;
+                    }
+                    return true;
+                }
+                // Add connector: the tapped joint is the endpoint; a new joint on the
+                // straight line from the selected one to it (halfway) is the connector
+                if let (Some(b), true, Some((sl, sn))) = (self.building.clone(), self.connecting, self.selected.clone()) {
+                    let near = self.tools.handles(self.project(), t).into_iter().filter(|h| h.layer == b && h.node != sn && (h.x - x).hypot(h.y - y) <= radius).min_by(|p, q| {
+                        let d = |h: &Handle| (h.x - x).hypot(h.y - y);
+                        d(p).partial_cmp(&d(q)).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    if let (Some(h), true) = (near, sl == b) {
+                        let sym = self.project().root_symbol.clone();
+                        let made = self.step("Add connector", |s| {
+                            let id = figure_ops::add_segment(s, &sym, &b, &sn, 30.0, 40.0)?;
+                            let Some(LayerKind::Figure(f)) = s.project.layer_mut(&sym, &b).map(|l| &mut l.kind) else { return crate::edit::fail("no figure") };
+                            let n = f.node_mut(&id).expect("new joint");
+                            n.legacy_extras.insert(crate::eval::pose::CONNECT_TO.into(), format!("s:{}", h.node));
+                            n.legacy_extras.insert("C.cMethod".into(), "f:1".into());
+                            n.legacy_extras.insert("C.cPercent".into(), "f:0.5".into());
+                            Ok(id)
+                        });
+                        self.connecting = false;
+                        if let Some(id) = made {
+                            self.selected = Some((b, id));
+                        }
+                    } else {
+                        self.message = "Tap another joint of this figure.".into();
                         self.rev += 1;
                     }
                     return true;
@@ -882,6 +912,35 @@ impl Session {
                             self.draw = None;
                         }
                     }
+                }
+            }
+            "connect_start" => {
+                self.connecting = self.building.is_some() && self.selected.is_some();
+                self.polyfill = None;
+                self.rev += 1;
+            }
+            "connect_cancel" => {
+                self.connecting = false;
+                self.rev += 1;
+            }
+            "connector_set" => {
+                // Connector Tools: where it sits between its two joints
+                if let Some((l, n)) = self.selected.clone() {
+                    let (pc, rv) = (c["percent"].as_f64(), c["reversed"].as_bool());
+                    self.step("Connector", |s| {
+                        let Some(LayerKind::Figure(f)) = s.project.layer_mut(&sym, &l).map(|x| &mut x.kind) else { return crate::edit::fail("no figure") };
+                        let Some(x) = f.node_mut(&n) else { return crate::edit::fail("no joint") };
+                        if !x.legacy_extras.contains_key(crate::eval::pose::CONNECT_TO) {
+                            return crate::edit::fail("not a connector");
+                        }
+                        if let Some(v) = pc {
+                            x.legacy_extras.insert("C.cPercent".into(), format!("f:{}", (v.clamp(0.0, 1.0) * 100.0).round() / 100.0));
+                        }
+                        if let Some(v) = rv {
+                            x.legacy_extras.insert("C.cReversed".into(), format!("f:{}", if v { 1 } else { 0 }));
+                        }
+                        Ok(())
+                    });
                 }
             }
             "polyfill_edit" => {
@@ -2083,7 +2142,11 @@ impl Session {
                 "gradient": node.gradient, "gradientColor": color_of(&mut r, &node.gradient_color, t), "gradientReverse": node.gradient_reverse, "gradientSideways": node.gradient_sideways,
                 "segScale": round2(r.f(&node.scale, t)), "curve": round2(node.curve), "outline": node.circle_outline, "outlineColor": color_of(&mut r, &node.outline_color, t),
                 "hollow": node.circle_hollow, "halfArc": node.half_arc, "sides": node.polygon_sides, "rightTriangle": node.right_triangle, "upsideDown": node.triangle_upside_down, "angleLock": node.angle_lock,
-                "stretchy": node.stretchy, "ownColor": node.own_color, "dragLock": node.drag_lock != 0,
+                "stretchy": node.stretchy, "ownColor": node.own_color,
+                "connector": node.legacy_extras.get(crate::eval::pose::CONNECT_TO).map(|to| {
+                    let num = |k: &str, d: f64| node.legacy_extras.get(k).and_then(|v| v.split_once(':')).and_then(|(_, x)| x.parse::<f64>().ok()).unwrap_or(d);
+                    json!({"to": to.trim_start_matches("s:"), "percent": num("C.cPercent", 0.5), "reversed": num("C.cReversed", 0.0) != 0.0})
+                }), "dragLock": node.drag_lock != 0,
                 "scale": round2(r.f(&layer.transform.scale_y, t).abs()), "figAngle": round2(r.f(&layer.transform.rotation, t)),
                 "locked": layer.locked, "onion": layer.onion,
                 "joinedTo": layer.parent.as_ref().and_then(|pid| p.root()?.layer(pid)).map(|x| x.name.clone().unwrap_or_else(|| x.id.clone())),
@@ -2217,6 +2280,7 @@ impl Session {
             "frameNoTween": no_tween,
             "noTweenFrames": self.no_tween_frames(frames),
             "frameClipCount": self.frame_clip.as_ref().map(|c| c.1).unwrap_or(0),
+            "connecting": self.connecting,
             "polyfill": self.polyfill.as_ref().and_then(|id| {
                 let f = p.root()?.layer(self.building.as_ref()?)?.as_figure()?;
                 let pf = f.polyfills.iter().find(|x| &x.id == id)?;

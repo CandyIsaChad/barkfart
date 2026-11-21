@@ -52,7 +52,7 @@ committed). Plainest behaviour where the reference is unsure.
 - [x] Delete one segment keeping its children
 - [x] Modify branch window
 - [x] Polyfill tool (Add polyfill..., Polyfill Tools)
-- [ ] Add connector
+- [x] Add connector (Connector Tools: percent, reversed, delete)
 - [ ] Trace stickfigure / frame, background image, background colour
 - [ ] Save stickfigure to a file, add to library, backups
 

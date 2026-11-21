@@ -78,6 +78,9 @@ impl FigurePose {
     }
 }
 
+/// A connector made in Barkfart names its endpoint joint here ("s:<id>").
+pub const CONNECT_TO: &str = "bf.connectTo";
+
 /// How a connector is placed (from its imported Stick Nodes data).
 #[derive(Clone, Copy, Debug)]
 pub struct ConnectorSpec {
@@ -98,6 +101,18 @@ fn extra_num(n: &Node, k: &str) -> Option<f64> {
 pub fn connector_links(f: &Figure) -> std::collections::HashMap<usize, (usize, ConnectorSpec)> {
     let mut out = std::collections::HashMap::new();
     let nodes = f.nodes();
+    // connectors made in Barkfart: the endpoint's id on the connector itself
+    for (ci, n) in nodes.iter().enumerate() {
+        let Some(to) = n.legacy_extras.get(CONNECT_TO).and_then(|v| v.strip_prefix("s:")) else { continue };
+        let Some(ei) = f.index_of(to) else { continue };
+        let spec = ConnectorSpec {
+            by_value: extra_num(n, "C.cMethod").unwrap_or(1.0) as i32 == 0,
+            percent: extra_num(n, "C.cPercent").unwrap_or(0.5) as f32,
+            value: extra_num(n, "C.cValue").unwrap_or(0.0) as f32,
+            reversed: extra_num(n, "C.cReversed").unwrap_or(0.0) != 0.0,
+        };
+        out.insert(ci, (ei, spec));
+    }
     let Some(table) = nodes.first().and_then(|r| r.legacy_extras.get("fig.connections")) else { return out };
     let table = table.strip_prefix("s:").unwrap_or(table);
     for pair in table.split(';') {
