@@ -2657,6 +2657,18 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           IconButton(icon: const Icon(Icons.close, color: cSecondary), onPressed: () => setState(() => _viewOptions = false)),
         ]),
         _Toggle('Show only main nodes', _opts['mainOnly'] == true, (v) => _cmd({'op': 'set', 'k': 'mainonly', 'v': v})),
+        if (_st['building'] != null) ...[
+          _Toggle('Show static nodes', _opts['static'] != false, (v) => _cmd({'op': 'set', 'k': 'static', 'v': v})),
+          _Toggle('Show draw order', AppSettings.flag('drawOrder'), (v) => setState(() {
+                AppSettings.values['drawOrder'] = v;
+                unawaited(AppSettings.save());
+              })),
+          _Btn('Node highlight: ${const ['None', 'Polyfills', 'Connectors', 'Drag / angle locks'][AppSettings.number('nodeHighlight').clamp(0, 3)]}', small: true, onTap: () => setState(() {
+                AppSettings.values['nodeHighlight'] = (AppSettings.number('nodeHighlight') + 1) % 4;
+                unawaited(AppSettings.save());
+              })),
+          _gap,
+        ],
         for (final (k, label) in const [
           ('showIds', 'Show figure names'),
           ('neighbourLines', 'Show neighbour lines'),
@@ -3312,6 +3324,11 @@ class _Overlay extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 4.5
         ..color = const Color(0xCCFFFFFF);
+      // figure editor View options: Node highlight (a filled ring on the
+      // polynodes, connectors or locked joints)
+      final hl = AppSettings.number('nodeHighlight');
+      final lit = (hl == 1 && f & 16 != 0) || (hl == 2 && f & 32 != 0) || (hl == 3 && f & 64 != 0);
+      if (lit) canvas.drawCircle(p, 9, Paint()..color = const Color(0xAAFFB020));
       if (root) {
         final r = Rect.fromCenter(center: p, width: 10, height: 10);
         canvas.drawRect(r, halo);
@@ -3319,6 +3336,14 @@ class _Overlay extends CustomPainter {
       } else {
         canvas.drawCircle(p, 5.5, halo);
         canvas.drawCircle(p, 5.5, stroke);
+      }
+      // Show draw order: each joint's place in the drawing order
+      if (l.length > 3 && AppSettings.flag('drawOrder')) {
+        final tp = TextPainter(
+          text: TextSpan(text: '${l[3]}', style: const TextStyle(color: Color(0xFF111111), fontSize: 11, fontWeight: FontWeight.w600, backgroundColor: Color(0xCCFFFFFF))),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        tp.paint(canvas, p + const Offset(7, -16));
       }
     }
   }

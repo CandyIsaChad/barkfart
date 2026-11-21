@@ -2196,6 +2196,21 @@ impl Session {
                 let fig = self.selected.as_ref().is_some_and(|(l, _)| *l == h.layer);
                 let near = fig && near.contains(&h.node);
                 let flags = h.root as u32 | (sel as u32) << 1 | (fig as u32) << 2 | (near as u32) << 3;
+                if self.building.is_some() {
+                    // figure editor View options: node highlight and draw order
+                    // (16 polynode, 32 connector, 64 drag / angle lock; then the index)
+                    let f = p.root().and_then(|r| r.layer(&h.layer)).and_then(|l| l.as_figure());
+                    let (extra, idx) = f.and_then(|f| {
+                        let i = f.index_of(&h.node)?;
+                        let n = &f.nodes()[i];
+                        let poly = f.polyfills.iter().any(|pf| pf.nodes.iter().any(|x| *x == h.node));
+                        let conn = n.legacy_extras.contains_key(crate::eval::pose::CONNECT_TO) || n.legacy_extras.get("connector").is_some_and(|v| v == "b:true");
+                        let lock = n.drag_lock != 0 || n.angle_lock != 0;
+                        Some(((poly as u32) << 4 | (conn as u32) << 5 | (lock as u32) << 6, i))
+                    }).unwrap_or((0, 0));
+                    handles.push(json!([round2(h.x), round2(h.y), flags | extra, idx]));
+                    continue;
+                }
                 handles.push(json!([round2(h.x), round2(h.y), flags]));
             }
         }

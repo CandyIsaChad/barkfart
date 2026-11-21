@@ -219,6 +219,9 @@ class AppSettings {
     // Show filters on the stage: 0 none, 1 no blur, 2 all; playback has its own switch
     'showFilters': 2,
     'playFilters': true,
+    // figure editor View options
+    'drawOrder': false,
+    'nodeHighlight': 0,
     'zoomButtons': false,
     'guides': false,
     'stageBox': true,
