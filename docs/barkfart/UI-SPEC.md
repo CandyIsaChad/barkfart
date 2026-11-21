@@ -145,8 +145,17 @@ Deliberate differences: the pencil edits the figure itself on every frame
 (the original makes a new library figure); Open and the figure picker are
 windows with a filter (the picker shows pictures); playback quality and the
 frame cache are ours.
-Not yet: textfields, movieclip editor, filters, sounds per frame, frame
-delay and repeat, settings, magnifier and arrows windows, join, loop tween.
+Not yet: movieclip editor, join, loop tween; in Frame Tools "Expand
+gradient", "Silence all sounds", slow-motion tweening and "use frame
+tweening properties during repeat"; the figure editor's polyfill tool,
+connectors and tracing.
+Done since (2026-11-21): textfields, Stickfigure Filters, frame background
+colour and gradient, frame delay and repeat (one wall-time schedule in
+engine/core/src/timing.rs that playback, sound and exports follow), sounds
+per frame (a "Frame sounds" audio layer whose clips follow their frames),
+the figure editor's Draw Tools, the Arrows and Magnifier windows, and
+Settings (only the settings that apply here; kept in
+barkfart-settings.json).
 
 ## v3.1 (2026-11-21): frames are snapshots
 User decision: no timeline/dope-sheet behaviour for now. Every frame holds
