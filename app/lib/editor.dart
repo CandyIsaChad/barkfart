@@ -1236,7 +1236,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                   // top right: this frame pauses; under the number: it repeats a series
                   if (((_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?)?.first == true)
                     const Positioned(right: 3, top: 2, child: Icon(Icons.timer_outlined, size: 15, color: Color(0xFFFF9F0A))),
-                  if (((_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?)?.last == true)
+                  if (((_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?)?.elementAtOrNull(2) == true)
+                    const Positioned(right: 22, bottom: 2, child: Icon(Icons.volume_off, size: 15, color: cDanger)),
+                  if (((_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?)?.elementAtOrNull(1) == true)
                     const Positioned(left: 3, top: 19, child: Icon(Icons.repeat, size: 15, color: Color(0xFFBF5AF2))),
                   Positioned(
                     left: 0,
@@ -1532,7 +1534,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final back = (rep['back'] as num?)?.toInt() ?? 0;
     final times = math.max(1, (rep['times'] as num?)?.toInt() ?? 1);
     return [
-      Text('Frame ${_frame + 1} of $_frames', style: const TextStyle(color: cSecondary, fontSize: 12)),
+      Text('Frame ${_frame + 1} of $_frames · Nodes: ${_st['nodeCount'] ?? 0}', style: const TextStyle(color: cSecondary, fontSize: 12)),
       _gap,
       GestureDetector(
         onLongPress: last ? null : _tweenCountPopup,
@@ -1565,7 +1567,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _stepper('Repeat', '$times times', () => _cmd({'op': 'frame_repeat', 'back': back, 'times': math.max(1, times - 1)}), () => _cmd({'op': 'frame_repeat', 'back': back, 'times': times + 1})),
       ],
       _gap,
+      _Toggle('Silence all sounds', _st['frameSilence'] == true, (v) => _cmd({'op': 'frame_silence', 'on': v})),
+      _hint('Sounds still playing stop when this frame starts.'),
+      _gap,
       ..._soundsBlock(),
+      _gap,
+      _Btn('Clear frame', danger: true, onTap: () async {
+        final ok = await _ask('Clear this frame?', 'Every figure and textfield on this frame is taken off it. The frame itself stays. Undo brings them back.', ['Cancel', 'Clear frame']);
+        if (ok == 'Clear frame') _cmd({'op': 'clear_frame'});
+      }),
     ];
   }
 

@@ -1125,6 +1125,8 @@ pub struct CameraLayer {
     pub repeat_back: Property,
     /// ... this many times.
     pub repeat_times: Property,
+    /// 1: every sound still playing stops when this frame starts.
+    pub silence: Property,
 }
 
 #[derive(Clone, Debug)]
@@ -1261,6 +1263,7 @@ impl Layer {
                 delay: Property::float(format!("{id}/cam/delay"), 0.0),
                 repeat_back: Property::float(format!("{id}/cam/repeatBack"), 0.0),
                 repeat_times: Property::float(format!("{id}/cam/repeatTimes"), 0.0),
+                silence: Property::float(format!("{id}/cam/silence"), 0.0),
             }),
         )
     }
@@ -1298,7 +1301,7 @@ impl Layer {
                     out.push(&c.pan);
                 }
             }
-            LayerKind::Camera(c) => out.extend([&c.x, &c.y, &c.zoom, &c.rotation, &c.background, &c.background2, &c.delay, &c.repeat_back, &c.repeat_times]),
+            LayerKind::Camera(c) => out.extend([&c.x, &c.y, &c.zoom, &c.rotation, &c.background, &c.background2, &c.delay, &c.repeat_back, &c.repeat_times, &c.silence]),
         }
         out
     }
@@ -1338,7 +1341,7 @@ impl Layer {
                     out.push(&mut c.pan);
                 }
             }
-            LayerKind::Camera(c) => out.extend([&mut c.x, &mut c.y, &mut c.zoom, &mut c.rotation, &mut c.background, &mut c.background2, &mut c.delay, &mut c.repeat_back, &mut c.repeat_times]),
+            LayerKind::Camera(c) => out.extend([&mut c.x, &mut c.y, &mut c.zoom, &mut c.rotation, &mut c.background, &mut c.background2, &mut c.delay, &mut c.repeat_back, &mut c.repeat_times, &mut c.silence]),
         }
         out
     }

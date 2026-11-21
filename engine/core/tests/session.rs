@@ -1019,3 +1019,43 @@ fn segment_tools_set_gradient_curve_and_shape_options() {
     s.command(&json!({"op": "undo"}));
     assert_eq!(codec::encode(s.project()), before);
 }
+
+#[test]
+fn silence_and_clear_frame() {
+    use barkfart_core::audio::{encode_wav, tone, AudioPlan};
+    use barkfart_core::timing::Schedule;
+    let mut s = session();
+    for _ in 0..3 {
+        s.command(&json!({"op": "insert_frame"}));
+    }
+    let st = s.import("long.wav", &encode_wav(&tone(440.0, 2.0, 8000, 0.5)));
+    let id = st["soundList"][0]["id"].as_str().unwrap().to_string();
+    s.command(&json!({"op": "frame", "i": 0}));
+    s.command(&json!({"op": "frame_sound", "asset": id}));
+    // frame 3 silences it; frame 4 repeats frames 1-4 once
+    s.command(&json!({"op": "frame", "i": 2}));
+    let st = s.command(&json!({"op": "frame_silence", "on": true}));
+    assert_eq!(st["frameSilence"], true);
+    assert_eq!(st["frameMarks"][2][2], true);
+    s.command(&json!({"op": "frame", "i": 3}));
+    s.command(&json!({"op": "frame_repeat", "back": 3, "times": 1}));
+    let fps = s.project().settings.fps as f64;
+    let sounds = |_: &str| Some(std::sync::Arc::new(tone(440.0, 2.0, 8000, 0.5)));
+    let plan = AudioPlan::build(s.project(), s.project().root().unwrap(), &sounds);
+    let out = Schedule::build(s.project()).retime(&plan);
+    // played twice (frame 1 comes round again), each cut at the next silence
+    assert_eq!(out.entries.len(), 2);
+    assert!((out.entries[0].end - 2.0 / fps).abs() < 1e-9);
+    assert!((out.entries[1].start - 4.0 / fps).abs() < 1e-9 && (out.entries[1].end - 6.0 / fps).abs() < 1e-9);
+
+    // clear frame: nothing left on it, the other frames keep the figure; undoable
+    s.command(&json!({"op": "frame", "i": 1}));
+    let st = s.command(&json!({"op": "clear_frame"}));
+    assert_eq!(st["handles"].as_array().unwrap().len(), 0);
+    assert_eq!(st["nodeCount"], 0);
+    let st = s.command(&json!({"op": "frame", "i": 0}));
+    assert_eq!(st["nodeCount"], 11);
+    s.command(&json!({"op": "frame", "i": 1}));
+    let st = s.command(&json!({"op": "undo"}));
+    assert_eq!(st["handles"].as_array().unwrap().len(), 11);
+}

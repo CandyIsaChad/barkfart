@@ -14,6 +14,8 @@ pub struct Slot {
     pub start: f64,
     pub len: f64,
     pub delay: f64,
+    /// Sounds still playing stop when this slot starts.
+    pub silence: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -36,6 +38,12 @@ pub const MAX_DELAY: f32 = 600.0;
 pub fn setting(p: &Property, fps: f64, frame: i32) -> f32 {
     let (t, eps) = (frame as f64 / fps, 0.25 / fps);
     p.track.keys().iter().find(|k| (k.time - t).abs() < eps).and_then(|k| if let Value::F(v) = k.value { Some(v) } else { None }).filter(|v| v.is_finite()).unwrap_or(0.0)
+}
+
+/// Whether a frame silences the sounds playing when it starts.
+pub fn frame_silences(p: &Project, frame: i32) -> bool {
+    let fps = fps_of(p);
+    p.root().and_then(|s| s.layers.iter().find_map(|l| if let LayerKind::Camera(c) = &l.kind { Some(c) } else { None })).is_some_and(|c| setting(&c.silence, fps, frame) > 0.5)
 }
 
 /// (delay seconds, go back frames, times) of a frame.
@@ -67,14 +75,15 @@ impl Schedule {
         let fps = fps_of(p);
         let n = frame_count(p);
         let sets: Vec<(f32, i32, i32)> = (0..n).map(|f| frame_settings(p, f)).collect();
-        let identity = sets.iter().all(|s| s.0 == 0.0 && s.2 == 0);
+        let silences: Vec<bool> = (0..n).map(|f| frame_silences(p, f)).collect();
+        let identity = sets.iter().all(|s| s.0 == 0.0 && s.2 == 0) && !silences.iter().any(|x| *x);
         let mut slots = Vec::with_capacity(n as usize);
         let mut done = vec![0i32; n as usize];
         let (mut f, mut at) = (0i32, 0f64);
         while f < n && slots.len() < MAX_SLOTS {
             let (delay, back, times) = sets[f as usize];
             let len = 1.0 / fps + delay as f64;
-            slots.push(Slot { frame: f, start: at, len, delay: delay as f64 });
+            slots.push(Slot { frame: f, start: at, len, delay: delay as f64, silence: silences[f as usize] });
             at += len;
             if times > 0 && done[f as usize] < times {
                 done[f as usize] += 1;
@@ -146,7 +155,13 @@ impl Schedule {
                 let mut c = e.clone();
                 c.start = s.start + off;
                 c.end = if e.loop_ { self.total.max(c.start) } else { c.start + (e.end - e.start) };
-                out.entries.push(c);
+                // a later silencing frame cuts it off
+                if let Some(cut) = self.slots.iter().find(|x| x.silence && x.start > s.start + 1e-9).map(|x| x.start) {
+                    c.end = c.end.min(cut);
+                }
+                if c.end > c.start {
+                    out.entries.push(c);
+                }
             }
         }
         out
@@ -162,10 +177,10 @@ mod tests {
     #[test]
     fn sounds_start_on_every_slot_of_their_frame() {
         let fps = 10.0;
-        let slot = |frame, start| Slot { frame, start, len: 0.1, delay: 0.0 };
+        let slot = |frame, start| Slot { frame, start, len: 0.1, delay: 0.0, silence: false };
         // frames 0 1 2, frame 0 pauses 1 s, then 1 2 repeat once
         let sch = Schedule {
-            slots: vec![Slot { frame: 0, start: 0.0, len: 1.1, delay: 1.0 }, slot(1, 1.1), slot(2, 1.2), slot(1, 1.3), slot(2, 1.4)],
+            slots: vec![Slot { frame: 0, start: 0.0, len: 1.1, delay: 1.0, silence: false }, slot(1, 1.1), slot(2, 1.2), slot(1, 1.3), slot(2, 1.4)],
             fps,
             total: 1.5,
             identity: false,
@@ -190,7 +205,7 @@ mod export_tests {
     #[test]
     fn exports_hold_delays_and_play_repeats() {
         let fps = 10.0;
-        let slot = |frame, start, delay: f64| Slot { frame, start, len: 0.1 + delay, delay };
+        let slot = |frame, start, delay: f64| Slot { frame, start, len: 0.1 + delay, delay, silence: false };
         let sch = Schedule { slots: vec![slot(0, 0.0, 0.0), slot(1, 0.1, 0.3), slot(0, 0.5, 0.0), slot(1, 0.6, 0.3)], fps, total: 1.0, identity: false };
         // GIF: the delayed picture carries its extra time
         let gif = crate::export::pictures(&sch, 0, 2, fps, false);
