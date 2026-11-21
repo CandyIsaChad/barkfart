@@ -1507,6 +1507,47 @@ impl Session {
                     self.changed();
                 }
             }
+            "camera_lock" => {
+                // Lock Figure To Camera: the figure moves with the camera (kept where
+                // it is now); joined figures have to be unjoined first
+                let id = c["layer"].as_str().map(str::to_string).or_else(|| self.sel_layer());
+                let on = c["on"].as_bool().unwrap_or(true);
+                if let Some(id) = id {
+                    let joined = self.project().root().and_then(|r| r.layer(&id)).is_some_and(|l| l.parent.as_ref().is_some_and(|p| !self.project().root().and_then(|r| r.layer(p)).is_some_and(|x| matches!(x.kind, LayerKind::Camera(_)))));
+                    if on && joined {
+                        self.message = "You can't lock a joined figure to the camera. Unjoin it first.".into();
+                    } else {
+                        self.step(if on { "Lock to camera" } else { "Unlock from camera" }, |s| {
+                            let cam = if on { Some(ensure_camera(s, &sym)?) } else { None };
+                            crate::edit::join_ops::reparent(s, &sym, &id, cam.as_deref(), t)?;
+                            if let Some(l) = s.project.layer_mut(&sym, &id) {
+                                if !on {
+                                    l.parallax = 0.0;
+                                    l.lock_move_only = false;
+                                }
+                            }
+                            Ok(())
+                        });
+                    }
+                }
+            }
+            "camera_lock_set" => {
+                // parallax in the original's units (1 = exactly with the camera) and
+                // "Rotate and scale with camera?"
+                if let Some(id) = c["layer"].as_str().map(str::to_string) {
+                    let (par, rot) = (c["parallax"].as_f64(), c["rotate"].as_bool());
+                    self.step("Camera lock", |s| {
+                        let Some(l) = s.project.layer_mut(&sym, &id) else { return crate::edit::fail("no layer") };
+                        if let Some(p) = par {
+                            l.parallax = (1.0 - p.clamp(-1.0, 1.0)) as f32;
+                        }
+                        if let Some(r) = rot {
+                            l.lock_move_only = !r;
+                        }
+                        Ok(())
+                    });
+                }
+            }
             "library_delete" => {
                 // Library Tools: a figure, movieclip or sprite off every frame (the
                 // ones joined to it stay where they are, unjoined)
@@ -1932,6 +1973,12 @@ impl Session {
                 "x0": round2(x0), "y0": round2(y0), "x1": round2(x1), "y1": round2(y1),
             }))
         });
+        // Lock Figure To Camera: the locked ones (parallax in the original's units)
+        let camera_locks: Vec<J> = p.root().map(|r| {
+            r.layers.iter().filter(|l| l.parent.as_ref().is_some_and(|pid| r.layer(pid).is_some_and(|x| matches!(x.kind, LayerKind::Camera(_))))).map(|l| {
+                json!({"layer": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone()), "parallax": round2(1.0 - l.parallax), "rotate": !l.lock_move_only})
+            }).collect()
+        }).unwrap_or_default();
         // Library Tools: every figure, movieclip and sprite with the frames it is on
         let library: Vec<J> = p.root().map(|r| {
             let mut res = Resolver::new(p);
@@ -1995,7 +2042,7 @@ impl Session {
             "propsFrom": self.props_clip.as_ref().and_then(|c| p.root()?.layer(&c.source).map(|l| l.name.clone().unwrap_or_else(|| l.id.clone()))),
             "textfield": textfield, "textfieldCopied": self.textfield_clip.is_some(),
             "filtersCopied": self.filter_clip.is_some(),
-            "frameBg": bg, "library": library,
+            "frameBg": bg, "library": library, "cameraLocks": camera_locks,
             "drawTool": self.draw.map(shape_name).unwrap_or("none"), "drawLine": draw_line,
             "soundList": sound_list, "frameSound": frame_snd, "soundCopied": self.sound_clip.is_some(),
             "frameDelay": fset.0, "frameRepeat": rep,

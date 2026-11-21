@@ -1446,3 +1446,34 @@ fn tween_colours_and_keep_during_tween() {
     assert_eq!(drawn(&s, 0.0), with, "still on its own frame");
     assert!(codec::encode(s.project()).contains("vanishInTween"));
 }
+
+/// Camera Tools "Lock figure to camera": the locked figure keeps its place
+/// and size in the shot when the camera zooms; without "Rotate and scale
+/// with camera" the zoom still scales it. Unlock puts it back.
+#[test]
+fn lock_figure_to_camera() {
+    let mut s = Session::new(Document::new(barkfart_core::session::new_editor_project()));
+    s.command(&json!({"op": "add_camera"}));
+    let fig = s.project().root().unwrap().layers.iter().find(|l| l.as_figure().is_some()).unwrap().id.clone();
+    let width = |s: &Session| {
+        let p = s.project();
+        let xy: Vec<f32> = barkfart_core::tess::tessellate(&barkfart_core::eval::evaluate(p, &p.root_symbol, 0.0), None).batches.iter().flat_map(|b| b.xy.iter().step_by(2).copied().collect::<Vec<_>>()).collect();
+        xy.iter().cloned().fold(f32::MIN, f32::max) - xy.iter().cloned().fold(f32::MAX, f32::min)
+    };
+    let w0 = width(&s);
+    let st = s.command(&json!({"op": "camera_lock", "layer": fig, "on": true}));
+    assert_eq!(st["undo"], "Lock to camera");
+    assert_eq!(st["cameraLocks"][0]["layer"], fig.as_str());
+    assert_eq!(st["cameraLocks"][0]["parallax"], 1.0);
+    assert!((width(&s) - w0).abs() < 0.5, "kept in place");
+    s.command(&json!({"op": "camera", "zoom": 2.0}));
+    assert!((width(&s) - w0).abs() < 0.5, "a zoom does not change it in the shot: {} {w0}", width(&s));
+    let st = s.command(&json!({"op": "camera_lock_set", "layer": fig, "rotate": false}));
+    assert_eq!(st["cameraLocks"][0]["rotate"], false);
+    assert!(width(&s) > w0 * 1.5, "now the zoom scales it: {}", width(&s));
+    let st = s.command(&json!({"op": "camera_lock_set", "layer": fig, "parallax": 0.5}));
+    assert_eq!(st["cameraLocks"][0]["parallax"], 0.5);
+    let st = s.command(&json!({"op": "camera_lock", "layer": fig, "on": false}));
+    assert_eq!(st["cameraLocks"].as_array().unwrap().len(), 0);
+    assert!(codec::encode(s.project()).contains("\"parallax\"") == false, "unlocked: no parallax left");
+}

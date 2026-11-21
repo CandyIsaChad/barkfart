@@ -796,6 +796,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         case 'library':
           if (w.length > 1) setState(() => _libType = int.parse(w[1]));
           unawaited(_libraryDialog());
+        case 'cameralock':
+          unawaited(_cameraLockDialog());
         case 'modifybranch':
           unawaited(_modifyBranchDialog());
         case 'viewoptions':
@@ -2354,8 +2356,53 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _stepper('Rotation', '${rot.round()}°', () => _cmd({'op': 'camera', 'rotation': rot - 5}), () => _cmd({'op': 'camera', 'rotation': rot + 5})),
       _gap,
       _pair(_Btn('Center camera', onTap: () => _cmd({'op': 'camera', 'center': true})), _Btn('Reset', onTap: () => _cmd({'op': 'reset_camera'}))),
+      _gap,
+      _Btn('Lock figure to camera…', onTap: _cameraLockDialog),
     ];
   }
+
+  /// Lock Figure To Camera: locked figures move with the camera (a health
+  /// bar, a logo); parallax and "rotate and scale with camera" per figure.
+  Future<void> _cameraLockDialog() => showDialog<void>(
+        context: context,
+        builder: (c) => StatefulBuilder(builder: (c, set) {
+          final locks = ((_st['cameraLocks'] as List?) ?? const []).cast<Map>();
+          final locked = {for (final m in locks) m['layer']};
+          final free = ((_st['library'] as List?) ?? const []).cast<Map>().where((m) => !locked.contains(m['layer'])).toList();
+          void run(Map<String, Object?> cmd) {
+            _cmd(cmd);
+            set(() {});
+          }
+
+          return AlertDialog(
+            backgroundColor: cPanel,
+            title: const Text('Lock figure to camera', style: TextStyle(color: cText, fontSize: 16)),
+            content: SizedBox(
+              width: 420,
+              child: ListView(shrinkWrap: true, children: [
+                _hint('A locked figure is no longer moved by hand: it moves with the camera. Useful for a health bar or a logo. Joined figures cannot be locked; unjoin them first. Parallax 1.00 moves exactly with the camera, 0.10 barely, negative values the opposite way (foreground).'),
+                const SizedBox(height: 12),
+                _label('Currently locked figures'),
+                if (locks.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 6), child: Text('(None)', style: TextStyle(color: cSecondary, fontSize: 13))),
+                for (final m in locks) ...[
+                  Row(children: [
+                    Expanded(child: Text('${m['name']}', style: const TextStyle(color: cText, fontSize: 13), overflow: TextOverflow.ellipsis)),
+                    SizedBox(width: 90, child: _Btn('Unlock', small: true, onTap: () => run({'op': 'camera_lock', 'layer': m['layer'], 'on': false}))),
+                  ]),
+                  _stepper('Parallax', ((m['parallax'] as num).toDouble()).toStringAsFixed(2), () => run({'op': 'camera_lock_set', 'layer': m['layer'], 'parallax': (m['parallax'] as num) - 0.1}), () => run({'op': 'camera_lock_set', 'layer': m['layer'], 'parallax': (m['parallax'] as num) + 0.1})),
+                  _Toggle('Rotate and scale with camera?', m['rotate'] == true, (v) => run({'op': 'camera_lock_set', 'layer': m['layer'], 'rotate': v})),
+                  const Divider(color: cSelected),
+                ],
+                const SizedBox(height: 8),
+                _label('Choose figure to lock'),
+                for (final m in free) Padding(padding: const EdgeInsets.only(bottom: 4), child: _Btn('${m['name']}', small: true, onTap: () => run({'op': 'camera_lock', 'layer': m['layer'], 'on': true}))),
+                if ('${_st['message'] ?? ''}'.contains('Unjoin')) Text('${_st['message']}', style: const TextStyle(color: cDanger, fontSize: 12)),
+              ]),
+            ),
+            actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Okay'))],
+          );
+        }),
+      );
 
   /// A colour control: the current colour; a tap opens the colour picker.
   Widget _swatches(int current, void Function(int) pick) {

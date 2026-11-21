@@ -1188,6 +1188,9 @@ pub struct Layer {
     pub vanish_in_tween: bool,
     /// "Tween stickfigure colors" off: colour keys hold until the next frame.
     pub colors_jump: bool,
+    /// Locked to the camera without "Rotate and scale with camera": only the
+    /// camera's movement carries it, its zoom and rotation still apply.
+    pub lock_move_only: bool,
     pub transform: Transform,
     pub effects: EffectStack,
     pub kind: LayerKind,
@@ -1212,6 +1215,7 @@ impl Layer {
             parallax: 0.0,
             vanish_in_tween: false,
             colors_jump: false,
+            lock_move_only: false,
             transform: Transform::new(id),
             effects: EffectStack::default(),
             kind,

@@ -421,6 +421,7 @@ fn layer(m: &Obj) -> R<Layer> {
     l.parallax = f(m, "parallax", 0.0)?;
     l.vanish_in_tween = b(m, "vanishInTween", false)?;
     l.colors_jump = b(m, "colorsJump", false)?;
+    l.lock_move_only = b(m, "lockMoveOnly", false)?;
     read_prop(m, "shown", &mut l.shown)?;
     read_prop(m, "opacity", &mut l.opacity)?;
     if let Some(t) = m.get("transform") {
@@ -838,6 +839,9 @@ fn layer_json(l: &Layer) -> Json {
     }
     if l.colors_jump {
         m.put("colorsJump", Json::Bool(true));
+    }
+    if l.lock_move_only {
+        m.put("lockMoveOnly", Json::Bool(true));
     }
     if l.parallax != 0.0 {
         m.put("parallax", json::f32(l.parallax));

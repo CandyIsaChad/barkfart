@@ -194,7 +194,12 @@ pub fn camera_of(c: &CameraLayer, t: f64, r: &mut Resolver) -> Affine {
 }
 
 /// The part of the camera's view a camera-locked layer undoes (parallax).
-fn lock_view(c: &CameraLayer, parallax: f32, t: f64, r: &mut Resolver) -> Affine {
+fn lock_view(c: &CameraLayer, parallax: f32, move_only: bool, t: f64, r: &mut Resolver) -> Affine {
+    if move_only {
+        let k = 1.0 - parallax as f64;
+        let (x, y) = (r.f(&c.x, t), r.f(&c.y, t));
+        return Affine::translate(-x as f64 * k, -y as f64 * k);
+    }
     if parallax == 0.0 {
         return camera_of(c, t, r);
     }
@@ -374,7 +379,7 @@ pub fn layer_chain(sym: &Symbol, l: &Layer, t: f64, r: &mut Resolver) -> Affine 
             break;
         }
         if let LayerKind::Camera(c) = &p.kind {
-            acc = lock_view(c, cur.parallax, t, r).inverse().mul(&acc);
+            acc = lock_view(c, cur.parallax, cur.lock_move_only, t, r).inverse().mul(&acc);
             cur = p;
             continue;
         }
