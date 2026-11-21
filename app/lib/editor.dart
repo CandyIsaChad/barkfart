@@ -2790,7 +2790,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     var staticOn = sel['static'] == true;
     var stretchy = sel['stretchy'] == true;
     var scale = 1.0;
+    var from = color, to = 0xff0000ff, grad = (sel['gradientColor'] as num?)?.toInt() ?? 0xffffffff;
+    var ownColor = sel['ownColor'] == true, ignore0 = true;
     void apply(Map<String, Object?> change) => _cmd({'op': 'segment', 'branch': true, ...change});
+    void edit(Map<String, Object?> change) => _cmd({'op': 'branch_edit', 'ignoreZero': ignore0, ...change});
     await showDialog<void>(
       context: context,
       builder: (c) => StatefulBuilder(
@@ -2824,7 +2827,41 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               child: ListView(shrinkWrap: true, children: [
                 _hint('Each Set applies one value to the selected joint and every joint below it.'),
                 const SizedBox(height: 12),
+                _label('Replace colour'),
+                Row(children: [
+                  Expanded(child: _swatches(from, (v) => set(() => from = v))),
+                  const Padding(padding: EdgeInsets.symmetric(horizontal: 6), child: Text('→', style: TextStyle(color: cText))),
+                  Expanded(child: _swatches(to, (v) => set(() => to = v))),
+                ]),
+                Row(children: [
+                  Expanded(child: _Btn('Replace', small: true, onTap: () => edit({'replaceFrom': from, 'replaceTo': to}))),
+                  const SizedBox(width: 8),
+                  Expanded(child: _Btn('From <<< To', small: true, onTap: () => set(() => from = to))),
+                ]),
+                const SizedBox(height: 12),
                 row('Segment colour', _swatches(color, (v) => set(() => color = v)), () => apply({'color': color})),
+                row('Gradient colour', _swatches(grad, (v) => set(() => grad = v)), () => edit({'gradientColor': grad})),
+                Row(children: [
+                  Expanded(child: _Toggle('Use segment colour', ownColor, (v) => set(() => ownColor = v))),
+                  const SizedBox(width: 8),
+                  SizedBox(width: 56, child: _Btn('Set', small: true, onTap: () => edit({'ownColor': ownColor}))),
+                ]),
+                _label('Increment'),
+                _Toggle('Ignore 0s', ignore0, (v) => set(() => ignore0 = v)),
+                Row(children: [
+                  const Expanded(child: Text('Thickness', style: TextStyle(color: cText, fontSize: 13))),
+                  SizedBox(width: 48, child: _Btn('−2', small: true, onTap: () => edit({'addThickness': -2}))),
+                  const SizedBox(width: 4),
+                  SizedBox(width: 48, child: _Btn('+2', small: true, onTap: () => edit({'addThickness': 2}))),
+                ]),
+                const SizedBox(height: 4),
+                Row(children: [
+                  const Expanded(child: Text('Length', style: TextStyle(color: cText, fontSize: 13))),
+                  SizedBox(width: 48, child: _Btn('−5', small: true, onTap: () => edit({'addLength': -5}))),
+                  const SizedBox(width: 4),
+                  SizedBox(width: 48, child: _Btn('+5', small: true, onTap: () => edit({'addLength': 5}))),
+                ]),
+                const SizedBox(height: 12),
                 numberRow('Thickness', '$thickness', () => set(() => thickness = math.max(0, thickness - 2)), () => set(() => thickness = math.min(400, thickness + 2)), () => apply({'thickness': thickness})),
                 row('Shape', Wrap(spacing: 4, runSpacing: 4, children: [
                   for (final s in const ['line', 'circle', 'square', 'ellipse', 'triangle', 'trapezoid', 'polygon'])

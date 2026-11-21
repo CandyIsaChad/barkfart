@@ -922,6 +922,68 @@ impl Session {
                     }
                 }
             }
+            "branch_edit" => {
+                // Modify branch, the rows beyond the Java reference's modify_branch:
+                // replace one colour by another, use segment colour, gradient
+                // colour, and increment thickness / length ("ignore 0s")
+                if let Some((l, n)) = self.selected.clone() {
+                    let c2 = c.clone();
+                    self.step("Modify branch", |s| {
+                        let Some(LayerKind::Figure(f)) = s.project.layer_mut(&sym, &l).map(|x| &mut x.kind) else { return crate::edit::fail("no figure") };
+                        let fig_color = figure_ops::figure_color(f);
+                        let ignore0 = c2["ignoreZero"].as_bool().unwrap_or(true);
+                        for id in f.subtree(&n) {
+                            let Some(x) = f.node_mut(&id).filter(|x| x.parent.is_some()) else { continue };
+                            if let (Some(from), Some(to)) = (c2["replaceFrom"].as_u64(), c2["replaceTo"].as_u64()) {
+                                let (from, to) = (Color::rgba8888(from as u32), Color::rgba8888(to as u32));
+                                if x.color.track.is_empty() && x.color.value.color() == from {
+                                    x.color.value = Value::C(to);
+                                    x.own_color = true;
+                                }
+                                if x.gradient_color.track.is_empty() && x.gradient_color.value.color() == from {
+                                    x.gradient_color.value = Value::C(to);
+                                }
+                            }
+                            if let Some(v) = c2["ownColor"].as_bool() {
+                                x.own_color = v;
+                                if !v {
+                                    x.color.track.clear();
+                                    x.color.value = Value::C(fig_color);
+                                }
+                            }
+                            if let Some(v) = c2["gradientColor"].as_u64() {
+                                x.gradient_color.track.clear();
+                                x.gradient_color.value = Value::C(Color::rgba8888(v as u32));
+                            }
+                            if let Some(d) = c2["addThickness"].as_f64() {
+                                if !(ignore0 && x.thickness.value.f() == 0.0 && x.thickness.track.is_empty()) {
+                                    let v = (x.thickness.value.f() + d as f32).clamp(0.0, 400.0);
+                                    x.thickness.track.clear();
+                                    x.thickness.value = Value::F(v);
+                                }
+                            }
+                            if let Some(d) = c2["addLength"].as_f64() {
+                                let d = d as f32;
+                                let zero = x.length.track.is_empty() && x.length.value.f() == 0.0;
+                                if !(ignore0 && zero) {
+                                    x.length.value = Value::F((x.length.value.f() + d).max(0.0));
+                                    for k in x.length.track.keys().to_vec() {
+                                        let mut k = k;
+                                        if let Value::F(v) = k.value {
+                                            k.value = Value::F((v + d).max(0.0));
+                                        }
+                                        x.length.track.put(k);
+                                    }
+                                    if x.rest_length > 0.0 {
+                                        x.rest_length = (x.rest_length + d).max(0.0);
+                                    }
+                                }
+                            }
+                        }
+                        Ok(())
+                    });
+                }
+            }
             "editor_bg" => {
                 self.editor_bg = c["color"].as_u64().map(|v| v as u32);
                 self.rev += 1;

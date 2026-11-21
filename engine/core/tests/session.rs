@@ -1694,3 +1694,26 @@ fn trace_ghost_of_a_frame_or_a_figure() {
     assert!(st["trace"].is_null());
     assert_eq!(codec::encode(s.project()), before, "nothing saved");
 }
+
+/// Modify branch: replace a colour, increment thickness / length (ignoring
+/// zeros), gradient colour, use segment colour; each one undo step.
+#[test]
+fn modify_branch_replace_and_increment() {
+    let mut s = session();
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    s.command(&json!({"op": "segment", "color": 0x112233ffu32}));
+    let node = |s: &Session, n: &str| s.project().root().unwrap().layer("L2").unwrap().as_figure().unwrap().node(n).unwrap().clone();
+    let other = node(&s, "armR2").color.value.color().to_rgba8888();
+    let st = s.command(&json!({"op": "branch_edit", "replaceFrom": 0x112233ffu32, "replaceTo": 0xff0000ffu32}));
+    assert_eq!(st["undo"], "Modify branch");
+    assert_eq!(node(&s, "armR1").color.value.color().to_rgba8888(), 0xff0000ff);
+    assert_eq!(node(&s, "armR2").color.value.color().to_rgba8888(), other, "only that colour");
+    let (t1, l2) = (node(&s, "armR1").thickness.value.f(), node(&s, "armR2").length.value.f());
+    s.command(&json!({"op": "branch_edit", "addThickness": 4.0, "addLength": 10.0}));
+    assert_eq!(node(&s, "armR1").thickness.value.f(), t1 + 4.0);
+    assert_eq!(node(&s, "armR2").length.value.f(), l2 + 10.0);
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(node(&s, "armR1").thickness.value.f(), t1);
+    s.command(&json!({"op": "branch_edit", "ownColor": false}));
+    assert!(!node(&s, "armR1").own_color);
+}
