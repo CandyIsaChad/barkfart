@@ -355,3 +355,42 @@ fn copy_paste_and_no_tween_frames() {
     let st = s.command(&json!({"op": "no_tween", "on": true}));
     assert_eq!(st["frameNoTween"], true);
 }
+
+#[test]
+fn stickfigure_segment_and_camera_tools() {
+    let mut s = two_poses();
+    s.command(&json!({"op": "select", "layer": "L2"}));
+    let st = s.command(&json!({"op": "figure", "scale": 3.0}));
+    assert_eq!(st["selected"]["scale"], 3.0);
+    let st = s.command(&json!({"op": "figure", "turn": 45.0}));
+    assert_eq!(st["selected"]["figAngle"], 45.0);
+    let st = s.command(&json!({"op": "figure", "color": 0x336699ffu32}));
+    assert_eq!(st["selected"]["figColor"], 0x336699ffu32);
+    let st = s.command(&json!({"op": "figure", "locked": true}));
+    assert_eq!(st["selected"]["locked"], true);
+    assert_eq!(st["handles"].as_array().unwrap().len(), 0, "a locked figure has no handles");
+    s.command(&json!({"op": "figure", "locked": false}));
+    // scale is keyed on this frame only
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "select", "layer": "L2"}));
+    assert_eq!(s.state()["selected"]["scale"], 2.0);
+
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR2"}));
+    let st = s.command(&json!({"op": "node", "stretchy": true, "length": 70.0}));
+    assert_eq!(st["selected"]["stretchy"], true);
+    assert_eq!(st["selected"]["length"], 70.0);
+
+    s.command(&json!({"op": "copy_figure"}));
+    let st = s.command(&json!({"op": "paste_figure"}));
+    assert_eq!(st["figures"].as_array().unwrap().len(), 2);
+    assert_ne!(st["selected"]["layer"], "L2");
+    // pasted on frame 2: not there on frame 1
+    s.command(&json!({"op": "frame", "i": 0}));
+    assert_eq!(s.state()["handles"].as_array().unwrap().len(), 11);
+
+    let st = s.command(&json!({"op": "add_camera"}));
+    assert!(st["cam"].is_object());
+    let st = s.command(&json!({"op": "camera", "zoom": 1.5, "rotation": 10.0}));
+    assert_eq!(st["cam"]["zoom"], 1.5);
+    assert_eq!(st["undo"], "Camera");
+}

@@ -41,12 +41,17 @@ pub struct Session {
     /// Selected (layer, node).
     pub selected: Option<(String, String)>,
     pub onion: bool,
+    /// Every drag stretches (the Drag: Stretch switch); otherwise only stretchy segments do.
+    pub stretch_all: bool,
     /// The figure open in the figure editor (structure tools, its joints only).
     pub building: Option<String>,
     gesture: Gesture,
     /// The last tap (no drag): where, and which handle, for node digging.
     last_tap: Option<(f32, f32, String, String)>,
     pose_clip: Option<(IndexMap<String, f32>, IndexMap<String, f32>)>,
+    /// Copied stickfigure (with joined figures) and copied figure properties.
+    figure_clip: Option<Vec<Layer>>,
+    props_clip: Option<layer_ops::Props>,
     /// Copied frame: its keys (times relative to the frame).
     frame_clip: Option<crate::edit::editor::KeyClip>,
     /// Bumped on every change the app should redraw for (drags included).
@@ -76,7 +81,7 @@ impl Session {
         let mut tools = CanvasTools::default();
         tools.key_scope = KeyScope::Figure;
         let frame = doc.project().view.frame.max(0);
-        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, onion: true, building: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, onion: true, stretch_all: false, building: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -222,6 +227,8 @@ impl Session {
                     if (x - x0).hypot(y - y0) < slop {
                         return;
                     }
+                    let stretchy = self.project().root().and_then(|s| s.layer(&hit.layer)).and_then(|l| l.as_figure()).and_then(|f| f.node(&hit.node)).is_some_and(|n| n.stretchy);
+                    self.tools.stretch = self.stretch_all || stretchy;
                     self.doc.begin(if hit.root { "Move figure" } else { "Pose node" });
                     anchor_poses(&mut self.doc.state);
                     self.tools.begin(&mut self.doc, &hit, x0, y0, t);
@@ -493,7 +500,7 @@ impl Session {
             }
             "set" => {
                 match c["k"].as_str().unwrap_or("") {
-                    "stretch" => self.tools.stretch = b("v"),
+                    "stretch" => self.stretch_all = b("v"),
                     "scope" => self.tools.key_scope = if c["v"].as_str() == Some("joint") { KeyScope::Joint } else { KeyScope::Figure },
                     "snap" => self.tools.snap_degrees = f("v").max(0.0),
                     "onion" => self.onion = b("v"),
@@ -723,6 +730,163 @@ impl Session {
                     });
                 }
             }
+            "figure" => {
+                // Stickfigure Tools values: keyed on this frame like a pose
+                if let Some(l) = self.sel_layer() {
+                    let c2 = c.clone();
+                    let ed = self.tools.editor.clone();
+                    let mut r = Resolver::new(self.project());
+                    let lay = self.project().root().and_then(|s| s.layer(&l)).cloned();
+                    let Some(lay) = lay else { return self.state() };
+                    let (x, y, rot, sx, sy) = (r.f(&lay.transform.x, t), r.f(&lay.transform.y, t), r.f(&lay.transform.rotation, t), r.f(&lay.transform.scale_x, t), r.f(&lay.transform.scale_y, t));
+                    let ids = (lay.transform.x.id.clone(), lay.transform.y.id.clone(), lay.transform.rotation.id.clone(), lay.transform.scale_x.id.clone(), lay.transform.scale_y.id.clone());
+                    self.step("Stickfigure", move |s| {
+                        if let Some(v) = c2["scale"].as_f64() {
+                            let v = v.clamp(0.01, 100.0) as f32;
+                            // keep the sign (a flipped figure stays flipped)
+                            ed.change_in(s, &ids.3, Value::F(v * sx.signum() * if sx == 0.0 { 1.0 } else { 1.0 }), t)?;
+                            ed.change_in(s, &ids.4, Value::F(v * if sy < 0.0 { -1.0 } else { 1.0 }), t)?;
+                        }
+                        if let Some(v) = c2["angle"].as_f64() {
+                            ed.change_in(s, &ids.2, Value::F(v as f32), t)?;
+                        }
+                        if let Some(v) = c2["turn"].as_f64() {
+                            ed.change_in(s, &ids.2, Value::F(rot + v as f32), t)?;
+                        }
+                        if c2["center"].as_bool() == Some(true) && (x != 0.0 || y != 0.0) {
+                            ed.change_in(s, &ids.0, Value::F(0.0), t)?;
+                            ed.change_in(s, &ids.1, Value::F(0.0), t)?;
+                        }
+                        let layer = s.project.layer_mut(&sym, &l).expect("layer");
+                        if let Some(v) = c2["locked"].as_bool() {
+                            layer.locked = v;
+                        }
+                        if let Some(v) = c2["onion"].as_bool() {
+                            layer.onion = v;
+                        }
+                        if let Some(v) = c2["color"].as_u64() {
+                            let root = layer.as_figure().and_then(|f| f.nodes().first().map(|n| n.id.clone()));
+                            if let Some(root) = root {
+                                figure_ops::modify_branch(s, &sym, &l, &root, &BranchChange::Color(Color::rgba8888(v as u32)))?;
+                            }
+                        }
+                        Ok(())
+                    });
+                    self.validate();
+                }
+            }
+            "node" => {
+                // Segment Tools for the segment ending at the selected node
+                if let Some((l, n)) = self.selected.clone() {
+                    let c2 = c.clone();
+                    let ed = self.tools.editor.clone();
+                    self.step("Segment", move |s| {
+                        if let Some(v) = c2["length"].as_f64() {
+                            let id = s.project.root().and_then(|r| r.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.node(&n)).map(|x| x.length.id.clone());
+                            if let Some(id) = id {
+                                ed.change_in(s, &id, Value::F(v.max(0.0) as f32), t)?;
+                            }
+                        }
+                        if let Some(v) = c2["angle"].as_f64() {
+                            let id = s.project.root().and_then(|r| r.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.node(&n)).map(|x| x.rotation.id.clone());
+                            if let Some(id) = id {
+                                ed.change_in(s, &id, Value::F(v as f32), t)?;
+                            }
+                        }
+                        let Some(layer) = s.project.layer_mut(&sym, &l) else { return Ok(()) };
+                        let LayerKind::Figure(fig) = &mut layer.kind else { return Ok(()) };
+                        let Some(node) = fig.node_mut(&n) else { return Ok(()) };
+                        if let Some(v) = c2["stretchy"].as_bool() {
+                            node.stretchy = v;
+                        }
+                        if let Some(v) = c2["dragLock"].as_bool() {
+                            node.drag_lock = if v { crate::edit::canvas::DRAG_HORIZONTAL | crate::edit::canvas::DRAG_VERTICAL } else { 0 };
+                        }
+                        Ok(())
+                    });
+                }
+            }
+            "camera" => {
+                let cam = self.project().root().and_then(|s| s.layers.iter().find(|l| matches!(l.kind, LayerKind::Camera(_))).map(|l| l.id.clone()));
+                if let Some(id) = cam {
+                    let c2 = c.clone();
+                    let ed = self.tools.editor.clone();
+                    self.step("Camera", move |s| {
+                        let ids = {
+                            let l = s.project.root().and_then(|r| r.layer(&id)).expect("camera");
+                            let LayerKind::Camera(cm) = &l.kind else { return Ok(()) };
+                            (cm.x.id.clone(), cm.y.id.clone(), cm.zoom.id.clone(), cm.rotation.id.clone())
+                        };
+                        if let Some(v) = c2["zoom"].as_f64() {
+                            ed.change_in(s, &ids.2, Value::F(v.clamp(0.01, 100.0) as f32), t)?;
+                        }
+                        if let Some(v) = c2["rotation"].as_f64() {
+                            ed.change_in(s, &ids.3, Value::F(v as f32), t)?;
+                        }
+                        if c2["center"].as_bool() == Some(true) {
+                            ed.change_in(s, &ids.0, Value::F(0.0), t)?;
+                            ed.change_in(s, &ids.1, Value::F(0.0), t)?;
+                        }
+                        Ok(())
+                    });
+                }
+            }
+            "copy_figure" => {
+                if let Some(l) = self.sel_layer() {
+                    let s0 = self.project().root().expect("root");
+                    let ids = if b("joined") { layer_ops::with_joined(s0, &l) } else { vec![l.clone()] };
+                    self.figure_clip = Some(ids.iter().filter_map(|i| s0.layer(i).map(|x| x.clone())).collect());
+                    self.message = "Stickfigure copied.".into();
+                    self.rev += 1;
+                }
+            }
+            "paste_figure" => {
+                if let Some(clip) = self.figure_clip.clone() {
+                    let made = self.step("Paste stickfigure", |s| {
+                        let mut ids = std::collections::HashMap::new();
+                        for l in &clip {
+                            let n = s.project.new_id("L");
+                            ids.insert(l.id.clone(), n);
+                        }
+                        let sym2 = s.project.root_symbol.clone();
+                        let mut first = None;
+                        for l in &clip {
+                            let c = structure::copy_layer(l, &ids)?;
+                            let id = c.id.clone();
+                            first.get_or_insert(id.clone());
+                            let at = s.project.root().map(|r| r.layers.len()).unwrap_or(0);
+                            structure::add_layer(s, &sym2, c, at)?;
+                            // pasted into this frame on: hidden before it
+                            show_only_from(s, &sym2, &id, 0.0, t);
+                        }
+                        Ok(first)
+                    });
+                    if let Some(Some(id)) = made {
+                        let root = self.project().root().and_then(|s| s.layer(&id)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
+                        self.selected = root.map(|r| (id, r));
+                        self.validate();
+                    }
+                }
+            }
+            "copy_props" => {
+                if let Some(l) = self.sel_layer() {
+                    match layer_ops::copy_props(self.project(), &sym, &l, t) {
+                        Ok(p) => {
+                            self.props_clip = Some(p);
+                            self.message = "Properties copied.".into();
+                        }
+                        Err(e) => self.message = e.0,
+                    }
+                    self.rev += 1;
+                }
+            }
+            "paste_props" => {
+                if let (Some(l), Some(pc)) = (self.sel_layer(), self.props_clip.clone()) {
+                    let ed = self.tools.editor.clone();
+                    let (pos, lay) = (c.get("position").and_then(|v| v.as_bool()).unwrap_or(true), c.get("layering").and_then(|v| v.as_bool()).unwrap_or(true));
+                    self.step("Paste properties", |s| layer_ops::paste_props(&ed, s, &sym, &l, &pc, pos, lay, t));
+                }
+            }
             "copy_pose" => {
                 if let Some(l) = self.sel_layer() {
                     let p = self.project();
@@ -860,9 +1024,19 @@ impl Session {
                 "smart": node.smart_stretch, "shape": shape_name(node.shape),
                 "thickness": r.f(&node.thickness, t), "color": color_of(&mut r, &node.color, t),
                 "angle": round2(r.f(&node.rotation, t)), "length": round2(r.f(&node.length, t)),
+                "stretchy": node.stretchy, "dragLock": node.drag_lock != 0,
+                "scale": round2(r.f(&layer.transform.scale_y, t).abs()), "figAngle": round2(r.f(&layer.transform.rotation, t)),
+                "locked": layer.locked, "onion": layer.onion,
+                "figColor": f.nodes().get(1).map(|n| color_of(&mut r, &n.color, t)).unwrap_or(0x000000ff),
+                "layerPos": p.root()?.layers.iter().filter(|x| x.as_figure().is_some()).position(|x| x.id == *l).map(|i| i + 1),
+                "figureCount": p.root()?.layers.iter().filter(|x| x.as_figure().is_some()).count(),
             }))
         });
         let cam = self.camera_frame();
+        let cam_vals = p.root().and_then(|s| s.layers.iter().find_map(|l| if let LayerKind::Camera(c) = &l.kind { Some(c) } else { None })).map(|c| {
+            let mut r = Resolver::new(p);
+            json!({"zoom": round2(r.f(&c.zoom, t)), "rotation": round2(r.f(&c.rotation, t))})
+        });
         let no_tween = {
             let k = self.keys_at(t, None);
             !k.is_empty() && k.iter().all(|r| p.property(&r.property).and_then(|q| q.track.keys().iter().find(|x| x.time == r.time)).is_some_and(|x| x.interp == Interp::Hold))
@@ -876,12 +1050,14 @@ impl Session {
             "handles": handles, "selected": sel, "figures": figures, "camera": cam,
             "hasCamera": p.root().is_some_and(|s| s.layers.iter().any(|l| matches!(l.kind, LayerKind::Camera(_)))),
             "opts": {
-                "stretch": self.tools.stretch, "scope": if self.tools.key_scope == KeyScope::Joint { "joint" } else { "figure" },
+                "stretch": self.stretch_all, "scope": if self.tools.key_scope == KeyScope::Joint { "joint" } else { "figure" },
                 "snap": self.tools.snap_degrees, "onion": self.onion, "axis": self.tools.axis_lock, "static": self.tools.show_static,
                 "tweenNew": self.tools.editor.default_interp != Interp::Hold, "mainOnly": self.tools.main_nodes_only,
             },
             "pose": self.pose_clip.is_some(),
             "frameCopied": self.frame_clip.is_some(),
+            "figureCopied": self.figure_clip.is_some(), "propsCopied": self.props_clip.is_some(),
+            "cam": cam_vals,
             "tweening": p.settings.tweening, "tweenedFrames": p.settings.tweened_frames, "rate": p.settings.sample_rate(),
             "frameNoTween": no_tween,
             "building": self.building.as_ref().and_then(|b| p.root()?.layer(b)).map(|l| json!({"layer": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone())})),
