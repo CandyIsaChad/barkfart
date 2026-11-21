@@ -257,7 +257,12 @@ impl Session {
                 }
                 // creation mode with a draw tool: a drag from a joint draws a segment
                 if let (Some(b), Some(_)) = (self.building.clone(), self.draw) {
-                    if let Some(h) = self.tools.pick(self.project(), x, y, radius, t).filter(|h| h.layer == b) {
+                    // the nearest joint of the figure being edited (other figures' joints never take the press)
+                    let near = self.tools.handles(self.project(), t).into_iter().filter(|h| h.layer == b && (h.x - x).hypot(h.y - y) <= radius).min_by(|p, q| {
+                        let d = |h: &Handle| (h.x - x).hypot(h.y - y);
+                        d(p).partial_cmp(&d(q)).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    if let Some(h) = near {
                         self.selected = Some((b.clone(), h.node.clone()));
                         self.gesture = Gesture::Draw { layer: b, from: h.node, x0: h.x, y0: h.y, x, y, slop: radius * 0.5 };
                         self.rev += 1;
@@ -1365,7 +1370,8 @@ impl Session {
                         let v = c2["seconds"].as_f64().unwrap_or(0.0).clamp(0.0, crate::timing::MAX_DELAY as f64);
                         set(&mut cm.delay, ((v * 100.0).round() / 100.0) as f32);
                     } else {
-                        let back = c2["back"].as_i64().unwrap_or(0).clamp(0, 100_000) as f32;
+                        // back at most to the first frame (frame 0 cannot repeat anything)
+                        let back = c2["back"].as_i64().unwrap_or(0).clamp(0, ((t * fps).round() as i64).max(0)) as f32;
                         let times = c2["times"].as_i64().unwrap_or(1).clamp(1, 1000) as f32;
                         set(&mut cm.repeat_back, back);
                         set(&mut cm.repeat_times, if back > 0.0 { times } else { 0.0 });

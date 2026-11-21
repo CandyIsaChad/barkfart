@@ -1555,7 +1555,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _Toggle('Pause on this frame', delay > 0, (v) => _cmd({'op': 'frame_delay', 'seconds': v ? 0.5 : 0})),
       if (delay > 0) _stepper('Seconds', delay.toStringAsFixed(2), () => _cmd({'op': 'frame_delay', 'seconds': math.max(0.01, delay - 0.05)}), () => _cmd({'op': 'frame_delay', 'seconds': delay + 0.05})),
       _gap,
-      _Toggle('Repeat frames before this one', back > 0, (v) => _cmd({'op': 'frame_repeat', 'back': v ? 1 : 0, 'times': 1})),
+      if (_frame > 0) _Toggle('Repeat frames before this one', back > 0, (v) => _cmd({'op': 'frame_repeat', 'back': v ? 1 : 0, 'times': 1})),
       if (back > 0) ...[
         _hint('After this frame, playback jumps back and plays the series again: a short loop without a movieclip.'),
         _stepper('Back', '$back frames', () => _cmd({'op': 'frame_repeat', 'back': math.max(1, back - 1), 'times': times}), () => _cmd({'op': 'frame_repeat', 'back': math.min(_frame, back + 1), 'times': times})),
