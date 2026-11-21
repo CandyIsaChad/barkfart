@@ -955,3 +955,47 @@ fn arrows_nudge_the_selected_figure_on_this_frame() {
     let st = s.command(&json!({"op": "undo"}));
     assert_eq!(handle(&st, 0), before[0]);
 }
+
+/// The IK arms: dragging a hand must not pull the arm in to one forearm's
+/// length (the connector's stored 110 is not the 220 arm's reach).
+#[test]
+fn ik_arms_keep_their_length_when_dragged() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../app/assets/stock/figures/Stickfigure (IK).nodes");
+    let Ok(bytes) = std::fs::read(path) else { return };
+    let p = {
+        let mut p = new_project();
+        p.root_mut().unwrap().layers.clear();
+        barkfart_core::import::import_file(&mut p, "ik.nodes", &bytes).unwrap();
+        p
+    };
+    let f = p.root().unwrap().layers[0].as_figure().unwrap();
+    let ci = barkfart_core::edit::canvas::connector_smart_stretch;
+    // a bit shorter: the arm follows, the forearm keeps its share
+    let (len, sets) = ci(f, f.index_of("n32").unwrap(), 200.0).expect("an IK arm");
+    assert!((len - 200.0).abs() < 1e-3, "{len}");
+    let get = |id: &str| sets.iter().find(|(k, _)| k.split('/').nth(1) == Some(id)).map(|x| x.1).unwrap();
+    assert!((get("n16") - 100.0).abs() < 0.01);
+    assert!((get("n28") - 100.0).abs() < 0.01);
+    // at rest nothing changes; past the reach it stops at the full arm
+    let (len, sets) = ci(f, f.index_of("n32").unwrap(), 220.0).unwrap();
+    assert!((len - 220.0).abs() < 1e-3 && sets.iter().all(|(k, v)| !k.contains("/n28/") || (v - 110.0).abs() < 0.01));
+    let (len, _) = ci(f, f.index_of("n32").unwrap(), 400.0).unwrap();
+    assert!((len - 220.0).abs() < 1e-3);
+
+    // through the session: a hand dragged a little stays where it was put
+    let mut s = Session::new(Document::new(new_project()));
+    let st = s.import("Stickfigure (IK).nodes", &bytes);
+    let lid = st["selected"]["layer"].as_str().unwrap().to_string();
+    let h = barkfart_core::edit::canvas::CanvasTools::default().handles(s.project(), 0.0).into_iter().find(|h| h.layer == lid && h.node == "n32").expect("hand handle");
+    let (hx, hy) = (h.x, h.y);
+    s.command(&json!({"op": "down", "x": hx, "y": hy, "r": 6}));
+    for k in 1..=4 {
+        s.command(&json!({"op": "move", "x": hx + 2.0 * k as f32, "y": hy}));
+    }
+    s.command(&json!({"op": "up"}));
+    let f = s.project().root().unwrap().layer(&lid).unwrap().as_figure().unwrap();
+    let mut r = barkfart_core::eval::Resolver::new(s.project());
+    let n = f.node("n32").unwrap();
+    let l = r.f(&n.length, 0.0);
+    assert!(l > 180.0, "the arm was pulled in to {l}");
+}

@@ -82,10 +82,11 @@ impl Default for CanvasTools {
 
 /// Stick Nodes IK rigs (e.g. "Stickfigure (IK)"): a stretchy segment S with a
 /// static smart-stretch connector X under it. Measured on the original
-/// (movieclip frames it stored, 2026-11-21): S stops at the connector's reach; with
-/// k = S's length / X's rest length, every static segment below X (down to the
+/// (movieclip frames it stored, 2026-11-21): S stops at its full reach; with
+/// k = S's length / S's rest length, every static segment below X (down to the
 /// next connector) gets rest x (1 + m (k - 1)), m being the multiplier of a
-/// "reset stretch impulse" segment and 1 otherwise; X follows S's length.
+/// "reset stretch impulse" segment and 1 otherwise; X is scaled by k too.
+/// (For the legs, where X's rest equals S's, this is what was measured.)
 /// Returns S's length and the (length property, value) changes, or None when
 /// S is not such a segment.
 pub fn connector_smart_stretch(f: &Figure, si: usize, len: f32) -> Option<(f32, Vec<(String, f32)>)> {
@@ -97,16 +98,19 @@ pub fn connector_smart_stretch(f: &Figure, si: usize, len: f32) -> Option<(f32, 
     let links = crate::eval::pose::connector_links(f);
     let x = nodes.iter().enumerate().find(|(j, n)| n.parent.as_deref() == Some(s.id.as_str()) && n.is_static && n.smart_stretch && links.contains_key(j))?;
     let (xi, xn) = x;
-    // the leg stops at the connector's stored value (its full reach), else at S's rest length
-    let reach = xn.legacy_extras.get("C.cValue").and_then(|v| v.split_once(':')).and_then(|(_, n)| n.parse::<f32>().ok()).filter(|v| *v > 0.0);
+    // S stops at its full reach: its rest length, or the connector's stored
+    // value when that is longer (the IK legs store 300 for a 299 leg; the
+    // arms store one forearm, 110, for a 220 arm, which is not a reach)
+    let stored = xn.legacy_extras.get("C.cValue").and_then(|v| v.split_once(':')).and_then(|(_, n)| n.parse::<f32>().ok()).filter(|v| *v > 0.0);
     let rest_s = if s.rest_length > 0.0 { s.rest_length } else { len };
-    let clamped = len.min(reach.unwrap_or(rest_s));
-    let rest_x = if xn.rest_length > 0.0 { xn.rest_length } else { rest_s };
-    if rest_x <= 1e-6 {
+    if rest_s <= 1e-6 {
         return None;
     }
-    let k = clamped / rest_x;
-    let mut out = vec![(xn.length.id.clone(), clamped)];
+    let clamped = len.min(stored.map_or(rest_s, |v| v.max(rest_s)));
+    let rest_x = if xn.rest_length > 0.0 { xn.rest_length } else { rest_s };
+    // the stretch of S against its own rest; X keeps its share of S
+    let k = clamped / rest_s;
+    let mut out = vec![(xn.length.id.clone(), rest_x * k)];
     // static descendants of X, stopping at connectors, non-static segments and do-not-smart-stretch ones
     let mut inside = vec![false; nodes.len()];
     inside[xi] = true;
