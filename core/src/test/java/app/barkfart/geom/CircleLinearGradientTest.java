@@ -34,8 +34,10 @@ class CircleLinearGradientTest {
         l.transform.x.setValue(-40f);
         p.root().layers.add(l);
         p.invalidateIndex();
+        // The disc reaches half the thickness (12) past the joints, so its rim
+        // is at 40 + 6 and the probes sit just inside it, at 42.
         // radial: centre dark, left and right rims both light
-        int cl = red(p, -36, 0), cr = red(p, 36, 0);
+        int cl = red(p, -42, 0), cr = red(p, 42, 0);
         assertTrue(red(p, 0, 0) < 20 && cl > 200 && cr > 200, "radial " + cl + " " + cr);
         Document d = new Document(p);
         d.apply(FigureOps.edit("Linear gradient", l, new Runnable() {
@@ -43,11 +45,11 @@ class CircleLinearGradientTest {
                 c.gradientLinear = true;
             }
         }));
-        assertTrue(red(p, -36, 0) < 20 && red(p, 36, 0) > 235, "along: dark at the joint side, light at the end");
+        assertTrue(red(p, -42, 0) < 20 && red(p, 42, 0) > 235, "along: dark at the joint side, light at the end");
         assertEquals(128, red(p, 0, 0), 10, "halfway in the middle");
         assertEquals(red(p, 0, 30), red(p, 0, -30), 3, "same colour across");
         c.gradientSideways = true;
-        assertTrue(red(p, 0, -36) < 20 && red(p, 0, 36) > 235, "sideways: varies across the segment");
+        assertTrue(red(p, 0, -42) < 20 && red(p, 0, 42) > 235, "sideways: varies across the segment");
         assertTrue(((Layer.FigureLayer) ProjectCodec.decode(ProjectCodec.encode(p)).root().layers.get(0)).figure.node("c").gradientLinear, "saved");
         c.gradientSideways = false;
         d.undo();
