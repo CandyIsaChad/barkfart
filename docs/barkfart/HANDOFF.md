@@ -1,4 +1,4 @@
-# Handoff brief (2026-11-21, while Claude's usage limit resets)
+# Handoff brief (2026-11-22, while Claude's usage limit resets)
 
 You are continuing work on Barkfart: a Rust engine (`engine/`) with a
 Flutter app (`app/`), remaking the Stick Nodes editor. Read
@@ -9,7 +9,8 @@ original's UI, control by control) before changing anything.
 ## Rules (hard)
 - Commit as `351002590+balsamiqvine@users.noreply.github.com`, name
   `balsamiqvine` (use `git -c user.email=... -c user.name=... commit`).
-  End every commit message with
+  End every commit message with a Co-Authored-By line naming the model you
+  are: `Co-Authored-By: Gemini 4 Hydrogen <noreply@google.com>` or
   `Co-Authored-By: DeepSeek V4.1 Flash <noreply@together.ai>`.
 - Never commit anything from `main/` or `docs/barkfart/research/local/`.
   Never rewrite history or force-push.
@@ -28,9 +29,23 @@ original's UI, control by control) before changing anything.
 - Keep changes small; one commit per feature.
 
 ## Status
-The three tasks of the 2026-11-21 handoff (textfields, Stickfigure Filters,
-frame background) are done and reviewed. The open work is the checklist in
-docs/barkfart/GAPS.md, top to bottom.
+Done and reviewed so far: everything ticked in docs/barkfart/GAPS.md.
+
+## Tasks, in order (stop after these; do not start other GAPS items)
+1. **Modify branch window** (figure editor, reference 12.5 "Modify Node
+   Branch"). A button "Modify branch…" in the figure editor panel
+   (`_builder` in app/lib/editor.dart) opens a window whose rows each have
+   their own Set button and apply one property to the selected joint and
+   everything below it: segment colour, thickness, shape, static, scale of
+   the lengths. The engine already has `figure_ops::modify_branch` with
+   `BranchChange::{Static, Thickness, Color, Shape, ScaleLength}` and the
+   session command `{"op":"segment","branch":true,...}` (extend it for
+   ScaleLength). Add stretchy (`BranchChange::Stretchy`) the same way. One
+   undo step per Set. Test in engine/core/tests/session.rs.
+2. **Outline selection** (View options, reference 8.6): a switch (kept
+   like the other View options in `AppSettings`, app/lib/files.dart) that
+   draws a thin outline box around the selected figure's joints in
+   `_Overlay` (the handles of the selected figure have flag bit 4 = 1 << 2).
 
 ## Design rules learned since (keep to them)
 - The camera layer holds the per-frame settings: background colour and
