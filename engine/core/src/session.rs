@@ -997,13 +997,19 @@ impl Session {
         let t = self.time();
         let mut handles = Vec::new();
         if self.mode == Mode::Figure {
+            // joints connected to the selected one (its parent and children)
+            let near: std::collections::HashSet<String> = match &self.selected {
+                Some((l, n)) => self.tools.neighbours(p, l, n, false, t).into_iter().map(|h| h.node).collect(),
+                None => Default::default(),
+            };
             for h in self.tools.handles(p, t) {
                 if self.building.as_ref().is_some_and(|b| *b != h.layer) {
                     continue;
                 }
                 let sel = self.selected.as_ref().is_some_and(|(l, n)| *l == h.layer && *n == h.node);
                 let fig = self.selected.as_ref().is_some_and(|(l, _)| *l == h.layer);
-                let flags = h.root as u32 | (sel as u32) << 1 | (fig as u32) << 2;
+                let near = fig && near.contains(&h.node);
+                let flags = h.root as u32 | (sel as u32) << 1 | (fig as u32) << 2 | (near as u32) << 3;
                 handles.push(json!([round2(h.x), round2(h.y), flags]));
             }
         }

@@ -231,7 +231,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     double t;
     if (_playing) {
       final dur = _frames / _fps;
-      final secs = e.playbackTime ?? _clockOffset + _clock.elapsedMicroseconds / 1e6;
+      // a steady clock started with the sound: the sound player only knows its
+      // position per audio buffer (tens of ms, and ahead of what is heard), which
+      // made tweened playback hold and jump
+      final secs = _clockOffset + _clock.elapsedMicroseconds / 1e6;
       t = dur > 0 ? secs % dur : 0;
       // one picture per frame, or more with tweening on (Animation Tools)
       final rate = (_st['rate'] as num?)?.toDouble() ?? _fps;
@@ -1477,23 +1480,48 @@ class _Overlay extends CustomPainter {
         ..color = const Color(0x66000000));
     }
     final hs = (st['handles'] as List?) ?? const [];
-    final ring = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5
-      ..color = const Color(0x99000000);
+    // selected joint red, the joints connected to it purple with a line to
+    // each, everything else blue rings (after the original's look)
+    const purple = Color(0xFFA43BE0), red = Color(0xFFE0383A), blue = Color(0xFF2F6BE8);
+    Offset? selAt;
+    final near = <Offset>[];
+    for (final h in hs) {
+      final l = h as List;
+      final f = (l[2] as num).toInt();
+      final p = v.toScreen((l[0] as num).toDouble(), (l[1] as num).toDouble());
+      if (f & 2 != 0) selAt = p;
+      if (f & 8 != 0) near.add(p);
+    }
+    if (selAt != null) {
+      final line = Paint()
+        ..color = purple
+        ..strokeWidth = 2.5
+        ..strokeCap = StrokeCap.round;
+      for (final p in near) {
+        canvas.drawLine(selAt, p, line);
+      }
+    }
     for (final h in hs) {
       final l = h as List;
       final p = v.toScreen((l[0] as num).toDouble(), (l[1] as num).toDouble());
-      final flags = (l[2] as num).toInt();
-      final root = flags & 1 != 0, sel = flags & 2 != 0, fig = flags & 4 != 0;
-      if (sel) canvas.drawCircle(p, 11, Paint()..color = const Color(0x550A84FF));
+      final f = (l[2] as num).toInt();
+      final root = f & 1 != 0, sel = f & 2 != 0, nb = f & 8 != 0;
+      final color = sel ? red : nb ? purple : (root ? cRoot : blue);
+      final stroke = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = sel || nb ? 2.5 : 2
+        ..color = color;
+      final halo = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 4.5
+        ..color = const Color(0xCCFFFFFF);
       if (root) {
         final r = Rect.fromCenter(center: p, width: 10, height: 10);
-        canvas.drawRect(r, Paint()..color = sel ? cAccent : cRoot);
-        canvas.drawRect(r, ring);
+        canvas.drawRect(r, halo);
+        canvas.drawRect(r, stroke);
       } else {
-        canvas.drawCircle(p, 4.5, Paint()..color = sel ? cAccent : (fig ? const Color(0xFFFFFFFF) : const Color(0xDDFFFFFF)));
-        canvas.drawCircle(p, 4.5, ring);
+        canvas.drawCircle(p, 5.5, halo);
+        canvas.drawCircle(p, 5.5, stroke);
       }
     }
   }

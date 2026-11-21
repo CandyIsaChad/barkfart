@@ -427,3 +427,23 @@ fn the_ik_stickfigure_bends_by_smart_stretch() {
     assert!(leg1 < leg0 * 0.7, "the stretchy leg shortened: {leg0} -> {leg1}");
     assert!((knee1 - knee0).abs() > 1.0, "the smart-stretch detail followed: {knee0} -> {knee1}");
 }
+
+#[test]
+fn tweened_motion_is_smooth_between_frames() {
+    // three frames, the figure moving right on each; sampled at 60 a second
+    let mut s = two_poses();
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "insert_frame"}));
+    let (x, y) = handle(&s.state(), 0);
+    s.command(&json!({"op": "down", "x": x, "y": y, "r": 20}));
+    s.command(&json!({"op": "move", "x": x + 120.0, "y": y}));
+    s.command(&json!({"op": "up"}));
+    let p = s.project();
+    let l = p.root().unwrap().layer("L2").unwrap();
+    let mut r = barkfart_core::eval::Resolver::new(p);
+    let xs: Vec<f32> = (0..=12).map(|i| r.f(&l.transform.x, i as f64 / 60.0)).collect();
+    for w in xs.windows(3) {
+        let (a, b) = (w[1] - w[0], w[2] - w[1]);
+        assert!(b > 0.0 && (a - b).abs() < 1e-3, "even steps while tweening: {xs:?}");
+    }
+}
