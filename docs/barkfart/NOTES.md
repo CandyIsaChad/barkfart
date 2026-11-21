@@ -241,4 +241,4 @@ before the colour block).
   and the knee position within 0.25 (test: ik_rig_matches_the_original).
 - The older rule (rest x sqrt((k cos b)^2 + sin^2 b), fitted on Rain /
   Action Lines) stays for smart-stretch flags on the stretched segment itself.
-- Movieclip version 431 import is not finished (reader only probes it).
+- Movieclip version 431 import is not supported yet (layout notes above).
