@@ -1711,6 +1711,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       if (bgGradient) ...[
         _label('Gradient colour (top)'),
         _swatches(bgTop, (c) => _cmd({'op': 'frame_bg', 'gradient': c})),
+        _Toggle('Expand gradient', (_st['frameBg'] as Map?)?['expand'] == true, (v) => _cmd({'op': 'frame_bg', 'expand': v})),
+        _hint('Stretches the gradient taller: most of the stage is the gradient colour.'),
       ],
       _gap,
       _Toggle('Do not tween this frame', _st['frameNoTween'] == true, (v) => _cmd({'op': 'no_tween', 'on': v})),

@@ -1663,6 +1663,7 @@ impl Session {
                     if let Some(v) = c2["useGradient"].as_bool() {
                         use_gradient = v;
                     }
+                    let expand = c2["expand"].as_bool();
                     // no gradient: the fill is `background` and `background2` keeps the
                     // gradient colour with zero alpha; with one, top is the gradient colour
                     let (top, bottom) = if use_gradient { (gradient | 0xff, color | 0xff) } else { (color, gradient & !0xff) };
@@ -1673,6 +1674,18 @@ impl Session {
                         key_every_frame(q, n, fps);
                         let interp = q.track.keys().iter().find(|k| k.time == t).map(|k| k.interp).unwrap_or(Interp::Linear);
                         q.track.put(Key::new(t, Value::C(Color::rgba8888(v)), interp));
+                    }
+                    if let Some(on) = expand {
+                        // a frame setting: exact HOLD keys, every frame its own
+                        let q = &mut cm.bg_expand;
+                        for i in 0..n {
+                            let ti = i as f64 / fps;
+                            if q.track.index_of(ti).is_err() {
+                                let old = crate::timing::setting(q, fps, i);
+                                q.track.put(Key::new(ti, Value::F(old), Interp::Hold));
+                            }
+                        }
+                        q.track.put(Key::new(t, Value::F(if on { 1.0 } else { 0.0 }), Interp::Hold));
                     }
                     Ok(())
                 });
@@ -1852,7 +1865,9 @@ impl Session {
         });
         let bg = {
             let (c, g, u) = frame_bg(p, t);
-            json!({"color": c, "gradient": g, "useGradient": u})
+            let fps = st_fps(p);
+            let expand = p.root().and_then(|r| r.layers.iter().find_map(|l| if let LayerKind::Camera(c) = &l.kind { Some(c) } else { None })).is_some_and(|c| crate::timing::setting(&c.bg_expand, fps, self.frame) > 0.5);
+            json!({"color": c, "gradient": g, "useGradient": u, "expand": expand})
         };
         let sound_list: Vec<J> = p.assets.values().filter(|a| a.kind == AssetKind::Audio).map(|a| json!({"id": a.id, "name": sound_name(p, &a.id)})).collect();
         let frame_snd = frame_sound(p, t).map(|c| {

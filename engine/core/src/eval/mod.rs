@@ -125,7 +125,10 @@ fn background(ctx: &mut Ctx, sym: &Symbol, t: f64, apply_camera: bool) {
     let w = ctx.project.settings.width as f32 / 2.0;
     let h = ctx.project.settings.height as f32 / 2.0;
     let mut pts = vec![-w, -h, w, -h, w, h, -w, h];
-    let mut ends = [0.0, h, 0.0, -h];
+    // "Expand gradient": the fade runs over three stage heights from the top
+    let fps = if ctx.project.settings.fps > 0.0 { ctx.project.settings.fps as f64 } else { 30.0 };
+    let expand = crate::timing::setting(&cam.bg_expand, fps, (t * fps + 1e-6).floor() as i32) > 0.5;
+    let mut ends = [0.0, h, 0.0, if expand { -5.0 * h } else { -h }];
     if !apply_camera {
         let inv = camera_of(cam, t, &mut ctx.r).inverse();
         for i in (0..pts.len()).step_by(2) {

@@ -1284,3 +1284,32 @@ fn slow_motion_tweening_stretches_one_frame() {
     s.command(&json!({"op": "undo"}));
     assert!((Schedule::build(s.project()).total - before).abs() < 1e-9, "one undo step");
 }
+
+/// Frame Tools "Expand gradient": the frame background's fade stretches
+/// down past the stage, so its middle is much closer to the gradient colour.
+#[test]
+fn expand_gradient_stretches_the_background_fade() {
+    let mut s = Session::new(Document::new(barkfart_core::session::new_editor_project()));
+    s.command(&json!({"op": "frame_bg", "color": 0xffffffffu32, "gradient": 0x000000ffu32, "useGradient": true}));
+    let bg = |s: &Session| {
+        let p = s.project();
+        let scene = barkfart_core::eval::evaluate(p, &p.root_symbol, 0.0);
+        let barkfart_core::eval::Item::Group(g) = &scene.root.children[0] else { panic!("background first") };
+        let barkfart_core::eval::Item::Shape(sh) = &g.children[0] else { panic!() };
+        sh.gradient.clone().expect("a gradient")
+    };
+    let plain = format!("{:?}", bg(&s));
+    let st = s.command(&json!({"op": "frame_bg", "expand": true}));
+    assert_eq!(st["frameBg"]["expand"], true);
+    assert_eq!(st["undo"], "Background colour");
+    let expanded = format!("{:?}", bg(&s));
+    assert_ne!(plain, expanded, "the fade's end moved");
+    assert!(codec::encode(s.project()).contains("bgExpand"), "saved");
+    s.command(&json!({"op": "insert_frame"}));
+    let st = s.state();
+    assert_eq!(st["frameBg"]["expand"], true, "a new frame copies this one's background, expansion included");
+    assert_eq!(st["frameBg"]["useGradient"], true);
+    s.command(&json!({"op": "undo"}));
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(format!("{:?}", bg(&s)), plain, "one undo step");
+}
