@@ -27,25 +27,23 @@ original's UI, control by control) before changing anything.
   run `gh workflow run app-ios.yml --ref main`. Do not download or send IPAs.
 - Keep changes small; one commit per feature.
 
-## Tasks, in order
-1. **Textfield Tools** (reference section 13). The engine already has text
-   layers (`Layer::text`, glyph rendering). Add session commands: add a
-   textfield on the current frame only (like `add_figure`: `only_on_frame`),
-   set text, colour, scale, alignment, locked, delete (this frame), copy and
-   paste. Dragging a textfield moves it (keyed). Add a "Textfield Tools"
-   section to the nothing-selected panel ("Add textfield") and a panel when a
-   textfield is selected. Tests in `engine/core/tests/session.rs`.
-2. **Stickfigure Filters** (reference 9.4): opacity, blur, glow, tint,
-   outline, drop shadow, hue shift, saturation, invert, pixelate, clear all,
-   copy/paste filters. The effect stack and all effects exist in the engine
-   (`edit/structure.rs` add_effect / remove_effect, `fx.rs`, renderer
-   `fx.wgsl`); map each control to an effect node on the selected figure's
-   layer, keyed on this frame. Panel section after Stickfigure Tools.
-3. **Frame background colour** (Frame Tools, reference 8.4): background
-   colour per frame (and optional gradient). If the model has no per-frame
-   background, use the camera layer's background properties or add a keyed
-   project background; keep it undoable and tested.
+## Status
+The three tasks of the 2026-11-21 handoff (textfields, Stickfigure Filters,
+frame background) are done and reviewed. The open work is the checklist in
+docs/barkfart/GAPS.md, top to bottom.
 
-When unsure how the original behaves, follow the reference document and
-choose the plainest behaviour; note open questions at the end of this file
-under "## Questions".
+## Design rules learned since (keep to them)
+- The camera layer holds the per-frame settings: background colour and
+  gradient, frame delay, repeat. They are keyed (HOLD) on their own frame
+  and read as the exact key there (no key = 0); a project without a camera
+  gets one in the same undo step.
+- engine/core/src/timing.rs is the one wall-time schedule (delays,
+  repeats): playback, sound and exports all follow it.
+- frame_ops::hold and slow_motion insert real frames: never use them for a
+  frame setting.
+- Per-frame sounds are clips on the audio layer named "Frame sounds"; only
+  that layer's clips move with their frames (the Java reference keeps other
+  audio layers on the timeline).
+
+## Questions
+(none open)
