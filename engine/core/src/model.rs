@@ -663,6 +663,9 @@ pub struct Node {
     pub gradient_color: Property,
     pub is_static: bool,
     pub stretchy: bool,
+    /// "Use segment color": the segment keeps its own colour when the
+    /// stickfigure colour changes (off: it follows the figure colour).
+    pub own_color: bool,
     pub smart_stretch: bool,
     pub no_smart_stretch: bool,
     pub rest_length: f32,
@@ -705,6 +708,7 @@ impl Node {
             gradient_color: Property::color(format!("{p}gradientColor"), Color::WHITE),
             is_static: false,
             stretchy: false,
+            own_color: false,
             smart_stretch: false,
             no_smart_stretch: false,
             rest_length: 0.0,
@@ -763,6 +767,9 @@ pub struct Figure {
     nodes: Vec<Node>,
     pub polyfills: Vec<Polyfill>,
     index: HashMap<String, usize>,
+    /// The stickfigure colour (segments without their own colour use it);
+    /// None: older files, where the first segment's colour stands in.
+    pub color: Option<Color>,
 }
 
 impl Figure {

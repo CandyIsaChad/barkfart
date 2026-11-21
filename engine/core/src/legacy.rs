@@ -614,6 +614,7 @@ pub fn to_layer(p: &mut Project, fig: &LegacyFigure, name: &str, report: &mut Re
     layer.transform.scale_y.value = Value::F(f32::from_bits(fig.scale));
     let fig_color = legacy_color(fig.color);
     let LayerKind::Figure(figure) = &mut layer.kind else { unreachable!() };
+    figure.color = Some(fig_color);
     let mut stack: Vec<(usize, Option<String>)> = vec![(0, None)];
     while let Some((li, parent)) = stack.pop() {
         let ln = &fig.nodes[li];
@@ -650,7 +651,8 @@ pub fn to_layer(p: &mut Project, fig: &LegacyFigure, name: &str, report: &mut Re
         if ln.fields.contains_key("gradientColor") {
             n.gradient_color.value = Value::C(legacy_color(ln.i("gradientColor")));
         }
-        n.color.value = Value::C(if ln.i("useSegmentColor") != 0 { legacy_color(ln.i("color")) } else { fig_color });
+        n.own_color = ln.i("useSegmentColor") != 0;
+        n.color.value = Value::C(if n.own_color { legacy_color(ln.i("color")) } else { fig_color });
         for (k, v) in &ln.fields {
             if !k.starts_with('~') {
                 n.legacy_extras.insert(format!("L.{k}"), ex_lv(*v));

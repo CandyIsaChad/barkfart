@@ -1125,12 +1125,22 @@ impl Session {
                         }
                         let Some(layer) = s.project.layer_mut(&sym, &l) else { return crate::edit::fail("no figure") };
                         let LayerKind::Figure(fig) = &mut layer.kind else { return crate::edit::fail("not a figure") };
+                        let fig_color = figure_ops::figure_color(fig);
                         let Some(node) = fig.node_mut(&n) else { return crate::edit::fail("no segment") };
                         if let Some(v) = c2["thickness"].as_f64() {
                             set_static(&mut node.thickness, Value::F(v.clamp(0.0, 400.0) as f32));
                         }
                         if let Some(v) = c2["color"].as_u64() {
+                            // a colour of its own ("Use segment color" on)
                             set_static(&mut node.color, Value::C(Color::rgba8888(v as u32)));
+                            node.own_color = true;
+                        }
+                        if let Some(v) = c2["ownColor"].as_bool() {
+                            // off: back to the stickfigure colour
+                            node.own_color = v;
+                            if !v {
+                                set_static(&mut node.color, Value::C(fig_color));
+                            }
                         }
                         if let Some(v) = c2["shape"].as_str() {
                             if node.parent.is_some() {
@@ -1225,9 +1235,9 @@ impl Session {
                             layer.onion = v;
                         }
                         if let Some(v) = c2["color"].as_u64() {
-                            let root = layer.as_figure().and_then(|f| f.nodes().first().map(|n| n.id.clone()));
-                            if let Some(root) = root {
-                                figure_ops::modify_branch(s, &sym, &l, &root, &BranchChange::Color(Color::rgba8888(v as u32)))?;
+                            // the stickfigure colour: segments without their own colour follow it
+                            if let LayerKind::Figure(f) = &mut layer.kind {
+                                figure_ops::set_figure_color(f, Color::rgba8888(v as u32));
                             }
                         }
                         Ok(())
@@ -1872,11 +1882,11 @@ impl Session {
                 "gradient": node.gradient, "gradientColor": color_of(&mut r, &node.gradient_color, t), "gradientReverse": node.gradient_reverse, "gradientSideways": node.gradient_sideways,
                 "segScale": round2(r.f(&node.scale, t)), "curve": round2(node.curve), "outline": node.circle_outline, "outlineColor": color_of(&mut r, &node.outline_color, t),
                 "hollow": node.circle_hollow, "halfArc": node.half_arc, "sides": node.polygon_sides, "rightTriangle": node.right_triangle, "upsideDown": node.triangle_upside_down, "angleLock": node.angle_lock,
-                "stretchy": node.stretchy, "dragLock": node.drag_lock != 0,
+                "stretchy": node.stretchy, "ownColor": node.own_color, "dragLock": node.drag_lock != 0,
                 "scale": round2(r.f(&layer.transform.scale_y, t).abs()), "figAngle": round2(r.f(&layer.transform.rotation, t)),
                 "locked": layer.locked, "onion": layer.onion,
                 "joinedTo": layer.parent.as_ref().and_then(|pid| p.root()?.layer(pid)).map(|x| x.name.clone().unwrap_or_else(|| x.id.clone())),
-                "figColor": f.nodes().get(1).map(|n| color_of(&mut r, &n.color, t)).unwrap_or(0x000000ff),
+                "figColor": f.color.map(|c| c.to_rgba8888()).unwrap_or_else(|| f.nodes().get(1).map(|n| color_of(&mut r, &n.color, t)).unwrap_or(0x000000ff)),
                 "layerPos": p.root()?.layers.iter().filter(|x| x.as_figure().is_some()).position(|x| x.id == *l).map(|i| i + 1),
                 "figureCount": p.root()?.layers.iter().filter(|x| x.as_figure().is_some()).count(),
                 "filters": crate::edit::filters::state(p, &p.root_symbol, l, t),

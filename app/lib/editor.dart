@@ -2311,8 +2311,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     return [
       _pair(_Btn('Flip ↔', onTap: () => _cmd({'op': 'flip_branch', 'h': true})), _Btn('Flip ↕', onTap: () => _cmd({'op': 'flip_branch', 'h': false}))),
       _gap,
-      _label('Segment colour'),
-      _swatches((sel['color'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'segment', 'color': c})),
+      _Toggle('Use segment colour', sel['ownColor'] == true, (v) => _cmd({'op': 'segment', 'ownColor': v})),
+      _hint('On: this segment keeps its own colour. Off: it follows the stickfigure colour.'),
+      Opacity(
+        opacity: sel['ownColor'] == true ? 1 : 0.4,
+        child: _swatches((sel['color'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'segment', 'color': c})),
+      ),
       _gap,
       _stepper('Thickness', thick.round().toString(), () => _cmd({'op': 'segment', 'thickness': math.max(0, thick - 2)}), () => _cmd({'op': 'segment', 'thickness': thick + 2})),
       _Btn('Reset thickness', small: true, enabled: thick != 32, onTap: () => _cmd({'op': 'segment', 'thickness': 32})),

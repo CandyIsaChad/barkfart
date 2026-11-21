@@ -1382,3 +1382,32 @@ fn library_lists_renames_and_deletes_figures() {
     s.command(&json!({"op": "undo"}));
     assert_eq!(codec::encode(s.project()), before);
 }
+
+/// Segment Tools "Use segment color": a segment with its own colour keeps it
+/// when the stickfigure colour changes; turning it off brings back the
+/// figure colour. Saved and undoable.
+#[test]
+fn segments_with_their_own_colour_ignore_the_figure_colour() {
+    let mut s = session();
+    let col = |s: &Session, n: &str| {
+        let p = s.project();
+        let f = p.root().unwrap().layer("L2").unwrap().as_figure().unwrap();
+        f.node(n).unwrap().color.value.color().to_rgba8888()
+    };
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    let st = s.command(&json!({"op": "segment", "color": 0xff0000ffu32}));
+    assert_eq!(st["selected"]["ownColor"], true);
+    s.command(&json!({"op": "figure", "color": 0x00ff00ffu32}));
+    assert_eq!(col(&s, "armR1"), 0xff0000ff, "own colour kept");
+    assert_eq!(col(&s, "armR2"), 0x00ff00ff, "the others follow the figure");
+    assert_eq!(s.state()["selected"]["figColor"], 0x00ff00ffu32);
+    let st = s.command(&json!({"op": "segment", "ownColor": false}));
+    assert_eq!(st["selected"]["ownColor"], false);
+    assert_eq!(col(&s, "armR1"), 0x00ff00ff, "back to the figure colour");
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(col(&s, "armR1"), 0xff0000ff);
+    let text = codec::encode(s.project());
+    assert!(text.contains("ownColor") && text.contains("figureColor"));
+    let back = codec::decode(&text).unwrap();
+    assert_eq!(codec::encode(&back), text, "round trip");
+}

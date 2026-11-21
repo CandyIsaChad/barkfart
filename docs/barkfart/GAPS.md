@@ -18,7 +18,7 @@ committed). Plainest behaviour where the reference is unsure.
 - [x] Paste stickfigure with layering (long-press)
 - [x] Paste all properties: the window with a checkbox per property
 - [ ] Keep stickfigure during tween, Tween stickfigure colours, tween easing
-- [ ] Use segment colour (own colour vs the figure colour): needs a model flag
+- [x] Use segment colour (own colour vs the figure colour)
 
 ## View options (8.6)
 - [x] Show figure names, neighbour lines, outline selection

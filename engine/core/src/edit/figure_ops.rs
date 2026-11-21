@@ -308,6 +308,24 @@ pub enum BranchChange {
     ScaleLength(f32),
 }
 
+/// The stickfigure colour: the stored one, or (older files) the first
+/// segment's.
+pub fn figure_color(f: &Figure) -> Color {
+    f.color.unwrap_or_else(|| f.nodes().get(1).map(|n| n.color.value.color()).unwrap_or(Color::BLACK))
+}
+
+/// Sets the stickfigure colour; every segment without a colour of its own
+/// ("Use segment color" off) takes it.
+pub fn set_figure_color(f: &mut Figure, c: Color) {
+    f.color = Some(c);
+    for x in f.nodes_mut() {
+        if x.parent.is_some() && !x.own_color {
+            x.color.track.clear();
+            x.color.value = Value::C(c);
+        }
+    }
+}
+
 pub fn modify_branch(st: &mut State, sym: &str, layer: &str, node: &str, change: &BranchChange) -> EditResult<()> {
     let (f, _) = figure(st, sym, layer)?;
     if f.node(node).is_none() {
@@ -328,6 +346,7 @@ pub fn modify_branch(st: &mut State, sym: &str, layer: &str, node: &str, change:
             BranchChange::Color(c) => {
                 x.color.track.clear();
                 x.color.value = Value::C(*c);
+                x.own_color = true;
             }
             BranchChange::Shape(s) => x.shape = *s,
             BranchChange::ScaleLength(k) => {

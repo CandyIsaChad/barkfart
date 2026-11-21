@@ -261,6 +261,7 @@ fn node(layer_id: &str, m: &Obj) -> R<Node> {
     n.right_triangle = i(m, "rightTriangle", 0)?;
     n.is_static = b(m, "static", false)?;
     n.stretchy = b(m, "stretchy", false)?;
+    n.own_color = b(m, "ownColor", false)?;
     n.smart_stretch = b(m, "smartStretch", false)?;
     n.no_smart_stretch = b(m, "noSmartStretch", false)?;
     n.rest_length = f(m, "restLength", 0.0)?;
@@ -311,6 +312,7 @@ fn layer(m: &Obj) -> R<Layer> {
             for o in list(m, "nodes")? {
                 fig.add(node(id, as_map(o, "node")?)?).map_err(FormatError)?;
             }
+            fig.color = str_(m, "figureColor")?.and_then(|h| u32::from_str_radix(h.trim_start_matches('#'), 16).ok()).map(Color::rgba8888);
             for o in list(m, "polyfills")? {
                 let pm = as_map(o, "polyfill")?;
                 let mut pf = Polyfill::new(id, req(pm, "id")?);
@@ -735,6 +737,9 @@ fn node_json(n: &Node) -> Json {
     if n.is_static {
         m.put("static", Json::Bool(true));
     }
+    if n.own_color {
+        m.put("ownColor", Json::Bool(true));
+    }
     if n.stretchy {
         m.put("stretchy", Json::Bool(true));
     }
@@ -857,6 +862,9 @@ fn layer_json(l: &Layer) -> Json {
                 })
                 .collect();
             m.put("polyfills", Json::List(fills));
+            if let Some(c) = f.color {
+                m.put("figureColor", json::s(&format!("#{:08x}", c.to_rgba8888())));
+            }
         }
         LayerKind::Sprite(s) => {
             m.put("asset", json::opt(&s.asset)).put("width", json::f32(s.width)).put("height", json::f32(s.height)).put("tint", prop_json(&s.tint, false));
