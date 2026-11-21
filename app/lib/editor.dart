@@ -146,9 +146,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         await _freshProject();
       }
     }
+    await AppSettings.load();
+    e.command({'op': 'set', 'k': 'axis', 'v': AppSettings.flag('axisLock')});
     _refresh(e.command({'op': 'state'}));
     // draw every frame picture for the project just opened
     _thumbsChanged('open');
+    _reminder = Timer.periodic(const Duration(seconds: 30), (_) => _remindToSave());
     final script = Platform.environment['BARKFART_SCRIPT'];
     if (script != null) Timer(const Duration(milliseconds: 1500), () => _runScript(script));
   }
@@ -173,6 +176,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _ticker.dispose();
+    _reminder?.cancel();
     _clearCache();
     if (_imageOwned) _image?.dispose();
     _engine?.dispose();
@@ -325,7 +329,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   Offset _downAt = Offset.zero;
   bool _moved = false;
 
-  double get _hitRadius => 32 / _view.s;
+  // a stylus can aim at a joint; a finger needs a bigger target
+  double get _hitRadius => (AppSettings.flag('stylus') ? 14 : 32) / _view.s;
 
   void _down(PointerDownEvent ev) {
     if (_playing) {
@@ -457,6 +462,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       return false;
     }
     await f.write(bytes);
+    _savedAt = DateTime.now();
     _file = f;
     await Recovery.clear();
     _refresh(e.command({'op': 'state'}));
@@ -682,6 +688,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           _jumpTo(w.sublist(1).join(' '));
         case 'magnifier':
           setState(() => _magnifier = true);
+        case 'settings':
+          unawaited(_settingsDialog());
+        case 'set':
+          // scripted: a setting (bool or number)
+          AppSettings.values[w[1]] = num.tryParse(w[2])?.toInt() ?? (w[2] == 'true');
+          setState(() {});
         case 'arrows':
           setState(() => _arrows = true);
         case 'viewoptions':
@@ -919,32 +931,35 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       return Scaffold(backgroundColor: cSurround, body: Center(child: Text(_fatal, style: const TextStyle(color: cText))));
     }
     final big = MediaQuery.sizeOf(context).shortestSide > 600;
-    final pad = MediaQuery.paddingOf(context);
+    // screen padding from the settings (notches, rounded corners)
+    final pad = MediaQuery.paddingOf(context) + EdgeInsets.only(left: AppSettings.number('padLeft').toDouble(), right: AppSettings.number('padRight').toDouble());
     final stripH = big ? 112.0 : 92.0;
+    final leftHand = AppSettings.flag('leftHand');
     return Scaffold(
       backgroundColor: cSurround,
       body: RepaintBoundary(
         key: _shot,
-        child: Row(children: [
+        child: Row(textDirection: leftHand ? TextDirection.rtl : TextDirection.ltr, children: [
+          // the tool panel: left, or right in left-hand mode
           Container(
-            width: (big ? 220 : 180) + pad.left,
+            width: (big ? 220 : 180) + (leftHand ? pad.right : pad.left),
             color: cPanel,
-            padding: EdgeInsets.only(left: pad.left, top: pad.top, bottom: pad.bottom),
-            child: _sidebar(),
+            padding: EdgeInsets.only(left: leftHand ? 0 : pad.left, right: leftHand ? pad.right : 0, top: pad.top, bottom: pad.bottom),
+            child: Directionality(textDirection: TextDirection.ltr, child: _sidebar()),
           ),
           Expanded(
             child: Column(children: [
               Container(
                 height: stripH + pad.top,
                 color: cPanel,
-                padding: EdgeInsets.only(top: pad.top, right: pad.right),
+                padding: EdgeInsets.only(top: pad.top, right: leftHand ? 0 : pad.right, left: leftHand ? pad.left : 0),
                 child: _st['building'] != null ? _buildBar() : _topBar(stripH),
               ),
               if (_showTabs && !_playing) _tabStrip(),
               Expanded(
                 child: Padding(
-                  padding: EdgeInsets.only(right: pad.right, bottom: pad.bottom),
-                  child: Stack(children: [
+                  padding: EdgeInsets.only(right: leftHand ? 0 : pad.right, left: leftHand ? pad.left : 0, bottom: pad.bottom),
+                  child: Stack(textDirection: TextDirection.ltr, children: [
                     Positioned.fill(child: _stage()),
                     if (_arrows && !_playing) Positioned(left: _arrowsAt.dx, top: _arrowsAt.dy, child: _arrowsWindow()),
                     if (_magnifier && !_playing) Positioned(left: _magAt.dx, top: _magAt.dy, child: _magnifierWindow()),
@@ -1025,7 +1040,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         width: 170,
         child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Editing ${building['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w600)),
-          const Text('Changes apply on every frame. Pick a draw tool, then drag from a joint.', style: TextStyle(color: cSecondary, fontSize: 11)),
+          _hint('Changes apply on every frame. Pick a draw tool, then drag from a joint.'),
         ]),
       ),
       const SizedBox(width: 8),
@@ -1112,7 +1127,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (_playing) return;
     setState(() => _frameSelected = true);
     _cmd({'op': 'frame', 'i': frame});
-    _cmd({'op': 'select'});
+    if (!AppSettings.flag('keepSelection')) _cmd({'op': 'select'});
     await showDialog<void>(
       context: context,
       builder: (c) => StatefulBuilder(
@@ -1183,7 +1198,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 if (_playing) _togglePlay();
                 setState(() => _frameSelected = true);
                 _cmd({'op': 'frame', 'i': i});
-                _cmd({'op': 'select'});
+                if (!AppSettings.flag('keepSelection')) _cmd({'op': 'select'});
               },
               child: Container(
                 width: cellW,
@@ -1373,13 +1388,99 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _title('Animation Tools'),
       ..._animationTools(),
       _gap,
-      const Text('Playback in the editor can stutter on big animations; exports never do.', style: TextStyle(color: cSecondary, fontSize: 11)),
+      _hint('Playback in the editor can stutter on big animations; exports never do.'),
     ];
   }
 
   List<Widget> _appTools() => [
         _pair(_Btn('New project…', onTap: _newProject), _Btn('Open…', onTap: _openDialog)),
+        _gap,
+        _Btn('Settings…', onTap: _settingsDialog),
       ];
+
+  Timer? _reminder;
+  DateTime _savedAt = DateTime.now();
+  bool _reminding = false;
+
+  /// "Remember to save": every few minutes (Settings) while there is unsaved work.
+  Future<void> _remindToSave() async {
+    final mins = AppSettings.number('saveReminder');
+    if (mins <= 0 || _reminding || _playing || _st['dirty'] != true || !mounted) return;
+    final since = DateTime.now().difference(_savedAt).inMinutes;
+    if (since < mins) return;
+    // only over the editor itself, never on top of another window
+    if (ModalRoute.of(context)?.isCurrent != true) return;
+    _reminding = true;
+    final pick = await showDialog<int>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: cPanel,
+        title: const Text('Save your work?', style: TextStyle(color: cText, fontSize: 16)),
+        content: Text('${_file?.name ?? 'This animation has never been saved.'}\nNothing has been saved for $since minutes. The reminder can be changed or turned off in Settings.', style: const TextStyle(color: cSecondary, fontSize: 13)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, 0), child: const Text('Later')),
+          TextButton(onPressed: () => Navigator.pop(c, 2), child: const Text('Save as…')),
+          TextButton(onPressed: () => Navigator.pop(c, 1), child: const Text('Save')),
+        ],
+      ),
+    );
+    _reminding = false;
+    // asked again after another interval either way
+    _savedAt = DateTime.now();
+    if (pick == 1) await _save();
+    if (pick == 2) await _saveAs();
+  }
+
+  /// App Tools > Settings: changes apply at once and are kept for next time.
+  Future<void> _settingsDialog() async {
+    final e = _engine;
+    await showDialog<void>(
+      context: context,
+      builder: (c) => StatefulBuilder(builder: (c, set) {
+        void put(String k, Object v) {
+          set(() => AppSettings.values[k] = v);
+          setState(() {});
+          unawaited(AppSettings.save());
+          if (k == 'axisLock') _cmd({'op': 'set', 'k': 'axis', 'v': v});
+        }
+
+        Widget toggle(String k, String label, String help) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                _Toggle(label, AppSettings.flag(k), (v) => put(k, v)),
+                if (!AppSettings.flag('nerd')) Text(help, style: const TextStyle(color: cSecondary, fontSize: 11)),
+              ]),
+            );
+        Widget number(String k, String label, int min, int max, int step) => _stepper(label, '${AppSettings.number(k)}', () => put(k, math.max(min, AppSettings.number(k) - step)), () => put(k, math.min(max, AppSettings.number(k) + step)));
+        return AlertDialog(
+          backgroundColor: cPanel,
+          title: const Text('Settings', style: TextStyle(color: cText, fontSize: 17)),
+          content: SizedBox(
+            width: 420,
+            child: ListView(shrinkWrap: true, children: [
+              Text('Graphics: ${e?.adapter ?? '?'}\nSound: ${e?.audioDevice ?? '?'}', style: const TextStyle(color: cSecondary, fontSize: 11)),
+              const SizedBox(height: 12),
+              toggle('axisLock', 'Axis locking', 'Drags of a figure or the camera keep to a straight line when they nearly follow one.'),
+              toggle('leftHand', 'Left-hand mode', 'The tool panel moves to the right side of the screen.'),
+              toggle('keepSelection', 'Keep the selection when changing frames', 'Picking another frame leaves the selected figure selected.'),
+              toggle('stylus', 'Precise touches (stylus)', 'Joints have to be touched more exactly; for a stylus rather than a finger.'),
+              toggle('nerd', 'Fewer explanations', 'Hides most help text in the panels once you know your way around.'),
+              const SizedBox(height: 6),
+              _label('Screen padding (for notches and rounded corners)'),
+              number('padLeft', 'Left', 0, 120, 4),
+              number('padRight', 'Right', 0, 120, 4),
+              const SizedBox(height: 6),
+              _label('Save reminder in minutes (0: off)'),
+              number('saveReminder', 'Minutes', 0, 120, 1),
+            ]),
+          ),
+          actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Done'))],
+        );
+      }),
+    );
+  }
+
+
 
   List<Widget> _projectTools() => [
         Text(_file?.name ?? '(Not saved yet)', style: const TextStyle(color: cSecondary, fontSize: 12)),
@@ -1438,7 +1539,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _gap,
       _Segmented(const ['50', '33/67', '10/90'], ['50', '33/67', '10/90'].indexOf(_tweenAt), (i) => setState(() => _tweenAt = ['50', '33/67', '10/90'][i])),
       _gap,
-      const Text('Hold the button to add several evenly spaced frames.', style: TextStyle(color: cSecondary, fontSize: 11)),
+      _hint('Hold the button to add several evenly spaced frames.'),
       _gap,
       _label('Background colour'),
       _swatches(bgColor, (c) => _cmd({'op': 'frame_bg', 'color': c})),
@@ -1456,7 +1557,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _gap,
       _Toggle('Repeat frames before this one', back > 0, (v) => _cmd({'op': 'frame_repeat', 'back': v ? 1 : 0, 'times': 1})),
       if (back > 0) ...[
-        const Text('After this frame, playback jumps back and plays the series again: a short loop without a movieclip.', style: TextStyle(color: cSecondary, fontSize: 11)),
+        _hint('After this frame, playback jumps back and plays the series again: a short loop without a movieclip.'),
         _stepper('Back', '$back frames', () => _cmd({'op': 'frame_repeat', 'back': math.max(1, back - 1), 'times': times}), () => _cmd({'op': 'frame_repeat', 'back': math.min(_frame, back + 1), 'times': times})),
         _stepper('Repeat', '$times times', () => _cmd({'op': 'frame_repeat', 'back': back, 'times': math.max(1, times - 1)}), () => _cmd({'op': 'frame_repeat', 'back': back, 'times': times + 1})),
       ],
@@ -1690,7 +1791,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _gap,
         _Btn('Paste', enabled: _st['textfieldCopied'] == true, onTap: () => _cmd({'op': 'paste_textfield'})),
         _gap,
-        const Text('A textfield sits on this frame only. Tap its box to select it, then drag to move it.', style: TextStyle(color: cSecondary, fontSize: 11)),
+        _hint('A textfield sits on this frame only. Tap its box to select it, then drag to move it.'),
       ];
     }
     final align = {'left': 0, 'center': 1, 'right': 2}[tf['align'] as String?] ?? 1;
@@ -1724,7 +1825,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     int col(String k, int d) => (f[k] as num?)?.toInt() ?? d;
     void shadow({double? distance, double? angle}) => _cmd({'op': 'filter', 'shadowDistance': distance ?? v('shadowDistance', 10), 'shadowAngle': angle ?? v('shadowAngle', 135)});
     return [
-      const Text('These filters show on the stage and may slow the editor; exports are unaffected.', style: TextStyle(color: cSecondary, fontSize: 11)),
+      _hint('These filters show on the stage and may slow the editor; exports are unaffected.'),
       _gap,
       _stepper('Opacity', v('opacity', 1).toStringAsFixed(2), () => _cmd({'op': 'filter', 'opacity': math.max(0, v('opacity', 1) - 0.05)}), () => _cmd({'op': 'filter', 'opacity': math.min(1, v('opacity', 1) + 0.05)})),
       _gap,
@@ -1864,15 +1965,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _gap,
         _Btn('Fit stage', onTap: () => setState(_fit)),
         _gap,
-        const Text('The arrows window moves the selected figure in small exact steps.', style: TextStyle(color: cSecondary, fontSize: 11)),
+        _hint('The arrows window moves the selected figure in small exact steps.'),
         _Btn('Show arrows', enabled: !_arrows, onTap: () => setState(() => _arrows = true)),
         _gap,
-        const Text('The magnifier shows the stage up close, so joints that sit close together are easy to pick. Move the picked joint on the main stage.', style: TextStyle(color: cSecondary, fontSize: 11)),
+        _hint('The magnifier shows the stage up close, so joints that sit close together are easy to pick. Move the picked joint on the main stage.'),
         _Btn('Show magnifier', enabled: !_magnifier, onTap: () => setState(() {
               _magnifier = true;
               _magKey = '';
             })),
-        if (_engineMs > 0) Padding(padding: const EdgeInsets.only(top: 8), child: Text('${_engineMs.toStringAsFixed(1)} ms per picture', style: const TextStyle(color: cSecondary, fontSize: 11))),
+        if (_engineMs > 0) Padding(padding: const EdgeInsets.only(top: 8), child: _hint('${_engineMs.toStringAsFixed(1)} ms per picture')),
       ]),
     );
   }
@@ -2023,6 +2124,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 }
 
 // ---------------------------------------------------------------- stage overlay
+
+/// Panel help text (hidden with Settings > Fewer explanations).
+Widget _hint(String text) => AppSettings.flag('nerd') ? const SizedBox.shrink() : Text(text, style: const TextStyle(color: cSecondary, fontSize: 11));
 
 class _MagPainter extends CustomPainter {
   final ui.Image? img;
@@ -2587,10 +2691,10 @@ class _ExportDialogState extends State<_ExportDialog> {
             const SizedBox(height: 12),
             _Segmented(const ['GIF', 'PNG frames'], _format, (i) => setState(() => _format = i)),
             const SizedBox(height: 10),
-            const Text('Size', style: TextStyle(color: cSecondary, fontSize: 11)),
+            _hint('Size'),
             const SizedBox(height: 4),
             _Segmented(const ['320', '640', '1280', '1920'], _size, (i) => setState(() => _size = i)),
-            Padding(padding: const EdgeInsets.only(top: 4), child: Text('$w × $h', style: const TextStyle(color: cSecondary, fontSize: 11))),
+            Padding(padding: const EdgeInsets.only(top: 4), child: _hint('$w × $h')),
             const SizedBox(height: 10),
             Row(children: [
               Expanded(child: Text('From frame $_start', style: const TextStyle(color: cText, fontSize: 13))),
@@ -2610,7 +2714,7 @@ class _ExportDialogState extends State<_ExportDialog> {
               _Toggle('Transparent background', _transparent, (v) => setState(() => _transparent = v)),
             ],
             const SizedBox(height: 8),
-            const Text('Saved in the Barkfart Exports folder, with the soundtrack as a WAV when there is sound.', style: TextStyle(color: cSecondary, fontSize: 11)),
+            _hint('Saved in the Barkfart Exports folder, with the soundtrack as a WAV when there is sound.'),
           ]),
         ),
       ),

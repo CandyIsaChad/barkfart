@@ -150,3 +150,48 @@ Future<List<File>> soundFiles() async {
     ..sort((a, b) => a.path.toLowerCase().compareTo(b.path.toLowerCase()));
   return out;
 }
+
+/// App settings (App Tools > Settings), kept in one small JSON file.
+class AppSettings {
+  static final Map<String, Object?> values = {
+    'axisLock': false,
+    'leftHand': false,
+    'keepSelection': false,
+    'stylus': false,
+    'padLeft': 0,
+    'padRight': 0,
+    'nerd': false,
+    'saveReminder': 5,
+  };
+
+  static Future<File> _file() async {
+    final override = Platform.environment['BARKFART_DOCS'];
+    final dir = (override != null && override.isNotEmpty) ? Directory(override) : await getApplicationSupportDirectory();
+    await dir.create(recursive: true);
+    return File('${dir.path}/barkfart-settings.json');
+  }
+
+  static Future<void> load() async {
+    try {
+      final f = await _file();
+      if (!f.existsSync()) return;
+      final m = jsonDecode(await f.readAsString());
+      if (m is Map<String, dynamic>) {
+        for (final e in m.entries) {
+          if (values.containsKey(e.key) && e.value.runtimeType == values[e.key].runtimeType) values[e.key] = e.value;
+        }
+      }
+    } catch (_) {
+      // a damaged settings file: the defaults
+    }
+  }
+
+  static Future<void> save() async {
+    try {
+      await (await _file()).writeAsString(jsonEncode(values));
+    } catch (_) {}
+  }
+
+  static bool flag(String k) => values[k] == true;
+  static int number(String k) => (values[k] as num?)?.toInt() ?? 0;
+}
