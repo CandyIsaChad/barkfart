@@ -346,7 +346,6 @@ pub fn modify_branch(st: &mut State, sym: &str, layer: &str, node: &str, change:
             BranchChange::Color(c) => {
                 x.color.track.clear();
                 x.color.value = Value::C(*c);
-                x.own_color = true;
             }
             BranchChange::Shape(s) => x.shape = *s,
             BranchChange::ScaleLength(k) => {

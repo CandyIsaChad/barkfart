@@ -4,6 +4,25 @@
 
 use std::path::{Path, PathBuf};
 
+/// The project without what only Barkfart records (the Java importer has no
+/// such fields): the stickfigure colour and "use segment colour" per node.
+fn java_view(p: &barkfart_core::model::Project) -> barkfart_core::model::Project {
+    let mut p = p.clone();
+    let ids: Vec<String> = p.library.keys().cloned().collect();
+    for sid in ids {
+        let lids: Vec<String> = p.library[&sid].layers.iter().map(|l| l.id.clone()).collect();
+        for lid in lids {
+            if let Some(barkfart_core::model::LayerKind::Figure(f)) = p.layer_mut(&sid, &lid).map(|l| &mut l.kind) {
+                f.color = None;
+                for n in f.nodes_mut() {
+                    n.own_color = false;
+                }
+            }
+        }
+    }
+    p
+}
+
 fn check_dir(dir: &Path) -> (usize, Vec<String>) {
     let mut failures = Vec::new();
     let mut checked = 0;
@@ -34,7 +53,7 @@ fn check_dir(dir: &Path) -> (usize, Vec<String>) {
             continue;
         }
         let want = std::fs::read_to_string(side(".after.json")).unwrap();
-        let got = barkfart_core::codec::encode(&p);
+        let got = barkfart_core::codec::encode(&java_view(&p));
         if want != got {
             let line = want.lines().zip(got.lines()).position(|(a, b)| a != b).unwrap_or(0);
             failures.push(format!(

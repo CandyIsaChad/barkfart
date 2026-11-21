@@ -203,10 +203,10 @@ mod tests {
     #[test]
     fn sounds_start_on_every_slot_of_their_frame() {
         let fps = 10.0;
-        let slot = |frame, start| Slot { frame, start, len: 0.1, delay: 0.0, silence: false };
+        let slot = |frame, start| Slot { frame, start, len: 0.1, delay: 0.0, silence: false, slow: 0 };
         // frames 0 1 2, frame 0 pauses 1 s, then 1 2 repeat once
         let sch = Schedule {
-            slots: vec![Slot { frame: 0, start: 0.0, len: 1.1, delay: 1.0, silence: false }, slot(1, 1.1), slot(2, 1.2), slot(1, 1.3), slot(2, 1.4)],
+            slots: vec![Slot { frame: 0, start: 0.0, len: 1.1, delay: 1.0, silence: false, slow: 0 }, slot(1, 1.1), slot(2, 1.2), slot(1, 1.3), slot(2, 1.4)],
             fps,
             total: 1.5,
             identity: false,
@@ -231,7 +231,7 @@ mod export_tests {
     #[test]
     fn exports_hold_delays_and_play_repeats() {
         let fps = 10.0;
-        let slot = |frame, start, delay: f64| Slot { frame, start, len: 0.1 + delay, delay, silence: false };
+        let slot = |frame, start, delay: f64| Slot { frame, start, len: 0.1 + delay, delay, silence: false, slow: 0 };
         let sch = Schedule { slots: vec![slot(0, 0.0, 0.0), slot(1, 0.1, 0.3), slot(0, 0.5, 0.0), slot(1, 0.6, 0.3)], fps, total: 1.0, identity: false };
         // GIF: the delayed picture carries its extra time
         let gif = crate::export::pictures(&sch, 0, 2, fps, false);

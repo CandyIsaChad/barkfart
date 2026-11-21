@@ -1121,7 +1121,19 @@ impl Session {
                             } else {
                                 return Ok(());
                             };
-                            return figure_ops::modify_branch(s, &sym, &l, &n, &ch);
+                            let colour = matches!(ch, BranchChange::Color(_));
+                            figure_ops::modify_branch(s, &sym, &l, &n, &ch)?;
+                            if colour {
+                                // a colour of their own (the Java reference has no such flag)
+                                if let Some(LayerKind::Figure(f)) = s.project.layer_mut(&sym, &l).map(|x| &mut x.kind) {
+                                    for id in f.subtree(&n) {
+                                        if let Some(x) = f.node_mut(&id).filter(|x| x.parent.is_some()) {
+                                            x.own_color = true;
+                                        }
+                                    }
+                                }
+                            }
+                            return Ok(());
                         }
                         let Some(layer) = s.project.layer_mut(&sym, &l) else { return crate::edit::fail("no figure") };
                         let LayerKind::Figure(fig) = &mut layer.kind else { return crate::edit::fail("not a figure") };
