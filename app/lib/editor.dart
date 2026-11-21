@@ -353,6 +353,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       final st = _cmd({'op': 'down', 'x': p.dx, 'y': p.dy, 'r': _hitRadius});
       if (st?['hit'] == true) {
         _oneFinger = 1;
+        // Settings "Haptic feedback": a tick when a joint is grabbed
+        if (AppSettings.flag('haptics')) unawaited(HapticFeedback.selectionClick());
       } else {
         _oneFinger = 2;
         _panFrom = ev.localPosition;
@@ -1618,6 +1620,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               const SizedBox(height: 6),
               _label('Save reminder in minutes (0: off)'),
               number('saveReminder', 'Minutes', 0, 120, 1),
+              const SizedBox(height: 12),
+              _label('Node style'),
+              _Segmented(const ['Legacy', 'Modern', 'Solid'], AppSettings.number('nodeStyle').clamp(0, 2), (i) => put('nodeStyle', i)),
+              const SizedBox(height: 8),
+              _label('Line width (see joints and lines easier)'),
+              number('lineWidth', 'Width', 1, 5, 1),
+              const SizedBox(height: 8),
+              toggle('haptics', 'Haptic feedback', 'A light tick when you grab a joint (devices that support it).'),
             ]),
           ),
           actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Done'))],
@@ -3328,26 +3338,29 @@ class _Overlay extends CustomPainter {
       final f = (l[2] as num).toInt();
       final root = f & 1 != 0, sel = f & 2 != 0, nb = f & 8 != 0;
       final color = sel ? red : nb ? purple : (root ? cRoot : blue);
+      // Settings: node style (0 legacy squares, 1 modern rings, 2 solid dots)
+      // and line width (1 thin ... 5 thick)
+      final style = AppSettings.number('nodeStyle'), k = 0.6 + 0.2 * AppSettings.number('lineWidth').clamp(1, 5);
       final stroke = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = sel || nb ? 2.5 : 2
+        ..style = style == 2 ? PaintingStyle.fill : PaintingStyle.stroke
+        ..strokeWidth = (sel || nb ? 2.5 : 2) * k
         ..color = color;
       final halo = Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 4.5
+        ..strokeWidth = 4.5 * k
         ..color = const Color(0xCCFFFFFF);
       // figure editor View options: Node highlight (a filled ring on the
       // polynodes, connectors or locked joints)
       final hl = AppSettings.number('nodeHighlight');
       final lit = (hl == 1 && f & 16 != 0) || (hl == 2 && f & 32 != 0) || (hl == 3 && f & 64 != 0);
       if (lit) canvas.drawCircle(p, 9, Paint()..color = const Color(0xAAFFB020));
-      if (root) {
-        final r = Rect.fromCenter(center: p, width: 10, height: 10);
+      if (root || style == 0) {
+        final r = Rect.fromCenter(center: p, width: (root ? 10 : 8) * k, height: (root ? 10 : 8) * k);
         canvas.drawRect(r, halo);
         canvas.drawRect(r, stroke);
       } else {
-        canvas.drawCircle(p, 5.5, halo);
-        canvas.drawCircle(p, 5.5, stroke);
+        canvas.drawCircle(p, 5.5 * k, halo);
+        canvas.drawCircle(p, 5.5 * k, stroke);
       }
       // Show draw order: each joint's place in the drawing order
       if (l.length > 3 && AppSettings.flag('drawOrder')) {

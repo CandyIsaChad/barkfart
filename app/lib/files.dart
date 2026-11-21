@@ -224,6 +224,10 @@ class AppSettings {
     'nodeHighlight': 0,
     // Camera Tools guide overlay (0 default ... 6)
     'cameraGuide': 0,
+    // Settings: joints on the stage
+    'nodeStyle': 1,
+    'lineWidth': 2,
+    'haptics': true,
     'zoomButtons': false,
     'guides': false,
     'stageBox': true,
