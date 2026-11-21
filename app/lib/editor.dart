@@ -639,6 +639,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           await _saveShot(w[1]);
         case 'state':
           debugPrint('state: ${_st['frame']}/${_st['frames']} undo=${_st['undo']} selected=${_sel?['node']} handles=${(_st['handles'] as List).length} ms=${_engineMs.toStringAsFixed(1)}');
+        case 'import':
+          // scripted: import a file (path) onto this frame
+          final f = File(w.sublist(1).join(' '));
+          _refresh(_engine?.importFile(f.path.split(Platform.pathSeparator).last, await f.readAsBytes()));
+          _thumbsChanged('import');
         case 'export':
           // scripted: GIF (0) or PNG zip (1) at 320 wide, the whole animation
           await _runExport(int.parse(w[1]), 320, (320 * (_st['h'] as num) / (_st['w'] as num)).round(), 0, 0, false, 'Script');
