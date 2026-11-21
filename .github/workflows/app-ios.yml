@@ -43,8 +43,11 @@ jobs:
           cp -R build/ios/iphoneos/Runner.app out/Payload/
           cd out && zip -qr "$name" Payload
           ls -l "$name"
-      - uses: actions/upload-artifact@v4
+      # The .ipa goes up as it is, not inside a zip: GitHub's streamed artifact
+      # zip would not open in iOS Files ("Bad message"), and the download is
+      # now the .ipa itself (artifact named after the file).
+      - uses: actions/upload-artifact@v7.0.2
         with:
-          name: Barkfart-flutter-ipa
           path: app/out/*.ipa
+          archive: false
           if-no-files-found: error
