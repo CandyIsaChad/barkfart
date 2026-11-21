@@ -2293,6 +2293,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _gap,
       if (shape == 'line' || shape == 'square' || shape == 'trapezoid')
         _stepper('Curve radius', curve.round().toString(), () => seg({'curve': curve - 5}), () => seg({'curve': curve + 5})),
+      if (shape == 'trapezoid') ...[
+        _stepper('End thickness', '${(((sel['trapRatio'] as num?) ?? 1) * 100).round()}%', () => seg({'trapRatio': math.max(0, ((sel['trapRatio'] as num?) ?? 1) - 0.1)}), () => seg({'trapRatio': ((sel['trapRatio'] as num?) ?? 1) + 0.1})),
+        _Toggle('Start rounded', sel['trapRoundStart'] == true, (v) => seg({'trapRoundStart': v})),
+        _Toggle('End rounded', sel['trapRoundEnd'] == true, (v) => seg({'trapRoundEnd': v})),
+      ],
       if (shape == 'circle' || shape == 'ellipse') ...[
         _Toggle('Half arc', half != 0, (v) => seg({'halfArc': v ? 1 : 0})),
         if (half != 0) _Toggle('Upside down', half < 0, (v) => seg({'halfArc': v ? -1 : 1})),

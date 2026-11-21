@@ -1717,3 +1717,23 @@ fn modify_branch_replace_and_increment() {
     s.command(&json!({"op": "branch_edit", "ownColor": false}));
     assert!(!node(&s, "armR1").own_color);
 }
+
+/// Segment Tools for trapezoids: end thickness and rounded ends.
+#[test]
+fn trapezoid_end_thickness_and_rounding() {
+    let mut s = session();
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    s.command(&json!({"op": "segment", "shape": "trapezoid"}));
+    let tris = |s: &Session| {
+        let p = s.project();
+        barkfart_core::tess::tessellate(&barkfart_core::eval::evaluate(p, &p.root_symbol, 0.0), None).triangle_count()
+    };
+    let flat = tris(&s);
+    let st = s.command(&json!({"op": "segment", "trapRatio": 0.3}));
+    assert_eq!(st["selected"]["trapRatio"], 0.3);
+    let st = s.command(&json!({"op": "segment", "trapRoundStart": true, "trapRoundEnd": true}));
+    assert_eq!(st["selected"]["trapRoundEnd"], true);
+    assert!(tris(&s) > flat, "rounded ends add triangles");
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(s.state()["selected"]["trapRoundEnd"], false);
+}

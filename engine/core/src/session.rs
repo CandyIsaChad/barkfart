@@ -1421,6 +1421,16 @@ impl Session {
                         if let Some(v) = c2["sides"].as_i64() {
                             node.polygon_sides = v.clamp(3, 64) as i32;
                         }
+                        // trapezoid: end width relative to the start, rounded ends
+                        if let Some(v) = c2["trapRatio"].as_f64() {
+                            node.trapezoid_ratio = ((v.clamp(0.0, 10.0) * 100.0).round() / 100.0) as f32;
+                        }
+                        if let Some(v) = c2["trapRoundStart"].as_bool() {
+                            node.trapezoid_round_start = v;
+                        }
+                        if let Some(v) = c2["trapRoundEnd"].as_bool() {
+                            node.trapezoid_round_end = v;
+                        }
                         if let Some(v) = c2["rightTriangle"].as_i64() {
                             node.right_triangle = v.clamp(-1, 1) as i32;
                         }
@@ -2237,7 +2247,7 @@ impl Session {
                 "angle": round2(r.f(&node.rotation, t)), "length": round2(r.f(&node.length, t)), "restLength": round2(node.rest_length),
                 "gradient": node.gradient, "gradientColor": color_of(&mut r, &node.gradient_color, t), "gradientReverse": node.gradient_reverse, "gradientSideways": node.gradient_sideways,
                 "segScale": round2(r.f(&node.scale, t)), "curve": round2(node.curve), "outline": node.circle_outline, "outlineColor": color_of(&mut r, &node.outline_color, t),
-                "hollow": node.circle_hollow, "halfArc": node.half_arc, "sides": node.polygon_sides, "rightTriangle": node.right_triangle, "upsideDown": node.triangle_upside_down, "angleLock": node.angle_lock,
+                "hollow": node.circle_hollow, "halfArc": node.half_arc, "sides": node.polygon_sides, "trapRatio": round2(node.trapezoid_ratio), "trapRoundStart": node.trapezoid_round_start, "trapRoundEnd": node.trapezoid_round_end, "rightTriangle": node.right_triangle, "upsideDown": node.triangle_upside_down, "angleLock": node.angle_lock,
                 "stretchy": node.stretchy, "ownColor": node.own_color,
                 "connector": node.legacy_extras.get(crate::eval::pose::CONNECT_TO).map(|to| {
                     let num = |k: &str, d: f64| node.legacy_extras.get(k).and_then(|v| v.split_once(':')).and_then(|(_, x)| x.parse::<f64>().ok()).unwrap_or(d);
