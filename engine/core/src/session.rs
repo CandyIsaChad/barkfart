@@ -1792,6 +1792,41 @@ impl Session {
                     });
                 }
             }
+            "to_movieclip" => {
+                // the selected figure and the figures joined to it become a movieclip
+                // that plays their animation in a loop, in their place
+                if let Some(l) = self.sel_layer() {
+                    let p = self.project();
+                    let mut set = vec![l.clone()];
+                    let mut i = 0;
+                    while i < set.len() {
+                        let cur = set[i].clone();
+                        if let Some(r) = p.root() {
+                            for x in &r.layers {
+                                if x.parent.as_deref() == Some(cur.as_str()) && !set.contains(&x.id) {
+                                    set.push(x.id.clone());
+                                }
+                            }
+                        }
+                        i += 1;
+                    }
+                    let name = p.root().and_then(|r| r.layer(&l)).and_then(|x| x.name.clone()).unwrap_or_else(|| "Movieclip".into());
+                    let order: Vec<String> = p.root().map(|r| r.layers.iter().filter(|x| set.contains(&x.id)).map(|x| x.id.clone()).collect()).unwrap_or_default();
+                    if self.step("Convert to movieclip", |s| crate::edit::symbol_ops::convert_to_symbol(s, &sym, &order, &format!("{name} clip")).map(|_| ())).is_some() {
+                        self.selected = None;
+                        self.validate();
+                    } else if self.message.is_empty() {
+                        self.message = "This figure is joined to one outside it; unjoin it first.".into();
+                    }
+                }
+            }
+            "break_apart" => {
+                // a movieclip back into figures, posed as it shows on this frame
+                if let Some(id) = c["layer"].as_str().map(str::to_string) {
+                    self.step("Break apart", |s| crate::edit::symbol_ops::break_apart(s, &sym, &id, t).map(|_| ()));
+                    self.validate();
+                }
+            }
             "library_delete" => {
                 // Library Tools: a figure, movieclip or sprite off every frame (the
                 // ones joined to it stay where they are, unjoined)

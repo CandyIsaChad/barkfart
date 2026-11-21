@@ -1737,3 +1737,28 @@ fn trapezoid_end_thickness_and_rounding() {
     s.command(&json!({"op": "undo"}));
     assert_eq!(s.state()["selected"]["trapRoundEnd"], false);
 }
+
+/// Convert to movieclip: the figure becomes a movieclip playing its own
+/// animation in its place (the picture does not change); Break apart turns
+/// it back into figures posed as on this frame.
+#[test]
+fn convert_to_movieclip_and_break_apart() {
+    let mut s = two_poses();
+    let fps = s.project().settings.fps as f64;
+    let (a0, a1) = (picture_at(&s, 0.0), picture_at(&s, 1.0 / fps));
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    let st = s.command(&json!({"op": "to_movieclip"}));
+    assert_eq!(st["undo"], "Convert to movieclip");
+    let lib = st["library"].as_array().unwrap().clone();
+    let mc = lib.iter().find(|m| m["kind"] == "movieclip").expect("a movieclip");
+    assert!(lib.iter().all(|m| m["layer"] != "L2"), "the figure moved into it");
+    assert_eq!(picture_at(&s, 0.0).len(), a0.len());
+    assert_eq!(picture_at(&s, 1.0 / fps).len(), a1.len(), "it still animates");
+    let id = mc["layer"].as_str().unwrap().to_string();
+    let st = s.command(&json!({"op": "break_apart", "layer": id}));
+    assert_eq!(st["undo"], "Break apart");
+    assert!(st["library"].as_array().unwrap().iter().any(|m| m["kind"] == "figure"));
+    s.command(&json!({"op": "undo"}));
+    s.command(&json!({"op": "undo"}));
+    assert!(s.state()["library"].as_array().unwrap().iter().any(|m| m["layer"] == "L2"));
+}

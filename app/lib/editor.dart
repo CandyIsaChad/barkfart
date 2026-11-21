@@ -1791,6 +1791,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                           child: Text('${m['name']}  ·  ${m['frames']} frame${m['frames'] == 1 ? '' : 's'}${kind == 'figure' ? '  ·  ${m['nodes']} nodes' : ''}',
                               style: const TextStyle(color: cText, fontSize: 13), overflow: TextOverflow.ellipsis),
                         ),
+                        if (kind == 'movieclip')
+                          IconButton(
+                            tooltip: 'Break apart into figures (posed as on this frame)',
+                            icon: const Icon(Icons.call_split, size: 18, color: cText),
+                            onPressed: () {
+                              _cmd({'op': 'break_apart', 'layer': m['layer']});
+                              set(() {});
+                            },
+                          ),
                         IconButton(
                           tooltip: 'Rename',
                           icon: const Icon(Icons.edit, size: 18, color: cText),
@@ -2122,6 +2131,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ]),
       _gap,
       _Btn('Center stickfigure', onTap: () => _cmd({'op': 'figure', 'center': true})),
+      _gap,
+      _Btn('Convert to movieclip…', onTap: () async {
+        final ok = await _ask('Convert to movieclip?', 'This figure and the figures joined to it become a movieclip that plays their animation in a loop, in their place. Library Tools can break it apart again.', ['Cancel', 'Convert']);
+        if (ok == 'Convert') _cmd({'op': 'to_movieclip'});
+      }),
       _gap,
       _label('Stickfigure colour'),
       _swatches((sel['figColor'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'figure', 'color': c})),
