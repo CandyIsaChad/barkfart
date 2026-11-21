@@ -41,8 +41,9 @@ committed). Plainest behaviour where the reference is unsure.
 - [ ] Movieclip editor
 
 ## Figure editor (12)
-- [ ] Special Segment Tools: reorder segment / branch, split N, copy /
-      paste segment and branch, modify branch window
+- [x] Special Segment Tools: reorder segment / branch, split N, copy /
+      paste segment and branch
+- [ ] Modify branch window; delete one segment keeping its children
 - [ ] Add connector, polyfill tool
 - [ ] Trace stickfigure / frame, background image, background colour
 - [ ] Save stickfigure to a file, add to library, backups

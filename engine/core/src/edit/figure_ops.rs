@@ -128,20 +128,39 @@ pub fn split(st: &mut State, sym: &str, layer: &str, node: &str, pieces: usize) 
 /// Copies a node and its branch next to the original, drawn above
 /// everything; polyfills wholly inside the branch come along. Returns the copy's id.
 pub fn duplicate_branch(st: &mut State, sym: &str, layer: &str, node: &str) -> EditResult<String> {
+    let parent = {
+        let (f, _) = figure(st, sym, layer)?;
+        match f.node(node) {
+            Some(n) if n.parent.is_some() => n.parent.clone().expect("has a parent"),
+            _ => return fail(format!("cannot duplicate {node}")),
+        }
+    };
+    let sub: Vec<Node> = {
+        let (f, _) = figure(st, sym, layer)?;
+        f.subtree(node).iter().map(|id| f.node(id).expect("in figure").clone()).collect()
+    };
+    let polys = figure(st, sym, layer)?.0.polyfills.clone();
+    paste_nodes(st, sym, layer, &parent, &sub, &polys)
+}
+
+/// Adds copies of `sub` (a branch in figure order, its first node the branch
+/// root) under joint `parent`, drawn above everything; polyfills of `polys`
+/// wholly inside the branch come along. Returns the new branch root's id.
+pub fn paste_nodes(st: &mut State, sym: &str, layer: &str, parent: &str, sub: &[Node], polys: &[Polyfill]) -> EditResult<String> {
     let (f, lid) = figure(st, sym, layer)?;
-    match f.node(node) {
-        Some(n) if n.parent.is_some() => {}
-        _ => return fail(format!("cannot duplicate {node}")),
+    if f.node(parent).is_none() || sub.is_empty() {
+        return fail(format!("cannot paste onto {parent}"));
     }
-    let sub: Vec<Node> = f.subtree(node).iter().map(|id| f.node(id).expect("in figure").clone()).collect();
+    let first = sub[0].id.clone();
     let max_order = f.nodes().iter().map(|x| x.draw_order).max().unwrap_or(i32::MIN);
     let base = max_order + 1;
     let min_sub = sub.iter().map(|x| x.draw_order).min().unwrap_or(i32::MAX);
     let mut ids: std::collections::HashMap<String, String> = Default::default();
     let mut made = String::new();
-    for x in &sub {
-        let parent = if x.id == node { x.parent.clone() } else { x.parent.as_ref().and_then(|p| ids.get(p).cloned()) };
-        let mut c = Node::new(&lid, &f.free_id("n"), parent.as_deref(), x.shape);
+    for x in sub {
+        let par = if x.id == first { Some(parent.to_string()) } else { x.parent.as_ref().and_then(|p| ids.get(p).cloned()) };
+        let Some(par) = par else { continue };
+        let mut c = Node::new(&lid, &f.free_id("n"), Some(&par), x.shape);
         copy_looks(x, &mut c);
         copy_property(&x.rotation, &mut c.rotation);
         copy_property(&x.length, &mut c.length);
@@ -152,14 +171,14 @@ pub fn duplicate_branch(st: &mut State, sym: &str, layer: &str, node: &str) -> E
         c.drag_lock = x.drag_lock;
         c.draw_order = base + (x.draw_order - min_sub);
         ids.insert(x.id.clone(), c.id.clone());
-        if x.id == node {
+        if x.id == first {
             made = c.id.clone();
         }
         f.add(c).map_err(EditError)?;
     }
     let count = f.polyfills.len();
     let mut extra = Vec::new();
-    for pf in &f.polyfills {
+    for pf in polys {
         if !ids.contains_key(&pf.anchor) || !pf.nodes.iter().all(|x| ids.contains_key(x)) {
             continue;
         }
@@ -172,6 +191,33 @@ pub fn duplicate_branch(st: &mut State, sym: &str, layer: &str, node: &str) -> E
     }
     f.polyfills.extend(extra);
     Ok(made)
+}
+
+/// Draw-order moves of a segment (or its whole branch): one step back or
+/// forward, or to the very back or front. `to`: -2 back end, -1 back one,
+/// 1 forward one, 2 front end.
+pub fn reorder(st: &mut State, sym: &str, layer: &str, node: &str, branch: bool, to: i32) -> EditResult<()> {
+    let (f, _) = figure(st, sym, layer)?;
+    if f.node(node).is_none() {
+        return fail(format!("no node {node}"));
+    }
+    let moving: std::collections::HashSet<String> = if branch { f.subtree(node).into_iter().collect() } else { [node.to_string()].into_iter().collect() };
+    let seq: Vec<String> = f.draw_sequence().into_iter().map(|i| f.nodes()[i].id.clone()).collect();
+    let (group, rest): (Vec<String>, Vec<String>) = seq.iter().cloned().partition(|x| moving.contains(x));
+    let before = seq.iter().take_while(|x| !moving.contains(*x)).count() as i64;
+    let at = match to {
+        -2 => 0,
+        2 => rest.len() as i64,
+        d => before + d.signum() as i64,
+    }
+    .clamp(0, rest.len() as i64) as usize;
+    let mut out: Vec<String> = rest[..at].to_vec();
+    out.extend(group);
+    out.extend(rest[at..].iter().cloned());
+    for (i, id) in out.iter().enumerate() {
+        f.node_mut(id).expect("in figure").draw_order = i as i32;
+    }
+    Ok(())
 }
 
 /// Mirrors a branch about its parent's joint (horizontal: left-right).

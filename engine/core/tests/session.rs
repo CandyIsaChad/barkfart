@@ -1092,3 +1092,35 @@ fn paste_properties_applies_only_the_ticked_parts() {
         assert!((r.f(&na.rotation, 0.0) - r.f(&nb.rotation, 0.0)).abs() < 1e-3, "{}", na.id);
     }
 }
+
+#[test]
+fn figure_editor_reorders_and_pastes_branches() {
+    let mut s = session();
+    let st = s.command(&json!({"op": "state"}));
+    let fig = st["figures"][0]["id"].as_str().unwrap().to_string();
+    let order = |s: &Session| -> Vec<String> {
+        let f = s.project().root().unwrap().layer(&fig).unwrap().as_figure().unwrap();
+        f.draw_sequence().into_iter().map(|i| f.nodes()[i].id.clone()).collect()
+    };
+    s.command(&json!({"op": "build", "layer": fig}));
+    s.command(&json!({"op": "select", "layer": fig, "node": "armR1"}));
+    let before = order(&s);
+    // the arm alone to the very back, then the whole arm branch to the front
+    s.command(&json!({"op": "reorder", "branch": false, "to": -2}));
+    assert_eq!(order(&s)[0], "armR1");
+    s.command(&json!({"op": "reorder", "branch": true, "to": 2}));
+    let o = order(&s);
+    assert_eq!(&o[o.len() - 2..], ["armR1", "armR2"]);
+    s.command(&json!({"op": "undo"}));
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(order(&s), before);
+    // copy the arm branch and paste it onto the head
+    let st = s.command(&json!({"op": "copy_branch", "branch": true}));
+    assert_eq!(st["branchCopied"], true);
+    s.command(&json!({"op": "select", "layer": fig, "node": "head"}));
+    let st = s.command(&json!({"op": "paste_branch"}));
+    assert_eq!(st["handles"].as_array().unwrap().len(), 13);
+    let f = s.project().root().unwrap().layer(&fig).unwrap().as_figure().unwrap();
+    let pasted = st["selected"]["node"].as_str().unwrap();
+    assert_eq!(f.node(pasted).unwrap().parent.as_deref(), Some("head"));
+}

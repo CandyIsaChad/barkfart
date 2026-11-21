@@ -69,6 +69,8 @@ pub struct Session {
     textfield_clip: Option<Layer>,
     filter_clip: Option<crate::edit::filters::Snapshot>,
     sound_clip: Option<Clip>,
+    /// Figure editor: a copied segment or branch (figure order) and its polyfills.
+    branch_clip: Option<(Vec<Node>, Vec<Polyfill>)>,
     /// Copied frame: its keys (times relative to the frame).
     frame_clip: Option<(crate::edit::editor::KeyClip, i32)>,
     /// Bumped on every change the app should redraw for (drags included).
@@ -118,7 +120,7 @@ impl Session {
         let mut doc = doc;
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
-        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -1023,6 +1025,34 @@ impl Session {
                     }
                 }
             }
+            "reorder" => {
+                if let Some((l, n)) = self.selected.clone() {
+                    let (branch, to) = (b("branch"), c["to"].as_i64().unwrap_or(1) as i32);
+                    self.step(if branch { "Reorder branch" } else { "Reorder segment" }, |s| figure_ops::reorder(s, &sym, &l, &n, branch, to));
+                }
+            }
+            "copy_branch" => {
+                // the selected segment alone, or with everything hanging off it
+                if let Some((l, n)) = self.selected.clone() {
+                    let branch = b("branch");
+                    if let Some(f) = self.project().root().and_then(|s| s.layer(&l)).and_then(|x| x.as_figure()) {
+                        let ids: Vec<String> = if branch { f.subtree(&n) } else { vec![n.clone()] };
+                        let nodes: Vec<Node> = ids.iter().filter_map(|id| f.node(id)).filter(|x| x.parent.is_some()).cloned().collect();
+                        if !nodes.is_empty() {
+                            self.branch_clip = Some((nodes, f.polyfills.clone()));
+                            self.message = if branch { "Branch copied.".into() } else { "Segment copied.".into() };
+                        }
+                        self.rev += 1;
+                    }
+                }
+            }
+            "paste_branch" => {
+                if let (Some((l, n)), Some((nodes, polys))) = (self.selected.clone(), self.branch_clip.clone()) {
+                    if let Some(id) = self.step("Paste segment", |s| figure_ops::paste_nodes(s, &sym, &l, &n, &nodes, &polys)) {
+                        self.selected = Some((l, id));
+                    }
+                }
+            }
             "delete_segment" => {
                 if let Some((l, n)) = self.selected.clone() {
                     let is_root = self.project().root().and_then(|s| s.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.node(&n)).is_some_and(|x| x.parent.is_none());
@@ -1036,7 +1066,7 @@ impl Session {
             "split" => {
                 if let Some((l, n)) = self.selected.clone() {
                     let k = c["n"].as_u64().unwrap_or(2) as usize;
-                    self.step("Split segment", |s| figure_ops::split(s, &sym, &l, &n, k.clamp(2, 10)));
+                    self.step("Split segment", |s| figure_ops::split(s, &sym, &l, &n, k.clamp(2, 21)));
                 }
             }
             "duplicate_branch" => {
@@ -1803,6 +1833,7 @@ impl Session {
             "undo": self.doc.undo_label(), "redo": self.doc.redo_label(), "dirty": self.doc.dirty(),
             "mode": match self.mode { Mode::Figure => "figure", Mode::All => "all", Mode::Camera => "camera" },
             "handles": handles, "selected": sel, "figures": figures, "camera": cam,
+            "branchCopied": self.branch_clip.is_some(),
             "propsFrom": self.props_clip.as_ref().and_then(|c| p.root()?.layer(&c.source).map(|l| l.name.clone().unwrap_or_else(|| l.id.clone()))),
             "textfield": textfield, "textfieldCopied": self.textfield_clip.is_some(),
             "filtersCopied": self.filter_clip.is_some(),

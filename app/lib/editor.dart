@@ -2358,6 +2358,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
 
 
+  int _splitN = 1;
+  bool _reorderBranch = false;
+
   /// The figure editor: structure tools for the selected segment.
   List<Widget> _builder(Map<String, dynamic>? sel) {
     if (sel == null) return [_title('Figure editor'), const Text('Tap a joint of this figure.', style: TextStyle(color: cSecondary, fontSize: 13))];
@@ -2375,10 +2378,29 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _label('Drag'),
       _Segmented(const ['Rotate', 'Stretch'], stretch ? 1 : 0, (i) => _cmd({'op': 'set', 'k': 'stretch', 'v': i == 1})),
       _gap,
-      _pair(_Btn('Add segment', onTap: () => _cmd({'op': 'add_segment'})), _Btn('Delete', danger: true, enabled: !root, onTap: () => _cmd({'op': 'delete_segment'}))),
+      _pair(_Btn('Add segment', onTap: () => _cmd({'op': 'add_segment'})), _Btn('Delete branch', danger: true, enabled: !root, onTap: () => _cmd({'op': 'delete_segment'}))),
+      _gap,
+      // paste a copied segment / branch onto this joint (the main node too)
+      _Btn('Paste segment here', enabled: _st['branchCopied'] == true, onTap: () => _cmd({'op': 'paste_branch'})),
       _gap,
       if (!root) ...[
-        _pair(_Btn('Split', onTap: () => _cmd({'op': 'split', 'n': 2})), _Btn('Copy branch', onTap: () => _cmd({'op': 'duplicate_branch'}))),
+        _pair(_Btn('Copy segment', onTap: () => _cmd({'op': 'copy_branch', 'branch': false})), _Btn('Copy branch', onTap: () => _cmd({'op': 'copy_branch', 'branch': true}))),
+        _gap,
+        _pair(_Btn('Split ($_splitN)', onTap: () => _cmd({'op': 'split', 'n': _splitN + 1})), _Btn('Duplicate branch', onTap: () => _cmd({'op': 'duplicate_branch'}))),
+        _stepper('New joints', '$_splitN', () => setState(() => _splitN = math.max(1, _splitN - 1)), () => setState(() => _splitN = math.min(20, _splitN + 1))),
+        _gap,
+        _label('Draw order'),
+        _Segmented(const ['Segment', 'Branch'], _reorderBranch ? 1 : 0, (i) => setState(() => _reorderBranch = i == 1)),
+        const SizedBox(height: 4),
+        Row(children: [
+          for (final (icon, to, tip) in const [(Icons.first_page, -2, 'To the back'), (Icons.chevron_left, -1, 'One back'), (Icons.chevron_right, 1, 'One forward'), (Icons.last_page, 2, 'To the front')])
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: Tooltip(message: tip, child: _Btn('', onTap: () => _cmd({'op': 'reorder', 'branch': _reorderBranch, 'to': to}), icon: icon)),
+              ),
+            ),
+        ]),
         _gap,
         _pair(_Btn('Flip branch', onTap: () => _cmd({'op': 'flip_branch', 'h': true})), _Btn(sel['pinned'] == true ? 'Unlock' : 'Lock', onTap: () => _cmd({'op': 'pin', 'v': sel['pinned'] != true}))),
         _gap,
@@ -2688,7 +2710,8 @@ class _Btn extends StatelessWidget {
   final String label;
   final VoidCallback? onTap;
   final bool enabled, accent, danger, small;
-  const _Btn(this.label, {this.onTap, this.enabled = true, this.accent = false, this.danger = false, this.small = false});
+  final IconData? icon;
+  const _Btn(this.label, {this.onTap, this.enabled = true, this.accent = false, this.danger = false, this.small = false, this.icon});
 
   @override
   Widget build(BuildContext context) {
@@ -2705,7 +2728,7 @@ class _Btn extends StatelessWidget {
             child: Center(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: danger ? cDanger : cText, fontSize: small ? 11 : 13)),
+                child: icon != null ? Icon(icon, size: 18, color: danger ? cDanger : cText) : Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: danger ? cDanger : cText, fontSize: small ? 11 : 13)),
               ),
             ),
           ),
