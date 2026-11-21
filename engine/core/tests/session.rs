@@ -449,18 +449,41 @@ fn a_figure_added_pasted_or_deleted_on_one_frame_stays_on_that_frame() {
     s.command(&json!({"op": "select", "layer": ball}));
     s.command(&json!({"op": "delete_here"}));
     assert_eq!((0..5).map(|f| on(&mut s, f)).collect::<Vec<_>>(), vec![false, true, false, false, false]);
-    // copy and paste onto frame 5 only
+    // copy it and paste onto frame 5 (which does not have it): the same ball, now on 2 and 5
     s.command(&json!({"op": "frame", "i": 1}));
     s.command(&json!({"op": "select", "layer": ball}));
     s.command(&json!({"op": "copy_figure"}));
     s.command(&json!({"op": "frame", "i": 4}));
     let st = s.command(&json!({"op": "paste_figure"}));
-    let copy = st["selected"]["layer"].as_str().unwrap().to_string();
-    let fps = s.project().settings.fps as f64;
-    let shown: Vec<bool> = (0..5).map(|f| s.tools.handles(s.project(), f as f64 / fps).iter().any(|h| h.layer == copy)).collect();
-    assert_eq!(shown, vec![false, false, false, false, true]);
-    // deleting it on its only frame removes it
-    s.command(&json!({"op": "select", "layer": copy}));
+    assert_eq!(st["selected"]["layer"], ball.as_str());
+    assert_eq!((0..5).map(|f| on(&mut s, f)).collect::<Vec<_>>(), vec![false, true, false, false, true]);
+    // a figure added on one frame and deleted there is removed altogether
+    s.command(&json!({"op": "frame", "i": 3}));
+    let st = s.command(&json!({"op": "add_figure", "kind": "stick"}));
+    assert_eq!(st["figures"].as_array().unwrap().len(), 3);
     let st = s.command(&json!({"op": "delete_here"}));
     assert_eq!(st["figures"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn pasting_onto_a_frame_without_the_figure_brings_the_same_figure_back() {
+    let mut s = two_poses();
+    s.command(&json!({"op": "insert_frame"}));
+    // frames 1..3; delete the figure on frame 2 by accident
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "select", "layer": "L2"}));
+    s.command(&json!({"op": "delete_here"}));
+    // copy it from frame 1 and paste it onto frame 2: the same figure (tweens), no new one
+    s.command(&json!({"op": "frame", "i": 0}));
+    s.command(&json!({"op": "select", "layer": "L2"}));
+    s.command(&json!({"op": "copy_figure"}));
+    s.command(&json!({"op": "frame", "i": 1}));
+    let st = s.command(&json!({"op": "paste_figure"}));
+    assert_eq!(st["figures"].as_array().unwrap().len(), 1, "no new figure");
+    assert_eq!(st["selected"]["layer"], "L2");
+    assert!(same(&picture(&s, 1), &picture(&s, 0)), "frame 2 now has the frame 1 pose");
+    // pasting where it already is: a new figure
+    let st = s.command(&json!({"op": "paste_figure"}));
+    assert_eq!(st["figures"].as_array().unwrap().len(), 2);
+    assert_ne!(st["selected"]["layer"], "L2");
 }

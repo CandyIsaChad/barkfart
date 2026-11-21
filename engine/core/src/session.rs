@@ -50,7 +50,8 @@ pub struct Session {
     last_tap: Option<(f32, f32, String, String)>,
     pose_clip: Option<(IndexMap<String, f32>, IndexMap<String, f32>)>,
     /// Copied stickfigure (with joined figures) and copied figure properties.
-    figure_clip: Option<Vec<Layer>>,
+    /// Copied figures and the time they were copied at (their pose there).
+    figure_clip: Option<(Vec<Layer>, f64)>,
     props_clip: Option<layer_ops::Props>,
     /// Copied frame: its keys (times relative to the frame).
     frame_clip: Option<crate::edit::editor::KeyClip>,
@@ -847,24 +848,53 @@ impl Session {
                 if let Some(l) = self.sel_layer() {
                     let s0 = self.project().root().expect("root");
                     let ids = if b("joined") { layer_ops::with_joined(s0, &l) } else { vec![l.clone()] };
-                    self.figure_clip = Some(ids.iter().filter_map(|i| s0.layer(i).map(|x| x.clone())).collect());
+                    self.figure_clip = Some((ids.iter().filter_map(|i| s0.layer(i).map(|x| x.clone())).collect(), t));
                     self.message = "Stickfigure copied.".into();
                     self.rev += 1;
                 }
             }
             "paste_figure" => {
-                if let Some(clip) = self.figure_clip.clone() {
+                // Like the original: figures are matched across frames by id (that is
+                // what tweens). Pasting onto a frame that does not have the copied
+                // figure brings the same figure back there (it tweens with its
+                // neighbours); where it is already present, the paste is a new figure.
+                if let Some((clip, t_copy)) = self.figure_clip.clone() {
                     let fr_now = self.frame;
                     let made = self.step("Paste stickfigure", |s| {
+                        let sym2 = s.project.root_symbol.clone();
+                        let here = |s: &crate::edit::State, id: &str| s.project.root().and_then(|r| r.layer(id)).map(|x| Resolver::new(&s.project).b(&x.shown, t));
+                        let same = clip.iter().all(|l| here(s, &l.id) == Some(false));
+                        if same {
+                            for l in &clip {
+                                let vals: Vec<(String, Value)> = l.properties().iter().filter(|q| !q.track.is_empty()).map(|q| (q.id.clone(), q.key_value(t_copy))).collect();
+                                for (pid, v) in vals {
+                                    if let Some(q) = s.project.property_mut(&pid) {
+                                        let interp = if matches!(v, Value::B(_)) { Interp::Hold } else { crate::edit::editor::interp_at(q, t, Interp::Linear) };
+                                        q.track.put(Key::new(t, v, interp));
+                                    }
+                                }
+                                if let Some(x) = s.project.layer_mut(&sym2, &l.id) {
+                                    x.shown.track.put(Key::new(t, Value::B(true), Interp::Hold));
+                                }
+                            }
+                            return Ok(clip.first().map(|l| l.id.clone()));
+                        }
                         let mut ids = std::collections::HashMap::new();
                         for l in &clip {
                             let n = s.project.new_id("L");
                             ids.insert(l.id.clone(), n);
                         }
-                        let sym2 = s.project.root_symbol.clone();
                         let mut first = None;
                         for l in &clip {
-                            let c = structure::copy_layer(l, &ids)?;
+                            let mut c = structure::copy_layer(l, &ids)?;
+                            // the new figure holds the copied pose
+                            for q in c.properties_mut() {
+                                if !q.track.is_empty() {
+                                    let v = q.key_value(t_copy);
+                                    q.track.clear();
+                                    q.value = v;
+                                }
+                            }
                             let id = c.id.clone();
                             first.get_or_insert(id.clone());
                             let at = s.project.root().map(|r| r.layers.len()).unwrap_or(0);
