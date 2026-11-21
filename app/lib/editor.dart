@@ -120,6 +120,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _ticker = createTicker((_) {
       _tick();
       _thumbTick();
+      _magTick();
     })..start();
     _start();
   }
@@ -679,6 +680,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           setState(() => _frameSelected = true);
         case 'tab':
           _jumpTo(w.sublist(1).join(' '));
+        case 'magnifier':
+          setState(() => _magnifier = true);
         case 'arrows':
           setState(() => _arrows = true);
         case 'viewoptions':
@@ -718,6 +721,82 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// A frame thumbnail was tapped: the panel shows Frame Tools.
   bool _frameSelected = false;
   bool _viewOptions = false;
+
+  // Magnifier window: a zoomed view around the selected joint, for picking
+  // joints that sit close together
+  bool _magnifier = false, _magLocked = false, _magNodes = true;
+  Offset _magAt = const Offset(16, 260);
+  double _magZoom = 3;
+  Offset _magCenter = Offset.zero;
+  ui.Image? _magImage;
+  String _magKey = '';
+  static const _magW = 240.0, _magH = 170.0;
+
+  double get _magK => _view.s * _magZoom;
+
+  void _magTick() {
+    final e = _engine;
+    if (!_magnifier || _playing || e == null || _st.isEmpty || _view.s <= 0) return;
+    if (!_magLocked) {
+      for (final h in (_st['handles'] as List?) ?? const []) {
+        final l = h as List;
+        if ((l[2] as num).toInt() & 2 != 0) _magCenter = Offset((l[0] as num).toDouble(), (l[1] as num).toDouble());
+      }
+    }
+    final k = _magK;
+    final key = '${_st['rev']} $_frame $_magCenter $k';
+    if (key == _magKey) return;
+    _magKey = key;
+    final x0 = _magCenter.dx - _magW / 2 / k, x1 = _magCenter.dx + _magW / 2 / k;
+    final y0 = _magCenter.dy - _magH / 2 / k, y1 = _magCenter.dy + _magH / 2 / k;
+    final w = (_magW * math.min(_dpr, 2.0)).round(), h = (_magH * math.min(_dpr, 2.0)).round();
+    final px = e.renderView(_frame / _fps, w, h, x0, y0, x1, y1);
+    if (px == null) return;
+    ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, (img) {
+      if (!mounted) return;
+      setState(() {
+        _magImage?.dispose();
+        _magImage = img;
+      });
+    });
+  }
+
+  Widget _magnifierWindow() {
+    final k = _magK;
+    final x0 = _magCenter.dx - _magW / 2 / k, y1 = _magCenter.dy + _magH / 2 / k;
+    return SizedBox(
+      width: _magW + 16,
+      child: _floating('Magnifier', () => setState(() => _magnifier = false), (d) => setState(() => _magAt += d), Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        // a tap picks the nearest joint; move it on the main stage
+        GestureDetector(
+          onTapUp: (d) {
+            final x = x0 + d.localPosition.dx / k, y = y1 - d.localPosition.dy / k;
+            _cmd({'op': 'down', 'x': x, 'y': y, 'r': 14 / k});
+            _cmd({'op': 'up', 'x': x, 'y': y});
+          },
+          child: Container(
+            width: _magW,
+            height: _magH,
+            color: Colors.white,
+            child: CustomPaint(painter: _MagPainter(_magImage, _magNodes ? ((_st['handles'] as List?) ?? const []) : const [], x0, y1, k)),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(children: [
+          IconButton(
+            tooltip: _magLocked ? 'Follow the selected joint' : 'Keep this spot',
+            icon: Icon(_magLocked ? Icons.lock : Icons.lock_open, size: 18, color: _magLocked ? cAccent : cSecondary),
+            onPressed: () => setState(() => _magLocked = !_magLocked),
+          ),
+          SizedBox(width: 36, child: _Btn('−', onTap: () => setState(() => _magZoom = math.max(1.5, _magZoom - 0.5)))),
+          const SizedBox(width: 4),
+          SizedBox(width: 36, child: _Btn('+', onTap: () => setState(() => _magZoom = math.min(12, _magZoom + 0.5)))),
+          const SizedBox(width: 6),
+          Expanded(child: _Btn(_magNodes ? 'Joints shown' : 'Joints hidden', small: true, onTap: () => setState(() => _magNodes = !_magNodes))),
+        ]),
+      ])),
+    );
+  }
 
   // Arrows window: nudges the selection by a set amount
   bool _arrows = false;
@@ -868,6 +947,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                   child: Stack(children: [
                     Positioned.fill(child: _stage()),
                     if (_arrows && !_playing) Positioned(left: _arrowsAt.dx, top: _arrowsAt.dy, child: _arrowsWindow()),
+                    if (_magnifier && !_playing) Positioned(left: _magAt.dx, top: _magAt.dy, child: _magnifierWindow()),
                     if (_viewOptions) Positioned(top: 0, right: 0, bottom: 0, width: 240, child: _viewOptionsPanel()),
                   ]),
                 ),
@@ -1786,6 +1866,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _gap,
         const Text('The arrows window moves the selected figure in small exact steps.', style: TextStyle(color: cSecondary, fontSize: 11)),
         _Btn('Show arrows', enabled: !_arrows, onTap: () => setState(() => _arrows = true)),
+        _gap,
+        const Text('The magnifier shows the stage up close, so joints that sit close together are easy to pick. Move the picked joint on the main stage.', style: TextStyle(color: cSecondary, fontSize: 11)),
+        _Btn('Show magnifier', enabled: !_magnifier, onTap: () => setState(() {
+              _magnifier = true;
+              _magKey = '';
+            })),
         if (_engineMs > 0) Padding(padding: const EdgeInsets.only(top: 8), child: Text('${_engineMs.toStringAsFixed(1)} ms per picture', style: const TextStyle(color: cSecondary, fontSize: 11))),
       ]),
     );
@@ -1937,6 +2023,34 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 }
 
 // ---------------------------------------------------------------- stage overlay
+
+class _MagPainter extends CustomPainter {
+  final ui.Image? img;
+  final List handles;
+  final double x0, y1, k;
+  _MagPainter(this.img, this.handles, this.x0, this.y1, this.k);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final i = img;
+    if (i != null) {
+      paintImage(canvas: canvas, rect: Offset.zero & size, image: i, fit: BoxFit.fill, filterQuality: FilterQuality.medium);
+    }
+    for (final h in handles) {
+      final l = h as List;
+      final p = Offset(((l[0] as num).toDouble() - x0) * k, (y1 - (l[1] as num).toDouble()) * k);
+      if (!(Offset.zero & size).inflate(8).contains(p)) continue;
+      final sel = (l[2] as num).toInt() & 2 != 0;
+      canvas.drawCircle(p, 6, Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = sel ? const Color(0xFFE0383A) : const Color(0xFF2F6BE8));
+    }
+  }
+
+  @override
+  bool shouldRepaint(_MagPainter o) => o.img != img || o.handles != handles || o.x0 != x0 || o.y1 != y1 || o.k != k;
+}
 
 class _Overlay extends CustomPainter {
   final Map<String, dynamic> st;
