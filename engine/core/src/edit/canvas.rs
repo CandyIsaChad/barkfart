@@ -80,6 +80,50 @@ impl Default for CanvasTools {
     }
 }
 
+/// Stick Nodes IK rigs (e.g. "Stickfigure (IK)"): a stretchy segment S with a
+/// static smart-stretch connector X under it. Measured on the original
+/// (movieclip frames it stored, 2026-11-21): S stops at the connector's reach; with
+/// k = S's length / X's rest length, every static segment below X (down to the
+/// next connector) gets rest x (1 + m (k - 1)), m being the multiplier of a
+/// "reset stretch impulse" segment and 1 otherwise; X follows S's length.
+/// Returns S's length and the (length property, value) changes, or None when
+/// S is not such a segment.
+pub fn connector_smart_stretch(f: &Figure, si: usize, len: f32) -> Option<(f32, Vec<(String, f32)>)> {
+    let nodes = f.nodes();
+    let s = &nodes[si];
+    if !s.stretchy || s.is_static {
+        return None;
+    }
+    let links = crate::eval::pose::connector_links(f);
+    let x = nodes.iter().enumerate().find(|(j, n)| n.parent.as_deref() == Some(s.id.as_str()) && n.is_static && n.smart_stretch && links.contains_key(j))?;
+    let (xi, xn) = x;
+    // the leg stops at the connector's stored value (its full reach), else at S's rest length
+    let reach = xn.legacy_extras.get("C.cValue").and_then(|v| v.split_once(':')).and_then(|(_, n)| n.parse::<f32>().ok()).filter(|v| *v > 0.0);
+    let rest_s = if s.rest_length > 0.0 { s.rest_length } else { len };
+    let clamped = len.min(reach.unwrap_or(rest_s));
+    let rest_x = if xn.rest_length > 0.0 { xn.rest_length } else { rest_s };
+    if rest_x <= 1e-6 {
+        return None;
+    }
+    let k = clamped / rest_x;
+    let mut out = vec![(xn.length.id.clone(), clamped)];
+    // static descendants of X, stopping at connectors, non-static segments and do-not-smart-stretch ones
+    let mut inside = vec![false; nodes.len()];
+    inside[xi] = true;
+    for j in xi + 1..nodes.len() {
+        let n = &nodes[j];
+        let Some(pj) = n.parent.as_ref().and_then(|p| f.index_of(p)) else { continue };
+        if !inside[pj] || !n.is_static || n.no_smart_stretch || links.contains_key(&j) {
+            continue;
+        }
+        inside[j] = true;
+        let m = crate::eval::pose::stretch_reset(n).unwrap_or(1.0);
+        let rest = if n.rest_length > 0.0 { n.rest_length } else { continue };
+        out.push((n.length.id.clone(), rest * (1.0 + m * (k - 1.0))));
+    }
+    Some((clamped, out))
+}
+
 /// Snaps an angle to the nearest multiple of step (step <= 0: unchanged).
 pub fn snap(deg: f64, step: f64) -> f64 {
     if step > 0.0 {
@@ -374,9 +418,18 @@ impl CanvasTools {
         let (rot_id, len_id) = (n.rotation.id.clone(), n.length.id.clone());
         let scale = r.f(&n.scale, t);
         let smart = n.smart_stretch;
+        // an IK rig: the stretchy segment has a smart-stretch connector under it
+        let ik = if self.stretch && scale > 1e-6 { connector_smart_stretch(f, i, ((dx * dx + dy * dy).sqrt() / scale as f64) as f32) } else { None };
         ed.change_in(&mut d.state, &rot_id, Value::F(rel as f32), t)?;
         if self.stretch && scale > 1e-6 {
             let len = ((dx * dx + dy * dy).sqrt() / scale as f64) as f32;
+            if let Some((clamped, sets)) = ik {
+                ed.change_in(&mut d.state, &len_id, Value::F(clamped), t)?;
+                for (id, v) in sets {
+                    ed.change_in(&mut d.state, &id, Value::F(v), t)?;
+                }
+                return self.hold_pins(d, &drag, t);
+            }
             ed.change_in(&mut d.state, &len_id, Value::F(len), t)?;
             if smart {
                 self.smart_stretch_in(d, &drag.hit.layer, &pose, i, len, t, &drag.start_length)?;

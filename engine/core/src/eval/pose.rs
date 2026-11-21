@@ -18,6 +18,10 @@ impl FigurePose {
         let nodes = f.nodes();
         let n = nodes.len();
         let mut p = FigurePose { x: vec![0.0; n], y: vec![0.0; n], angle: vec![0.0; n], parent: vec![0; n] };
+        let links = connector_links(f);
+        // a connector aimed at a joint later in the list needs that joint first: a second pass
+        let passes = if links.iter().any(|(c, (e, _))| e > c) { 2 } else { 1 };
+        for pass in 0..passes {
         for (i, node) in nodes.iter().enumerate() {
             let rot = r.f(&node.rotation, t) as f64;
             let Some(parent) = &node.parent else {
@@ -32,11 +36,34 @@ impl FigurePose {
                 continue;
             }
             let pi = pi as usize;
+            // a connector sits on the line from its parent to another joint
+            // (Stick Nodes connectors; IK rigs are built from them)
+            if let Some(&(ei, spec)) = links.get(&i) {
+                if ei < i || pass == 1 {
+                    let (ax, ay, ex, ey) = (p.x[pi], p.y[pi], p.x[ei], p.y[ei]);
+                    let (dx, dy) = (ex - ax, ey - ay);
+                    let d = dx.hypot(dy);
+                    let (x, y) = if !spec.by_value {
+                        let f = spec.percent as f64;
+                        if spec.reversed { (ex - dx * f, ey - dy * f) } else { (ax + dx * f, ay + dy * f) }
+                    } else if d < 1e-9 {
+                        (ax, ay)
+                    } else {
+                        let v = (r.f(&node.length, t) * r.f(&node.scale, t)) as f64;
+                        if spec.reversed { (ex - dx / d * v, ey - dy / d * v) } else { (ax + dx / d * v, ay + dy / d * v) }
+                    };
+                    p.x[i] = x;
+                    p.y[i] = y;
+                    p.angle[i] = if d < 1e-9 { base(nodes, &p, i, pi) + rot } else { dy.atan2(dx).to_degrees() };
+                    continue;
+                }
+            }
             p.angle[i] = base(nodes, &p, i, pi) + rot;
             let len = (r.f(&node.length, t) * r.f(&node.scale, t)) as f64;
             let rad = p.angle[i].to_radians();
             p.x[i] = p.x[pi] + len * rad.cos();
             p.y[i] = p.y[pi] + len * rad.sin();
+        }
         }
         p
     }
@@ -48,6 +75,57 @@ impl FigurePose {
         } else {
             base(nodes, self, i, self.parent[i] as usize)
         }
+    }
+}
+
+/// How a connector is placed (from its imported Stick Nodes data).
+#[derive(Clone, Copy, Debug)]
+pub struct ConnectorSpec {
+    pub by_value: bool,
+    pub percent: f32,
+    pub value: f32,
+    pub reversed: bool,
+}
+
+fn extra_num(n: &Node, k: &str) -> Option<f64> {
+    let v = n.legacy_extras.get(k)?;
+    let (_, num) = v.split_once(':')?;
+    num.parse::<f64>().ok()
+}
+
+/// Connector node index -> (endpoint node index, placement), from the
+/// figure's imported connector table ("fig.connections" on the main node).
+pub fn connector_links(f: &Figure) -> std::collections::HashMap<usize, (usize, ConnectorSpec)> {
+    let mut out = std::collections::HashMap::new();
+    let nodes = f.nodes();
+    let Some(table) = nodes.first().and_then(|r| r.legacy_extras.get("fig.connections")) else { return out };
+    let table = table.strip_prefix("s:").unwrap_or(table);
+    for pair in table.split(';') {
+        let Some((a, b)) = pair.split_once(',') else { continue };
+        let (Some(ci), Some(ei)) = (f.index_of(&format!("n{a}")), f.index_of(&format!("n{b}"))) else { continue };
+        let n = &nodes[ci];
+        if n.legacy_extras.get("connector").map(String::as_str) != Some("b:true") {
+            continue;
+        }
+        let spec = ConnectorSpec {
+            // measured against the original (2026-11-21): method 0 places the connector
+            // its own length from the endpoint (reversed) or parent, method 1 by percent
+            by_value: extra_num(n, "C.cMethod").unwrap_or(0.0) as i32 == 0,
+            percent: extra_num(n, "C.cPercent").unwrap_or(0.5) as f32,
+            value: extra_num(n, "C.cValue").unwrap_or(0.0) as f32,
+            reversed: extra_num(n, "C.cReversed").unwrap_or(0.0) != 0.0,
+        };
+        out.insert(ci, (ei, spec));
+    }
+    out
+}
+
+/// Stretch multiplier of a "reset stretch impulse" node (None when not reset).
+pub fn stretch_reset(n: &Node) -> Option<f32> {
+    if extra_num(n, "L.smartStretchResetImpulse").unwrap_or(0.0) != 0.0 {
+        Some(extra_num(n, "L.smartStretchMultiplier").unwrap_or(1.0) as f32)
+    } else {
+        None
     }
 }
 

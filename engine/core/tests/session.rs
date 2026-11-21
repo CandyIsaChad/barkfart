@@ -336,7 +336,7 @@ fn stickfigure_segment_and_camera_tools() {
 /// detail segments smart-stretch. Dragging a limb end in Barkfart must bend
 /// it the same way (lengths of the static children follow).
 #[test]
-#[ignore = "smart-stretch impulse (reset / multiplier) not modelled yet: waiting for ground truth from the original (a .nodemc posed at several stretches)"]
+#[ignore = "superseded by ik_rig_matches_the_original (the IK leg is a connector rig, not the movieclip smart-stretch rule)"]
 fn the_ik_stickfigure_bends_by_smart_stretch() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../app/assets/stock/figures/Stickfigure (IK).nodes");
     let Ok(bytes) = std::fs::read(path) else { return };
@@ -542,4 +542,48 @@ fn copying_a_frame_and_the_ones_after_it() {
     let st = s.command(&json!({"op": "no_tween", "on": true}));
     assert_eq!(st["noTweenFrames"][5], true);
     assert_eq!(st["noTweenFrames"][4], false);
+}
+
+
+/// Ground truth from the original (Stick Nodes Pro 4.3.1, 2026-11-21): a movieclip
+/// of "Stickfigure (IK)" with one foot (stretchy n30) pulled to 176.7, 67.6
+/// and 465.5 (past reach). The original stored, per frame, the lengths of the
+/// construction segments n11, n12 (reset impulse x -1), n13 and the connectors
+/// n14 (construction point to hip) and n15 (knee, the end of the visible thigh n27, to foot).
+#[test]
+fn ik_rig_matches_the_original() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../app/assets/stock/figures/Stickfigure (IK).nodes");
+    let Ok(bytes) = std::fs::read(path) else { return };
+    let mut p = new_project();
+    p.root_mut().unwrap().layers.clear();
+    barkfart_core::import::import_file(&mut p, "ik.nodes", &bytes).unwrap();
+    let truth = [(176.7f32, [94.5f32, 197.3, 82.7, 141.0, 148.3]), (67.6, [36.2, 248.3, 31.7, 218.9, 146.5]), (465.5, [160.5, 139.5, 140.5, 139.5, 160.0])];
+    for (raw, want) in truth {
+        let mut q = p.clone();
+        let root = q.root_symbol.clone();
+        let lid = q.root().unwrap().layers[0].id.clone();
+        let (clamped, sets) = {
+            let f = q.root().unwrap().layers[0].as_figure().unwrap();
+            barkfart_core::edit::canvas::connector_smart_stretch(f, f.index_of("n30").unwrap(), raw).expect("an IK leg")
+        };
+        {
+            let l = q.layer_mut(&root, &lid).unwrap();
+            let barkfart_core::model::LayerKind::Figure(f) = &mut l.kind else { unreachable!() };
+            f.node_mut("n30").unwrap().length.value = barkfart_core::model::Value::F(clamped);
+            for (id, v) in &sets {
+                let nid = id.split('/').nth(1).unwrap();
+                f.node_mut(nid).unwrap().length.value = barkfart_core::model::Value::F(*v);
+            }
+        }
+        let f = q.root().unwrap().layers[0].as_figure().unwrap();
+        let len = |n: &str| f.node(n).unwrap().length.value.f();
+        let pose = barkfart_core::eval::FigurePose::compute(f, 0.0, &mut barkfart_core::eval::Resolver::new(&q));
+        let at = |n: &str| { let i = f.index_of(n).unwrap(); (pose.x[i], pose.y[i]) };
+        let dist = |a: (f64, f64), b: (f64, f64)| ((a.0 - b.0).hypot(a.1 - b.1)) as f32;
+        let knee = at("n13");
+        let got = [len("n11"), len("n12"), len("n13"), dist(knee, at("n0")), dist(at("n27"), at("n10"))];
+        for (k, name) in ["n11", "n12", "n13", "knee to hip", "knee to foot"].iter().enumerate() {
+            assert!((got[k] - want[k]).abs() < 0.25, "foot at {raw}: {name} is {} in Barkfart, {} in the original", got[k], want[k]);
+        }
+    }
 }

@@ -220,14 +220,25 @@ outlines or hollow circles.
   their legacy fields (angleLocked, angleLockMain, offsets, multiplier,
   dragLocked) are kept raw and not mapped, since no file shows their meaning.
 
-## Smart-stretch impulse (open, 2026-11-21)
-The original's "Stickfigure (IK)" is a rig: a stretchy segment from the hip
-to the foot, then a static child with the smart-stretch flag pointing back
-up, then static segments drawing the leg; one of them has "reset stretch
-impulse" with multiplier -1 (the knee bends outward as the leg shortens).
-Our smart-stretch (fitted on Rain / Action Lines) triggers only on the
-dragged node's flag and has no impulse reset or multiplier, so the IK leg
-stretches but does not bend. Ground truth needed: a movieclip from the
-original with this figure posed at several leg lengths (its frames store
-the lengths and angles the original computed). Test waiting:
-session.rs the_ik_stickfigure_bends_by_smart_stretch (ignored).
+## IK rigs: connectors and the stretch rule (solved 2026-11-21)
+Measured on the original (Stick Nodes Pro 4.3.1 on the user's phone, driven
+over SSH at their request): "Stickfigure (IK)" at rest looks like the plain
+stickman; a movieclip of it with one foot pulled to 176.7 / 67.6 / 465.5
+stores the lengths the original computed (movieclip version 431: build i32
+after the version, an extra count after sounds, 83/103-byte node records;
+length @11, local angle @19, default local angle @23 counted from 35 bytes
+before the colour block).
+- Connectors (fig.connections: connector -> endpoint, by draw index) are
+  placed on the line from their parent to the endpoint: method 0 = their own
+  length from the endpoint (reversed) or parent; method 1 = by percent. Their
+  direction is parent -> endpoint. A connector aimed at a later joint takes
+  a second pass.
+- A stretchy segment S with a static smart-stretch connector X under it:
+  S stops at X's stored value (its reach); k = S / X's rest length; each
+  static segment below X, down to the next connector, gets
+  rest x (1 + m (k - 1)), m = the multiplier of a "reset stretch impulse"
+  segment, else 1; X takes S's length. This reproduces every stored length
+  and the knee position within 0.25 (test: ik_rig_matches_the_original).
+- The older rule (rest x sqrt((k cos b)^2 + sin^2 b), fitted on Rain /
+  Action Lines) stays for smart-stretch flags on the stretched segment itself.
+- Movieclip version 431 import is not finished (reader only probes it).
