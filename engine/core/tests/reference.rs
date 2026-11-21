@@ -94,8 +94,15 @@ fn group_json(g: &eval::Group) -> J {
                     }
                     ShapeKind::Polygon { points, convex } => json!({"points": floats(points), "convex": convex}),
                     ShapeKind::Quad { asset, corners } => json!({"asset": asset, "corners": floats(corners)}),
-                    ShapeKind::Text { text, font, size, xf, corner } => json!({"text": text, "font": font, "size": size,
-                        "xf": {"kind": "Affine", "a": xf.a, "b": xf.b, "c": xf.c, "d": xf.d, "tx": xf.tx, "ty": xf.ty}, "corner": corner}),
+                    ShapeKind::Text { text, font, size, xf, corner, align } => {
+                        let mut o = json!({"text": text, "font": font, "size": size,
+                            "xf": {"kind": "Affine", "a": xf.a, "b": xf.b, "c": xf.c, "d": xf.d, "tx": xf.tx, "ty": xf.ty}, "corner": corner});
+                        // newer textfields carry their own line alignment; older text layers follow corner
+                        if *align >= 0 {
+                            o.as_object_mut().unwrap().insert("align".into(), json!(align));
+                        }
+                        o
+                    }
                 };
                 for (k, v) in extra.as_object().unwrap() {
                     m.insert(k.clone(), v.clone());

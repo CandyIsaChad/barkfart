@@ -257,7 +257,7 @@ fn eval_symbol<'p>(ctx: &mut Ctx<'p>, w: Work<'p>, stack: &mut Vec<Work<'p>>, on
                     if !text.is_empty() && tl.size > 0.0 && ctx.spend(&l.id) {
                         let color = ctx.r.color(&tl.color, t);
                         let shape = Shape::new(
-                            ShapeKind::Text { text: text.clone(), font: tl.font.clone(), size: tl.size.min(10000.0), xf, corner: tl.corner },
+                            ShapeKind::Text { text: text.clone(), font: tl.font.clone(), size: tl.size.min(10000.0), xf, corner: tl.corner, align: tl.align },
                             color,
                             l.id.clone(),
                         );

@@ -99,7 +99,7 @@ pub enum ShapeKind {
     /// Textured quad, corners BL, BR, TR, TL.
     Quad { asset: String, corners: [f32; 8] },
     /// Text laid out by the tessellator.
-    Text { text: String, font: Option<String>, size: f32, xf: Affine, corner: i32 },
+    Text { text: String, font: Option<String>, size: f32, xf: Affine, corner: i32, align: i32 },
 }
 
 #[derive(Clone, Debug, PartialEq)]

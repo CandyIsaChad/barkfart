@@ -302,9 +302,9 @@ fn walk(g: &Group, opacity: f32, blend: Blend, fx: Option<&str>, out: &mut DrawL
 }
 
 fn emit(s: &Shape, op: f32, b: Blend, effects: Option<&str>, out: &mut DrawList, glyphs: Option<&dyn GlyphSource>) {
-    if let ShapeKind::Text { text: t, size, xf, corner, .. } = &s.kind {
+    if let ShapeKind::Text { text: t, size, xf, corner, align, .. } = &s.kind {
         if let Some(gs) = glyphs {
-            text(gs, t, *size, xf, *corner, &s.color, op, b, effects, out);
+            text(gs, t, *size, xf, *corner, *align, &s.color, op, b, effects, out);
         }
         return;
     }
@@ -498,7 +498,7 @@ fn fan(cx: f32, cy: f32, r: f32, start: f32, span: f32, c: u32, b: usize, out: &
 }
 
 #[allow(clippy::too_many_arguments)]
-fn text(gs: &dyn GlyphSource, t: &str, size: f32, xf: &Affine, corner: i32, c: &Color, op: f32, b: Blend, effects: Option<&str>, out: &mut DrawList) {
+fn text(gs: &dyn GlyphSource, t: &str, size: f32, xf: &Affine, corner: i32, align: i32, c: &Color, op: f32, b: Blend, effects: Option<&str>, out: &mut DrawList) {
     if !(gs.base_px() > 0.0) {
         return;
     }
@@ -518,18 +518,37 @@ fn text(gs: &dyn GlyphSource, t: &str, size: f32, xf: &Affine, corner: i32, c: &
     } else {
         total / 2.0
     };
+    // A textfield's own alignment aligns each line inside the block.
+    let widths: Vec<f32> = lines
+        .iter()
+        .map(|line| line.chars().take(10000).map(|ch| gs.glyph(ch).map(|g| g.advance).unwrap_or(lh * 0.3)).sum())
+        .collect();
+    let block = widths.iter().fold(0f32, |m, w| m.max(*w));
+    let block_left = if left {
+        0.0
+    } else if right {
+        -block
+    } else {
+        -block / 2.0
+    };
     for (li, line) in lines.iter().enumerate().take(500) {
         let chars: Vec<char> = line.chars().take(10000).collect();
-        let mut width = 0f32;
-        for &ch in &chars {
-            width += gs.glyph(ch).map(|g| g.advance).unwrap_or(lh * 0.3);
-        }
-        let mut pen = if left {
-            0.0
-        } else if right {
-            -width
+        let width = widths[li];
+        let mut pen = if align < 0 {
+            if left {
+                0.0
+            } else if right {
+                -width
+            } else {
+                -width / 2.0
+            }
         } else {
-            -width / 2.0
+            block_left
+                + match align {
+                    0 => 0.0,
+                    1 => (block - width) / 2.0,
+                    _ => block - width,
+                }
         };
         let base = top - (li as i32 + 1) as f32 * lh + lh * 0.25;
         for &ch in &chars {

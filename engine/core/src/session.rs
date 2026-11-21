@@ -29,6 +29,8 @@ enum Gesture {
     None,
     /// A handle is held; the drag starts once the finger moves past the slop.
     Handle { hit: Handle, x: f32, y: f32, slop: f32, started: bool },
+    /// A textfield is held; the drag starts past the slop and keys its position.
+    Textfield { layer: String, x: f32, y: f32, tx: f32, ty: f32, slop: f32, started: bool },
     All { x: f32, y: f32 },
     Camera { xi: String, yi: String, x: f32, y: f32, cx: f32, cy: f32 },
 }
@@ -40,6 +42,8 @@ pub struct Session {
     pub mode: Mode,
     /// Selected (layer, node).
     pub selected: Option<(String, String)>,
+    /// The selected textfield layer (figures and textfields never both).
+    pub selected_text: Option<String>,
     pub onion: bool,
     /// Every drag stretches (the Drag: Stretch switch); otherwise only stretchy segments do.
     pub stretch_all: bool,
@@ -55,6 +59,7 @@ pub struct Session {
     /// Copied figures and the time they were copied at (their pose there).
     figure_clip: Option<(Vec<Layer>, f64)>,
     props_clip: Option<layer_ops::Props>,
+    textfield_clip: Option<Layer>,
     /// Copied frame: its keys (times relative to the frame).
     frame_clip: Option<(crate::edit::editor::KeyClip, i32)>,
     /// Bumped on every change the app should redraw for (drags included).
@@ -104,7 +109,7 @@ impl Session {
         let mut doc = doc;
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
-        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, onion: true, stretch_all: false, joining: None, building: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, textfield_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -140,6 +145,14 @@ impl Session {
                 self.selected = None;
             }
         }
+        if let Some(id) = &self.selected_text {
+            let t = self.time();
+            let p = self.project();
+            let ok = p.root().and_then(|s| s.layer(id)).filter(|x| Resolver::new(p).b(&x.shown, t)).is_some_and(|l| matches!(l.kind, LayerKind::Text(_)));
+            if !ok {
+                self.selected_text = None;
+            }
+        }
     }
 
     fn sync_tools(&mut self) {
@@ -163,6 +176,30 @@ impl Session {
 
     fn sel_layer(&self) -> Option<String> {
         self.selected.as_ref().map(|s| s.0.clone())
+    }
+
+    /// The topmost visible textfield whose box (plus the tap radius) is hit.
+    fn textfield_at(&self, x: f32, y: f32, radius: f32, t: f64) -> Option<String> {
+        let p = self.project();
+        let mut r = Resolver::new(p);
+        for l in p.root()?.layers.iter().rev() {
+            let LayerKind::Text(tl) = &l.kind else { continue };
+            if !r.b(&l.shown, t) {
+                continue;
+            }
+            if text_hit(tl, l, &mut r, t, x, y, radius) {
+                return Some(l.id.clone());
+            }
+        }
+        None
+    }
+
+    fn textfield_hit(&self, id: &str, x: f32, y: f32, radius: f32, t: f64) -> bool {
+        let p = self.project();
+        let Some(l) = p.root().and_then(|s| s.layer(id)) else { return false };
+        let LayerKind::Text(tl) = &l.kind else { return false };
+        let mut r = Resolver::new(p);
+        r.b(&l.shown, t) && text_hit(tl, l, &mut r, t, x, y, radius)
     }
 
     /// Runs one edit as an undo step and reports failures as the message.
@@ -212,6 +249,26 @@ impl Session {
                     }
                     return true;
                 }
+                // textfields are drawn on top, so tapping one selects it; a
+                // selected textfield is dragged even when a figure is under it
+                if self.building.is_none() {
+                    let picked = match self.selected_text.clone() {
+                        Some(id) if self.textfield_hit(&id, x, y, radius, t) => Some(id),
+                        _ => self.textfield_at(x, y, radius, t),
+                    };
+                    if let Some(id) = picked {
+                        let p = self.project();
+                        let l = p.root().and_then(|s| s.layer(&id)).expect("textfield");
+                        let mut r = Resolver::new(p);
+                        let (tx, ty) = (r.f(&l.transform.x, t), r.f(&l.transform.y, t));
+                        self.selected = None;
+                        self.selected_text = Some(id.clone());
+                        self.last_tap = None;
+                        self.gesture = Gesture::Textfield { layer: id, x, y, tx, ty, slop: radius * 0.25, started: false };
+                        self.rev += 1;
+                        return true;
+                    }
+                }
                 let mut hit = self.tools.pick_cycling(self.project(), x, y, radius, t, None, prev.as_ref().map(|(l, n)| (l.as_str(), n.as_str())));
                 if let (Some(b), Some(h)) = (&self.building, &hit) {
                     if h.layer != *b {
@@ -221,13 +278,15 @@ impl Session {
                 match hit {
                     Some(h) => {
                         self.selected = Some((h.layer.clone(), h.node.clone()));
+                        self.selected_text = None;
                         self.gesture = Gesture::Handle { hit: h, x, y, slop: radius * 0.25, started: false };
                         self.rev += 1;
                         true
                     }
                     None if self.building.is_some() => false,
                     None => {
-                        if self.selected.take().is_some() {
+                        let changed = self.selected.take().is_some() | self.selected_text.take().is_some();
+                        if changed {
                             self.rev += 1;
                         }
                         self.last_tap = None;
@@ -281,6 +340,30 @@ impl Session {
                 }
                 self.rev += 1;
             }
+            Gesture::Textfield { layer, x: x0, y: y0, tx, ty, slop, started } => {
+                if !started {
+                    if (x - x0).hypot(y - y0) < slop {
+                        return;
+                    }
+                    // a locked textfield does not move (the drag deselects it)
+                    if self.project().root().and_then(|s| s.layer(&layer)).is_some_and(|l| l.locked) {
+                        self.selected_text = None;
+                        self.gesture = Gesture::None;
+                        self.rev += 1;
+                        return;
+                    }
+                    self.doc.begin("Move textfield");
+                    anchor_poses(&mut self.doc.state);
+                    self.gesture = Gesture::Textfield { layer: layer.clone(), x: x0, y: y0, tx, ty, slop, started: true };
+                }
+                let ed = self.tools.editor.clone();
+                let ids = self.project().root().and_then(|s| s.layer(&layer)).map(|l| (l.transform.x.id.clone(), l.transform.y.id.clone()));
+                if let Some((xi, yi)) = ids {
+                    let _ = ed.change_in(&mut self.doc.state, &xi, Value::F(tx + (x - x0)), t);
+                    let _ = ed.change_in(&mut self.doc.state, &yi, Value::F(ty + (y - y0)), t);
+                }
+                self.rev += 1;
+            }
             Gesture::All { x: x0, y: y0 } => {
                 let _ = self.tools.move_all(&mut self.doc, x - x0, y - y0, t);
                 self.gesture = Gesture::All { x, y };
@@ -320,6 +403,17 @@ impl Session {
                     self.last_tap = None;
                 } else {
                     self.last_tap = Some((x, y, hit.layer, hit.node));
+                }
+            }
+            Gesture::Textfield { started, .. } => {
+                if started {
+                    if cancel {
+                        self.doc.cancel();
+                    } else {
+                        anchor_poses(&mut self.doc.state);
+                        snap_keys(&mut self.doc.state);
+                        self.doc.commit();
+                    }
                 }
             }
             Gesture::All { .. } | Gesture::Camera { .. } => {
@@ -580,6 +674,7 @@ impl Session {
             }
             "select" => {
                 let l = c["layer"].as_str().map(str::to_string);
+                self.selected_text = None;
                 self.selected = match l {
                     Some(l) => {
                         let root = self.project().root().and_then(|s| s.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
@@ -600,6 +695,7 @@ impl Session {
                     let l = ids[i as usize].clone();
                     let root = self.project().root().and_then(|s| s.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
                     self.selected = root.map(|r| (l, r));
+                    self.selected_text = None;
                     self.rev += 1;
                 }
             }
@@ -668,6 +764,112 @@ impl Session {
                 if let Some(id) = made {
                     let root = self.project().root().and_then(|s| s.layer(&id)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
                     self.selected = root.map(|r| (id, r));
+                    self.selected_text = None;
+                }
+            }
+            "add_textfield" => {
+                let n = self
+                    .project()
+                    .root()
+                    .map(|s| s.layers.iter().filter(|l| matches!(l.kind, LayerKind::Text(_))).count())
+                    .unwrap_or(0)
+                    + 1;
+                let fr_now = self.frame;
+                let made = self.step("Add textfield", |s| {
+                    let id = s.project.new_id("L");
+                    let mut l = Layer::text(&id, Some(&format!("Textfield {n}")));
+                    let LayerKind::Text(t) = &mut l.kind else { unreachable!() };
+                    t.text = Some("Hello".into());
+                    t.size = 64.0;
+                    t.color.value = Value::C(Color::rgba8888(0x1a1a1aff));
+                    t.align = 1;
+                    let sym = s.project.root_symbol.clone();
+                    let at = s.project.root().map(|r| r.layers.len()).unwrap_or(0);
+                    structure::add_layer(s, &sym, l, at)?;
+                    only_on_frame(s, &sym, &id, fr_now);
+                    Ok(id)
+                });
+                if let Some(id) = made {
+                    self.selected = None;
+                    self.selected_text = Some(id);
+                }
+            }
+            "textfield" => {
+                if let Some(id) = self.selected_text.clone() {
+                    let c2 = c.clone();
+                    let ed = self.tools.editor.clone();
+                    self.step("Textfield", move |s| {
+                        let scale = {
+                            let Some(layer) = s.project.layer_mut(&sym, &id) else { return crate::edit::fail("no textfield") };
+                            let LayerKind::Text(tl) = &mut layer.kind else { return crate::edit::fail("not a textfield") };
+                            if let Some(v) = c2["text"].as_str() {
+                                tl.text = Some(v.to_string());
+                            }
+                            if let Some(v) = c2["color"].as_u64() {
+                                tl.color.track.put(Key::new(t, Value::C(Color::rgba8888(v as u32)), Interp::Linear));
+                            }
+                            if let Some(v) = c2["align"].as_i64() {
+                                tl.align = (v as i32).clamp(0, 2);
+                            }
+                            if let Some(v) = c2["locked"].as_bool() {
+                                layer.locked = v;
+                            }
+                            c2["scale"].as_f64().map(|v| (layer.transform.scale_x.id.clone(), layer.transform.scale_y.id.clone(), (v.clamp(0.01, 100.0)) as f32))
+                        };
+                        if let Some((xi, yi, v)) = scale {
+                            ed.change_in(s, &xi, Value::F(v), t)?;
+                            ed.change_in(s, &yi, Value::F(v), t)?;
+                        }
+                        Ok(())
+                    });
+                    self.validate();
+                }
+            }
+            "delete_textfield" => {
+                if let Some(id) = self.selected_text.clone() {
+                    self.step("Delete textfield", |s| {
+                        let n = frame_ops::frame_count(s);
+                        let fps = st_fps(&s.project);
+                        if let Some(l) = s.project.layer_mut(&sym, &id) {
+                            l.shown.track.put(Key::new(t, Value::B(false), Interp::Hold));
+                        }
+                        let gone = s.project.root().and_then(|r| r.layer(&id)).is_some_and(|x| (0..n).all(|i| !Resolver::new(&s.project).b(&x.shown, i as f64 / fps)));
+                        if gone {
+                            structure::remove_layer(s, &sym, &id)?;
+                        }
+                        Ok(())
+                    });
+                    self.selected_text = None;
+                }
+            }
+            "copy_textfield" => {
+                if let Some(id) = self.selected_text.clone() {
+                    if let Some(l) = self.project().root().and_then(|s| s.layer(&id)) {
+                        self.textfield_clip = Some(l.clone());
+                        self.message = "Textfield copied.".into();
+                        self.rev += 1;
+                    }
+                }
+            }
+            "paste_textfield" => {
+                if let Some(src) = self.textfield_clip.clone() {
+                    let fr_now = self.frame;
+                    let made = self.step("Paste textfield", |s| {
+                        let id = s.project.new_id("L");
+                        let mut ids = std::collections::HashMap::new();
+                        ids.insert(src.id.clone(), id.clone());
+                        let mut c = structure::copy_layer(&src, &ids)?;
+                        c.name = Some("Textfield copy".into());
+                        let sym = s.project.root_symbol.clone();
+                        let at = s.project.root().map(|r| r.layers.len()).unwrap_or(0);
+                        structure::add_layer(s, &sym, c, at)?;
+                        only_on_frame(s, &sym, &id, fr_now);
+                        Ok(id)
+                    });
+                    if let Some(id) = made {
+                        self.selected = None;
+                        self.selected_text = Some(id);
+                    }
                 }
             }
             "delete_everywhere" | "delete_figure" => {
@@ -1144,6 +1346,25 @@ impl Session {
                 "figureCount": p.root()?.layers.iter().filter(|x| x.as_figure().is_some()).count(),
             }))
         });
+        let textfield = self.selected_text.as_ref().and_then(|id| {
+            let layer = p.root()?.layer(id)?;
+            let LayerKind::Text(tl) = &layer.kind else { return None };
+            let mut r = Resolver::new(p);
+            let (sx, sy) = (r.f(&layer.transform.scale_x, t).abs(), r.f(&layer.transform.scale_y, t).abs());
+            let (cx, cy) = (r.f(&layer.transform.x, t), r.f(&layer.transform.y, t));
+            let (w, h) = text_size(tl);
+            let (x0, y0, x1, y1) = text_rect(tl, cx, cy, w * sx, h * sy);
+            Some(json!({
+                "layer": id, "name": layer.name.clone().unwrap_or_else(|| id.clone()),
+                "text": tl.text.clone().unwrap_or_default(),
+                "color": color_of(&mut r, &tl.color, t),
+                "scale": round2(sy),
+                "align": align_name(tl.align, tl.corner),
+                "locked": layer.locked,
+                "x": round2(cx), "y": round2(cy),
+                "x0": round2(x0), "y0": round2(y0), "x1": round2(x1), "y1": round2(y1),
+            }))
+        });
         let cam = self.camera_frame();
         let cam_vals = p.root().and_then(|s| s.layers.iter().find_map(|l| if let LayerKind::Camera(c) = &l.kind { Some(c) } else { None })).map(|c| {
             let mut r = Resolver::new(p);
@@ -1160,6 +1381,7 @@ impl Session {
             "undo": self.doc.undo_label(), "redo": self.doc.redo_label(), "dirty": self.doc.dirty(),
             "mode": match self.mode { Mode::Figure => "figure", Mode::All => "all", Mode::Camera => "camera" },
             "handles": handles, "selected": sel, "figures": figures, "camera": cam,
+            "textfield": textfield, "textfieldCopied": self.textfield_clip.is_some(),
             "hasCamera": p.root().is_some_and(|s| s.layers.iter().any(|l| matches!(l.kind, LayerKind::Camera(_)))),
             "opts": {
                 "stretch": self.stretch_all, "scope": if self.tools.key_scope == KeyScope::Joint { "joint" } else { "figure" },
@@ -1430,6 +1652,65 @@ fn only_on_frame(st: &mut crate::edit::State, sym: &str, id: &str, frame: i32) {
     }
 }
 
+
+/// An estimate of a textfield's block size in stage units at scale 1 (the
+/// engine's glyph atlas is not available to the session).
+fn text_size(tl: &TextLayer) -> (f32, f32) {
+    let size = tl.size.max(0.0);
+    let text = tl.text.as_deref().unwrap_or("");
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut w = 0f32;
+    for l in &lines {
+        w = w.max(l.chars().count() as f32 * size * 0.55);
+    }
+    (w.max(size * 0.55), lines.len() as f32 * size * 1.2)
+}
+
+fn text_hit(tl: &TextLayer, l: &Layer, r: &mut Resolver, t: f64, x: f32, y: f32, radius: f32) -> bool {
+    let (sx, sy) = (r.f(&l.transform.scale_x, t).abs(), r.f(&l.transform.scale_y, t).abs());
+    let (cx, cy) = (r.f(&l.transform.x, t), r.f(&l.transform.y, t));
+    let (w, h) = text_size(tl);
+    let (x0, y0, x1, y1) = text_rect(tl, cx, cy, w * sx, h * sy);
+    (x - x.clamp(x0, x1)).hypot(y - y.clamp(y0, y1)) <= radius
+}
+
+/// The box the text occupies, anchored by `corner` at (x, y).
+fn text_rect(tl: &TextLayer, x: f32, y: f32, w: f32, h: f32) -> (f32, f32, f32, f32) {
+    let left = tl.corner == 1 || tl.corner == 3;
+    let right = tl.corner == 2 || tl.corner == 4;
+    let top = if tl.corner == 1 || tl.corner == 2 {
+        0.0
+    } else if tl.corner == 3 || tl.corner == 4 {
+        h
+    } else {
+        h / 2.0
+    };
+    let x0 = if left {
+        x
+    } else if right {
+        x - w
+    } else {
+        x - w / 2.0
+    };
+    let y1 = y + top;
+    (x0, y1 - h, x0 + w, y1)
+}
+
+fn align_name(align: i32, corner: i32) -> &'static str {
+    match if align < 0 {
+        match corner {
+            1 | 3 => 0,
+            2 | 4 => 2,
+            _ => 1,
+        }
+    } else {
+        align
+    } {
+        0 => "left",
+        2 => "right",
+        _ => "center",
+    }
+}
 
 fn round2(v: f32) -> f64 {
     (v as f64 * 100.0).round() / 100.0

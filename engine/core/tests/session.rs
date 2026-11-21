@@ -587,3 +587,80 @@ fn ik_rig_matches_the_original() {
         }
     }
 }
+
+fn text_layers(s: &Session) -> Vec<barkfart_core::model::Layer> {
+    s.project().root().unwrap().layers.iter().filter(|l| matches!(l.kind, barkfart_core::model::LayerKind::Text(_))).map(|l| (**l).clone()).collect()
+}
+
+#[test]
+fn textfields_are_added_on_this_frame_and_dragged_keyed() {
+    let mut s = session();
+    s.command(&json!({"op": "insert_frame"}));
+    assert_eq!(s.state()["frames"], 2);
+    let st = s.command(&json!({"op": "add_textfield"}));
+    let tf = st["textfield"].clone();
+    assert_eq!(tf["text"], "Hello");
+    assert_eq!(tf["align"], "center");
+    assert_eq!(tf["scale"], 1.0);
+    assert_eq!(tf["locked"], false);
+    let id = tf["layer"].as_str().unwrap().to_string();
+    assert_eq!(text_layers(&s).len(), 1);
+
+    // the textfield is on this frame only
+    let st = s.command(&json!({"op": "frame", "i": 0}));
+    assert!(st["textfield"].is_null());
+    assert_eq!(text_layers(&s).len(), 1, "the layer still exists on the other frame");
+    s.command(&json!({"op": "frame", "i": 1}));
+
+    // tap its right end (away from the figure's hip at the centre)
+    let st = s.command(&json!({"op": "down", "x": 40.0, "y": 10.0, "r": 10.0}));
+    assert_eq!(st["hit"], true);
+    assert_eq!(st["textfield"]["layer"], id);
+    s.command(&json!({"op": "up"}));
+
+    let st = s.command(&json!({"op": "textfield", "text": "Hi\nthere", "color": 0xff0000ffu32, "scale": 2.0, "align": 0, "locked": true}));
+    assert_eq!(st["textfield"]["text"], "Hi\nthere");
+    assert_eq!(st["textfield"]["color"], 0xff0000ffu32);
+    assert_eq!(st["textfield"]["scale"], 2.0);
+    assert_eq!(st["textfield"]["align"], "left");
+    assert_eq!(st["textfield"]["locked"], true);
+    // the text is really in the layer
+    let l = s.project().root().unwrap().layer(&id).unwrap();
+    let barkfart_core::model::LayerKind::Text(tl) = &l.kind else { panic!("not text") };
+    assert_eq!(tl.text.as_deref(), Some("Hi\nthere"));
+
+    // unlocked again: dragging moves it, keyed on this frame
+    s.command(&json!({"op": "textfield", "locked": false}));
+    let before = codec::encode(s.project());
+    s.command(&json!({"op": "down", "x": 40.0, "y": 10.0, "r": 10.0}));
+    for k in 1..=4 {
+        s.command(&json!({"op": "move", "x": 40.0 + 10.0 * k as f32, "y": 10.0 - 5.0 * k as f32}));
+    }
+    let st = s.command(&json!({"op": "up"}));
+    assert_eq!(st["undo"], "Move textfield");
+    assert_eq!(st["textfield"]["x"], 40.0);
+    assert_eq!(st["textfield"]["y"], -20.0);
+    let st = s.command(&json!({"op": "undo"}));
+    assert_eq!(codec::encode(s.project()), before);
+    assert_eq!(st["textfield"]["x"], 0.0);
+
+    // copy and paste make a second textfield on top of the first
+    s.command(&json!({"op": "down", "x": 40.0, "y": 10.0, "r": 10.0}));
+    s.command(&json!({"op": "up"}));
+    let st = s.command(&json!({"op": "copy_textfield"}));
+    assert_eq!(st["textfieldCopied"], true);
+    let st = s.command(&json!({"op": "paste_textfield"}));
+    assert_eq!(text_layers(&s).len(), 2);
+    let copy = st["textfield"]["layer"].as_str().unwrap().to_string();
+    assert_ne!(copy, id);
+    assert_eq!(st["textfield"]["text"], "Hi\nthere");
+
+    // delete removes it from this frame; on no frame at all, the layer goes
+    s.command(&json!({"op": "delete_textfield"}));
+    assert_eq!(text_layers(&s).len(), 1);
+    s.command(&json!({"op": "select"}));
+    s.command(&json!({"op": "down", "x": 40.0, "y": 10.0, "r": 10.0}));
+    s.command(&json!({"op": "up"}));
+    s.command(&json!({"op": "delete_textfield"}));
+    assert_eq!(text_layers(&s).len(), 0);
+}

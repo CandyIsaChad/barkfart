@@ -671,6 +671,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           if (mounted) Navigator.of(context).maybePop();
         case 'frametools':
           setState(() => _frameSelected = true);
+        case 'tab':
+          _jumpTo(w.sublist(1).join(' '));
         case 'viewoptions':
           setState(() => _viewOptions = true);
         case 'quit':
@@ -721,9 +723,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (_st['building'] != null) return const ['Figure editor'];
     if (_st['mode'] == 'camera') return const ['Camera Tools'];
     if (_frameSelected) return const ['Frame Tools'];
+    if (_st['textfield'] != null) return const ['Textfield Tools'];
     final sel = _sel;
     if (sel != null) return const ['Stickfigure Tools', 'Segment Tools'];
-    return const ['App Tools', 'Project Tools', 'Animation Tools', 'Library Tools'];
+    return const ['App Tools', 'Project Tools', 'Animation Tools', 'Library Tools', 'Textfield Tools'];
   }
 
   List<Widget> _sectionBody(String name) {
@@ -740,6 +743,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         return _frameToolsPanel();
       case 'Stickfigure Tools':
         return _stickfigureTools(_sel!);
+      case 'Textfield Tools':
+        return _textfieldTools(_st['textfield'] as Map<String, dynamic>?);
       case 'Segment Tools':
         return _segmentTools(_sel!);
       case 'Camera Tools':
@@ -1231,6 +1236,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     ];
   }
 
+
   int _tweenCount = 3;
 
   Future<void> _tweenCountPopup() async {
@@ -1338,6 +1344,40 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         setState(() => _easing = (_easing + 1) % _easings.length);
         _cmd({'op': 'easing', 'v': _easings[_easing].$1});
       }),
+    ];
+  }
+
+  List<Widget> _textfieldTools(Map<String, dynamic>? tf) {
+    if (tf == null) {
+      return [
+        _Btn('Add textfield', accent: true, onTap: () => _cmd({'op': 'add_textfield'})),
+        _gap,
+        _Btn('Paste textfield', enabled: _st['textfieldCopied'] == true, onTap: () => _cmd({'op': 'paste_textfield'})),
+        _gap,
+        const Text('A textfield sits on this frame only. Tap its box to select it, then drag to move it.', style: TextStyle(color: cSecondary, fontSize: 11)),
+      ];
+    }
+    final align = {'left': 0, 'center': 1, 'right': 2}[tf['align'] as String?] ?? 1;
+    final scale = (tf['scale'] as num?)?.toDouble() ?? 1;
+    return [
+      Text(tf['name'] as String? ?? 'Textfield', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 13)),
+      _gap,
+      _TextFieldBox(text: tf['text'] as String? ?? '', onChanged: (v) => _cmd({'op': 'textfield', 'text': v})),
+      _gap,
+      _label('Alignment'),
+      _Segmented(const ['Left', 'Center', 'Right'], align, (i) => _cmd({'op': 'textfield', 'align': i})),
+      _gap,
+      _label('Text colour'),
+      _swatches((tf['color'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'textfield', 'color': c})),
+      _gap,
+      _stepper('Scale', scale.toStringAsFixed(2), () => _cmd({'op': 'textfield', 'scale': math.max(0.05, scale - 0.05)}), () => _cmd({'op': 'textfield', 'scale': scale + 0.05})),
+      _gap,
+      _Toggle('Locked', tf['locked'] == true, (v) => _cmd({'op': 'textfield', 'locked': v})),
+      _gap,
+      _pair(_Btn('Copy textfield', onTap: () => _cmd({'op': 'copy_textfield'})), _Btn('Paste textfield', enabled: _st['textfieldCopied'] == true, onTap: () => _cmd({'op': 'paste_textfield'}))),
+      _gap,
+      _Btn('Delete textfield', danger: true, onTap: () => _cmd({'op': 'delete_textfield'})),
+      const Padding(padding: EdgeInsets.only(top: 3), child: Text('Removes it from this frame.', style: TextStyle(color: cSecondary, fontSize: 11))),
     ];
   }
 
@@ -1615,6 +1655,18 @@ class _Overlay extends CustomPainter {
         ..strokeWidth = 1
         ..color = const Color(0x66000000));
     }
+    // a selected textfield: a thin blue box around the text
+    final tf = st['textfield'] as Map<String, dynamic>?;
+    if (tf != null) {
+      final r = Rect.fromPoints(
+        v.toScreen((tf['x0'] as num).toDouble(), (tf['y0'] as num).toDouble()),
+        v.toScreen((tf['x1'] as num).toDouble(), (tf['y1'] as num).toDouble()),
+      );
+      canvas.drawRect(r, Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..color = cAccent);
+    }
     final hs = (st['handles'] as List?) ?? const [];
     // selected joint red, the joints connected to it purple with a line to
     // each, everything else blue rings (after the original's look)
@@ -1667,6 +1719,56 @@ class _Overlay extends CustomPainter {
 }
 
 // ---------------------------------------------------------------- controls
+
+/// The textfield's text: edits apply live, and a rebuild does not reset the
+/// cursor while it has focus.
+class _TextFieldBox extends StatefulWidget {
+  final String text;
+  final ValueChanged<String> onChanged;
+  const _TextFieldBox({required this.text, required this.onChanged});
+
+  @override
+  State<_TextFieldBox> createState() => _TextFieldBoxState();
+}
+
+class _TextFieldBoxState extends State<_TextFieldBox> {
+  late final TextEditingController _ctl = TextEditingController(text: widget.text);
+  final FocusNode _focus = FocusNode();
+
+  @override
+  void didUpdateWidget(_TextFieldBox old) {
+    super.didUpdateWidget(old);
+    if (!_focus.hasFocus && _ctl.text != widget.text) _ctl.text = widget.text;
+  }
+
+  @override
+  void dispose() {
+    _ctl.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: _ctl,
+      focusNode: _focus,
+      maxLines: 4,
+      minLines: 2,
+      style: const TextStyle(color: cText, fontSize: 13),
+      decoration: const InputDecoration(
+        hintText: 'Text',
+        hintStyle: TextStyle(color: cSecondary),
+        filled: true,
+        fillColor: cControl,
+        isDense: true,
+        border: OutlineInputBorder(borderSide: BorderSide(color: cSelected)),
+        contentPadding: EdgeInsets.all(8),
+      ),
+      onChanged: widget.onChanged,
+    );
+  }
+}
 
 class _Btn extends StatelessWidget {
   final String label;

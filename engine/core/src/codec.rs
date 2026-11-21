@@ -349,6 +349,7 @@ fn layer(m: &Obj) -> R<Layer> {
             t.size = f(m, "size", t.size)?;
             read_prop(m, "color", &mut t.color)?;
             t.corner = i(m, "corner", 0)?.clamp(0, 4);
+            t.align = i(m, "align", -1)?.clamp(-1, 2);
             t.above_bars = b(m, "aboveBars", false)?;
             l
         }
@@ -857,6 +858,9 @@ fn layer_json(l: &Layer) -> Json {
             m.put("text", json::opt(&t.text)).put("font", json::opt(&t.font)).put("size", json::f32(t.size)).put("color", prop_json(&t.color, false));
             if t.corner != 0 {
                 m.put("corner", json::int(t.corner as i64));
+            }
+            if t.align >= 0 {
+                m.put("align", json::int(t.align as i64));
             }
             if t.above_bars {
                 m.put("aboveBars", Json::Bool(true));

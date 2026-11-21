@@ -1094,6 +1094,9 @@ pub struct TextLayer {
     pub color: Property,
     /// 0 centre, 1 TL, 2 TR, 3 BL, 4 BR.
     pub corner: i32,
+    /// Line alignment inside the text block: -1 follows `corner` (older
+    /// projects), 0 left, 1 centre, 2 right.
+    pub align: i32,
     pub above_bars: bool,
 }
 
@@ -1208,6 +1211,7 @@ impl Layer {
                 size: 32.0,
                 color: Property::color(format!("{id}/color"), Color::BLACK),
                 corner: 0,
+                align: -1,
                 above_bars: false,
             }),
         )
