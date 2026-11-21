@@ -81,6 +81,9 @@ impl Session {
         let mut tools = CanvasTools::default();
         tools.key_scope = KeyScope::Figure;
         let frame = doc.project().view.frame.max(0);
+        let mut doc = doc;
+        // repair keys that drifted off their frames (older Barkfart builds)
+        snap_keys(&mut doc.state);
         let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, onion: true, stretch_all: false, building: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
@@ -148,6 +151,7 @@ impl Session {
             anchor_poses(s);
             let v = f(s)?;
             anchor_poses(s);
+            snap_keys(s);
             Ok(v)
         });
         self.changed();
@@ -271,6 +275,7 @@ impl Session {
                         self.doc.cancel();
                     } else {
                         self.tools.end(&mut self.doc);
+                        snap_keys(&mut self.doc.state);
                         self.doc.commit();
                     }
                     self.last_tap = None;
@@ -1146,6 +1151,58 @@ impl Session {
         self.rev += 1;
         Ok(bytes)
     }
+}
+
+/// Keys a hair away from a frame (float error from shifting keys when
+/// frames are inserted or deleted) are put exactly on the frame. When two
+/// land on the same frame, the one that was keyed exactly there wins: the
+/// other is a stale shifted copy (it made tweens snap back, "rubber-band").
+/// Keys deliberately between frames are left alone.
+pub fn snap_keys(st: &mut crate::edit::State) -> usize {
+    let fps = st_fps(&st.project);
+    let ids: Vec<String> = st.project.root().map(|s| s.layers.iter().map(|l| l.id.clone()).collect()).unwrap_or_default();
+    let sym = st.project.root_symbol.clone();
+    let mut fixed = 0;
+    for id in ids {
+        let needs = {
+            let Some(l) = st.project.root().and_then(|s| s.layer(&id)) else { continue };
+            l.properties().iter().any(|q| q.track.keys().iter().any(|k| {
+                let g = (k.time * fps).round() / fps;
+                g != k.time && (g - k.time).abs() < 1e-4
+            }))
+        };
+        if !needs {
+            continue;
+        }
+        let Some(l) = st.project.layer_mut(&sym, &id) else { continue };
+        for q in l.properties_mut() {
+            let mut out: Vec<(f64, Key)> = Vec::new();
+            for k in q.track.keys() {
+                let g = (k.time * fps).round() / fps;
+                let (t, off) = if (g - k.time).abs() < 1e-4 { (g, (g - k.time).abs()) } else { (k.time, 0.0) };
+                match out.iter_mut().find(|(_, o)| o.time == t) {
+                    Some((best, o)) => {
+                        if off < *best {
+                            *best = off;
+                            *o = Key { time: t, ..*k };
+                        }
+                        fixed += 1;
+                    }
+                    None => {
+                        if t != k.time {
+                            fixed += 1;
+                        }
+                        out.push((off, Key { time: t, ..*k }));
+                    }
+                }
+            }
+            q.track.clear();
+            for (_, k) in out {
+                q.track.put(k);
+            }
+        }
+    }
+    fixed
 }
 
 /// Inserts one real frame per fraction after `frame`, each keyed with the

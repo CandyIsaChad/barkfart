@@ -447,3 +447,34 @@ fn tweened_motion_is_smooth_between_frames() {
         assert!(b > 0.0 && (a - b).abs() < 1e-3, "even steps while tweening: {xs:?}");
     }
 }
+
+/// Inserting frames shifts later keys by 1/fps; float error used to leave a
+/// stale key a hair away from a new one on the same frame, so tweens
+/// snapped back ("rubber-band"), in playback and export.
+#[test]
+fn keys_stay_on_their_frames_after_many_inserts() {
+    let mut s = Session::new(Document::new(barkfart_core::session::new_editor_project()));
+    s.command(&json!({"op": "fps", "v": 12}));
+    for i in 0..12 {
+        // insert in the middle (shifting everything after), then pose the new frame
+        s.command(&json!({"op": "frame", "i": i / 2}));
+        s.command(&json!({"op": "insert_frame"}));
+        let (x, y) = handle(&s.state(), 0);
+        s.command(&json!({"op": "down", "x": x, "y": y, "r": 20}));
+        s.command(&json!({"op": "move", "x": x + 7.0 + i as f32, "y": y}));
+        s.command(&json!({"op": "up"}));
+        s.command(&json!({"op": "tween_add"}));
+    }
+    let p = s.project();
+    let fps = p.settings.fps as f64;
+    for l in &p.root().unwrap().layers {
+        for q in l.properties() {
+            for w in q.track.keys().windows(2) {
+                assert!(w[1].time - w[0].time > 0.5 / fps, "{}: keys {} and {} are on the same frame", q.id, w[0].time, w[1].time);
+            }
+            for k in q.track.keys() {
+                assert_eq!(k.time, (k.time * fps).round() / fps, "{}: key at {} is off its frame", q.id, k.time);
+            }
+        }
+    }
+}
