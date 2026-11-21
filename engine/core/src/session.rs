@@ -2377,6 +2377,28 @@ impl Session {
         out
     }
 
+    /// Save stickfigure: the figure being edited (or the selected one) as a
+    /// Stick Nodes .nodes file, in its pose on this frame, with its name.
+    pub fn figure_file(&self) -> Result<(String, Vec<u8>), String> {
+        let id = self.building.clone().or_else(|| self.sel_layer()).ok_or("no stickfigure selected")?;
+        let p = self.project();
+        let l = p.root().and_then(|s| s.layer(&id)).ok_or("no stickfigure")?;
+        if l.as_figure().is_none() {
+            return Err("not a stickfigure".into());
+        }
+        let t = self.time();
+        let mut copy = l.clone();
+        let mut r = Resolver::new(p);
+        for q in copy.properties_mut() {
+            if !q.track.is_empty() {
+                q.value = r.resolve(q, t);
+                q.track.clear();
+            }
+        }
+        let fig = crate::legacy::to_legacy(&copy).map_err(|e| e.0)?;
+        Ok((l.name.clone().unwrap_or_else(|| "Stickfigure".into()), crate::legacy::write_nodes(&fig)))
+    }
+
     /// The project as a .bark file without marking it saved.
     pub fn save_copy(&self) -> Result<Vec<u8>, String> {
         let assets: IndexMap<String, Vec<u8>> = self.doc.state.assets.iter().map(|(k, v)| (k.clone(), (**v).clone())).collect();

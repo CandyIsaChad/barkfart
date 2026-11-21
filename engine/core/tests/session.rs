@@ -1631,3 +1631,23 @@ fn connector_sits_between_two_joints() {
     s.command(&json!({"op": "undo"}));
     assert!(s.state()["selected"]["connector"].is_null() || s.state()["selected"]["node"] != id.as_str());
 }
+
+/// Figure editor "Save stickfigure": the figure as a Stick Nodes .nodes file
+/// that reads back with the same joints, in this frame's pose.
+#[test]
+fn save_stickfigure_writes_a_nodes_file() {
+    let mut s = two_poses();
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    let (name, bytes) = s.figure_file().expect("a file");
+    assert!(!name.is_empty());
+    let fig = barkfart_core::legacy::read_nodes(&bytes).expect("reads back");
+    let joints = s.project().root().unwrap().layer("L2").unwrap().as_figure().unwrap().nodes().len();
+    assert_eq!(fig.nodes.len(), joints);
+    // importing it gives a figure again
+    let n0 = s.state()["library"].as_array().unwrap().len();
+    let mut p = s.project().clone();
+    barkfart_core::import::import_file(&mut p, "Saved.nodes", &bytes).expect("imports");
+    let mut s2 = Session::new(Document::new(p));
+    assert_eq!(s2.command(&json!({"op": "state"}))["library"].as_array().unwrap().len(), n0 + 1);
+}

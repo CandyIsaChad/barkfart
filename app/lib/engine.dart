@@ -249,6 +249,16 @@ class Engine {
   }
 
   /// The project as .bark bytes without marking it saved (recovery copies).
+  /// The edited or selected stickfigure as a Stick Nodes .nodes file.
+  Uint8List? figureFile() {
+    final len = calloc<IntPtr>();
+    final p = _lib.lookupFunction<_SaveC, _SaveC>('bf_figure_file')(_handle, len);
+    final n = len.value;
+    calloc.free(len);
+    if (p == nullptr) return null;
+    return Uint8List.fromList(p.asTypedList(n));
+  }
+
   Uint8List? saveCopy() {
     final len = calloc<IntPtr>();
     final p = _lib.lookupFunction<_SaveC, _SaveC>('bf_save_copy')(_handle, len);

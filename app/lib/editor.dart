@@ -800,6 +800,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           unawaited(_cameraLockDialog());
         case 'autocamera':
           unawaited(_autoCameraDialog());
+        case 'savefigure':
+          final bytes = _engine?.figureFile();
+          if (bytes != null) await File(w[1]).writeAsBytes(bytes);
         case 'modifybranch':
           unawaited(_modifyBranchDialog());
         case 'viewoptions':
@@ -2839,6 +2842,29 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   /// The figure editor: structure tools for the selected segment.
+  /// Save Stickfigure As: a Stick Nodes .nodes file in the Barkfart Figures
+  /// folder (it then shows in Add stickfigure... and works in Stick Nodes).
+  Future<void> _saveFigureFile() async {
+    final e = _engine;
+    if (e == null) return;
+    final b = _st['building'] as Map?;
+    final name = await _askName('Save stickfigure as', '${b?['name'] ?? _sel?['name'] ?? 'Stickfigure'}');
+    if (name == null || name.trim().isEmpty) return;
+    final bytes = e.figureFile();
+    if (bytes == null) {
+      _say('Could not save the stickfigure: ${e.lastError}');
+      return;
+    }
+    final dir = await figuresDir();
+    final clean = name.trim().replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    var f = File('${dir.path}/$clean.nodes');
+    for (var k = 2; f.existsSync(); k++) {
+      f = File('${dir.path}/$clean ($k).nodes');
+    }
+    await f.writeAsBytes(bytes);
+    _say('Saved ${f.path.split(Platform.pathSeparator).last} in Barkfart Figures.');
+  }
+
   /// Polyfill Tools: while a polyfill is edited, taps on joints add polynodes.
   List<Widget> _polyfillTools(Map pf) {
     final own = pf['own'] == true;
@@ -2942,6 +2968,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ],
       _gap,
       _Btn('Modify branch…', onTap: _modifyBranchDialog),
+      _gap,
+      _Btn('Save stickfigure…', icon: null, onTap: _saveFigureFile),
       _gap,
       _Btn('Add connector…', onTap: () => _cmd({'op': 'connect_start'})),
       _gap,
