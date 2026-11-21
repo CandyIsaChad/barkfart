@@ -527,7 +527,11 @@ pub extern "C" fn bf_render_view(e: *const Engine, t: f64, w: u32, h: u32, x0: f
         let mut list = tess::layered(&scene, Some(&engine.glyphs));
         if flags & 2 != 0 {
             let v = &p.view;
-            let onion = tess::OnionSkin { apply_camera: camera, before: v.onion_before.clamp(0, 3), after: v.onion_after.clamp(0, 3), ..Default::default() };
+            // ghosts only of frames that exist (none before the first, none after the last)
+            let fps = p.settings.fps.max(1.0) as f64;
+            let frames = ((p.root().map(|r| r.duration).unwrap_or(0.0) * fps).round() as i32).max(1);
+            let here = ((t * fps).round() as i32).clamp(0, frames - 1);
+            let onion = tess::OnionSkin { apply_camera: camera, before: v.onion_before.clamp(0, 3).min(here), after: v.onion_after.clamp(0, 3).min(frames - 1 - here), ..Default::default() };
             let ghosts = onion.build_layered(p, &p.root_symbol, t);
             list = if v.onion_in_front { list.with_overlay(ghosts) } else { list.with_underlay(ghosts) };
         }

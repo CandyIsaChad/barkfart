@@ -557,20 +557,19 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   ExportJob? _export;
 
-  Future<void> _exportGif() async {
+  Future<void> _runExport(int format, int w, int h, int start, int count, bool transparent, String title) async {
     final e = _engine;
     if (e == null || _export != null) return;
     final dir = await exportsDir();
-    final name = (_file?.name ?? 'Animation').replaceAll(RegExp(r'[^A-Za-z0-9 _-]'), '');
+    final name = title.replaceAll(RegExp(r'[^A-Za-z0-9 _-]'), '').trim();
     final stamp = DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
-    final sw = (_st['w'] as num).toDouble(), sh = (_st['h'] as num).toDouble();
-    final w = 480, h = (480 * sh / sw).round();
-    final job = e.export(0, '${dir.path}/$name $stamp.gif', w, h);
+    final base = '${dir.path}/${name.isEmpty ? 'Animation' : name} $stamp';
+    final job = e.export(format, format == 0 ? '$base.gif' : '$base.zip', w, h, start: start, count: count, transparent: transparent);
     if (job == null) {
       _say('Export failed: ${e.lastError}');
       return;
     }
-    e.exportSoundtrack('${dir.path}/$name $stamp.wav');
+    e.exportSoundtrack('$base.wav', start: start, count: count);
     _export = job;
     _say('Exporting…');
     Timer.periodic(const Duration(milliseconds: 16), (tm) {
@@ -640,6 +639,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           await _saveShot(w[1]);
         case 'state':
           debugPrint('state: ${_st['frame']}/${_st['frames']} undo=${_st['undo']} selected=${_sel?['node']} handles=${(_st['handles'] as List).length} ms=${_engineMs.toStringAsFixed(1)}');
+        case 'export':
+          // scripted: GIF (0) or PNG zip (1) at 320 wide, the whole animation
+          await _runExport(int.parse(w[1]), 320, (320 * (_st['h'] as num) / (_st['w'] as num)).round(), 0, 0, false, 'Script');
+        case 'exportwindow':
+          unawaited(_exportDialog());
+        case 'copypopup':
+          unawaited(_copyPopup(int.parse(w[1])));
         case 'savebutton':
           unawaited(_save());
         case 'picker':
@@ -882,6 +888,67 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     });
   }
 
+  int _copyCount = 1;
+
+  /// The copy popup on a frame picture: copy it alone, or with N frames after it.
+  Future<void> _copyPopup(int frame) async {
+    if (_playing) return;
+    setState(() => _frameSelected = true);
+    _cmd({'op': 'frame', 'i': frame});
+    _cmd({'op': 'select'});
+    await showDialog<void>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, set) {
+          final maxN = math.max(0, _frames - 1 - frame);
+          final n = math.min(_copyCount, maxN);
+          return AlertDialog(
+            backgroundColor: cPanel,
+            content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              _pair(
+                _Btn('Copy this frame', onTap: () {
+                  _cmd({'op': 'copy_frame', 'n': 0});
+                  Navigator.pop(c);
+                }),
+                _Btn('Paste after it', enabled: _st['frameCopied'] == true, onTap: () {
+                  _cmd({'op': 'paste_frame'});
+                  Navigator.pop(c);
+                }),
+              ),
+              const SizedBox(height: 12),
+              const Text('Or copy this frame and the frames after it:', style: TextStyle(color: cSecondary, fontSize: 12)),
+              const SizedBox(height: 6),
+              Row(children: [
+                SizedBox(width: 44, child: _Btn('−', enabled: n > 1, onTap: () => set(() => _copyCount = math.max(1, n - 1)))),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: _Btn('Copy +$n', accent: true, enabled: maxN > 0, onTap: () {
+                    _cmd({'op': 'copy_frame', 'n': n});
+                    Navigator.pop(c);
+                  }),
+                ),
+                const SizedBox(width: 6),
+                SizedBox(width: 44, child: _Btn('+', enabled: n < maxN, onTap: () => set(() => _copyCount = math.min(maxN, n + 1)))),
+              ]),
+              const SizedBox(height: 4),
+              Text(maxN > 0 ? 'Frames ${frame + 1} to ${frame + 1 + n}.' : 'This is the last frame.', style: const TextStyle(color: cSecondary, fontSize: 11)),
+            ]),
+          );
+        },
+      ),
+    );
+  }
+
+  /// Export: GIF or PNG frames, size (keeps the shot's shape), frame range,
+  /// transparent background for PNG. Files go to Barkfart Exports.
+  Future<void> _exportDialog() async {
+    if (_export != null) return;
+    final sw = (_st['w'] as num).toDouble(), sh = (_st['h'] as num).toDouble();
+    final opts = await showDialog<Map<String, Object>>(context: context, builder: (c) => _ExportDialog(sw, sh, _frames, _file?.name ?? 'Animation'));
+    if (opts == null) return;
+    await _runExport(opts['format'] as int, opts['w'] as int, opts['h'] as int, opts['start'] as int, opts['count'] as int, opts['transparent'] as bool, opts['name'] as String);
+  }
+
   Widget _topBar(double h) {
     final cellH = h - 16;
     final cellW = cellH * 16 / 9;
@@ -907,6 +974,30 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 decoration: BoxDecoration(color: const Color(0xFFF2F2F2), border: Border.all(color: cur ? cAccent : cControl, width: cur ? 3 : 1)),
                 child: Stack(fit: StackFit.expand, children: [
                   if (img != null) RawImage(image: img, fit: BoxFit.contain),
+                  // bottom left: copy this frame (and the ones after it)
+                  Positioned(
+                    left: 2,
+                    bottom: 2,
+                    child: GestureDetector(
+                      onTap: () => _copyPopup(i),
+                      child: Container(
+                        decoration: BoxDecoration(color: const Color(0xCC2B2E33), borderRadius: BorderRadius.circular(3)),
+                        padding: const EdgeInsets.all(2),
+                        child: const Icon(Icons.copy_all, size: 14, color: cText),
+                      ),
+                    ),
+                  ),
+                  // bottom right: tweens to the next frame / does not
+                  if (_st['tweening'] == true && i < _frames - 1)
+                    Positioned(
+                      right: 3,
+                      bottom: 2,
+                      child: Icon(
+                        ((_st['noTweenFrames'] as List?)?.elementAtOrNull(i) == true) ? Icons.block : Icons.arrow_forward,
+                        size: 15,
+                        color: ((_st['noTweenFrames'] as List?)?.elementAtOrNull(i) == true) ? cDanger : cAccent,
+                      ),
+                    ),
                   Positioned(
                     left: 0,
                     top: 0,
@@ -1073,7 +1164,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _gap,
         _pair(_Btn('Save', onTap: _save), _Btn('Save as…', onTap: _saveAs)),
         _gap,
-        _Btn('Export GIF…', onTap: _exportGif),
+        _Btn('Export…', onTap: _exportDialog),
       ];
 
   List<Widget> _animationTools() {
@@ -1208,6 +1299,23 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _label('Drag'),
       _Segmented(const ['Rotate', 'Stretch'], stretch ? 1 : 0, (i) => _cmd({'op': 'set', 'k': 'stretch', 'v': i == 1})),
       _gap,
+      if (_st['joining'] == true) ...[
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(border: Border.all(color: cAccent), borderRadius: BorderRadius.circular(4)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const Text('Tap a joint on another figure to join this one to it.', style: TextStyle(color: cText, fontSize: 12)),
+            _gap,
+            _Btn('Cancel', onTap: () => _cmd({'op': 'join_cancel'})),
+          ]),
+        ),
+      ] else if (sel['joinedTo'] != null) ...[
+        Text('Joined to ${sel['joinedTo']}', style: const TextStyle(color: cSecondary, fontSize: 12)),
+        _gap,
+        _Btn('Unjoin', onTap: () => _cmd({'op': 'unjoin'})),
+      ] else
+        _Btn('Join to…', onTap: () => _cmd({'op': 'join'})),
+      _gap,
       _label('Tween to the next frame'),
       _Btn('Tween: ${_easings[_easing].$2}', onTap: () {
         setState(() => _easing = (_easing + 1) % _easings.length);
@@ -1287,6 +1395,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         ]),
         _Toggle('Show only main nodes', _opts['mainOnly'] == true, (v) => _cmd({'op': 'set', 'k': 'mainonly', 'v': v})),
         _Toggle('Onion skin', _opts['onion'] == true, (v) => _cmd({'op': 'set', 'k': 'onion', 'v': v})),
+        if (_opts['onion'] == true) ...[
+          _stepper('Frames before', '${_opts['onionBefore'] ?? 1}', () => _cmd({'op': 'set', 'k': 'onion_before', 'v': ((_opts['onionBefore'] as num?) ?? 1) - 1}), () => _cmd({'op': 'set', 'k': 'onion_before', 'v': ((_opts['onionBefore'] as num?) ?? 1) + 1})),
+          _gap,
+          _stepper('Frames after', '${_opts['onionAfter'] ?? 1}', () => _cmd({'op': 'set', 'k': 'onion_after', 'v': ((_opts['onionAfter'] as num?) ?? 1) - 1}), () => _cmd({'op': 'set', 'k': 'onion_after', 'v': ((_opts['onionAfter'] as num?) ?? 1) + 1})),
+          _gap,
+          _Segmented(const ['Behind', 'In front'], _opts['onionFront'] == true ? 1 : 0, (i) => _cmd({'op': 'set', 'k': 'onion_front', 'v': i == 1})),
+          _gap,
+        ],
         _Toggle('Show section tabs', _showTabs, (v) => setState(() => _showTabs = v)),
         _gap,
         _label('Playback quality'),
@@ -1870,6 +1986,87 @@ class _OpenDialogState extends State<_OpenDialog> {
           ]),
         ),
       ),
+    );
+  }
+}
+
+class _ExportDialog extends StatefulWidget {
+  final double w, h;
+  final int frames;
+  final String name;
+  const _ExportDialog(this.w, this.h, this.frames, this.name);
+
+  @override
+  State<_ExportDialog> createState() => _ExportDialogState();
+}
+
+class _ExportDialogState extends State<_ExportDialog> {
+  int _format = 0;
+  int _size = 1;
+  int _start = 1;
+  int _end = 0;
+  bool _transparent = false;
+  late final TextEditingController _name = TextEditingController(text: widget.name);
+
+  static const _widths = [320, 640, 1280, 1920];
+
+  @override
+  Widget build(BuildContext context) {
+    final w = _widths[_size], h = (w * widget.h / widget.w).round();
+    final last = _end == 0 ? widget.frames : _end;
+    return AlertDialog(
+      backgroundColor: cPanel,
+      title: const Text('Export animation', style: TextStyle(color: cText, fontSize: 17)),
+      content: SizedBox(
+        width: 360,
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            TextField(controller: _name, style: const TextStyle(color: cText), decoration: const InputDecoration(labelText: 'Name')),
+            const SizedBox(height: 12),
+            _Segmented(const ['GIF', 'PNG frames'], _format, (i) => setState(() => _format = i)),
+            const SizedBox(height: 10),
+            const Text('Size', style: TextStyle(color: cSecondary, fontSize: 11)),
+            const SizedBox(height: 4),
+            _Segmented(const ['320', '640', '1280', '1920'], _size, (i) => setState(() => _size = i)),
+            Padding(padding: const EdgeInsets.only(top: 4), child: Text('$w × $h', style: const TextStyle(color: cSecondary, fontSize: 11))),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: Text('From frame $_start', style: const TextStyle(color: cText, fontSize: 13))),
+              SizedBox(width: 40, child: _Btn('−', enabled: _start > 1, onTap: () => setState(() => _start--))),
+              const SizedBox(width: 4),
+              SizedBox(width: 40, child: _Btn('+', enabled: _start < last, onTap: () => setState(() => _start++))),
+            ]),
+            const SizedBox(height: 6),
+            Row(children: [
+              Expanded(child: Text('To frame $last', style: const TextStyle(color: cText, fontSize: 13))),
+              SizedBox(width: 40, child: _Btn('−', enabled: last > _start, onTap: () => setState(() => _end = last - 1))),
+              const SizedBox(width: 4),
+              SizedBox(width: 40, child: _Btn('+', enabled: last < widget.frames, onTap: () => setState(() => _end = last + 1 >= widget.frames ? 0 : last + 1))),
+            ]),
+            if (_format == 1) ...[
+              const SizedBox(height: 6),
+              _Toggle('Transparent background', _transparent, (v) => setState(() => _transparent = v)),
+            ],
+            const SizedBox(height: 8),
+            const Text('Saved in the Barkfart Exports folder, with the soundtrack as a WAV when there is sound.', style: TextStyle(color: cSecondary, fontSize: 11)),
+          ]),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(
+          onPressed: () => Navigator.pop(context, <String, Object>{
+            'format': _format,
+            'w': w,
+            'h': h,
+            'start': _start - 1,
+            'count': last - _start + 1,
+            'transparent': _format == 1 && _transparent,
+            'name': _name.text,
+          }),
+          child: Text(_format == 0 ? 'Export GIF' : 'Export ${last - _start + 1} PNGs'),
+        ),
+      ],
     );
   }
 }
