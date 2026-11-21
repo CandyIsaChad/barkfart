@@ -69,10 +69,27 @@ pub fn new_project() -> Project {
     crate::codec::decode(STARTER).expect("starter project")
 }
 
+/// A new project starting with a Stick Nodes figure file (the original's
+/// default stickfigure), else the built-in one.
+pub fn new_editor_project_with(name: &str, figure: &[u8]) -> Project {
+    let mut p = new_editor_project();
+    let backup = p.clone();
+    if let Some(r) = p.root_mut() {
+        r.layers.clear();
+    }
+    match crate::import::import_file(&mut p, name, figure) {
+        Ok(_) => p,
+        Err(_) => backup,
+    }
+}
+
 /// A new project as the editor starts it: like the original app, 10 frames per second.
 pub fn new_editor_project() -> Project {
     let mut p = new_project();
     p.settings.fps = 10.0;
+    // the original's stage
+    p.settings.width = 1920;
+    p.settings.height = 1080;
     if let Some(r) = p.root_mut() {
         r.duration = 0.1;
     }

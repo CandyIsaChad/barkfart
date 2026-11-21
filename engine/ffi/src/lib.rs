@@ -687,3 +687,17 @@ pub extern "C" fn bf_import(e: *mut Engine, name: *const c_char, data: *const u8
     engine.answer.push(0);
     engine.answer.as_ptr() as *const c_char
 }
+
+/// Opens a new project whose first figure comes from a Stick Nodes figure file.
+#[no_mangle]
+pub extern "C" fn bf_doc_new_with(e: *mut Engine, name: *const c_char, data: *const u8, len: usize) -> i32 {
+    if e.is_null() || data.is_null() {
+        return 1;
+    }
+    // SAFETY: live handle; the caller passes len readable bytes
+    let (engine, bytes) = unsafe { (&mut *e, std::slice::from_raw_parts(data, len)) };
+    let name = cstr(name).unwrap_or_else(|| "Stickfigure.nodes".into());
+    let p = barkfart_core::session::new_editor_project_with(&name, bytes);
+    engine.open(p, Default::default());
+    0
+}

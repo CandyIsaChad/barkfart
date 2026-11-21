@@ -142,7 +142,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       } else if (last != null && e.load(await last.read()) == null) {
         _file = last;
       } else {
-        e.newProject();
+        await _freshProject();
       }
     }
     _refresh(e.command({'op': 'state'}));
@@ -533,13 +533,25 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   Future<void> _newProject() async {
     if (!await _leaveUnsaved()) return;
-    _engine?.newProject();
+    await _freshProject();
     _file = null;
     _fitted = false;
     _frameSelected = false;
     _refresh(_engine?.command({'op': 'state'}));
     _thumbsChanged('new');
     _say('New animation');
+  }
+
+  /// A new project starting with the original's default stickfigure.
+  Future<void> _freshProject() async {
+    final e = _engine;
+    if (e == null) return;
+    try {
+      final bytes = (await rootBundle.load('assets/stock/figures/Stickfigure.nodes')).buffer.asUint8List();
+      e.newProjectWith('Stickfigure.nodes', bytes);
+    } catch (_) {
+      e.newProject();
+    }
   }
 
   Future<void> _openFile(ProjectFile chosen) async {

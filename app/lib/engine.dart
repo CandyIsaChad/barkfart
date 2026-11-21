@@ -40,6 +40,8 @@ typedef _FileC = Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, In
 typedef _FileD = int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, int, int, int, Pointer<Uint8>);
 typedef _ImportC = Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, IntPtr);
 typedef _ImportD = Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, int);
+typedef _ImportC2 = Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, IntPtr);
+typedef _ImportD2 = int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, int);
 typedef _SaveC = Pointer<Uint8> Function(Pointer<Void>, Pointer<IntPtr>);
 
 DynamicLibrary _open() {
@@ -148,6 +150,16 @@ class Engine {
 
   /// Opens a new project (one frame, one figure).
   void newProject() => _lib.lookupFunction<_DocNewC, _DocNewD>('bf_doc_new')(_handle);
+
+  /// Opens a new project whose figure comes from a Stick Nodes figure file.
+  void newProjectWith(String name, Uint8List figure) {
+    final data = calloc<Uint8>(figure.length);
+    data.asTypedList(figure.length).setAll(0, figure);
+    final n = name.toNativeUtf8();
+    _lib.lookupFunction<_ImportC2, _ImportD2>('bf_doc_new_with')(_handle, n, data, figure.length);
+    calloc.free(n);
+    calloc.free(data);
+  }
 
   /// Runs an editing command; returns the editor state (null without a project).
   Map<String, dynamic>? command(Map<String, Object?> c) {
