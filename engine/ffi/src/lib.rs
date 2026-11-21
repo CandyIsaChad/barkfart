@@ -335,6 +335,8 @@ pub struct Export {
     next: u32,
     transparent: bool,
     error: Vec<u8>,
+    /// (time, extra seconds) per picture when frames pause or repeat.
+    pics: Option<Vec<(f64, f64)>>,
 }
 
 fn cstr(p: *const c_char) -> Option<String> {
@@ -367,8 +369,19 @@ pub extern "C" fn bf_export_begin(e: *mut Engine, format: i32, path: *const c_ch
         let rate = p.settings.sample_rate();
         let per = rate / fps;
         let total = ((p.root().map(|s| s.duration).unwrap_or(0.0) * rate).round() as u32).max(1);
+        // frame delays and repeats: the pictures follow the playing schedule
+        let sch = barkfart_core::timing::Schedule::build(p);
+        let pics = if sch.identity {
+            None
+        } else {
+            let frames = barkfart_core::timing::frame_count(p);
+            let first = (start as i32).clamp(0, frames - 1);
+            let n = if count == 0 { frames - first } else { (count as i32).clamp(1, frames - first) };
+            Some(barkfart_core::export::pictures(&sch, first, n, rate, format == 1))
+        };
         let start = ((start as f64 * per).round() as u32).min(total - 1);
         let count = if count == 0 { total - start } else { ((count as f64 * per).round() as u32).max(1).min(total - start) };
+        let count = pics.as_ref().map(|v| v.len() as u32).unwrap_or(count);
         let fps = rate;
         let file = std::io::BufWriter::new(std::fs::File::create(&path).map_err(|e| e.to_string())?);
         let writer = match format {
@@ -376,7 +389,7 @@ pub extern "C" fn bf_export_begin(e: *mut Engine, format: i32, path: *const c_ch
             1 => Writer::Png(barkfart_core::export::PngZip::new(file, w, h, transparent != 0)),
             _ => return Err(format!("unknown export format {format}")),
         };
-        Ok(Export { writer: Some(writer), path, w, h, start, count, next: 0, transparent: transparent != 0, error: vec![0] })
+        Ok(Export { writer: Some(writer), path, w, h, start, count, next: 0, transparent: transparent != 0, error: vec![0], pics })
     })();
     match r {
         Ok(x) => Box::into_raw(Box::new(x)),
@@ -412,7 +425,10 @@ pub extern "C" fn bf_export_step(e: *const Engine, x: *mut Export) -> i32 {
             }
             return Ok(true);
         }
-        let t = barkfart_core::export::frame_time(job.start, job.next, p.settings.sample_rate());
+        let (t, extra) = match &job.pics {
+            Some(v) => v[job.next as usize],
+            None => (barkfart_core::export::frame_time(job.start, job.next, p.settings.sample_rate()), 0.0),
+        };
         let scene = eval::evaluate(p, &p.root_symbol, t);
         let list = tess::layered(&scene, Some(&engine.glyphs));
         let (hw, hh) = (p.settings.width as f32 / 2.0, p.settings.height as f32 / 2.0);
@@ -421,7 +437,7 @@ pub extern "C" fn bf_export_step(e: *const Engine, x: *mut Export) -> i32 {
         let transparent = job.transparent && matches!(job.writer, Some(Writer::Png(_)));
         let px = engine.renderer.render_export(&list, job.w, job.h, view, 2, transparent);
         match job.writer.as_mut() {
-            Some(Writer::Gif(g)) => g.frame(&px).map_err(|e| e.to_string())?,
+            Some(Writer::Gif(g)) => g.frame_held(&px, extra).map_err(|e| e.to_string())?,
             Some(Writer::Png(z)) => z.frame(&px).map_err(|e| e.to_string())?,
             None => return Err("export already finished".into()),
         }
@@ -493,7 +509,15 @@ pub extern "C" fn bf_export_soundtrack(e: *mut Engine, path: *const c_char, star
     let fps = p.settings.fps.max(1.0) as f64;
     let total = ((p.root().map(|s| s.duration).unwrap_or(0.0) * fps).round() as u32).max(1);
     let count = if count == 0 { total.saturating_sub(start) } else { count };
-    let Some(wav) = barkfart_core::audio::bounce(plan, start as f64 / fps, count as f64 / fps) else { return 1 };
+    // frame delays and repeats: the soundtrack follows the exported pictures
+    let sch = barkfart_core::timing::Schedule::build(p);
+    let wav = if sch.identity {
+        barkfart_core::audio::bounce(plan, start as f64 / fps, count as f64 / fps)
+    } else {
+        let part = sch.subset(start as i32, count.max(1) as i32);
+        barkfart_core::audio::bounce(&part.retime(plan), 0.0, part.total)
+    };
+    let Some(wav) = wav else { return 1 };
     let Some(path) = cstr(path) else { return 2 };
     match std::fs::write(&path, wav) {
         Ok(()) => 0,

@@ -114,6 +114,19 @@ impl Schedule {
         base + step.max(0.0)
     }
 
+    /// Only the slots of frames [first, first + frames), played back to back
+    /// (what an export of that range shows and sounds like).
+    pub fn subset(&self, first: i32, frames: i32) -> Schedule {
+        let mut at = 0.0;
+        let mut slots = Vec::new();
+        for s in self.slots.iter().filter(|s| s.frame >= first && s.frame < first + frames) {
+            slots.push(Slot { start: at, ..*s });
+            at += s.len;
+        }
+        // retime() maps every slot by its own start, so the result is exact
+        Schedule { slots, fps: self.fps, total: at, identity: false }
+    }
+
     /// Wall time a frame first starts at.
     pub fn wall_of(&self, frame: i32) -> f64 {
         self.slots.iter().find(|s| s.frame == frame).map(|s| s.start).unwrap_or(0.0)
@@ -167,5 +180,29 @@ mod tests {
         // the picture holds frame 0 during its pause
         assert_eq!(sch.time_at(0.5, fps), 0.0);
         assert_eq!(sch.slot_at(1.32).frame, 1);
+    }
+}
+
+#[cfg(test)]
+mod export_tests {
+    use super::*;
+
+    #[test]
+    fn exports_hold_delays_and_play_repeats() {
+        let fps = 10.0;
+        let slot = |frame, start, delay: f64| Slot { frame, start, len: 0.1 + delay, delay };
+        let sch = Schedule { slots: vec![slot(0, 0.0, 0.0), slot(1, 0.1, 0.3), slot(0, 0.5, 0.0), slot(1, 0.6, 0.3)], fps, total: 1.0, identity: false };
+        // GIF: the delayed picture carries its extra time
+        let gif = crate::export::pictures(&sch, 0, 2, fps, false);
+        assert_eq!(gif.len(), 4);
+        assert!((gif[1].1 - 0.3).abs() < 1e-9 && gif[0].1 == 0.0);
+        // PNG frames: three more copies of the held picture
+        let png = crate::export::pictures(&sch, 0, 2, fps, true);
+        assert_eq!(png.len(), 2 * (1 + 4));
+        // a range keeps only its frames, back to back
+        let part = sch.subset(1, 1);
+        assert_eq!(part.slots.len(), 2);
+        assert!((part.slots[1].start - 0.4).abs() < 1e-9);
+        assert!((part.total - 0.8).abs() < 1e-9);
     }
 }

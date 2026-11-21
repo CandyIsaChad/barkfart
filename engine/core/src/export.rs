@@ -59,6 +59,15 @@ impl<W: Write> Gif<W> {
         d as u32
     }
 
+    /// Adds a frame that shows `extra` seconds longer than the others (a
+    /// frame delay).
+    pub fn frame_held(&mut self, rgba: &[u8], extra: f64) -> std::io::Result<()> {
+        if extra.is_finite() && extra > 0.0 {
+            self.owed += extra.min(600.0) * 100.0;
+        }
+        self.frame(rgba)
+    }
+
     /// Adds a frame (straight RGBA8, w * h * 4 bytes).
     pub fn frame(&mut self, rgba: &[u8]) -> std::io::Result<()> {
         let (w, h) = (self.w as usize, self.h as usize);
@@ -215,6 +224,39 @@ impl<W: Write + Seek> PngZip<W> {
 }
 
 /// Time of the n-th exported frame (0-based) of a range starting at start_frame.
+/// The pictures of an export of frames [first, first + frames) in playing
+/// order: (project time, extra seconds it shows for). Frame delays hold the
+/// slot's first picture; repeats play their frames again. `rate` pictures
+/// per second (the fps, or more with tweening on); with `hold_as_copies` a
+/// delay becomes copies of the picture (PNG frames have no durations).
+pub fn pictures(sch: &crate::timing::Schedule, first: i32, frames: i32, rate: f64, hold_as_copies: bool) -> Vec<(f64, f64)> {
+    let rate = if rate > 0.0 { rate } else { sch.fps };
+    let per = ((rate / sch.fps).round() as i32).max(1);
+    let mut out = Vec::new();
+    for s in sch.slots.iter().filter(|s| s.frame >= first && s.frame < first + frames) {
+        let base = s.frame as f64 / sch.fps;
+        for k in 0..per {
+            let t = base + k as f64 / rate;
+            if k == 0 && s.delay > 0.0 {
+                if hold_as_copies {
+                    for _ in 0..(s.delay * rate).round() as i64 {
+                        out.push((t, 0.0));
+                    }
+                    out.push((t, 0.0));
+                } else {
+                    out.push((t, s.delay));
+                }
+            } else {
+                out.push((t, 0.0));
+            }
+            if out.len() >= 1_000_000 {
+                return out;
+            }
+        }
+    }
+    out
+}
+
 pub fn frame_time(start_frame: u32, n: u32, fps: f64) -> f64 {
     let fps = if fps > 0.0 { fps } else { 30.0 };
     (start_frame + n) as f64 / fps
