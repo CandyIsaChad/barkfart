@@ -2301,6 +2301,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         for (final (k, label) in const [
           ('showIds', 'Show figure names'),
           ('neighbourLines', 'Show neighbour lines'),
+          ('outlineSelection', 'Outline selection'),
           ('zoomButtons', 'Show zoom buttons'),
           ('guides', 'Show guides'),
           ('stageBox', 'Show stage box'),
@@ -2731,6 +2732,23 @@ class _Overlay extends CustomPainter {
         ..color = cAccent);
     }
     final hs = (st['handles'] as List?) ?? const [];
+    // View options: a thin outline around the selected figure's joints
+    if (AppSettings.flag('outlineSelection')) {
+      Rect? box;
+      for (final h in hs) {
+        final l = h as List;
+        if ((l[2] as num).toInt() & 4 == 0) continue;
+        final p = v.toScreen((l[0] as num).toDouble(), (l[1] as num).toDouble());
+        final r = Rect.fromLTWH(p.dx, p.dy, 0, 0);
+        box = box == null ? r : box.expandToInclude(r);
+      }
+      if (box != null) {
+        canvas.drawRect(box.inflate(10), Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5
+          ..color = const Color(0xCCFF2D92));
+      }
+    }
     // selected joint red, the joints connected to it purple with a line to
     // each, everything else blue rings (after the original's look)
     const purple = Color(0xFFA43BE0), red = Color(0xFFE0383A), blue = Color(0xFF2F6BE8);

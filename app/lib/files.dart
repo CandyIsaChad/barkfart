@@ -199,6 +199,7 @@ class AppSettings {
     // View options
     'showIds': false,
     'neighbourLines': true,
+    'outlineSelection': false,
     'zoomButtons': false,
     'guides': false,
     'stageBox': true,

@@ -21,7 +21,7 @@ committed). Plainest behaviour where the reference is unsure.
 - [ ] Use segment colour (own colour vs the figure colour): needs a model flag
 
 ## View options (8.6)
-- [x] Show figure names, neighbour lines (outline selection: still to do)
+- [x] Show figure names, neighbour lines, outline selection
 - [x] Zoom buttons, guides, stage box
 - [ ] Show filters, filter quality
 
