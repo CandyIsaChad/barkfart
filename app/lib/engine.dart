@@ -18,6 +18,10 @@ typedef _PlayC = Void Function(Pointer<Void>, Double, Double, Double);
 typedef _PlayD = void Function(Pointer<Void>, double, double, double);
 typedef _TimeC = Double Function(Pointer<Void>);
 typedef _TimeD = double Function(Pointer<Void>);
+typedef _WallC = Double Function(Pointer<Void>, Double, Double);
+typedef _WallD = double Function(Pointer<Void>, double, double);
+typedef _FrameWallC = Double Function(Pointer<Void>, Int32);
+typedef _FrameWallD = double Function(Pointer<Void>, int);
 typedef _ExBeginC = Pointer<Void> Function(Pointer<Void>, Int32, Pointer<Utf8>, Uint32, Uint32, Uint32, Uint32, Int32);
 typedef _ExBeginD = Pointer<Void> Function(Pointer<Void>, int, Pointer<Utf8>, int, int, int, int, int);
 typedef _ExStepC = Int32 Function(Pointer<Void>, Pointer<Void>);
@@ -106,6 +110,19 @@ class Engine {
   void play(double t, {double loopStart = 0, double loopEnd = 0}) => _play(_handle, t, loopStart, loopEnd);
 
   void stop() => _stop(_handle);
+
+  late final _TimeD _wallTotal = _lib.lookupFunction<_TimeC, _TimeD>('bf_wall_total');
+  late final _WallD _wallTime = _lib.lookupFunction<_WallC, _WallD>('bf_wall_time');
+  late final _FrameWallD _frameWall = _lib.lookupFunction<_FrameWallC, _FrameWallD>('bf_frame_wall');
+
+  /// Seconds one pass plays for (frame delays and repeats included).
+  double get wallTotal => _wallTotal(_handle);
+
+  /// The project time shown at wall time w (one picture per 1/rate s).
+  double wallTime(double w, double rate) => _wallTime(_handle, w, rate);
+
+  /// The wall time a frame first plays at.
+  double frameWall(int frame) => _frameWall(_handle, frame);
 
   /// Time of the sound being played, or null (stopped, or no sound output).
   double? get playbackTime {

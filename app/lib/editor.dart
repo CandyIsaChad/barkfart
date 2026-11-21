@@ -235,15 +235,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (!_fitted) _fit();
     double t;
     if (_playing) {
-      final dur = _frames / _fps;
+      // wall time: frame delays and repeats stretch it (the engine's schedule)
+      final dur = e.wallTotal;
       // a steady clock started with the sound: the sound player only knows its
       // position per audio buffer (tens of ms, and ahead of what is heard), which
       // made tweened playback hold and jump
       final secs = _clockOffset + _clock.elapsedMicroseconds / 1e6;
-      t = dur > 0 ? secs % dur : 0;
       // one picture per frame, or more with tweening on (Animation Tools)
       final rate = (_st['rate'] as num?)?.toDouble() ?? _fps;
-      t = (t * rate).floor() / rate;
+      t = e.wallTime(dur > 0 ? secs % dur : 0, rate);
       if (t != _playT) setState(() => _playT = t);
     } else {
       t = _frame / _fps;
@@ -433,13 +433,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _clock.stop();
       } else {
         _playing = true;
-        final start = _frame / _fps;
+        final start = e.frameWall(_frame);
         _clock
           ..reset()
           ..start();
         // the clock starts at the current frame
         _clockOffset = start;
-        e.play(start, loopStart: 0, loopEnd: _frames / _fps);
+        e.play(start, loopStart: 0, loopEnd: e.wallTotal);
       }
     });
   }
@@ -1022,6 +1022,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                         color: ((_st['noTweenFrames'] as List?)?.elementAtOrNull(i) == true) ? cDanger : cAccent,
                       ),
                     ),
+                  // top right: this frame pauses; under the number: it repeats a series
+                  if (((_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?)?.first == true)
+                    const Positioned(right: 3, top: 2, child: Icon(Icons.timer_outlined, size: 15, color: Color(0xFFFF9F0A))),
+                  if (((_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?)?.last == true)
+                    const Positioned(left: 3, top: 19, child: Icon(Icons.repeat, size: 15, color: Color(0xFFBF5AF2))),
                   Positioned(
                     left: 0,
                     top: 0,
@@ -1225,6 +1230,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final bgColor = (bg['color'] as num?)?.toInt() ?? 0xffffffff;
     final bgTop = (bg['gradient'] as num?)?.toInt() ?? 0x808080ff;
     final bgGradient = bg['useGradient'] == true;
+    final delay = (_st['frameDelay'] as num?)?.toDouble() ?? 0;
+    final rep = (_st['frameRepeat'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+    final back = (rep['back'] as num?)?.toInt() ?? 0;
+    final times = math.max(1, (rep['times'] as num?)?.toInt() ?? 1);
     return [
       Text('Frame ${_frame + 1} of $_frames', style: const TextStyle(color: cSecondary, fontSize: 12)),
       _gap,
@@ -1248,6 +1257,16 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ],
       _gap,
       _Toggle('Do not tween this frame', _st['frameNoTween'] == true, (v) => _cmd({'op': 'no_tween', 'on': v})),
+      _gap,
+      _Toggle('Pause on this frame', delay > 0, (v) => _cmd({'op': 'frame_delay', 'seconds': v ? 0.5 : 0})),
+      if (delay > 0) _stepper('Seconds', delay.toStringAsFixed(2), () => _cmd({'op': 'frame_delay', 'seconds': math.max(0.01, delay - 0.05)}), () => _cmd({'op': 'frame_delay', 'seconds': delay + 0.05})),
+      _gap,
+      _Toggle('Repeat frames before this one', back > 0, (v) => _cmd({'op': 'frame_repeat', 'back': v ? 1 : 0, 'times': 1})),
+      if (back > 0) ...[
+        const Text('After this frame, playback jumps back and plays the series again: a short loop without a movieclip.', style: TextStyle(color: cSecondary, fontSize: 11)),
+        _stepper('Back', '$back frames', () => _cmd({'op': 'frame_repeat', 'back': math.max(1, back - 1), 'times': times}), () => _cmd({'op': 'frame_repeat', 'back': math.min(_frame, back + 1), 'times': times})),
+        _stepper('Repeat', '$times times', () => _cmd({'op': 'frame_repeat', 'back': back, 'times': math.max(1, times - 1)}), () => _cmd({'op': 'frame_repeat', 'back': back, 'times': times + 1})),
+      ],
     ];
   }
 

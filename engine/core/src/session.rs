@@ -1262,20 +1262,41 @@ impl Session {
                     });
                 }
             }
+            "frame_delay" | "frame_repeat" => {
+                let c2 = c.clone();
+                let delay = op == "frame_delay";
+                self.step(if delay { "Frame delay" } else { "Repeat frames" }, move |s| {
+                    let cam = ensure_camera(s, &sym)?;
+                    let (n, fps) = (frame_ops::frame_count(s), st_fps(&s.project));
+                    let l = s.project.layer_mut(&sym, &cam).expect("camera");
+                    let LayerKind::Camera(cm) = &mut l.kind else { return crate::edit::fail("not a camera") };
+                    let set = |q: &mut Property, v: f32| {
+                        // every frame keeps its own setting (exact keys, HOLD)
+                        for i in 0..n {
+                            let ti = i as f64 / fps;
+                            if q.track.index_of(ti).is_err() {
+                                let old = crate::timing::setting(q, fps, i);
+                                q.track.put(Key::new(ti, Value::F(old), Interp::Hold));
+                            }
+                        }
+                        q.track.put(Key::new(t, Value::F(v), Interp::Hold));
+                    };
+                    if delay {
+                        let v = c2["seconds"].as_f64().unwrap_or(0.0).clamp(0.0, crate::timing::MAX_DELAY as f64);
+                        set(&mut cm.delay, ((v * 100.0).round() / 100.0) as f32);
+                    } else {
+                        let back = c2["back"].as_i64().unwrap_or(0).clamp(0, 100_000) as f32;
+                        let times = c2["times"].as_i64().unwrap_or(1).clamp(1, 1000) as f32;
+                        set(&mut cm.repeat_back, back);
+                        set(&mut cm.repeat_times, if back > 0.0 { times } else { 0.0 });
+                    }
+                    Ok(())
+                });
+            }
             "frame_bg" => {
                 let c2 = c.clone();
                 self.step("Background colour", move |s| {
-                    let cam = s.project.root().and_then(|r| r.layers.iter().find(|l| matches!(l.kind, LayerKind::Camera(_))).map(|l| l.id.clone()));
-                    let cam = match cam {
-                        Some(id) => id,
-                        None => {
-                            // the camera holds the per-frame background; a new one sits at the stage
-                            let id = s.project.new_id("L");
-                            let at = s.project.root().map(|r| r.layers.len()).unwrap_or(0);
-                            structure::add_layer(s, &sym, Layer::camera(&id, Some("Camera")), at)?;
-                            id
-                        }
-                    };
+                    let cam = ensure_camera(s, &sym)?;
                     let (mut color, mut gradient, mut use_gradient) = frame_bg(&s.project, t);
                     if let Some(v) = c2["color"].as_u64() {
                         color = v as u32;
@@ -1437,6 +1458,10 @@ impl Session {
             let (c, g, u) = frame_bg(p, t);
             json!({"color": c, "gradient": g, "useGradient": u})
         };
+        let fset = crate::timing::frame_settings(p, self.frame);
+        // per thumbnail: [delay, repeat] flags
+        let rep = json!({"back": fset.1, "times": fset.2});
+        let marks: Vec<J> = (0..frames).map(|f| { let (d, _, n) = crate::timing::frame_settings(p, f as i32); json!([d > 0.0, n > 0]) }).collect();
         let cam = self.camera_frame();
         let cam_vals = p.root().and_then(|s| s.layers.iter().find_map(|l| if let LayerKind::Camera(c) = &l.kind { Some(c) } else { None })).map(|c| {
             let mut r = Resolver::new(p);
@@ -1456,6 +1481,8 @@ impl Session {
             "textfield": textfield, "textfieldCopied": self.textfield_clip.is_some(),
             "filtersCopied": self.filter_clip.is_some(),
             "frameBg": bg,
+            "frameDelay": fset.0, "frameRepeat": rep,
+            "frameMarks": marks,
             "hasCamera": p.root().is_some_and(|s| s.layers.iter().any(|l| matches!(l.kind, LayerKind::Camera(_)))),
             "opts": {
                 "stretch": self.stretch_all, "scope": if self.tools.key_scope == KeyScope::Joint { "joint" } else { "figure" },
@@ -1645,7 +1672,8 @@ pub fn add_tweened(st: &mut crate::edit::State, frame: i32, fracs: &[f64]) -> Ed
     if let Some(s) = st.project.root() {
         for l in &s.layers {
             for q in l.properties() {
-                if q.track.is_empty() {
+                // frame delay / repeat stay with their own frame
+                if q.track.is_empty() || frame_ops::is_frame_setting(&q.id) {
                     continue;
                 }
                 let vals = fracs.iter().map(|f| q.key_value(t0 + (t1 - t0) * f)).collect();
@@ -1788,6 +1816,18 @@ fn align_name(align: i32, corner: i32) -> &'static str {
 
 fn round2(v: f32) -> f64 {
     (v as f64 * 100.0).round() / 100.0
+}
+
+/// The root's camera, added (at the stage, changing nothing) when there is
+/// none: it holds the per-frame settings (background, delay, repeat).
+fn ensure_camera(s: &mut crate::edit::State, sym: &str) -> EditResult<String> {
+    if let Some(id) = s.project.root().and_then(|r| r.layers.iter().find(|l| matches!(l.kind, LayerKind::Camera(_))).map(|l| l.id.clone())) {
+        return Ok(id);
+    }
+    let id = s.project.new_id("L");
+    let at = s.project.root().map(|r| r.layers.len()).unwrap_or(0);
+    structure::add_layer(s, sym, Layer::camera(&id, Some("Camera")), at)?;
+    Ok(id)
 }
 
 /// The frame's background (colour, gradient colour, gradient on) at t, read

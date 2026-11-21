@@ -769,3 +769,74 @@ fn frame_background_is_per_frame_and_undoable() {
     }
     assert!(without_ids(&s) == before, "undo restores the project");
 }
+
+#[test]
+fn frame_delay_and_repeat_follow_their_frames() {
+    use barkfart_core::timing::Schedule;
+    let mut s = session();
+    let without_ids = |s: &Session| codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
+    let before = without_ids(&s);
+    assert_eq!(s.state()["canUndo"], false);
+    for _ in 0..3 {
+        s.command(&json!({"op": "insert_frame"}));
+    }
+    assert_eq!(s.state()["frames"], 4);
+    let fps = s.project().settings.fps as f64;
+    let plain = Schedule::build(s.project());
+    assert!(plain.identity);
+    assert!((plain.total - 4.0 / fps).abs() < 1e-9);
+
+    // frame 2 (index 1) pauses half a second
+    s.command(&json!({"op": "frame", "i": 1}));
+    let st = s.command(&json!({"op": "frame_delay", "seconds": 0.5}));
+    assert_eq!(st["frameDelay"], 0.5);
+    assert_eq!(st["frameMarks"][1][0], true);
+    assert_eq!(st["frameMarks"][0][0], false);
+    let sch = Schedule::build(s.project());
+    assert!(!sch.identity);
+    assert!((sch.total - (4.0 / fps + 0.5)).abs() < 1e-6);
+    // during the pause the picture holds frame 2, then frame 3 follows
+    assert!((sch.time_at(1.0 / fps + 0.3, fps) - 1.0 / fps).abs() < 1e-9);
+    assert!((sch.time_at(2.0 / fps + 0.5 + 1e-6, fps) - 2.0 / fps).abs() < 1e-9);
+    // the file keeps it
+    let back = codec::decode(&codec::encode(s.project())).unwrap();
+    assert_eq!(barkfart_core::timing::frame_settings(&back, 1).0, 0.5);
+
+    // a frame inserted before it moves the delay along; the new frame has none
+    s.command(&json!({"op": "frame", "i": 0}));
+    s.command(&json!({"op": "insert_frame"}));
+    assert_eq!(barkfart_core::timing::frame_settings(s.project(), 2).0, 0.5);
+    assert_eq!(barkfart_core::timing::frame_settings(s.project(), 1).0, 0.0);
+    // a tweened frame after the delayed one does not inherit it
+    s.command(&json!({"op": "frame", "i": 2}));
+    s.command(&json!({"op": "tween_add", "at": [0.5]}));
+    assert_eq!(barkfart_core::timing::frame_settings(s.project(), 3).0, 0.0);
+    // copy and paste carry it
+    s.command(&json!({"op": "frame", "i": 2}));
+    s.command(&json!({"op": "copy_frame"}));
+    s.command(&json!({"op": "frame", "i": 5}));
+    s.command(&json!({"op": "paste_frame"}));
+    assert_eq!(barkfart_core::timing::frame_settings(s.project(), 6).0, 0.5);
+
+    // the last frame repeats the two before it twice: 7 frames + 2 * 3 slots
+    let n = s.state()["frames"].as_i64().unwrap() as i32;
+    s.command(&json!({"op": "frame", "i": n - 1}));
+    let st = s.command(&json!({"op": "frame_repeat", "back": 2, "times": 2}));
+    assert_eq!(st["frameRepeat"]["back"], 2);
+    assert_eq!(st["frameMarks"][(n - 1) as usize][1], true);
+    let sch = Schedule::build(s.project());
+    let order: Vec<i32> = sch.slots.iter().map(|x| x.frame).collect();
+    let k = n - 1;
+    let mut want: Vec<i32> = (0..=k).collect();
+    want.extend([k - 2, k - 1, k, k - 2, k - 1, k]);
+    assert_eq!(order, want);
+    // turning it off
+    let st = s.command(&json!({"op": "frame_repeat", "back": 0}));
+    assert_eq!(st["frameRepeat"]["back"], 0);
+    assert_eq!(Schedule::build(s.project()).slots.len(), n as usize);
+
+    while s.state()["canUndo"] == true {
+        s.command(&json!({"op": "undo"}));
+    }
+    assert!(without_ids(&s) == before, "undo restores the project");
+}

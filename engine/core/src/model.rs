@@ -1117,6 +1117,14 @@ pub struct CameraLayer {
     pub rotation: Property,
     pub background: Property,
     pub background2: Property,
+    /// Frame settings, keyed (HOLD) on the frames that have them; read as the
+    /// exact key at a frame's time, no key meaning 0 (see `timing`).
+    /// Seconds the frame pauses for.
+    pub delay: Property,
+    /// "Repeat series of frames": go back this many frames (0 = off) ...
+    pub repeat_back: Property,
+    /// ... this many times.
+    pub repeat_times: Property,
 }
 
 #[derive(Clone, Debug)]
@@ -1250,6 +1258,9 @@ impl Layer {
                 rotation: Property::angle(format!("{id}/cam/rotation"), 0.0),
                 background: Property::color(format!("{id}/cam/bg"), Color::CLEAR),
                 background2: Property::color(format!("{id}/cam/bg2"), Color::CLEAR),
+                delay: Property::float(format!("{id}/cam/delay"), 0.0),
+                repeat_back: Property::float(format!("{id}/cam/repeatBack"), 0.0),
+                repeat_times: Property::float(format!("{id}/cam/repeatTimes"), 0.0),
             }),
         )
     }
@@ -1287,7 +1298,7 @@ impl Layer {
                     out.push(&c.pan);
                 }
             }
-            LayerKind::Camera(c) => out.extend([&c.x, &c.y, &c.zoom, &c.rotation, &c.background, &c.background2]),
+            LayerKind::Camera(c) => out.extend([&c.x, &c.y, &c.zoom, &c.rotation, &c.background, &c.background2, &c.delay, &c.repeat_back, &c.repeat_times]),
         }
         out
     }
@@ -1327,7 +1338,7 @@ impl Layer {
                     out.push(&mut c.pan);
                 }
             }
-            LayerKind::Camera(c) => out.extend([&mut c.x, &mut c.y, &mut c.zoom, &mut c.rotation, &mut c.background, &mut c.background2]),
+            LayerKind::Camera(c) => out.extend([&mut c.x, &mut c.y, &mut c.zoom, &mut c.rotation, &mut c.background, &mut c.background2, &mut c.delay, &mut c.repeat_back, &mut c.repeat_times]),
         }
         out
     }

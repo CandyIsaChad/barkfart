@@ -5,6 +5,8 @@
 //! version (git tag `java-reference`), which stays the reference until this
 //! crate matches its outputs.
 
+#![recursion_limit = "256"]
+
 pub mod audio;
 pub mod codec;
 pub mod edit;
@@ -20,5 +22,6 @@ pub mod legacy;
 pub mod model;
 pub mod session;
 pub mod tess;
+pub mod timing;
 
 pub use tess::{Batch, DrawList, Glyph, GlyphSource};

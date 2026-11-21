@@ -123,12 +123,18 @@ pub fn set_tween(ed: &Editor, st: &mut State, frame: i32, tween: bool) -> EditRe
     ed.set_interp_in(st, &sel, if tween { Interp::Linear } else { Interp::Hold }, Ease::LINEAR)
 }
 
+/// Frame delay and repeat (camera properties) belong to one frame; tweened
+/// frames do not inherit them.
+pub fn is_frame_setting(id: &str) -> bool {
+    id.ends_with("/cam/delay") || id.ends_with("/cam/repeatBack") || id.ends_with("/cam/repeatTimes")
+}
+
 /// "Add tweened frame": keys every animated property (all layers, or one)
 /// at t with the value it has there. Nothing moves. Returns keys added.
 pub fn key_pose(st: &mut State, only: Option<&str>, t: f64) -> EditResult<usize> {
     let mut added = 0;
     for (l, id) in props(st) {
-        if only.is_some_and(|o| o != l) {
+        if only.is_some_and(|o| o != l) || is_frame_setting(&id) {
             continue;
         }
         rewrite(st, &l, &id, |p| {

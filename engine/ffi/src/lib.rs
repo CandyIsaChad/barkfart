@@ -15,6 +15,8 @@ pub struct Engine {
     renderer: Renderer,
     /// Decoded sounds of the current project (for the soundtrack export).
     plan: Option<barkfart_core::audio::AudioPlan>,
+    /// Frame delays and repeats in wall time (rebuilt with the plan).
+    schedule: Option<barkfart_core::timing::Schedule>,
     player: barkfart_audio::Player,
     audio_label: Vec<u8>,
     glyphs: GlyphAtlas,
@@ -77,7 +79,10 @@ impl Engine {
         if let Some(root) = p.root() {
             let sounds = &self.sounds;
             let plan = barkfart_core::audio::AudioPlan::build(p, root, &|id: &str| sounds.get(id).cloned());
-            self.player.set_plan(plan.clone());
+            // the player runs in wall time: delays and repeats move the sounds
+            let schedule = barkfart_core::timing::Schedule::build(p);
+            self.player.set_plan(schedule.retime(&plan));
+            self.schedule = Some(schedule);
             self.plan = Some(plan);
         }
         self.plan_rev = s.rev();
@@ -104,6 +109,7 @@ pub extern "C" fn bf_engine_new() -> *mut Engine {
             Box::into_raw(Box::new(Engine {
                 renderer,
                 plan: None,
+                schedule: None,
                 player,
                 audio_label,
                 glyphs,
@@ -266,6 +272,34 @@ pub extern "C" fn bf_stop(e: *const Engine) {
     }
     // SAFETY: live handle
     unsafe { (*e).player.stop() };
+}
+
+/// Wall seconds of one pass of the animation (frame delays and repeats included).
+#[no_mangle]
+pub extern "C" fn bf_wall_total(e: *const Engine) -> f64 {
+    with_schedule(e, |s| s.total)
+}
+
+/// The project time shown at wall time w, one picture per 1/rate seconds.
+#[no_mangle]
+pub extern "C" fn bf_wall_time(e: *const Engine, w: f64, rate: f64) -> f64 {
+    with_schedule(e, |s| s.time_at(w, rate))
+}
+
+/// The wall time a frame first plays at.
+#[no_mangle]
+pub extern "C" fn bf_frame_wall(e: *const Engine, frame: i32) -> f64 {
+    with_schedule(e, |s| s.wall_of(frame))
+}
+
+fn with_schedule(e: *const Engine, f: impl FnOnce(&barkfart_core::timing::Schedule) -> f64) -> f64 {
+    if e.is_null() {
+        return 0.0;
+    }
+    // SAFETY: live handle; the app calls in from one thread
+    let engine = unsafe { &mut *(e as *mut Engine) };
+    engine.refresh_plan();
+    engine.schedule.as_ref().map(f).unwrap_or(0.0)
 }
 
 /// The time the sound is playing (the picture follows it), or -1 when
