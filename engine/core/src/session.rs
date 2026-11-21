@@ -1079,6 +1079,49 @@ impl Session {
                         if let Some(v) = c2["smart"].as_bool() {
                             node.smart_stretch = v;
                         }
+                        // the rest of the original's Segment Tools
+                        if let Some(v) = c2["gradient"].as_bool() {
+                            node.gradient = v;
+                        }
+                        if let Some(v) = c2["gradientColor"].as_u64() {
+                            set_static(&mut node.gradient_color, Value::C(Color::rgba8888(v as u32)));
+                        }
+                        if let Some(v) = c2["gradientReverse"].as_bool() {
+                            node.gradient_reverse = v;
+                        }
+                        if let Some(v) = c2["gradientSideways"].as_bool() {
+                            node.gradient_sideways = v;
+                        }
+                        if let Some(v) = c2["segScale"].as_f64() {
+                            set_static(&mut node.scale, Value::F(v.clamp(0.01, 100.0) as f32));
+                        }
+                        if let Some(v) = c2["curve"].as_f64() {
+                            node.curve = v.clamp(-1000.0, 1000.0) as f32;
+                        }
+                        if let Some(v) = c2["outline"].as_bool() {
+                            node.circle_outline = v;
+                        }
+                        if let Some(v) = c2["outlineColor"].as_u64() {
+                            set_static(&mut node.outline_color, Value::C(Color::rgba8888(v as u32)));
+                        }
+                        if let Some(v) = c2["hollow"].as_bool() {
+                            node.circle_hollow = v;
+                        }
+                        if let Some(v) = c2["halfArc"].as_i64() {
+                            node.half_arc = v.clamp(-1, 1) as i32;
+                        }
+                        if let Some(v) = c2["sides"].as_i64() {
+                            node.polygon_sides = v.clamp(3, 64) as i32;
+                        }
+                        if let Some(v) = c2["rightTriangle"].as_i64() {
+                            node.right_triangle = v.clamp(-1, 1) as i32;
+                        }
+                        if let Some(v) = c2["upsideDown"].as_bool() {
+                            node.triangle_upside_down = v;
+                        }
+                        if let Some(v) = c2["angleLock"].as_i64() {
+                            node.angle_lock = v.clamp(0, 2) as i32;
+                        }
                         Ok(())
                     });
                 }
@@ -1617,6 +1660,9 @@ impl Session {
                 "smart": node.smart_stretch, "shape": shape_name(node.shape),
                 "thickness": r.f(&node.thickness, t), "color": color_of(&mut r, &node.color, t),
                 "angle": round2(r.f(&node.rotation, t)), "length": round2(r.f(&node.length, t)), "restLength": round2(node.rest_length),
+                "gradient": node.gradient, "gradientColor": color_of(&mut r, &node.gradient_color, t), "gradientReverse": node.gradient_reverse, "gradientSideways": node.gradient_sideways,
+                "segScale": round2(r.f(&node.scale, t)), "curve": round2(node.curve), "outline": node.circle_outline, "outlineColor": color_of(&mut r, &node.outline_color, t),
+                "hollow": node.circle_hollow, "halfArc": node.half_arc, "sides": node.polygon_sides, "rightTriangle": node.right_triangle, "upsideDown": node.triangle_upside_down, "angleLock": node.angle_lock,
                 "stretchy": node.stretchy, "dragLock": node.drag_lock != 0,
                 "scale": round2(r.f(&layer.transform.scale_y, t).abs()), "figAngle": round2(r.f(&layer.transform.rotation, t)),
                 "locked": layer.locked, "onion": layer.onion,

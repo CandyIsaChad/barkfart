@@ -999,3 +999,23 @@ fn ik_arms_keep_their_length_when_dragged() {
     let l = r.f(&n.length, 0.0);
     assert!(l > 180.0, "the arm was pulled in to {l}");
 }
+
+#[test]
+fn segment_tools_set_gradient_curve_and_shape_options() {
+    let mut s = session();
+    let st = s.command(&json!({"op": "state"}));
+    let (x, y) = handle(&st, 6);
+    s.command(&json!({"op": "down", "x": x, "y": y, "r": 20}));
+    s.command(&json!({"op": "up"}));
+    let before = codec::encode(s.project());
+    let st = s.command(&json!({"op": "segment", "gradient": true, "gradientColor": 0x0000ffffu32, "curve": 30.0, "segScale": 1.5, "angleLock": 2, "sides": 7}));
+    let sel = &st["selected"];
+    assert_eq!(sel["gradient"], true);
+    assert_eq!(sel["gradientColor"], 0x0000ffffu32);
+    assert_eq!(sel["curve"], 30.0);
+    assert_eq!(sel["segScale"], 1.5);
+    assert_eq!(sel["angleLock"], 2);
+    assert_eq!(sel["sides"], 7);
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(codec::encode(s.project()), before);
+}

@@ -1879,6 +1879,55 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     ];
   }
 
+  /// Segment Tools: gradient, segment scale, the shape's own options and
+  /// angle lock (not keyed: they belong to the segment, like its colour).
+  List<Widget> _segmentLook(Map<String, dynamic> sel) {
+    void seg(Map<String, Object?> m) => _cmd({'op': 'segment', ...m});
+    final shape = sel['shape'] as String? ?? 'line';
+    final grad = sel['gradient'] == true;
+    final scale = (sel['segScale'] as num?)?.toDouble() ?? 1;
+    final curve = (sel['curve'] as num?)?.toDouble() ?? 0;
+    final sides = (sel['sides'] as num?)?.toInt() ?? 5;
+    final right = (sel['rightTriangle'] as num?)?.toInt() ?? 0;
+    final half = (sel['halfArc'] as num?)?.toInt() ?? 0;
+    final lock = (sel['angleLock'] as num?)?.toInt() ?? 0;
+    return [
+      _Toggle('Use gradient colour', grad, (v) => seg({'gradient': v})),
+      if (grad) ...[
+        _swatches((sel['gradientColor'] as num?)?.toInt() ?? 0x808080ff, (c) => seg({'gradientColor': c})),
+        _Toggle('Reverse gradient', sel['gradientReverse'] == true, (v) => seg({'gradientReverse': v})),
+        _Toggle('Sideways gradient', sel['gradientSideways'] == true, (v) => seg({'gradientSideways': v})),
+      ],
+      _gap,
+      _Toggle('Use segment scale', (scale - 1).abs() > 1e-3, (v) => seg({'segScale': v ? 1.5 : 1.0})),
+      if ((scale - 1).abs() > 1e-3) _stepper('Segment scale', scale.toStringAsFixed(2), () => seg({'segScale': math.max(0.05, scale - 0.05)}), () => seg({'segScale': scale + 0.05})),
+      _gap,
+      if (shape == 'line' || shape == 'square' || shape == 'trapezoid')
+        _stepper('Curve radius', curve.round().toString(), () => seg({'curve': curve - 5}), () => seg({'curve': curve + 5})),
+      if (shape == 'circle' || shape == 'ellipse') ...[
+        _Toggle('Half arc', half != 0, (v) => seg({'halfArc': v ? 1 : 0})),
+        if (half != 0) _Toggle('Upside down', half < 0, (v) => seg({'halfArc': v ? -1 : 1})),
+      ],
+      if (shape == 'circle') ...[
+        _Toggle('Circle outline colour', sel['outline'] == true, (v) => seg({'outline': v})),
+        if (sel['outline'] == true) ...[
+          _swatches((sel['outlineColor'] as num?)?.toInt() ?? 0x000000ff, (c) => seg({'outlineColor': c})),
+          _Toggle('Is hollow', sel['hollow'] == true, (v) => seg({'hollow': v})),
+        ],
+      ],
+      if (shape == 'triangle') ...[
+        _Toggle('Right triangle', right != 0, (v) => seg({'rightTriangle': v ? 1 : 0})),
+        if (right != 0) _Toggle('Flipped', right < 0, (v) => seg({'rightTriangle': v ? -1 : 1})),
+        _Toggle('Upside down', sel['upsideDown'] == true, (v) => seg({'upsideDown': v})),
+      ],
+      if (shape == 'polygon') _stepper('Vertices', '$sides', () => seg({'sides': math.max(3, sides - 1)}), () => seg({'sides': sides + 1})),
+      _gap,
+      _label('Angle lock'),
+      _Segmented(const ['None', 'Absolute', 'Relative'], lock, (i) => seg({'angleLock': i})),
+      _gap,
+    ];
+  }
+
   List<Widget> _segmentTools(Map<String, dynamic> sel) {
     final root = sel['root'] == true;
     if (root) {
@@ -1904,6 +1953,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _stepper('Length', len.round().toString(), () => _cmd({'op': 'node', 'length': math.max(0, len - 5)}), () => _cmd({'op': 'node', 'length': len + 5})),
       _Btn('Reset length', small: true, enabled: rest > 0 && (len - rest).abs() > 0.01, onTap: () => _cmd({'op': 'node', 'length': rest})),
       _gap,
+      ..._segmentLook(sel),
       _Toggle('Is stretchy', sel['stretchy'] == true, (v) => _cmd({'op': 'node', 'stretchy': v})),
       _Toggle('Lock node', sel['pinned'] == true, (v) => _cmd({'op': 'pin', 'v': v})),
       _Toggle('Drag lock', sel['dragLock'] == true, (v) => _cmd({'op': 'node', 'dragLock': v})),
