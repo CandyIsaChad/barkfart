@@ -60,6 +60,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   ui.Image? _image;
   bool _imageOwned = true;
+  /// The editor state the shown picture was drawn from: handles and the
+  /// camera frame use it, so they move together with the figure.
+  Map<String, dynamic>? _pictureSt;
   /// Playback quality (fraction of full resolution) and the frames drawn
   /// while playing, reused on the next loop (cleared when anything changes).
   double _quality = 0.5;
@@ -290,8 +293,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       return;
     }
     final ms = e.lastMicros / 1000.0;
+    final drawnFrom = _st;
     ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, (img) {
       if (!mounted) return;
+      _pictureSt = drawnFrom;
       final keep = camera && _cacheBytes + w * h * 4 <= _cacheBudget && '${_st['rev']} $w $h' == _cacheKey;
       if (keep) {
         _frameCache[fi] = img;
@@ -319,7 +324,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   Offset _downAt = Offset.zero;
   bool _moved = false;
 
-  double get _hitRadius => 22 / _view.s;
+  double get _hitRadius => 32 / _view.s;
 
   void _down(PointerDownEvent ev) {
     if (_playing) {
@@ -810,7 +815,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         child: ClipRect(
           child: Stack(fit: StackFit.expand, children: [
             if (_image != null) RawImage(image: _image, fit: BoxFit.fill, filterQuality: FilterQuality.low),
-            CustomPaint(painter: _Overlay(_st, _view, _playing)),
+            CustomPaint(painter: _Overlay(_pictureSt ?? _st, _view, _playing)),
             if (_st['mode'] == 'camera') IgnorePointer(child: Container(decoration: BoxDecoration(border: Border.all(color: cAccent, width: 2)))),
           ]),
         ),
@@ -1157,17 +1162,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       Row(children: [
         Expanded(
           child: GestureDetector(
-            onLongPress: () async {
-              final ok = await _ask('Delete on every frame?', 'The figure is removed from the whole animation (Undo brings it back).', ['Cancel', 'Delete everywhere']);
-              if (ok == 'Delete everywhere') _cmd({'op': 'delete_everywhere'});
-            },
+            onLongPress: () => _cmd({'op': 'delete_here', 'joined': true}),
             child: _Btn('Delete stickfigure', danger: true, onTap: () => _cmd({'op': 'delete_here'})),
           ),
         ),
         const SizedBox(width: 6),
         SizedBox(width: 44, child: _Btn('✎', onTap: () => _cmd({'op': 'build'}))),
       ]),
-      const Padding(padding: EdgeInsets.only(top: 3), child: Text('Deletes it from this frame. Hold to delete everywhere. ✎ edits its segments.', style: TextStyle(color: cSecondary, fontSize: 11))),
+      const Padding(padding: EdgeInsets.only(top: 3), child: Text('Removes it from this frame. Hold: with the figures joined to it. ✎ edits its segments.', style: TextStyle(color: cSecondary, fontSize: 11))),
       _gap,
       _pair(_Btn('◀', onTap: () => _cmd({'op': 'cycle_figure', 'dir': -1})), _Btn('▶', onTap: () => _cmd({'op': 'cycle_figure', 'dir': 1}))),
       _gap,
@@ -1211,9 +1213,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         setState(() => _easing = (_easing + 1) % _easings.length);
         _cmd({'op': 'easing', 'v': _easings[_easing].$1});
       }),
-      _gap,
-      _Btn('Cut here', enabled: _frame > 0, onTap: () => _cmd({'op': 'cut'})),
-      const Padding(padding: EdgeInsets.only(top: 3), child: Text('Splits it into two separate figures from this frame on.', style: TextStyle(color: cSecondary, fontSize: 11))),
     ];
   }
 

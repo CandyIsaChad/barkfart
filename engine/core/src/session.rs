@@ -172,9 +172,9 @@ impl Session {
         match self.mode {
             Mode::Figure => {
                 let prev = self.last_tap.as_ref().filter(|(tx, ty, _, _)| (tx - x).hypot(ty - y) <= radius).map(|(_, _, l, n)| (l.clone(), n.clone()));
-                let sel = self.selected.clone();
+                // nearest joint wins; tapping the same spot again steps to the next one under the finger
                 self.sync_tools();
-                let mut hit = self.tools.pick_cycling(self.project(), x, y, radius, t, sel.as_ref().map(|(l, n)| (l.as_str(), n.as_str())), prev.as_ref().map(|(l, n)| (l.as_str(), n.as_str())));
+                let mut hit = self.tools.pick_cycling(self.project(), x, y, radius, t, None, prev.as_ref().map(|(l, n)| (l.as_str(), n.as_str())));
                 if let (Some(b), Some(h)) = (&self.building, &hit) {
                     if h.layer != *b {
                         hit = None;
@@ -275,6 +275,7 @@ impl Session {
                         self.doc.cancel();
                     } else {
                         self.tools.end(&mut self.doc);
+                        anchor_poses(&mut self.doc.state);
                         snap_keys(&mut self.doc.state);
                         self.doc.commit();
                     }
@@ -424,10 +425,6 @@ impl Session {
                     }
                 }
             }
-            "inbetween" => {
-                let (fr, n) = (self.frame, c["n"].as_i64().unwrap_or(1).clamp(1, 240) as i32);
-                self.step(if n == 1 { "Add in-between" } else { "Add in-betweens" }, |s| frame_ops::insert_tweened(s, fr, n));
-            }
             "easing" => {
                 let v = c["v"].as_str().unwrap_or("linear").to_string();
                 let (interp, ease) = match v.as_str() {
@@ -445,20 +442,31 @@ impl Session {
                     self.step("Easing", |s| ed.set_interp_in(s, &sel, interp, ease));
                 }
             }
-            "delete_here" | "cut" => {
+            "delete_here" => {
+                // gone from this frame only (hold: with the figures joined to it)
                 if let Some(l) = self.sel_layer() {
-                    let (fr, n, del) = (self.frame, self.frame_count(), op == "delete_here");
-                    let label = if del { "Delete from this frame" } else { "Cut figure" };
-                    if let Some(copy) = self.step(label, |s| split_layer(s, &sym, &l, fr, n, del)) {
-                        // keep working on the part that shows from here on
-                        if !del {
-                            if let Some(c) = copy {
-                                let node = self.selected.as_ref().map(|x| x.1.clone()).unwrap_or_default();
-                                self.selected = Some((c, node));
+                    let fr = self.frame;
+                    let joined = b("joined");
+                    self.step("Delete stickfigure", |s| {
+                        let block = if joined { layer_ops::with_joined(s.project.root().expect("root"), &l) } else { vec![l.clone()] };
+                        for id in &block {
+                            if let Some(x) = s.project.layer_mut(&sym, id) {
+                                x.shown.track.put(Key::new(t, Value::B(false), Interp::Hold));
                             }
                         }
-                        self.validate();
-                    }
+                        // a figure on no frame at all is removed
+                        let n = frame_ops::frame_count(s);
+                        let fps = st_fps(&s.project);
+                        for id in &block {
+                            let gone = s.project.root().and_then(|r| r.layer(id)).is_some_and(|x| (0..n).all(|i| !Resolver::new(&s.project).b(&x.shown, i as f64 / fps)));
+                            if gone {
+                                structure::remove_layer(s, &sym, id)?;
+                            }
+                        }
+                        let _ = fr;
+                        Ok(())
+                    });
+                    self.selected = None;
                 }
             }
             "tween" => {
@@ -578,6 +586,7 @@ impl Session {
                 let name = crate::figures::ALL.iter().find(|(id, _)| *id == kind).map(|(_, nm)| *nm).unwrap_or("Figure");
                 let template = new_project();
                 let src = template.root().and_then(|s| s.layers.first()).map(|l| (**l).clone()).expect("starter figure");
+                let fr_now = self.frame;
                 let made = self.step("Add figure", |s| {
                     let id = s.project.new_id("L");
                     let mut l = if kind == "stickman" {
@@ -599,10 +608,8 @@ impl Session {
                     let at = s.project.root().map(|r| r.layers.len()).unwrap_or(0);
                     let sym = s.project.root_symbol.clone();
                     structure::add_layer(s, &sym, l, at)?;
-                    // like a snapshot: the new figure appears from this frame on
-                    if t > 1e-9 {
-                        show_only_from(s, &sym, &id, 0.0, t);
-                    }
+                    // frames are snapshots: the new figure is on this frame only
+                    only_on_frame(s, &sym, &id, fr_now);
                     Ok(id)
                 });
                 if let Some(id) = made {
@@ -847,6 +854,7 @@ impl Session {
             }
             "paste_figure" => {
                 if let Some(clip) = self.figure_clip.clone() {
+                    let fr_now = self.frame;
                     let made = self.step("Paste stickfigure", |s| {
                         let mut ids = std::collections::HashMap::new();
                         for l in &clip {
@@ -861,8 +869,7 @@ impl Session {
                             first.get_or_insert(id.clone());
                             let at = s.project.root().map(|r| r.layers.len()).unwrap_or(0);
                             structure::add_layer(s, &sym2, c, at)?;
-                            // pasted into this frame on: hidden before it
-                            show_only_from(s, &sym2, &id, 0.0, t);
+                            only_on_frame(s, &sym2, &id, fr_now);
                         }
                         Ok(first)
                     });
@@ -969,7 +976,7 @@ impl Session {
         if self.dragging() {
             self.end_gesture(false);
         }
-        let t = self.time();
+        let fr_now = self.frame;
         let made = self.step("Import", |s| {
             let before: std::collections::HashSet<String> = s.project.root().map(|r| r.layers.iter().map(|l| l.id.clone()).collect()).unwrap_or_default();
             let got = crate::import::import_file(&mut s.project, file_name, bytes).map_err(|e| crate::edit::EditError(e.to_string()))?;
@@ -978,10 +985,8 @@ impl Session {
             }
             let sym = s.project.root_symbol.clone();
             let added: Vec<String> = s.project.root().map(|r| r.layers.iter().filter(|l| !before.contains(&l.id)).map(|l| l.id.clone()).collect()).unwrap_or_default();
-            if t > 1e-9 {
-                for id in &added {
-                    show_only_from(s, &sym, id, 0.0, t);
-                }
+            for id in &added {
+                only_on_frame(s, &sym, id, fr_now);
             }
             Ok((got.layer, got.message))
         });
@@ -1243,31 +1248,24 @@ fn st_fps(p: &Project) -> f64 {
     if p.settings.fps > 0.0 { p.settings.fps as f64 } else { 30.0 }
 }
 
-/// Frames are poses: once there is more than one frame, every pose property
-/// that has no keys yet gets one on the first frame, so keying it on a
-/// later frame cannot change the frames before it.
+/// Frames are snapshots (like the original): every figure's pose and its
+/// visibility are keyed on every frame, so changing one frame can never
+/// change another (tweening only blends neighbouring frames).
 pub fn anchor_poses(st: &mut crate::edit::State) {
-    if frame_ops::frame_count(st) <= 1 {
-        return;
-    }
+    let n = frame_ops::frame_count(st);
+    let fps = st_fps(&st.project);
     let sym = st.project.root_symbol.clone();
     let ids: Vec<String> = st.project.root().map(|s| s.layers.iter().map(|l| l.id.clone()).collect()).unwrap_or_default();
     for id in ids {
-        let needs = {
-            let Some(l) = st.project.root().and_then(|s| s.layer(&id)) else { continue };
-            pose_props(l).iter().any(|q| q.track.is_empty())
-        };
-        if !needs {
-            continue;
-        }
         let Some(l) = st.project.layer_mut(&sym, &id) else { continue };
+        key_every_frame(&mut l.shown, n, fps);
         let tr = &mut l.transform;
         let mut ps: Vec<&mut Property> = vec![&mut tr.x, &mut tr.y, &mut tr.rotation, &mut tr.scale_x, &mut tr.scale_y];
         match &mut l.kind {
             LayerKind::Figure(f) => {
-                for n in f.nodes_mut() {
-                    ps.push(&mut n.rotation);
-                    ps.push(&mut n.length);
+                for nd in f.nodes_mut() {
+                    ps.push(&mut nd.rotation);
+                    ps.push(&mut nd.length);
                 }
             }
             LayerKind::Camera(c) => {
@@ -1279,119 +1277,34 @@ pub fn anchor_poses(st: &mut crate::edit::State) {
             _ => {}
         }
         for q in ps {
-            if q.track.is_empty() {
-                let v = q.value;
-                q.track.put(Key::new(0.0, v, Interp::Linear));
-            }
+            key_every_frame(q, n, fps);
         }
     }
 }
 
-fn pose_props(l: &Layer) -> Vec<&Property> {
-    let tr = &l.transform;
-    let mut ps: Vec<&Property> = vec![&tr.x, &tr.y, &tr.rotation, &tr.scale_x, &tr.scale_y];
-    match &l.kind {
-        LayerKind::Figure(f) => {
-            for n in f.nodes() {
-                ps.push(&n.rotation);
-                ps.push(&n.length);
-            }
+fn key_every_frame(q: &mut Property, n: i32, fps: f64) {
+    let hold = matches!(q.value, Value::B(_));
+    for i in 0..n {
+        let t = i as f64 / fps;
+        if q.track.index_of(t).is_err() {
+            let v = q.key_value(t);
+            let interp = if hold { Interp::Hold } else { crate::edit::editor::interp_at(q, t, Interp::Linear) };
+            q.track.put(Key::new(t, v, interp));
         }
-        LayerKind::Camera(c) => ps.extend([&c.x, &c.y, &c.zoom, &c.rotation]),
-        _ => {}
     }
-    ps
 }
 
-/// Splits a figure (with the figures joined to it) at a frame into two
-/// independent figures, like a cut in a video editor: the original shows
-/// before `frame`, a copy from `frame` on (delete: from `frame + 1` on, so
-/// the figure is gone on this frame only). Returns the copy's id (None
-/// when no copy was needed).
-pub fn split_layer(st: &mut crate::edit::State, sym: &str, id: &str, frame: i32, frames: i32, delete: bool) -> EditResult<Option<String>> {
-    let fps = if st.project.settings.fps > 0.0 { st.project.settings.fps as f64 } else { 30.0 };
-    let block = layer_ops::with_joined(st.project.symbol(sym).ok_or_else(|| crate::edit::EditError("no symbol".into()))?, id);
-    let show_from = if delete { frame + 1 } else { frame };
-    let hide_at = frame as f64 / fps;
-    if delete && frames <= 1 {
-        for l in &block {
-            structure::remove_layer(st, sym, l)?;
-        }
-        return Ok(None);
+/// A figure (with what is joined to it) shown on one frame only.
+fn only_on_frame(st: &mut crate::edit::State, sym: &str, id: &str, frame: i32) {
+    let n = frame_ops::frame_count(st);
+    let fps = st_fps(&st.project);
+    let Some(l) = st.project.layer_mut(sym, id) else { return };
+    l.shown.track.clear();
+    for i in 0..n {
+        l.shown.track.put(Key::new(i as f64 / fps, Value::B(i == frame), Interp::Hold));
     }
-    if !delete && frame <= 0 {
-        return crate::edit::fail("Cut on a later frame: the first frame has nothing before it.");
-    }
-    let ts = show_from as f64 / fps;
-    let shown_later = show_from < frames && {
-        let p = &st.project;
-        let l = p.symbol(sym).and_then(|s| s.layer(id)).expect("layer");
-        Resolver::new(p).b(&l.shown, ts)
-    };
-    if !shown_later {
-        // nothing after: just hide it from here on
-        for l in &block {
-            hide_from(st, sym, l, hide_at);
-        }
-        return Ok(None);
-    }
-    if frame == 0 {
-        // nothing before: the same figure, hidden on the first frame only
-        for l in &block {
-            show_only_from(st, sym, l, hide_at, ts);
-        }
-        return Ok(None);
-    }
-    let copies = layer_ops::duplicate(st, sym, id, true, 0.0, 0.0)?;
-    // the copy keeps every key (so it moves exactly as before, eased tweens
-    // included) and is only hidden before the cut
-    for c in &copies {
-        show_only_from(st, sym, c, 0.0, ts);
-    }
-    for l in &block {
-        hide_from(st, sym, l, hide_at);
-    }
-    Ok(copies.first().cloned())
 }
 
-fn shown_mut<'a>(st: &'a mut crate::edit::State, sym: &str, id: &str) -> Option<&'a mut Property> {
-    st.project.layer_mut(sym, id).map(|l| &mut l.shown)
-}
-
-/// Keys the layer hidden from t on (later visibility keys are dropped); before t it is unchanged.
-fn hide_from(st: &mut crate::edit::State, sym: &str, id: &str, t: f64) {
-    let Some(q) = shown_mut(st, sym, id) else { return };
-    let v0 = q.key_value(0.0);
-    let keep: Vec<Key> = q.track.keys().iter().filter(|k| k.time < t - 1e-9).copied().collect();
-    q.track.clear();
-    if keep.first().is_none_or(|k| k.time > 1e-9) && t > 1e-9 {
-        q.track.put(Key::new(0.0, v0, Interp::Hold));
-    }
-    for k in keep {
-        q.track.put(k);
-    }
-    q.track.put(Key::new(t, Value::B(false), Interp::Hold));
-}
-
-/// Keys the layer hidden from `from` until `to`, shown at `to` (later visibility keys kept).
-fn show_only_from(st: &mut crate::edit::State, sym: &str, id: &str, from: f64, to: f64) {
-    let Some(q) = shown_mut(st, sym, id) else { return };
-    let v0 = q.key_value(0.0);
-    let earlier: Vec<Key> = q.track.keys().iter().filter(|k| k.time < from - 1e-9).copied().collect();
-    let later: Vec<Key> = q.track.keys().iter().filter(|k| k.time > to + 1e-9).copied().collect();
-    q.track.clear();
-    if from > 1e-9 && earlier.first().is_none_or(|k| k.time > 1e-9) {
-        q.track.put(Key::new(0.0, v0, Interp::Hold));
-    }
-    for k in earlier {
-        q.track.put(k);
-    }
-    q.track.put(Key::new(from, Value::B(false), Interp::Hold));
-    q.track.put(Key::new(to, Value::B(true), Interp::Hold));
-    for k in later {
-        q.track.put(k);
-    }
-}
 
 fn round2(v: f32) -> f64 {
     (v as f64 * 100.0).round() / 100.0

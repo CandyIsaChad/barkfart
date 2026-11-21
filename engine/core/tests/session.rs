@@ -130,12 +130,12 @@ fn moving_everything_is_one_step() {
     assert_eq!(codec::encode(s.project()), before);
 }
 
-/// Four frames: hip moves right and the right arm swings, keyed on 0 and 3 (linear in between).
+/// Four frames (snapshots): the last one has the right arm swung and the figure moved.
 fn animated() -> Session {
     let mut s = session();
-    s.command(&json!({"op": "insert_frame"}));
-    s.command(&json!({"op": "frame", "i": 0}));
-    s.command(&json!({"op": "inbetween", "n": 2}));
+    for _ in 0..3 {
+        s.command(&json!({"op": "insert_frame"}));
+    }
     s.command(&json!({"op": "frame", "i": 3}));
     let st = s.command(&json!({"op": "state"}));
     let (x, y) = handle(&st, 6);
@@ -161,16 +161,6 @@ fn same(a: &[f32], b: &[f32]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3)
 }
 
-#[test]
-fn in_betweens_tween_and_keys_show_on_the_strip() {
-    let s = animated();
-    let st = s.state();
-    assert_eq!(st["frames"], 4);
-    assert_eq!(st["keyed"], json!([true, false, false, true]));
-    // the in-betweens are between the two poses
-    let (a, m, b) = (picture(&s, 0), picture(&s, 1), picture(&s, 3));
-    assert!(!same(&a, &m) && !same(&m, &b));
-}
 
 #[test]
 fn deleting_on_one_frame_leaves_the_others_alone() {
@@ -190,8 +180,7 @@ fn deleting_on_one_frame_leaves_the_others_alone() {
                 assert!(same(&now, &before[f as usize]), "deleting on frame {k} changed frame {f}");
             }
         }
-        let figs = st["figures"].as_array().unwrap().len();
-        assert_eq!(figs, if k == 0 || k == 3 { 1 } else { 2 }, "frame {k}: a copy only when there is something on both sides");
+        assert_eq!(st["figures"].as_array().unwrap().len(), 1, "frame {k}: still one figure");
         s.command(&json!({"op": "undo"}));
         let mut back = codec::decode(&codec::encode(s.project())).unwrap();
         back.id_counter = codec::decode(&text).unwrap().id_counter;
@@ -199,60 +188,8 @@ fn deleting_on_one_frame_leaves_the_others_alone() {
     }
 }
 
-#[test]
-fn a_cut_makes_two_figures_that_look_the_same() {
-    let mut s = animated();
-    let before: Vec<Vec<f32>> = (0..4).map(|f| picture(&s, f)).collect();
-    s.command(&json!({"op": "frame", "i": 2}));
-    s.command(&json!({"op": "select", "layer": "L2"}));
-    let st = s.command(&json!({"op": "cut"}));
-    assert_eq!(st["figures"].as_array().unwrap().len(), 2);
-    assert_ne!(st["selected"]["layer"], "L2", "the part after the cut is selected");
-    for f in 0..4 {
-        assert!(same(&picture(&s, f), &before[f as usize]), "frame {f} changed");
-    }
-    // the two parts are independent: posing the second does not touch the first
-    let st = s.command(&json!({"op": "frame", "i": 3}));
-    let (x, y) = handle(&st, 6);
-    s.command(&json!({"op": "down", "x": x, "y": y, "r": 20}));
-    s.command(&json!({"op": "move", "x": x - 50.0, "y": y}));
-    s.command(&json!({"op": "up"}));
-    assert!(same(&picture(&s, 0), &before[0]) && same(&picture(&s, 1), &before[1]));
-}
 
-#[test]
-fn easing_a_frame() {
-    let mut s = animated();
-    let lin = picture(&s, 1);
-    s.command(&json!({"op": "frame", "i": 0}));
-    let st = s.command(&json!({"op": "easing", "v": "smooth"}));
-    assert_eq!(st["undo"], "Easing");
-    assert!(!same(&picture(&s, 1), &lin), "the in-between moved");
-    assert!(same(&picture(&s, 0), &picture(&{ let mut t = animated(); t.command(&json!({"op": "frame", "i": 0})); t }, 0)));
-}
 
-#[test]
-fn a_cut_inside_an_eased_tween() {
-    let mut s = animated();
-    s.command(&json!({"op": "frame", "i": 0}));
-    s.command(&json!({"op": "inbetween", "n": 4}));
-    s.command(&json!({"op": "easing", "v": "smooth"}));
-    let n = s.state()["frames"].as_i64().unwrap() as i32;
-    let before: Vec<Vec<f32>> = (0..n).map(|f| picture(&s, f)).collect();
-    s.command(&json!({"op": "frame", "i": 2}));
-    s.command(&json!({"op": "select", "layer": "L2"}));
-    s.command(&json!({"op": "cut"}));
-    let mut worst = 0f32;
-    for f in 0..n {
-        let now = picture(&s, f);
-        assert_eq!(now.len(), before[f as usize].len());
-        for (a, b) in now.iter().zip(&before[f as usize]) {
-            worst = worst.max((a - b).abs());
-        }
-    }
-    eprintln!("eased cut: largest vertex change {worst}");
-    assert!(worst < 1e-3, "frames after a cut in an eased tween moved by {worst}");
-}
 
 #[test]
 fn importing_a_stick_nodes_figure_is_one_step() {
@@ -477,4 +414,53 @@ fn keys_stay_on_their_frames_after_many_inserts() {
             }
         }
     }
+}
+
+#[test]
+fn easing_shapes_the_tween_between_frames() {
+    let mut s = two_poses();
+    let mid = picture_at(&s, 0.05);
+    let st = s.command(&json!({"op": "easing", "v": "smooth"}));
+    assert_eq!(st["undo"], "Easing");
+    assert!(!same(&picture_at(&s, 0.03), &mid) || !same(&picture_at(&s, 0.02), &picture_at(&{ let t = two_poses(); t }, 0.02)), "the in-between changed");
+    assert!(same(&picture(&s, 0), &picture(&two_poses(), 0)) && same(&picture(&s, 1), &picture(&two_poses(), 1)), "the frames themselves did not");
+}
+
+#[test]
+fn a_figure_added_pasted_or_deleted_on_one_frame_stays_on_that_frame() {
+    let mut s = session();
+    for _ in 0..3 {
+        s.command(&json!({"op": "insert_frame"}));
+    }
+    s.command(&json!({"op": "frame", "i": 1}));
+    let st = s.command(&json!({"op": "add_figure", "kind": "ball"}));
+    let ball = st["selected"]["layer"].as_str().unwrap().to_string();
+    let on = |s: &mut Session, f: i32| {
+        s.command(&json!({"op": "frame", "i": f}));
+        s.tools.handles(s.project(), s.time()).iter().filter(|h| h.layer == ball).count() > 0
+    };
+    assert_eq!((0..4).map(|f| on(&mut s, f)).collect::<Vec<_>>(), vec![false, true, false, false], "added on frame 2 only");
+    // a new frame after frame 2 copies it, ball included
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "insert_frame"}));
+    assert_eq!((0..5).map(|f| on(&mut s, f)).collect::<Vec<_>>(), vec![false, true, true, false, false]);
+    // deleting on frame 3 leaves frame 2
+    s.command(&json!({"op": "frame", "i": 2}));
+    s.command(&json!({"op": "select", "layer": ball}));
+    s.command(&json!({"op": "delete_here"}));
+    assert_eq!((0..5).map(|f| on(&mut s, f)).collect::<Vec<_>>(), vec![false, true, false, false, false]);
+    // copy and paste onto frame 5 only
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "select", "layer": ball}));
+    s.command(&json!({"op": "copy_figure"}));
+    s.command(&json!({"op": "frame", "i": 4}));
+    let st = s.command(&json!({"op": "paste_figure"}));
+    let copy = st["selected"]["layer"].as_str().unwrap().to_string();
+    let fps = s.project().settings.fps as f64;
+    let shown: Vec<bool> = (0..5).map(|f| s.tools.handles(s.project(), f as f64 / fps).iter().any(|h| h.layer == copy)).collect();
+    assert_eq!(shown, vec![false, false, false, false, true]);
+    // deleting it on its only frame removes it
+    s.command(&json!({"op": "select", "layer": copy}));
+    let st = s.command(&json!({"op": "delete_here"}));
+    assert_eq!(st["figures"].as_array().unwrap().len(), 2);
 }

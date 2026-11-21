@@ -147,3 +147,14 @@ windows with a filter (the picker shows pictures); playback quality and the
 frame cache are ours.
 Not yet: textfields, movieclip editor, filters, sounds per frame, frame
 delay and repeat, settings, magnifier and arrows windows, join, loop tween.
+
+## v3.1 (2026-11-21): frames are snapshots
+User decision: no timeline/dope-sheet behaviour for now. Every frame holds
+its own copy of every figure (pose and visibility keyed on every frame).
+Adding, pasting or importing a figure puts it on the current frame only; a
+new frame copies the current one; Delete removes the figure from this frame
+(hold: with joined figures); a figure on no frame is removed. Removed: Cut
+here, delete everywhere, joint/pose key scope, unkeyed in-betweens.
+Picking: the nearest joint within 32 pt; tapping the same spot again steps
+to the next joint under the finger. Handles are drawn from the same state
+as the picture, so they move with it.
