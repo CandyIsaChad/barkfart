@@ -950,6 +950,8 @@ pub struct FrameFigure {
     pub library_id: usize,
     pub header: Vec<u8>,
     pub nodes: Vec<Vec<u8>>,
+    /// Movieclip version 4xx layout (131-byte header, other offsets).
+    pub v4: bool,
 }
 
 impl FrameFigure {
@@ -958,21 +960,39 @@ impl FrameFigure {
     }
 
     pub fn scale(&self) -> f32 {
-        bef(&self.header, 4)
+        bef(&self.header, if self.v4 { 8 } else { 4 })
     }
 
     pub fn opacity(&self) -> f32 {
-        bef(&self.header, 8)
+        bef(&self.header, if self.v4 { 12 } else { 8 })
     }
 
     pub fn stage_x(&self) -> f32 {
-        bef(&self.header, 67)
+        bef(&self.header, if self.v4 { 91 } else { 67 })
     }
 
     pub fn stage_y(&self) -> f32 {
-        bef(&self.header, 71)
+        bef(&self.header, if self.v4 { 95 } else { 71 })
+    }
+
+    pub fn color(&self) -> u32 {
+        be32(&self.header, if self.v4 { 99 } else { 75 }) as u32
+    }
+
+    /// A joint's local angle in its record.
+    pub fn node_angle(&self, r: &[u8]) -> f32 {
+        bef(r, if self.v4 { 19 } else { 23 })
     }
 }
+
+/// Movieclip version 431 (Stick Nodes 4.3.x), measured 2026-11-21 on a clip
+/// saved by the original: per figure a 131-byte header, 83-byte node records
+/// (connectors: 20 more bytes after), 1-byte frame trailer.
+pub const V4_VERSION: i32 = 431;
+const V4_FIGURE_HEADER_BYTES: usize = 131;
+const V4_NODE_RECORD_BYTES: usize = 83;
+const V4_CONNECTOR_PREFIX_BYTES: usize = 20;
+const V4_FRAME_TRAILER_BYTES: usize = 1;
 
 #[derive(Clone, Debug, Default)]
 pub struct Frame {
@@ -1032,13 +1052,23 @@ pub fn read_movieclip(file: &[u8]) -> R<LegacyMovieclip> {
 
 fn read_mc_body(inp: &mut In) -> R<LegacyMovieclip> {
     let mut mc = LegacyMovieclip { version: inp.i32()?, ..Default::default() };
-    if mc.version != VERIFIED_VERSION {
-        return err(format!("movieclip version {} is not supported yet (verified: {VERIFIED_VERSION})", mc.version));
+    let v4 = mc.version == V4_VERSION;
+    if mc.version != VERIFIED_VERSION && !v4 {
+        return err(format!("movieclip version {} is not supported yet (verified: {VERIFIED_VERSION}, {V4_VERSION})", mc.version));
+    }
+    if v4 {
+        let _build = inp.i32()?;
     }
     mc.name = inp.str()?;
     let frames = inp.count(20)?;
     let figs = inp.count(16)?;
     let sounds = inp.count(4)?;
+    if v4 {
+        let extra = inp.i32()?;
+        if extra != 0 {
+            return err(format!("movieclip version {}: sprites in movieclips are not supported yet", mc.version));
+        }
+    }
     mc.preview_count = inp.i32()?;
     mc.preview_width = inp.i32()?;
     mc.preview_height = inp.i32()?;
@@ -1068,15 +1098,22 @@ fn read_mc_body(inp: &mut In) -> R<LegacyMovieclip> {
             if lib < 0 || lib as usize >= mc.library.len() {
                 return err(format!("bad library id {lib}"));
             }
-            let header = inp.take(FIGURE_HEADER_BYTES)?;
-            let count = mc.library[lib as usize].figure.nodes.len();
-            let mut nodes = Vec::with_capacity(count);
-            for _ in 0..count {
-                nodes.push(inp.take(NODE_RECORD_BYTES)?);
+            let header = inp.take(if v4 { V4_FIGURE_HEADER_BYTES } else { FIGURE_HEADER_BYTES })?;
+            let lib_nodes = &mc.library[lib as usize].figure.nodes;
+            let mut nodes = Vec::with_capacity(lib_nodes.len());
+            for ln in lib_nodes.iter() {
+                if v4 {
+                    nodes.push(inp.take(V4_NODE_RECORD_BYTES)?);
+                    if ln.is_connector {
+                        inp.take(V4_CONNECTOR_PREFIX_BYTES)?;
+                    }
+                } else {
+                    nodes.push(inp.take(NODE_RECORD_BYTES)?);
+                }
             }
-            fr.figures.push(FrameFigure { library_id: lib as usize, header, nodes });
+            fr.figures.push(FrameFigure { library_id: lib as usize, header, nodes, v4 });
         }
-        fr.trailer = inp.take(FRAME_TRAILER_BYTES)?;
+        fr.trailer = inp.take(if v4 { V4_FRAME_TRAILER_BYTES } else { FRAME_TRAILER_BYTES })?;
         mc.frames.push(fr);
     }
     Ok(mc)
@@ -1119,14 +1156,14 @@ pub fn movieclip_to_symbol(p: &mut Project, mc: &LegacyMovieclip, report: &mut R
             key(&mut l.transform.scale_x, t, ff.scale());
             key(&mut l.transform.scale_y, t, ff.scale());
             key(&mut l.opacity, t, ff.opacity());
-            let fig_color = legacy_color(be32(&ff.header, 75));
+            let fig_color = legacy_color(ff.color() as i32);
             let LayerKind::Figure(fig) = &mut l.kind else { continue };
             let nodes = fig.nodes_mut();
             for i in 0..nodes.len().min(ff.nodes.len()) {
                 let r = &ff.nodes[i];
                 let n = &mut nodes[i];
                 let ln = &lib_fig.nodes[lib[i]];
-                key(&mut n.rotation, t, bef(r, 23));
+                key(&mut n.rotation, t, ff.node_angle(r));
                 key(&mut n.length, t, bef(r, 11));
                 if ln.i("useSegmentScale") != 0 {
                     key(&mut n.scale, t, bef(r, 7));

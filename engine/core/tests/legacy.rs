@@ -87,3 +87,27 @@ fn original_samples_import_like_java_when_present() {
     eprintln!("{n} local samples checked");
     assert!(failures.is_empty(), "{} of {n} differ:\n{}", failures.len(), failures.iter().take(8).cloned().collect::<Vec<_>>().join("\n"));
 }
+
+/// A movieclip saved by Stick Nodes Pro 4.3.1 (version 431): the IK figure with
+/// one foot pulled in (local file, made on the user's phone 2026-11-21).
+#[test]
+fn imports_a_version_431_movieclip() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/barkfart/research/local/zz_ik_probe.nodemc");
+    let Ok(bytes) = std::fs::read(path) else { return };
+    let mut p = barkfart_core::session::new_project();
+    p.root_mut().unwrap().layers.clear();
+    let got = barkfart_core::import::import_file(&mut p, "zz_ik_probe.nodemc", &bytes).expect("version 431 reads");
+    let _ = got;
+    let sym = p.library.values().find(|s| s.id != p.root_symbol).expect("the movieclip symbol");
+    assert!((sym.duration - 0.4).abs() < 1e-6, "4 frames at 10 fps");
+    let l = sym.layers.iter().find(|l| l.as_figure().is_some()).unwrap();
+    let f = l.as_figure().unwrap();
+    let mut r = barkfart_core::eval::Resolver::new(&p);
+    let t = 0.1; // frame 2
+    assert!((r.f(&f.node("n30").unwrap().length, t) - 176.7).abs() < 0.1);
+    let pose = barkfart_core::eval::FigurePose::compute(f, t, &mut r);
+    let at = |n: &str| { let i = f.index_of(n).unwrap(); (pose.x[i], pose.y[i]) };
+    let d = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).hypot(a.1 - b.1);
+    assert!((d(at("n13"), at("n0")) - 141.0).abs() < 0.3, "the knee point as the original placed it");
+    assert!((d(at("n27"), at("n10")) - 148.3).abs() < 0.3);
+}
