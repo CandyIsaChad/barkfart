@@ -102,6 +102,15 @@ pub struct DrawList {
 }
 
 impl DrawList {
+    /// View options "Show filters": drops the effects `keep` refuses (on the
+    /// stage only; None drops every filter, No blur the two blurs).
+    pub fn without_effects(mut self, keep: impl Fn(&str) -> bool) -> DrawList {
+        for i in &mut self.isolates {
+            i.effects.retain(|e| keep(&e.ty));
+        }
+        self
+    }
+
     pub fn triangle_count(&self) -> usize {
         self.batches.iter().map(|b| b.vertex_count() / 3).sum()
     }

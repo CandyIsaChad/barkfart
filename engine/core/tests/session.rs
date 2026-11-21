@@ -1340,3 +1340,22 @@ fn paste_with_layering_keeps_the_stacking_place() {
     assert!(!figs.contains(&layered[0]), "the copy of the bottom figure is at the bottom: {layered:?}");
     assert_eq!(&layered[1..], &figs[..]);
 }
+
+/// View options "Show filters": None drops every filter from the stage
+/// picture, No blur only the blurs; the project keeps them all.
+#[test]
+fn show_filters_strips_effects_from_the_stage_only() {
+    let mut s = session();
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    s.command(&json!({"op": "filter", "blur": 8.0}));
+    s.command(&json!({"op": "filter", "outline": 0xff0000ffu32, "outlineAmount": 1.0}));
+    let p = s.project();
+    let list = || barkfart_core::tess::layered(&barkfart_core::eval::evaluate(p, &p.root_symbol, 0.0), None);
+    let tys = |l: &barkfart_core::tess::DrawList| -> Vec<String> { l.isolates.iter().flat_map(|i| i.effects.iter().map(|e| e.ty.clone())).collect() };
+    let all = tys(&list());
+    assert!(all.iter().any(|t| t == barkfart_core::fx::BLUR) && all.iter().any(|t| t == barkfart_core::fx::OUTLINE), "{all:?}");
+    let no_blur = tys(&list().without_effects(|ty| ty != barkfart_core::fx::BLUR && ty != barkfart_core::fx::MOTION));
+    assert!(!no_blur.iter().any(|t| t == barkfart_core::fx::BLUR) && no_blur.iter().any(|t| t == barkfart_core::fx::OUTLINE));
+    assert!(tys(&list().without_effects(|_| false)).is_empty());
+    assert_eq!(tys(&list()), all, "the project still has them");
+}

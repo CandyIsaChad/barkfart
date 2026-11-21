@@ -263,6 +263,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final onion = !_playing && _opts['onion'] == true && _frames > 1;
     // View options: outline the selected figure (editing only)
     final outline = !_playing && AppSettings.flag('outlineSelection') && _sel != null;
+    // View options "Show filters" (stage), or the playback switch
+    final filters = _playing ? (AppSettings.flag('playFilters') ? 2 : 0) : AppSettings.number('showFilters');
     double x0, y0, x1, y1;
     if (camera) {
       // the shot fitted into the stage area
@@ -278,11 +280,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       x1 = _view.x1;
       y1 = _view.y1;
     }
-    final key = '${_st['rev']} $t $w $h $x0 $y0 $x1 $y1 $camera $onion ${outline ? _sel!['layer'] : ''}';
+    final key = '${_st['rev']} $t $w $h $x0 $y0 $x1 $y1 $camera $onion $filters ${outline ? _sel!['layer'] : ''}';
     if (key == _drawn) return;
     final fi = (t * ((_st['rate'] as num?)?.toDouble() ?? _fps)).round();
     if (camera) {
-      final ck = '${_st['rev']} $w $h';
+      final ck = '${_st['rev']} $w $h $filters';
       if (ck != _cacheKey) {
         _clearCache();
         _cacheKey = ck;
@@ -297,7 +299,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _drawn = key;
     _busy = true;
     final sw = Stopwatch()..start();
-    final px = e.renderView(t, w, h, x0, y0, x1, y1, camera: camera, onion: onion, outline: outline);
+    final px = e.renderView(t, w, h, x0, y0, x1, y1, camera: camera, onion: onion, outline: outline, filters: filters);
     if (px == null) {
       _busy = false;
       return;
@@ -1644,6 +1646,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     return [
       _stepper('FPS', _fps.round().toString(), () => _cmd({'op': 'fps', 'v': _fps - 1}), () => _cmd({'op': 'fps', 'v': _fps + 1})),
       _gap,
+      _Toggle('Show filters while playing', AppSettings.flag('playFilters'), (v) => setState(() {
+            AppSettings.values['playFilters'] = v;
+            unawaited(AppSettings.save());
+          })),
+      _hint('Playback only; exports always have them. Turning filters (and tweening) off helps when playback lags.'),
+      _gap,
       _Toggle('Tweening on', tween, (v) => _cmd({'op': 'animation', 'tweening': v})),
       Opacity(
         opacity: tween ? 1 : 0.4,
@@ -2362,6 +2370,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 AppSettings.values[k] = v;
                 unawaited(AppSettings.save());
               })),
+        _label('Show filters'),
+        _Segmented(const ['None', 'No blur', 'All'], AppSettings.number('showFilters').clamp(0, 2), (i) => setState(() {
+              AppSettings.values['showFilters'] = i;
+              unawaited(AppSettings.save());
+            })),
+        _gap,
         _Toggle('Onion skin', _opts['onion'] == true, (v) => _cmd({'op': 'set', 'k': 'onion', 'v': v})),
         if (_opts['onion'] == true) ...[
           _stepper('Frames before', '${_opts['onionBefore'] ?? 1}', () => _cmd({'op': 'set', 'k': 'onion_before', 'v': ((_opts['onionBefore'] as num?) ?? 1) - 1}), () => _cmd({'op': 'set', 'k': 'onion_before', 'v': ((_opts['onionBefore'] as num?) ?? 1) + 1})),

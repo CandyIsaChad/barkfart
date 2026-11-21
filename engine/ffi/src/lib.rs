@@ -609,6 +609,12 @@ pub extern "C" fn bf_render_view(e: *const Engine, t: f64, w: u32, h: u32, x0: f
             let ghosts = onion.build_layered(p, &p.root_symbol, t);
             list = if v.onion_in_front { list.with_overlay(ghosts) } else { list.with_underlay(ghosts) };
         }
+        // View options "Show filters": 8 = none, 16 = no blur
+        if flags & 8 != 0 {
+            list = list.without_effects(|_| false);
+        } else if flags & 16 != 0 {
+            list = list.without_effects(|ty| ty != barkfart_core::fx::BLUR && ty != barkfart_core::fx::MOTION);
+        }
         // View options "Outline selection": a thin magenta band around the selected figure
         if flags & 4 != 0 {
             if let Some((layer, _)) = engine.session.as_ref().and_then(|s| s.selected.as_ref()) {

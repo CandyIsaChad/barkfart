@@ -23,7 +23,8 @@ committed). Plainest behaviour where the reference is unsure.
 ## View options (8.6)
 - [x] Show figure names, neighbour lines, outline selection
 - [x] Zoom buttons, guides, stage box
-- [ ] Show filters, filter quality
+- [x] Show filters (None / No blur / All on the stage; playback switch)
+- [ ] Filter quality (the reference saw no difference; left out)
 
 ## Camera (10.3, 10.4)
 - [x] Copy / paste camera

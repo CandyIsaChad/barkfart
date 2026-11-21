@@ -201,6 +201,9 @@ class AppSettings {
     'neighbourLines': true,
     'outlineSelection': false,
     'pasteLayering': false,
+    // Show filters on the stage: 0 none, 1 no blur, 2 all; playback has its own switch
+    'showFilters': 2,
+    'playFilters': true,
     'zoomButtons': false,
     'guides': false,
     'stageBox': true,
