@@ -35,7 +35,7 @@ committed). Plainest behaviour where the reference is unsure.
 - [x] Make vertical, rotate cameras 90 degrees
 - [x] Watermark
 - [ ] MP4 export (iOS: AVAssetWriter)
-- [ ] Open: sort, delete, past saves (backups)
+- [x] Open: sort, delete, past saves (backups)
 
 ## Library Tools (11)
 - [ ] Stickfigure / movieclip / sprite switcher, rename, hide, delete

@@ -18,6 +18,12 @@ Future<Directory> projectsDir() async {
   return d;
 }
 
+Future<Directory> pastSavesDir() async {
+  final d = Directory('${(await projectsDir()).path}/Past saves');
+  await d.create(recursive: true);
+  return d;
+}
+
 Future<Directory> exportsDir() async {
   final d = Directory('${(await _docs()).path}/Barkfart Exports');
   await d.create(recursive: true);
@@ -41,8 +47,28 @@ class ProjectFile {
 
   Future<Uint8List> read() => File(path).readAsBytes();
 
+  bool get isPastSave => path.contains('${Platform.pathSeparator}Past saves${Platform.pathSeparator}');
+
   /// Writes through a temporary file so a crash never leaves half a project.
+  /// The version it replaces is kept in "Past saves" (the newest 10 per name).
   Future<void> write(Uint8List bytes) async {
+    final old = File(path);
+    if (old.existsSync() && !isPastSave) {
+      try {
+        final d = await pastSavesDir();
+        final m = old.lastModifiedSync();
+        String two(int v) => v.toString().padLeft(2, '0');
+        final stamp = '${m.year}-${two(m.month)}-${two(m.day)} ${two(m.hour)}.${two(m.minute)}.${two(m.second)}';
+        await old.copy('${d.path}/$name ($stamp).bark');
+        final mine = d.listSync().whereType<File>().where((f) => f.path.split(Platform.pathSeparator).last.startsWith('$name (')).toList()
+          ..sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+        for (final f in mine.skip(10)) {
+          f.deleteSync();
+        }
+      } catch (_) {
+        // a past save is a bonus; the save itself goes on
+      }
+    }
     final tmp = File('$path.saving');
     await tmp.writeAsBytes(bytes, flush: true);
     await tmp.rename(path);
@@ -50,6 +76,14 @@ class ProjectFile {
 
   static Future<List<ProjectFile>> all() async {
     final d = await projectsDir();
+    final files = d.listSync().whereType<File>().where((f) => f.path.endsWith('.bark')).toList()
+      ..sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+    return files.map((f) => ProjectFile(f.path)).toList();
+  }
+
+  /// Earlier versions of saved animations, newest first.
+  static Future<List<ProjectFile>> pastSaves() async {
+    final d = await pastSavesDir();
     final files = d.listSync().whereType<File>().where((f) => f.path.endsWith('.bark')).toList()
       ..sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
     return files.map((f) => ProjectFile(f.path)).toList();

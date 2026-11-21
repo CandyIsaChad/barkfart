@@ -651,7 +651,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _say('Could not open ${chosen.name}: $err');
       return;
     }
-    _file = chosen;
+    // a past save opens as an unsaved copy (Save asks for a name)
+    _file = chosen.isPastSave ? null : chosen;
+    if (chosen.isPastSave) _engine?.command({'op': 'mark_unsaved'});
     _fitted = false;
     _frameSelected = false;
     _refresh(_engine?.command({'op': 'state'}));
@@ -2320,8 +2322,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   Future<void> _openDialog() async {
     if (!await _leaveUnsaved()) return;
     final files = await ProjectFile.all();
+    final past = await ProjectFile.pastSaves();
     if (!mounted) return;
-    final chosen = await showDialog<ProjectFile>(context: context, builder: (c) => _OpenDialog(files, _file?.path, _ask));
+    final chosen = await showDialog<ProjectFile>(context: context, builder: (c) => _OpenDialog(files, _file?.path, _ask, past));
     if (chosen != null) await _openFile(chosen);
   }
 
@@ -2989,14 +2992,16 @@ class _OpenDialog extends StatefulWidget {
   final List<ProjectFile> files;
   final String? current;
   final Future<String?> Function(String, String, List<String>) ask;
-  const _OpenDialog(this.files, this.current, this.ask);
+  final List<ProjectFile> past;
+  const _OpenDialog(this.files, this.current, this.ask, this.past);
 
   @override
   State<_OpenDialog> createState() => _OpenDialogState();
 }
 
 class _OpenDialogState extends State<_OpenDialog> {
-  late final List<ProjectFile> _files = List.of(widget.files);
+  late List<ProjectFile> _files = List.of(widget.files);
+  bool _past = false;
   String _filter = '';
   int _sort = 0;
   ProjectFile? _picked;
@@ -3019,7 +3024,19 @@ class _OpenDialogState extends State<_OpenDialog> {
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            const Text('Open an animation', style: TextStyle(color: cText, fontSize: 17, fontWeight: FontWeight.w600)),
+            Row(children: [
+              Expanded(child: Text(_past ? 'Past saves' : 'Open an animation', style: const TextStyle(color: cText, fontSize: 17, fontWeight: FontWeight.w600))),
+              // every save keeps the version it replaced
+              SizedBox(
+                width: 150,
+                child: _Btn(_past ? '‹ Animations' : 'Past saves ›', onTap: () => setState(() {
+                      _past = !_past;
+                      _files = List.of(_past ? widget.past : widget.files);
+                      _picked = null;
+                    })),
+              ),
+            ]),
+            if (_past) _hint('Earlier versions, kept each time an animation was saved over. One opens as an unsaved copy.'),
             const SizedBox(height: 10),
             Row(children: [
               Expanded(
@@ -3035,7 +3052,7 @@ class _OpenDialogState extends State<_OpenDialog> {
             const SizedBox(height: 10),
             Expanded(
               child: list.isEmpty
-                  ? const Center(child: Text('Nothing saved yet.', style: TextStyle(color: cSecondary)))
+                  ? Center(child: Text(_past ? 'No past saves yet.' : 'Nothing saved yet.', style: const TextStyle(color: cSecondary)))
                   : ListView(children: [
                       for (final f in list)
                         Padding(
