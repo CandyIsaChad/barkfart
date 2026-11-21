@@ -536,10 +536,13 @@ impl Session {
             }
             "animation" => {
                 // Animation Tools: tweening on/off and tweened frames (playback and export only)
-                let (tw, n) = (c["tweening"].as_bool(), c["tweened"].as_i64());
+                let (tw, n, lp) = (c["tweening"].as_bool(), c["tweened"].as_i64(), c["loop"].as_bool());
                 self.step("Animation settings", |s| {
                     if let Some(v) = tw {
                         s.project.settings.tweening = v;
+                    }
+                    if let Some(v) = lp {
+                        s.project.settings.loop_tween = v;
                     }
                     if let Some(v) = n {
                         s.project.settings.tweened_frames = (v as i32).clamp(0, 8);
@@ -1904,7 +1907,7 @@ impl Session {
             "frameCopied": self.frame_clip.is_some(),
             "figureCopied": self.figure_clip.is_some(), "propsCopied": self.props_clip.is_some(),
             "cam": cam_vals,
-            "tweening": p.settings.tweening, "tweenedFrames": p.settings.tweened_frames, "rate": p.settings.sample_rate(),
+            "tweening": p.settings.tweening, "loopTween": p.settings.loop_tween, "tweenedFrames": p.settings.tweened_frames, "rate": p.settings.sample_rate(),
             "frameNoTween": no_tween,
             "noTweenFrames": self.no_tween_frames(frames),
             "frameClipCount": self.frame_clip.as_ref().map(|c| c.1).unwrap_or(0),

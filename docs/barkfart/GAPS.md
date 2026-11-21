@@ -12,7 +12,7 @@ committed). Plainest behaviour where the reference is unsure.
 - [x] Node counter "Nodes: N" at the top of Frame Tools (8.4)
 - [x] "?" help for tweened frames, and the bar that picks 10% / 90% only (8.4)
 - [x] Play long-press: "Loop to" start / end frame popup (7.3)
-- [ ] Animation Tools: looping on/off (7.1)
+- [x] Animation Tools: looping on/off (7.1)
 
 ## Stickfigure Tools (9.2)
 - [ ] Paste stickfigure with layering (long-press)

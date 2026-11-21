@@ -1221,3 +1221,31 @@ fn selection_outline_follows_the_selected_figure() {
     assert!(out.triangle_count() < own * 4, "only the selected figure, not the whole scene");
     assert_eq!(barkfart_core::tess::selection_outline(&scene, "nope", 2.0, 0xff2d92).triangle_count(), 0);
 }
+
+/// Animation Tools "Is looping animation": with tweening on, the last frame's
+/// in-betweens tween back into frame 1; off (or tweening off), it holds.
+#[test]
+fn looping_tween_blends_the_last_frame_into_the_first() {
+    let mut s = two_poses();
+    let fps = s.project().settings.fps as f64;
+    let x_at = |s: &Session, t: f64| {
+        let p = s.project();
+        let l = p.root().unwrap().layer("L2").unwrap();
+        barkfart_core::eval::Resolver::new(p).f(&l.transform.x, t)
+    };
+    let (x0, x1) = (x_at(&s, 0.0), x_at(&s, 1.0 / fps));
+    assert!((x1 - x0).abs() > 50.0, "the two frames differ: {x0} {x1}");
+    let mid = 1.5 / fps;
+    s.command(&json!({"op": "animation", "tweening": true}));
+    assert_eq!(x_at(&s, mid), x1, "no looping: the last frame holds");
+    let st = s.command(&json!({"op": "animation", "loop": true}));
+    assert_eq!(st["loopTween"], true);
+    assert!((x_at(&s, mid) - (x0 + x1) / 2.0).abs() < 0.5, "halfway back to frame 1: {}", x_at(&s, mid));
+    assert_eq!(x_at(&s, 1.0 / fps), x1, "the last frame itself is unchanged");
+    s.command(&json!({"op": "animation", "tweening": false}));
+    assert_eq!(x_at(&s, mid), x1, "looping needs tweening on");
+    s.command(&json!({"op": "undo"}));
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(x_at(&s, mid), x1, "undone");
+    assert!(barkfart_core::codec::encode(s.project()).contains("loopTween") == false);
+}

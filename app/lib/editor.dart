@@ -1644,7 +1644,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         opacity: tween ? 1 : 0.4,
         child: IgnorePointer(
           ignoring: !tween,
-          child: _stepper('Tweened frames', '$n', () => _cmd({'op': 'animation', 'tweened': n - 1}), () => _cmd({'op': 'animation', 'tweened': n + 1})),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            _Toggle('Is looping animation', _st['loopTween'] == true, (v) => _cmd({'op': 'animation', 'loop': v})),
+            _hint('Tweens the last frame back into the first.'),
+            _stepper('Tweened frames', '$n', () => _cmd({'op': 'animation', 'tweened': n - 1}), () => _cmd({'op': 'animation', 'tweened': n + 1})),
+          ]),
         ),
       ),
       _gap,

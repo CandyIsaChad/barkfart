@@ -17,7 +17,21 @@ pub struct Resolver<'p> {
     link_depth: usize,
     resolves: usize,
     budget_reported: bool,
+    /// Animation Tools "Is looping animation" (tweening on): between the last
+    /// frame's time and the end, tracks keyed on the last frame tween into
+    /// their value at frame 1. (last frame time, end time)
+    wrap: Option<(f64, f64)>,
     pub diagnostics: Vec<Diagnostic>,
+}
+
+fn wrap_of(project: &Project) -> Option<(f64, f64)> {
+    let st = &project.settings;
+    if !(st.tweening && st.loop_tween) {
+        return None;
+    }
+    let fps = if st.fps > 0.0 { st.fps as f64 } else { 30.0 };
+    let frames = (project.root()?.duration * fps).round() as i64;
+    (frames > 1).then(|| ((frames - 1) as f64 / fps, frames as f64 / fps))
 }
 
 impl<'p> Resolver<'p> {
@@ -29,6 +43,7 @@ impl<'p> Resolver<'p> {
             link_depth: 0,
             resolves: 0,
             budget_reported: false,
+            wrap: wrap_of(project),
             diagnostics: Vec::new(),
         }
     }
@@ -86,6 +101,16 @@ impl<'p> Resolver<'p> {
             start = 1;
         }
         let mut v = p.key_value(kt);
+        if let Some((a, e)) = self.wrap {
+            if kt > a && kt < e {
+                if let Some(k) = p.track.keys().last() {
+                    // only tracks whose last key is the last frame's, tweening there
+                    if (k.time - a).abs() < 1e-6 && k.interp != Interp::Hold && p.ty.continuous() {
+                        v = p.ty.lerp(&k.value, &p.key_value(0.0), ((kt - a) / (e - a)) as f32);
+                    }
+                }
+            }
+        }
         for m in &mods[start..] {
             if !m.enabled {
                 continue;
