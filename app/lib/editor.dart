@@ -2379,6 +2379,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _gap,
       _Btn('Lock figure to camera…', onTap: _cameraLockDialog),
       _gap,
+      _Btn('Mode: ${const ['Default', 'Rule of thirds', 'Phi grid', 'Fib spiral 1', 'Fib spiral 2', 'Fib spiral 3', 'Fib spiral 4'][AppSettings.number('cameraGuide').clamp(0, 6)]}', onTap: () => setState(() {
+            AppSettings.values['cameraGuide'] = (AppSettings.number('cameraGuide') + 1) % 7;
+            unawaited(AppSettings.save());
+          })),
+      _gap,
       ..._cameraFx(),
     ];
   }
@@ -3241,6 +3246,8 @@ class _Overlay extends CustomPainter {
         ..strokeWidth = 1
         ..color = const Color(0x66000000));
     }
+    // Camera Tools "Mode": composition guides inside the shot (camera mode only)
+    if (cam != null && cam.length == 8 && st['mode'] == 'camera') _guides(canvas, cam, AppSettings.number('cameraGuide'));
     // a selected textfield: a thin blue box around the text
     final tf = st['textfield'] as Map<String, dynamic>?;
     if (tf != null) {
@@ -3345,6 +3352,52 @@ class _Overlay extends CustomPainter {
         )..layout();
         tp.paint(canvas, p + const Offset(7, -16));
       }
+    }
+  }
+
+  /// Default (centre lines, diagonals, centre circle), rule of thirds, phi
+  /// grid, or a golden spiral in one of four turns, in the shot's own
+  /// corners (so they follow its zoom and rotation).
+  void _guides(Canvas canvas, List<double> cam, int mode) {
+    Offset at(double u, double w) {
+      final x = cam[0] + (cam[2] - cam[0]) * u + (cam[6] - cam[0]) * w;
+      final y = cam[1] + (cam[3] - cam[1]) * u + (cam[7] - cam[1]) * w;
+      return v.toScreen(x, y);
+    }
+
+    Paint pen(Color c) => Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..color = c;
+    void line(double u0, double w0, double u1, double w1, Color c) => canvas.drawLine(at(u0, w0), at(u1, w1), pen(c));
+    switch (mode) {
+      case 1 || 2:
+        final a = mode == 1 ? 1 / 3 : 0.382;
+        for (final k in [a, 1 - a]) {
+          line(k, 0, k, 1, const Color(0xCC2F6BE8));
+          line(0, k, 1, k, const Color(0xCCE0383A));
+        }
+      case >= 3 && <= 6:
+        // golden spiral: r = e^(b θ), b = ln(phi) / (pi / 2), around the phi point
+        final flipU = mode == 4 || mode == 6, flipW = mode == 5 || mode == 6;
+        final path = Path();
+        const b = 0.30634896253;
+        for (var i = 0; i <= 240; i++) {
+          final th = -i / 240 * 4 * math.pi;
+          final r = 0.62 * math.exp(b * th);
+          var u = 0.618 + r * math.cos(th) * 0.62, w = 0.382 + r * math.sin(th) * 0.62;
+          if (flipU) u = 1 - u;
+          if (flipW) w = 1 - w;
+          final p = at(u.clamp(0, 1), w.clamp(0, 1));
+          i == 0 ? path.moveTo(p.dx, p.dy) : path.lineTo(p.dx, p.dy);
+        }
+        canvas.drawPath(path, pen(const Color(0xCCFFB020)));
+      default:
+        line(0, 0.5, 1, 0.5, const Color(0xCCE0383A));
+        line(0.5, 0, 0.5, 1, const Color(0xCC2F6BE8));
+        line(0, 0, 1, 1, const Color(0x9934C759));
+        line(0, 1, 1, 0, const Color(0x99BF5AF2));
+        canvas.drawCircle(at(0.5, 0.5), 10, pen(const Color(0xCCFFFFFF)));
     }
   }
 

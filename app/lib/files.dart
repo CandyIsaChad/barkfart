@@ -222,6 +222,8 @@ class AppSettings {
     // figure editor View options
     'drawOrder': false,
     'nodeHighlight': 0,
+    // Camera Tools guide overlay (0 default ... 6)
+    'cameraGuide': 0,
     'zoomButtons': false,
     'guides': false,
     'stageBox': true,
