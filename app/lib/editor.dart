@@ -2884,6 +2884,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         const SizedBox(height: 4),
         _Btn(tr['frame'] != null ? 'Clear trace (frame ${(tr['frame'] as num) + 1})' : 'Clear trace', small: true, onTap: () => _cmd({'op': 'trace'})),
       ],
+      _gap,
+      _label('Background colour (while editing)'),
+      _swatches((_st['editorBg'] as num?)?.toInt() ?? 0xffffffff, (c) => _cmd({'op': 'editor_bg', 'color': c})),
     ];
   }
 

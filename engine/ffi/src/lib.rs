@@ -630,7 +630,8 @@ pub extern "C" fn bf_render_view(e: *const Engine, t: f64, w: u32, h: u32, x0: f
             }
         }
         let cpu = start.elapsed();
-        let bg = p.settings.background;
+        // Figure editor "Background color" (view only)
+        let bg = engine.session.as_ref().filter(|s| s.building.is_some()).and_then(|s| s.editor_bg).map(barkfart_core::model::Color::rgba8888).unwrap_or(p.settings.background);
         let view = View { x0, y0, x1, y1, background: [bg.r, bg.g, bg.b, bg.a] };
         let px = engine.renderer.render(&list, w, h, view);
         if std::env::var_os("BARKFART_TRACE").is_some() {

@@ -60,6 +60,9 @@ pub struct Session {
     /// Figure editor "Trace": a frame (index) or a figure (layer id) shown
     /// faintly behind, to draw over. Editing view only, never saved.
     pub trace: Option<(Option<i32>, Option<String>)>,
+    /// Figure editor "Background color": the stage colour while editing a
+    /// figure (view only).
+    pub editor_bg: Option<u32>,
     /// Creation mode's draw tool (None: select and move).
     pub draw: Option<Shape>,
     gesture: Gesture,
@@ -127,7 +130,7 @@ impl Session {
         let mut doc = doc;
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
-        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -918,6 +921,10 @@ impl Session {
                         }
                     }
                 }
+            }
+            "editor_bg" => {
+                self.editor_bg = c["color"].as_u64().map(|v| v as u32);
+                self.rev += 1;
             }
             "trace" => {
                 // {"frame": i} or {"layer": id}; neither clears it
@@ -2294,6 +2301,7 @@ impl Session {
             "noTweenFrames": self.no_tween_frames(frames),
             "frameClipCount": self.frame_clip.as_ref().map(|c| c.1).unwrap_or(0),
             "connecting": self.connecting,
+            "editorBg": self.editor_bg,
             "trace": self.trace.as_ref().map(|(f, l)| json!({"frame": f, "layer": l})),
             "polyfill": self.polyfill.as_ref().and_then(|id| {
                 let f = p.root()?.layer(self.building.as_ref()?)?.as_figure()?;

@@ -54,7 +54,8 @@ committed). Plainest behaviour where the reference is unsure.
 - [x] Polyfill tool (Add polyfill..., Polyfill Tools)
 - [x] Add connector (Connector Tools: percent, reversed, delete)
 - [x] Trace stickfigure / frame
-- [ ] Background image, background colour in the figure editor
+- [x] Background colour in the figure editor (view only)
+- [ ] Background image in the figure editor
 - [x] Save stickfigure to a file (.nodes in Barkfart Figures)
 
 ## Textfields (13)
