@@ -32,7 +32,8 @@ committed). Plainest behaviour where the reference is unsure.
 - [ ] Widescreen effect, wobble (export / playback only)
 
 ## Project and export (6)
-- [ ] Watermark, make vertical, rotate cameras 90 degrees
+- [x] Make vertical, rotate cameras 90 degrees
+- [ ] Watermark
 - [ ] MP4 export (iOS: AVAssetWriter)
 - [ ] Open: sort, delete, past saves (backups)
 

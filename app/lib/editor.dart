@@ -1606,7 +1606,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _pair(_Btn('Save', onTap: _save), _Btn('Save as…', onTap: _saveAs)),
         _gap,
         _Btn('Export…', onTap: _exportDialog),
+        _gap,
+        _Toggle('Make vertical (phone video)', _vertical, (v) => setState(() => _vertical = v)),
+        if (_vertical) ...[
+          _hint('Turns the camera of every frame a quarter turn; the right edge becomes the top of the video.'),
+          _Btn('Rotate cameras 90°', onTap: () => _cmd({'op': 'rotate_cameras'})),
+        ],
       ];
+
+  bool _vertical = false;
 
   List<Widget> _animationTools() {
     final tween = _st['tweening'] == true;

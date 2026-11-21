@@ -1124,3 +1124,15 @@ fn figure_editor_reorders_and_pastes_branches() {
     let pasted = st["selected"]["node"].as_str().unwrap();
     assert_eq!(f.node(pasted).unwrap().parent.as_deref(), Some("head"));
 }
+
+#[test]
+fn rotate_cameras_turns_every_frame() {
+    let mut s = session();
+    s.command(&json!({"op": "insert_frame"}));
+    let st = s.command(&json!({"op": "rotate_cameras"}));
+    assert_eq!(st["cam"]["rotation"], 90.0);
+    let st = s.command(&json!({"op": "frame", "i": 0}));
+    assert_eq!(st["cam"]["rotation"], 90.0);
+    let st = s.command(&json!({"op": "undo"}));
+    assert!(st["cam"].is_null() || st["cam"]["rotation"] == 0.0);
+}

@@ -1468,6 +1468,22 @@ impl Session {
                     self.mode = Mode::Camera;
                 }
             }
+            "rotate_cameras" => {
+                // Make vertical: every frame's camera turns 90 degrees (one step)
+                self.step("Rotate cameras", |s| {
+                    let cam = ensure_camera(s, &sym)?;
+                    anchor_poses(s);
+                    let l = s.project.layer_mut(&sym, &cam).expect("camera");
+                    let LayerKind::Camera(cm) = &mut l.kind else { return crate::edit::fail("not a camera") };
+                    let keys: Vec<Key> = cm.rotation.track.keys().iter().map(|k| Key { value: Value::F(k.value.f() + 90.0), ..k.clone() }).collect();
+                    cm.rotation.track.clear();
+                    for k in keys {
+                        cm.rotation.track.put(k);
+                    }
+                    cm.rotation.value = Value::F(cm.rotation.value.f() + 90.0);
+                    Ok(())
+                });
+            }
             "reset_camera" => {
                 let cam = self.project().root().and_then(|s| s.layers.iter().find(|l| matches!(l.kind, LayerKind::Camera(_))).map(|l| l.id.clone()));
                 if let Some(id) = cam {
