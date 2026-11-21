@@ -798,6 +798,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           unawaited(_libraryDialog());
         case 'cameralock':
           unawaited(_cameraLockDialog());
+        case 'autocamera':
+          unawaited(_autoCameraDialog());
         case 'modifybranch':
           unawaited(_modifyBranchDialog());
         case 'viewoptions':
@@ -1368,6 +1370,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                     const Positioned(right: 3, top: 2, child: Icon(Icons.timer_outlined, size: 15, color: Color(0xFFFF9F0A))),
                   if (((_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?)?.elementAtOrNull(2) == true)
                     const Positioned(right: 22, bottom: 2, child: Icon(Icons.volume_off, size: 15, color: cDanger)),
+                  // auto-camera starts here
+                  if (((_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?)?.elementAtOrNull(4) == true)
+                    const Positioned(left: 22, bottom: 2, child: Icon(Icons.videocam, size: 15, color: Color(0xFFFF6FB5))),
                   // beside the tween arrow: slow motion tweening
                   if (((_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?)?.elementAtOrNull(3) == true)
                     const Positioned(right: 41, bottom: 2, child: Icon(Icons.slow_motion_video, size: 15, color: Color(0xFFBF5AF2))),
@@ -2357,6 +2362,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _gap,
       _pair(_Btn('Center camera', onTap: () => _cmd({'op': 'camera', 'center': true})), _Btn('Reset', onTap: () => _cmd({'op': 'reset_camera'}))),
       _gap,
+      _hint("Use auto-camera to have this frame's camera tween across multiple frames automatically."),
+      _Btn(_st['autoCam'] != null ? 'Auto-camera… (to frame ${((_st['autoCam'] as Map)['end'] as num) + 1})' : 'Auto-camera…', onTap: _autoCameraDialog),
+      _gap,
       _Btn('Lock figure to camera…', onTap: _cameraLockDialog),
       _gap,
       ..._cameraFx(),
@@ -2397,6 +2405,60 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ),
       _hint('Widescreen and wobble belong to this frame and show when playing and in exports, not while editing.'),
     ];
+  }
+
+  static const _autoEases = ['Ease v1', 'Ease v2', 'Bounce', 'Elastic', 'Swing'];
+
+  /// Auto-Camera Settings: the camera tweens from this frame to a later one.
+  Future<void> _autoCameraDialog() async {
+    if (_frame >= _frames - 1) {
+      await _ask('Auto-camera', "Can't do auto-camera if this is the last frame.", ['Okay']);
+      return;
+    }
+    final cur = _st['autoCam'] as Map?;
+    var end = ((cur?['end'] as num?)?.toInt() ?? _frame + 1).clamp(_frame + 1, _frames - 1);
+    final code = (cur?['ease'] as num?)?.toInt() ?? 1;
+    var type = (code % 10).clamp(1, 5) - 1;
+    var easeIn = (code ~/ 10) & 1 == 1, easeOut = (code ~/ 10) & 2 == 2;
+    if (!mounted) return;
+    final ok = await showDialog<String>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, set) => AlertDialog(
+          backgroundColor: cPanel,
+          title: const Text('Auto-camera', style: TextStyle(color: cText, fontSize: 16)),
+          content: SizedBox(
+            width: 400,
+            child: ListView(shrinkWrap: true, children: [
+              if (cur != null) ...[
+                const Text('This frame already starts an auto-camera. Deleting it means the camera no longer moves and adjusts by itself as you add or remove frames.', style: TextStyle(color: cText, fontSize: 12)),
+                const SizedBox(height: 6),
+                _Btn('Delete auto-camera', danger: true, onTap: () => Navigator.pop(c, 'delete')),
+                const SizedBox(height: 12),
+              ],
+              const Text('On what frame does the auto-camera end? (A frame after this one.)', style: TextStyle(color: cText, fontSize: 13)),
+              const SizedBox(height: 6),
+              _stepper('End frame', '${end + 1}', () => set(() => end = math.max(_frame + 1, end - 1)), () => set(() => end = math.min(_frames - 1, end + 1))),
+              const SizedBox(height: 8),
+              Wrap(spacing: 4, runSpacing: 4, children: [for (var i = 0; i < _autoEases.length; i++) _Chip(_autoEases[i], i == type, () => set(() => type = i))]),
+              _Toggle('Ease in', easeIn, (v) => set(() => easeIn = v)),
+              _Toggle('Ease out', easeOut, (v) => set(() => easeOut = v)),
+              const SizedBox(height: 8),
+              _hint('What is auto-camera? The camera moves, zooms and rotates by itself from this frame to the end frame: a tween for the camera across several frames. The frames in between follow it, and it adapts when frames are added or deleted.'),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(c, 'ok'), child: const Text('Okay')),
+          ],
+        ),
+      ),
+    );
+    if (ok == 'delete') {
+      _cmd({'op': 'auto_camera', 'end': null});
+    } else if (ok == 'ok') {
+      _cmd({'op': 'auto_camera', 'end': end, 'ease': type + 1 + (easeIn ? 10 : 0) + (easeOut ? 20 : 0)});
+    }
   }
 
   /// Lock Figure To Camera: locked figures move with the camera (a health

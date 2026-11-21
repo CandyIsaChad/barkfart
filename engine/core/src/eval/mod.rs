@@ -215,35 +215,92 @@ pub fn camera_view(sym: &Symbol, t: f64, r: &mut Resolver) -> Affine {
     }
 }
 
+/// The auto-camera span around t: (start, end, ease code), start <= t < end.
+pub fn auto_camera_at(c: &CameraLayer, t: f64) -> Option<(f64, f64, i32)> {
+    let start = c.auto_cam.track.keys().iter().filter(|k| k.time <= t + 1e-9 && matches!(k.value, Value::F(v) if v > 0.5)).last()?;
+    let end = c.auto_cam_end.track.keys().iter().find(|k| k.time > start.time + 1e-9 && matches!(k.value, Value::F(v) if v > 0.5))?;
+    // a later start before this end belongs to another span
+    let code = if let Value::F(v) = start.value { v.round() as i32 } else { 1 };
+    (t < end.time - 1e-9).then_some((start.time, end.time, code))
+}
+
+/// Auto-camera easing: type (1 Ease v1, 2 Ease v2, 3 Bounce, 4 Elastic,
+/// 5 Swing), +10 ease in, +20 ease out (both: in-out).
+pub fn auto_ease(code: i32, u: f64) -> f64 {
+    let u = u.clamp(0.0, 1.0);
+    let (ty, ein, eout) = (code % 10, (code / 10) & 1 == 1, (code / 10) & 2 == 2);
+    let out = |f: &dyn Fn(f64) -> f64, u: f64| 1.0 - f(1.0 - u);
+    let base: Box<dyn Fn(f64) -> f64> = match ty {
+        2 => Box::new(|u: f64| u * u * u),
+        3 => Box::new(|u: f64| 1.0 - bounce(1.0 - u)),
+        4 => Box::new(|u: f64| if u <= 0.0 || u >= 1.0 { u } else { -(2f64.powf(10.0 * u - 10.0)) * ((u * 10.0 - 10.75) * (2.0 * PI / 3.0)).sin() }),
+        5 => Box::new(|u: f64| 2.70158 * u * u * u - 1.70158 * u * u),
+        _ => Box::new(|u: f64| u * u),
+    };
+    match (ein, eout) {
+        (true, true) => if u < 0.5 { base(2.0 * u) / 2.0 } else { 1.0 - base(2.0 - 2.0 * u) / 2.0 },
+        (true, false) => base(u),
+        (false, true) => out(&*base, u),
+        // neither: the plain types are even, the springy ones settle at the end
+        (false, false) => if ty <= 2 { u } else { out(&*base, u) },
+    }
+}
+
+fn bounce(u: f64) -> f64 {
+    let (n, d) = (7.5625, 2.75);
+    if u < 1.0 / d {
+        n * u * u
+    } else if u < 2.0 / d {
+        let u = u - 1.5 / d;
+        n * u * u + 0.75
+    } else if u < 2.5 / d {
+        let u = u - 2.25 / d;
+        n * u * u + 0.9375
+    } else {
+        let u = u - 2.625 / d;
+        n * u * u + 0.984375
+    }
+}
+
+/// x, y, zoom, rotation of a camera at t (auto-camera applied).
+pub fn camera_values(c: &CameraLayer, t: f64, r: &mut Resolver) -> (f32, f32, f32, f32) {
+    let at = |r: &mut Resolver, t: f64| (r.f(&c.x, t), r.f(&c.y, t), r.f(&c.zoom, t), r.f(&c.rotation, t));
+    match auto_camera_at(c, t) {
+        Some((a, b, code)) if t > a + 1e-9 => {
+            let (p, q) = (at(r, a), at(r, b));
+            let k = auto_ease(code, (t - a) / (b - a)) as f32;
+            (p.0 + (q.0 - p.0) * k, p.1 + (q.1 - p.1) * k, p.2 + (q.2 - p.2) * k, p.3 + (q.3 - p.3) * k)
+        }
+        _ => at(r, t),
+    }
+}
+
 /// One camera's view transform (stage to shot).
 pub fn camera_of(c: &CameraLayer, t: f64, r: &mut Resolver) -> Affine {
-    let mut zoom = r.f(&c.zoom, t) as f64;
+    let (x, y, zoom, rot) = camera_values(c, t, r);
+    let mut zoom = zoom as f64;
     if !(zoom > 1e-6) {
         zoom = 1e-6;
     }
-    let rot = r.f(&c.rotation, t);
-    let (x, y) = (r.f(&c.x, t), r.f(&c.y, t));
     Affine::scale(zoom, zoom).mul(&Affine::rotate_deg(-rot as f64)).mul(&Affine::translate(-x as f64, -y as f64))
 }
 
 /// The part of the camera's view a camera-locked layer undoes (parallax).
 fn lock_view(c: &CameraLayer, parallax: f32, move_only: bool, t: f64, r: &mut Resolver) -> Affine {
+    let (x, y, zoom, rot) = camera_values(c, t, r);
     if move_only {
         let k = 1.0 - parallax as f64;
-        let (x, y) = (r.f(&c.x, t), r.f(&c.y, t));
         return Affine::translate(-x as f64 * k, -y as f64 * k);
     }
     if parallax == 0.0 {
         return camera_of(c, t, r);
     }
     let k = 1.0 - parallax as f64;
-    let mut zoom = r.f(&c.zoom, t) as f64;
+    let mut zoom = zoom as f64;
     if !(zoom > 1e-6) {
         zoom = 1e-6;
     }
     zoom = zoom.powf(k);
-    let rot = r.f(&c.rotation, t);
-    let (x, y) = (r.f(&c.x, t), r.f(&c.y, t));
     Affine::scale(zoom, zoom).mul(&Affine::rotate_deg(-rot as f64 * k)).mul(&Affine::translate(-x as f64 * k, -y as f64 * k))
 }
 

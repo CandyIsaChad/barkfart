@@ -1516,3 +1516,46 @@ fn widescreen_and_wobble_are_per_frame_playback_effects() {
     let text = codec::encode(s.project());
     assert!(text.contains("wobbleXY") && text.contains("widescreen"));
 }
+
+/// Camera Tools "Auto-camera": the camera tweens from the start frame's to
+/// the end frame's across the frames between, whatever they say, and the
+/// span follows its frames when one is inserted inside it.
+#[test]
+fn auto_camera_tweens_across_frames() {
+    let mut s = Session::new(Document::new(barkfart_core::session::new_editor_project()));
+    s.command(&json!({"op": "add_camera"}));
+    for _ in 0..3 {
+        s.command(&json!({"op": "insert_frame"}));
+    }
+    let fps = s.project().settings.fps as f64;
+    s.command(&json!({"op": "frame", "i": 3}));
+    s.command(&json!({"op": "camera", "zoom": 2.0}));
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "camera", "zoom": 5.0}));
+    let zoom = |s: &Session, f: f64| {
+        let p = s.project();
+        let c = p.root().unwrap().layers.iter().find_map(|l| if let barkfart_core::model::LayerKind::Camera(c) = &l.kind { Some(c) } else { None }).unwrap();
+        barkfart_core::eval::camera_values(c, f / fps, &mut barkfart_core::eval::Resolver::new(p)).2
+    };
+    assert_eq!(zoom(&s, 1.0), 5.0);
+    s.command(&json!({"op": "frame", "i": 0}));
+    let st = s.command(&json!({"op": "auto_camera", "end": 3, "ease": 1}));
+    assert_eq!(st["undo"], "Auto-camera");
+    assert_eq!(st["autoCam"]["end"], 3);
+    assert_eq!(st["frameMarks"][0][4], true);
+    assert!((zoom(&s, 1.0) - (1.0 + 1.0 / 3.0)).abs() < 1e-4, "frame 2 follows the tween, not its own 5: {}", zoom(&s, 1.0));
+    assert_eq!(zoom(&s, 3.0), 2.0);
+    // a frame inserted inside the span: it still ends on the same (moved) frame
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "insert_frame"}));
+    s.command(&json!({"op": "frame", "i": 0}));
+    assert_eq!(s.state()["autoCam"]["end"], 4);
+    assert_eq!(zoom(&s, 4.0), 2.0);
+    // delete it
+    let st = s.command(&json!({"op": "auto_camera", "end": null}));
+    assert!(st["autoCam"].is_null());
+    assert_eq!(st["frameMarks"][0][4], false);
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(s.state()["autoCam"]["end"], 4);
+    assert!(codec::encode(s.project()).contains("autoCamEnd"));
+}

@@ -407,6 +407,8 @@ fn layer(m: &Obj) -> R<Layer> {
             read_prop(m, "wobbleRot", &mut c.wobble_rot)?;
             read_prop(m, "wobbleSpeed", &mut c.wobble_speed)?;
             read_prop(m, "wobbleNoZoom", &mut c.wobble_no_zoom)?;
+            read_prop(m, "autoCam", &mut c.auto_cam)?;
+            read_prop(m, "autoCamEnd", &mut c.auto_cam_end)?;
             l
         }
         other => return err(format!("unknown layer type {other}")),
@@ -945,7 +947,7 @@ fn layer_json(l: &Layer) -> Json {
             if !c.background2.track.is_empty() || c.background2.value.color().a > 0.0 {
                 m.put("background2", prop_json(&c.background2, false));
             }
-            for (k, q) in [("frameDelay", &c.delay), ("repeatBack", &c.repeat_back), ("repeatTimes", &c.repeat_times), ("silence", &c.silence), ("slowMotion", &c.slow_motion), ("bgExpand", &c.bg_expand), ("widescreen", &c.widescreen), ("wobbleXY", &c.wobble_xy), ("wobbleRot", &c.wobble_rot), ("wobbleSpeed", &c.wobble_speed), ("wobbleNoZoom", &c.wobble_no_zoom)] {
+            for (k, q) in [("frameDelay", &c.delay), ("repeatBack", &c.repeat_back), ("repeatTimes", &c.repeat_times), ("silence", &c.silence), ("slowMotion", &c.slow_motion), ("bgExpand", &c.bg_expand), ("widescreen", &c.widescreen), ("wobbleXY", &c.wobble_xy), ("wobbleRot", &c.wobble_rot), ("wobbleSpeed", &c.wobble_speed), ("wobbleNoZoom", &c.wobble_no_zoom), ("autoCam", &c.auto_cam), ("autoCamEnd", &c.auto_cam_end)] {
                 if !q.track.is_empty() || q.value != Value::F(0.0) {
                     m.put(k, prop_json(q, false));
                 }

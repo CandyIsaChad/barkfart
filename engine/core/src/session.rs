@@ -1642,10 +1642,10 @@ impl Session {
                     });
                 }
             }
-            "frame_delay" | "frame_repeat" | "frame_silence" | "frame_slow" | "camera_fx" => {
+            "frame_delay" | "frame_repeat" | "frame_silence" | "frame_slow" | "camera_fx" | "auto_camera" => {
                 let c2 = c.clone();
                 let delay = op == "frame_delay";
-                let label = match op { "frame_delay" => "Frame delay", "frame_repeat" => "Repeat frames", "frame_slow" => "Slow motion", "camera_fx" => "Camera effects", _ => "Silence sounds" };
+                let label = match op { "frame_delay" => "Frame delay", "frame_repeat" => "Repeat frames", "frame_slow" => "Slow motion", "camera_fx" => "Camera effects", "auto_camera" => "Auto-camera", _ => "Silence sounds" };
                 self.step(label, move |s| {
                     let cam = ensure_camera(s, &sym)?;
                     let (n, fps) = (frame_ops::frame_count(s), st_fps(&s.project));
@@ -1664,6 +1664,34 @@ impl Session {
                     };
                     if let Some(v) = c2["on"].as_bool().filter(|_| c2["op"] == "frame_silence") {
                         set(&mut cm.silence, if v { 1.0 } else { 0.0 });
+                        return Ok(());
+                    }
+                    if c2["op"] == "auto_camera" {
+                        // from this frame to a later one; "end": null deletes it
+                        let here = (t * fps).round() as i64;
+                        if let Some((_, b, _)) = crate::eval::auto_camera_at(cm, t).filter(|(a, _, _)| (a - t).abs() < 0.25 / fps) {
+                            // replacing (or deleting) the one that starts here: its end goes
+                            let bi = (b * fps).round() as i32;
+                            set(&mut cm.auto_cam_end, 0.0);
+                            let tb = bi as f64 / fps;
+                            cm.auto_cam_end.track.put(Key::new(tb, Value::F(0.0), Interp::Hold));
+                        }
+                        match c2["end"].as_i64() {
+                            Some(e) if e > here && e < n as i64 => {
+                                let code = c2["ease"].as_i64().unwrap_or(1).clamp(1, 35) as f32;
+                                set(&mut cm.auto_cam, code);
+                                let te = e as f64 / fps;
+                                for i in 0..n {
+                                    let ti = i as f64 / fps;
+                                    if cm.auto_cam_end.track.index_of(ti).is_err() {
+                                        cm.auto_cam_end.track.put(Key::new(ti, Value::F(0.0), Interp::Hold));
+                                    }
+                                }
+                                cm.auto_cam_end.track.put(Key::new(te, Value::F(1.0), Interp::Hold));
+                            }
+                            Some(_) => return crate::edit::fail("the auto-camera ends on a later frame"),
+                            None => set(&mut cm.auto_cam, 0.0),
+                        }
                         return Ok(());
                     }
                     if c2["op"] == "camera_fx" {
@@ -1992,6 +2020,12 @@ impl Session {
                 "x0": round2(x0), "y0": round2(y0), "x1": round2(x1), "y1": round2(y1),
             }))
         });
+        // Auto-camera starting on this frame: its end frame and ease
+        let auto_cam = p.root().and_then(|r| r.layers.iter().find_map(|l| if let LayerKind::Camera(c) = &l.kind { Some(c) } else { None })).and_then(|c| {
+            let fps = st_fps(p);
+            let t0 = self.frame as f64 / fps;
+            crate::eval::auto_camera_at(c, t0).filter(|(a, _, _)| (a - t0).abs() < 0.25 / fps).map(|(_, b, code)| json!({"end": (b * fps).round() as i64, "ease": code}))
+        });
         // Camera Tools: this frame's widescreen and wobble
         let cam_fx = p.root().and_then(|r| r.layers.iter().find_map(|l| if let LayerKind::Camera(c) = &l.kind { Some(c) } else { None })).map(|c| {
             let fps = st_fps(p);
@@ -2046,7 +2080,7 @@ impl Session {
             let mut r = Resolver::new(p);
             p.root().map(|s| s.layers.iter().filter(|l| r.b(&l.shown, t)).filter_map(|l| l.as_figure()).map(|f| f.nodes().len()).sum()).unwrap_or(0)
         };
-        let marks: Vec<J> = (0..frames).map(|f| { let (d, _, n) = crate::timing::frame_settings(p, f as i32); json!([d > 0.0, n > 0, crate::timing::frame_silences(p, f as i32), crate::timing::frame_slow(p, f as i32) > 0]) }).collect();
+        let marks: Vec<J> = (0..frames).map(|f| { let (d, _, n) = crate::timing::frame_settings(p, f as i32); json!([d > 0.0, n > 0, crate::timing::frame_silences(p, f as i32), crate::timing::frame_slow(p, f as i32) > 0, p.root().and_then(|r| r.layers.iter().find_map(|l| if let LayerKind::Camera(c) = &l.kind { Some(c) } else { None })).is_some_and(|c| crate::timing::setting(&c.auto_cam, st_fps(p), f as i32) > 0.5)]) }).collect();
         let cam = self.camera_frame();
         let cam_vals = p.root().and_then(|s| s.layers.iter().find_map(|l| if let LayerKind::Camera(c) = &l.kind { Some(c) } else { None })).map(|c| {
             let mut r = Resolver::new(p);
@@ -2068,7 +2102,7 @@ impl Session {
             "propsFrom": self.props_clip.as_ref().and_then(|c| p.root()?.layer(&c.source).map(|l| l.name.clone().unwrap_or_else(|| l.id.clone()))),
             "textfield": textfield, "textfieldCopied": self.textfield_clip.is_some(),
             "filtersCopied": self.filter_clip.is_some(),
-            "frameBg": bg, "camFx": cam_fx, "library": library, "cameraLocks": camera_locks,
+            "frameBg": bg, "camFx": cam_fx, "autoCam": auto_cam, "library": library, "cameraLocks": camera_locks,
             "drawTool": self.draw.map(shape_name).unwrap_or("none"), "drawLine": draw_line,
             "soundList": sound_list, "frameSound": frame_snd, "soundCopied": self.sound_clip.is_some(),
             "frameDelay": fset.0, "frameRepeat": rep,
