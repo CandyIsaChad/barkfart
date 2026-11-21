@@ -725,7 +725,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (_frameSelected) return const ['Frame Tools'];
     if (_st['textfield'] != null) return const ['Textfield Tools'];
     final sel = _sel;
-    if (sel != null) return const ['Stickfigure Tools', 'Segment Tools'];
+    if (sel != null) return const ['Stickfigure Tools', 'Stickfigure Filters', 'Segment Tools'];
     return const ['App Tools', 'Project Tools', 'Animation Tools', 'Library Tools', 'Textfield Tools'];
   }
 
@@ -743,6 +743,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         return _frameToolsPanel();
       case 'Stickfigure Tools':
         return _stickfigureTools(_sel!);
+      case 'Stickfigure Filters':
+        return _stickfigureFilters(_sel!);
       case 'Textfield Tools':
         return _textfieldTools(_st['textfield'] as Map<String, dynamic>?);
       case 'Segment Tools':
@@ -1352,7 +1354,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       return [
         _Btn('Add textfield', accent: true, onTap: () => _cmd({'op': 'add_textfield'})),
         _gap,
-        _Btn('Paste textfield', enabled: _st['textfieldCopied'] == true, onTap: () => _cmd({'op': 'paste_textfield'})),
+        _Btn('Paste', enabled: _st['textfieldCopied'] == true, onTap: () => _cmd({'op': 'paste_textfield'})),
         _gap,
         const Text('A textfield sits on this frame only. Tap its box to select it, then drag to move it.', style: TextStyle(color: cSecondary, fontSize: 11)),
       ];
@@ -1374,10 +1376,68 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _gap,
       _Toggle('Locked', tf['locked'] == true, (v) => _cmd({'op': 'textfield', 'locked': v})),
       _gap,
-      _pair(_Btn('Copy textfield', onTap: () => _cmd({'op': 'copy_textfield'})), _Btn('Paste textfield', enabled: _st['textfieldCopied'] == true, onTap: () => _cmd({'op': 'paste_textfield'}))),
+      _pair(_Btn('Copy', onTap: () => _cmd({'op': 'copy_textfield'})), _Btn('Paste', enabled: _st['textfieldCopied'] == true, onTap: () => _cmd({'op': 'paste_textfield'}))),
       _gap,
       _Btn('Delete textfield', danger: true, onTap: () => _cmd({'op': 'delete_textfield'})),
       const Padding(padding: EdgeInsets.only(top: 3), child: Text('Removes it from this frame.', style: TextStyle(color: cSecondary, fontSize: 11))),
+    ];
+  }
+
+  List<Widget> _stickfigureFilters(Map<String, dynamic> sel) {
+    final f = (sel['filters'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+    double v(String k, double d) => (f[k] as num?)?.toDouble() ?? d;
+    bool on(String k) => f[k] == true;
+    int col(String k, int d) => (f[k] as num?)?.toInt() ?? d;
+    void shadow({double? distance, double? angle}) => _cmd({'op': 'filter', 'shadowDistance': distance ?? v('shadowDistance', 10), 'shadowAngle': angle ?? v('shadowAngle', 135)});
+    return [
+      const Text('These filters show on the stage and may slow the editor; exports are unaffected.', style: TextStyle(color: cSecondary, fontSize: 11)),
+      _gap,
+      _stepper('Opacity', v('opacity', 1).toStringAsFixed(2), () => _cmd({'op': 'filter', 'opacity': math.max(0, v('opacity', 1) - 0.05)}), () => _cmd({'op': 'filter', 'opacity': math.min(1, v('opacity', 1) + 0.05)})),
+      _gap,
+      _Toggle('Invert colour', on('invert'), (x) => _cmd({'op': 'filter', 'invert': x})),
+      _gap,
+      _stepper('Hue shift', v('hue', 0).round().toString(), () => _cmd({'op': 'filter', 'hue': v('hue', 0) - 5}), () => _cmd({'op': 'filter', 'hue': v('hue', 0) + 5})),
+      _gap,
+      _stepper('Saturation', v('saturation', 1).toStringAsFixed(2), () => _cmd({'op': 'filter', 'saturation': math.max(0, v('saturation', 1) - 0.05)}), () => _cmd({'op': 'filter', 'saturation': math.min(4, v('saturation', 1) + 0.05)})),
+      _gap,
+      _stepper('Pixelate', v('pixelate', 1).round().toString(), () => _cmd({'op': 'filter', 'pixelate': math.max(1, v('pixelate', 1) - 1)}), () => _cmd({'op': 'filter', 'pixelate': v('pixelate', 1) + 1})),
+      _gap,
+      _label('Tint'),
+      _swatches(col('tint', 0xffffffff), (c) => _cmd({'op': 'filter', 'tint': c})),
+      _stepper('Amount', v('tintAmount', 0).toStringAsFixed(2), () => _cmd({'op': 'filter', 'tintAmount': math.max(0, v('tintAmount', 0) - 0.05)}), () => _cmd({'op': 'filter', 'tintAmount': math.min(1, v('tintAmount', 0) + 0.05)})),
+      _gap,
+      _label('Outline'),
+      _swatches(col('outline', 0xff00ffff), (c) => _cmd({'op': 'filter', 'outline': c})),
+      _stepper('Amount', v('outlineAmount', 1).toStringAsFixed(2), () => _cmd({'op': 'filter', 'outlineAmount': math.max(0, v('outlineAmount', 1) - 0.05)}), () => _cmd({'op': 'filter', 'outlineAmount': math.min(1, v('outlineAmount', 1) + 0.05)})),
+      _stepper('Thickness', v('outlineThickness', 4).round().toString(), () => _cmd({'op': 'filter', 'outlineThickness': math.max(0, v('outlineThickness', 4) - 1)}), () => _cmd({'op': 'filter', 'outlineThickness': v('outlineThickness', 4) + 1})),
+      _gap,
+      _stepper('Blur', v('blur', 0).toStringAsFixed(1), () => _cmd({'op': 'filter', 'blur': math.max(0, v('blur', 0) - 0.5)}), () => _cmd({'op': 'filter', 'blur': v('blur', 0) + 0.5})),
+      Opacity(
+        opacity: v('blur', 0) > 0 ? 1 : 0.4,
+        child: IgnorePointer(
+          ignoring: v('blur', 0) <= 0,
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            _Toggle('Motion blur', on('motion'), (x) => _cmd({'op': 'filter', 'motion': x})),
+            _stepper('Distance', v('motionDistance', 30).round().toString(), () => _cmd({'op': 'filter', 'motionDistance': math.max(0, v('motionDistance', 30) - 1)}), () => _cmd({'op': 'filter', 'motionDistance': v('motionDistance', 30) + 1})),
+          ]),
+        ),
+      ),
+      _gap,
+      _label('Glow'),
+      _swatches(col('glow', 0x0a84ffff), (c) => _cmd({'op': 'filter', 'glow': c})),
+      _stepper('Amount', v('glowAmount', 0).toStringAsFixed(2), () => _cmd({'op': 'filter', 'glowAmount': math.max(0, v('glowAmount', 0) - 0.05)}), () => _cmd({'op': 'filter', 'glowAmount': math.min(1, v('glowAmount', 0) + 0.05)})),
+      _stepper('Intensity', v('glowIntensity', 1).toStringAsFixed(2), () => _cmd({'op': 'filter', 'glowIntensity': math.max(0, v('glowIntensity', 1) - 0.1)}), () => _cmd({'op': 'filter', 'glowIntensity': v('glowIntensity', 1) + 0.1})),
+      _gap,
+      _label('Drop shadow'),
+      _swatches(col('shadow', 0x000000ff), (c) => _cmd({'op': 'filter', 'shadow': c})),
+      _stepper('Opacity', v('shadowOpacity', 0).toStringAsFixed(2), () => _cmd({'op': 'filter', 'shadowOpacity': math.max(0, v('shadowOpacity', 0) - 0.05)}), () => _cmd({'op': 'filter', 'shadowOpacity': math.min(1, v('shadowOpacity', 0) + 0.05)})),
+      _stepper('Distance', v('shadowDistance', 10).round().toString(), () => shadow(distance: math.max(0, v('shadowDistance', 10) - 1)), () => shadow(distance: v('shadowDistance', 10) + 1)),
+      _stepper('Angle', '${v('shadowAngle', 135).round()}°', () => shadow(angle: v('shadowAngle', 135) - 5), () => shadow(angle: v('shadowAngle', 135) + 5)),
+      _stepper('Blur', v('shadowBlur', 6).toStringAsFixed(1), () => _cmd({'op': 'filter', 'shadowBlur': math.max(0, v('shadowBlur', 6) - 0.5)}), () => _cmd({'op': 'filter', 'shadowBlur': v('shadowBlur', 6) + 0.5})),
+      _gap,
+      _Btn('Clear all filters', onTap: () => _cmd({'op': 'clear_filters'})),
+      _gap,
+      _pair(_Btn('Copy filters', onTap: () => _cmd({'op': 'copy_filters'})), _Btn('Paste filters', enabled: _st['filtersCopied'] == true, onTap: () => _cmd({'op': 'paste_filters'}))),
     ];
   }
 

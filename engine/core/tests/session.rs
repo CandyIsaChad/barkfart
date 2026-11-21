@@ -664,3 +664,69 @@ fn textfields_are_added_on_this_frame_and_dragged_keyed() {
     s.command(&json!({"op": "delete_textfield"}));
     assert_eq!(text_layers(&s).len(), 0);
 }
+
+#[test]
+fn stickfigure_filters_map_to_effect_nodes_on_this_frame() {
+    let mut s = session();
+    let st = s.command(&json!({"op": "state"}));
+    let id = st["figures"][0]["id"].as_str().unwrap().to_string();
+    s.command(&json!({"op": "select", "layer": id}));
+    let st = s.command(&json!({"op": "filter", "opacity": 0.5, "invert": true, "hue": 30.0, "saturation": 0.5,
+        "pixelate": 4.0, "tint": 0x00ff00ffu32, "tintAmount": 0.3, "outline": 0xff00ffffu32, "outlineAmount": 0.8,
+        "outlineThickness": 3.0, "blur": 2.0, "motion": true, "motionDistance": 12.0, "glow": 0x0a84ffffu32,
+        "glowAmount": 0.4, "glowIntensity": 2.0, "shadow": 0x000000ffu32, "shadowOpacity": 0.5,
+        "shadowDistance": 20.0, "shadowAngle": 90.0, "shadowBlur": 3.0}));
+    let f = &st["selected"]["filters"];
+    assert_eq!(f["opacity"], 0.5);
+    assert_eq!(f["invert"], true);
+    assert_eq!(f["hue"], 30.0);
+    assert_eq!(f["saturation"], 0.5);
+    assert_eq!(f["pixelate"], 4.0);
+    assert_eq!(f["tint"], 0x00ff00ffu32);
+    assert_eq!(f["tintAmount"], 0.3);
+    assert_eq!(f["outline"], 0xff00ffffu32);
+    assert_eq!(f["outlineAmount"], 0.8);
+    assert_eq!(f["outlineThickness"], 3.0);
+    assert_eq!(f["blur"], 2.0);
+    assert_eq!(f["motion"], true);
+    assert_eq!(f["motionDistance"], 12.0);
+    assert_eq!(f["glow"], 0x0a84ffffu32);
+    assert_eq!(f["glowAmount"], 0.4);
+    assert_eq!(f["glowIntensity"], 2.0);
+    assert_eq!(f["shadow"], 0x000000ffu32);
+    assert_eq!(f["shadowOpacity"], 0.5);
+    assert_eq!(f["shadowDistance"], 20.0);
+    assert_eq!(f["shadowAngle"], 90.0);
+    assert_eq!(f["shadowBlur"], 3.0);
+    {
+        let l = s.project().root().unwrap().layer(&id).unwrap();
+        let ids: Vec<&str> = l.effects.nodes.keys().map(String::as_str).collect();
+        assert_eq!(ids, ["filter.invert", "filter.adjust", "filter.pixelate", "filter.tint", "filter.outline", "filter.blur", "filter.motion", "filter.glow", "filter.shadow"]);
+        // the controls are keyed on this frame (the first one)
+        let blur = &l.effects.nodes["filter.blur"];
+        assert!(blur.params["radius"].track.index_of(0.0).is_ok());
+        assert!(blur.mix.track.index_of(0.0).is_ok());
+    }
+
+    // undo takes every filter away again
+    let st = s.command(&json!({"op": "undo"}));
+    assert_eq!(st["selected"]["filters"]["opacity"], 1.0);
+    assert_eq!(st["selected"]["filters"]["invert"], false);
+    let l = s.project().root().unwrap().layer(&id).unwrap();
+    assert!(l.effects.is_empty());
+
+    // copy the filter set onto another figure
+    s.command(&json!({"op": "filter", "blur": 2.0, "invert": true}));
+    s.command(&json!({"op": "copy_filters"}));
+    let st = s.command(&json!({"op": "add_figure"}));
+    let second = st["selected"]["layer"].as_str().unwrap().to_string();
+    let st = s.command(&json!({"op": "paste_filters"}));
+    assert_eq!(st["selected"]["filters"]["blur"], 2.0);
+    assert_eq!(st["selected"]["filters"]["invert"], true);
+    // clear all
+    let st = s.command(&json!({"op": "clear_filters"}));
+    assert_eq!(st["selected"]["filters"]["blur"], 0.0);
+    assert_eq!(st["selected"]["filters"]["invert"], false);
+    let l = s.project().root().unwrap().layer(&second).unwrap();
+    assert!(l.effects.is_empty());
+}

@@ -60,6 +60,7 @@ pub struct Session {
     figure_clip: Option<(Vec<Layer>, f64)>,
     props_clip: Option<layer_ops::Props>,
     textfield_clip: Option<Layer>,
+    filter_clip: Option<crate::edit::filters::Snapshot>,
     /// Copied frame: its keys (times relative to the frame).
     frame_clip: Option<(crate::edit::editor::KeyClip, i32)>,
     /// Bumped on every change the app should redraw for (drags included).
@@ -109,7 +110,7 @@ impl Session {
         let mut doc = doc;
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
-        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, textfield_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, textfield_clip: None, filter_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -1261,6 +1262,34 @@ impl Session {
                     });
                 }
             }
+            "filter" => {
+                if let Some(l) = self.sel_layer() {
+                    let c2 = c.clone();
+                    self.step("Stickfigure filters", move |s| crate::edit::filters::apply(s, &sym, &l, &c2, t));
+                }
+            }
+            "clear_filters" => {
+                if let Some(l) = self.sel_layer() {
+                    self.step("Clear filters", |s| crate::edit::filters::clear(s, &sym, &l, t));
+                }
+            }
+            "copy_filters" => {
+                if let Some(l) = self.sel_layer() {
+                    if let Some(snap) = crate::edit::filters::snapshot(self.project(), &sym, &l, t) {
+                        self.filter_clip = Some(snap);
+                        self.message = "Filters copied.".into();
+                        self.rev += 1;
+                    }
+                }
+            }
+            "paste_filters" => {
+                if let (Some(l), Some(snap)) = (self.sel_layer(), self.filter_clip.clone()) {
+                    self.step("Paste filters", |s| {
+                        crate::edit::filters::clear(s, &sym, &l, t)?;
+                        crate::edit::filters::restore(s, &sym, &l, &snap, t)
+                    });
+                }
+            }
             _ => self.message = format!("unknown command {op}"),
         }
         self.state()
@@ -1344,6 +1373,7 @@ impl Session {
                 "figColor": f.nodes().get(1).map(|n| color_of(&mut r, &n.color, t)).unwrap_or(0x000000ff),
                 "layerPos": p.root()?.layers.iter().filter(|x| x.as_figure().is_some()).position(|x| x.id == *l).map(|i| i + 1),
                 "figureCount": p.root()?.layers.iter().filter(|x| x.as_figure().is_some()).count(),
+                "filters": crate::edit::filters::state(p, &p.root_symbol, l, t),
             }))
         });
         let textfield = self.selected_text.as_ref().and_then(|id| {
@@ -1382,6 +1412,7 @@ impl Session {
             "mode": match self.mode { Mode::Figure => "figure", Mode::All => "all", Mode::Camera => "camera" },
             "handles": handles, "selected": sel, "figures": figures, "camera": cam,
             "textfield": textfield, "textfieldCopied": self.textfield_clip.is_some(),
+            "filtersCopied": self.filter_clip.is_some(),
             "hasCamera": p.root().is_some_and(|s| s.layers.iter().any(|l| matches!(l.kind, LayerKind::Camera(_)))),
             "opts": {
                 "stretch": self.stretch_all, "scope": if self.tools.key_scope == KeyScope::Joint { "joint" } else { "figure" },
