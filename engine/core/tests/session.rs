@@ -933,3 +933,25 @@ fn creation_mode_draws_a_segment_from_a_joint() {
     s.command(&json!({"op": "undo"}));
     assert!(codec::encode(s.project()) == before, "undo takes the segment away");
 }
+
+#[test]
+fn arrows_nudge_the_selected_figure_on_this_frame() {
+    let mut s = session();
+    s.command(&json!({"op": "insert_frame"}));
+    let st = s.command(&json!({"op": "state"}));
+    let fig = st["figures"][0]["id"].as_str().unwrap().to_string();
+    let before: Vec<(f32, f32)> = (0..11).map(|i| handle(&st, i)).collect();
+    s.command(&json!({"op": "select", "layer": fig}));
+    let st = s.command(&json!({"op": "nudge", "dx": 10.0, "dy": -2.5}));
+    assert_eq!(st["undo"], "Nudge figure");
+    for i in 0..11 {
+        let (x, y) = handle(&st, i);
+        assert!((x - before[i].0 - 10.0).abs() < 0.02 && (y - before[i].1 + 2.5).abs() < 0.02, "joint {i}");
+    }
+    // the other frame keeps its pose
+    let st = s.command(&json!({"op": "frame", "i": 0}));
+    assert_eq!(handle(&st, 0), before[0]);
+    s.command(&json!({"op": "frame", "i": 1}));
+    let st = s.command(&json!({"op": "undo"}));
+    assert_eq!(handle(&st, 0), before[0]);
+}

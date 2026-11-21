@@ -756,6 +756,48 @@ impl Session {
                     }
                 }
             }
+            "nudge" => {
+                // Arrows window: the selected figure (or textfield) moves by (dx, dy)
+                let (dx, dy) = (c["dx"].as_f64().unwrap_or(0.0) as f32, c["dy"].as_f64().unwrap_or(0.0) as f32);
+                if let Some(id) = self.selected_text.clone() {
+                    let ed = self.tools.editor.clone();
+                    self.step("Nudge textfield", |s| {
+                        anchor_poses(s);
+                        let l = s.project.layer_mut(&sym, &id).ok_or_else(|| crate::edit::EditError("no textfield".into()))?;
+                        let (xi, yi) = (l.transform.x.id.clone(), l.transform.y.id.clone());
+                        let mut r = Resolver::new(&s.project);
+                        let l = s.project.root().and_then(|x| x.layer(&id)).expect("textfield");
+                        let (x, y) = (r.f(&l.transform.x, t), r.f(&l.transform.y, t));
+                        ed.change_in(s, &xi, Value::F(x + dx), t)?;
+                        ed.change_in(s, &yi, Value::F(y + dy), t)?;
+                        Ok(())
+                    });
+                } else if let Some(l) = self.sel_layer() {
+                    let root = self.tools.handles(self.project(), t).into_iter().find(|h| h.layer == l && h.root);
+                    if let (Some(h), false) = (root, self.dragging()) {
+                        self.doc.begin("Nudge figure");
+                        anchor_poses(&mut self.doc.state);
+                        let stretch = self.tools.stretch;
+                        self.tools.stretch = false;
+                        self.tools.begin(&mut self.doc, &h, h.x, h.y, t);
+                        let r = self.tools.move_to(&mut self.doc, h.x + dx, h.y + dy, t);
+                        self.tools.end(&mut self.doc);
+                        self.tools.stretch = stretch;
+                        match r {
+                            Ok(()) => {
+                                anchor_poses(&mut self.doc.state);
+                                snap_keys(&mut self.doc.state);
+                                self.doc.commit();
+                            }
+                            Err(e) => {
+                                self.doc.cancel();
+                                self.message = e.0;
+                            }
+                        }
+                        self.rev += 1;
+                    }
+                }
+            }
             "draw_tool" => {
                 self.draw = match c["shape"].as_str() {
                     None | Some("none") => None,

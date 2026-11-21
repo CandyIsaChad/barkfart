@@ -679,6 +679,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           setState(() => _frameSelected = true);
         case 'tab':
           _jumpTo(w.sublist(1).join(' '));
+        case 'arrows':
+          setState(() => _arrows = true);
         case 'viewoptions':
           setState(() => _viewOptions = true);
         case 'quit':
@@ -716,6 +718,69 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// A frame thumbnail was tapped: the panel shows Frame Tools.
   bool _frameSelected = false;
   bool _viewOptions = false;
+
+  // Arrows window: nudges the selection by a set amount
+  bool _arrows = false;
+  Offset _arrowsAt = const Offset(16, 16);
+  double _nudge = 1;
+
+  /// A small floating window; drag it by its title bar.
+  Widget _floating(String title, VoidCallback close, void Function(Offset) moved, Widget child) {
+    return Material(
+      color: cPanel,
+      elevation: 10,
+      borderRadius: BorderRadius.circular(8),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        GestureDetector(
+          onPanUpdate: (d) => moved(d.delta),
+          child: Container(
+            padding: const EdgeInsets.only(left: 10),
+            decoration: const BoxDecoration(color: cControl, borderRadius: BorderRadius.vertical(top: Radius.circular(8))),
+            child: Row(children: [
+              const Icon(Icons.open_with, size: 14, color: cSecondary),
+              const SizedBox(width: 6),
+              Expanded(child: Text(title, style: const TextStyle(color: cText, fontSize: 12))),
+              IconButton(visualDensity: VisualDensity.compact, icon: const Icon(Icons.close, size: 18, color: cDanger), onPressed: close),
+            ]),
+          ),
+        ),
+        Padding(padding: const EdgeInsets.all(8), child: child),
+      ]),
+    );
+  }
+
+  Widget _arrowsWindow() {
+    Widget arrow(IconData i, double dx, double dy) => SizedBox(
+          width: 44,
+          height: 44,
+          child: Material(
+            color: cAccent,
+            borderRadius: BorderRadius.circular(6),
+            child: InkWell(onTap: () => _cmd({'op': 'nudge', 'dx': dx * _nudge, 'dy': dy * _nudge}), child: Icon(i, color: cText)),
+          ),
+        );
+    // steps of 1 from 1 up, of 0.1 below
+    final step = _nudge >= 1 ? 1.0 : 0.1;
+    return SizedBox(
+      width: 190,
+      child: _floating('Arrows', () => setState(() => _arrows = false), (d) => setState(() => _arrowsAt += d), Column(mainAxisSize: MainAxisSize.min, children: [
+        arrow(Icons.keyboard_arrow_up, 0, 1),
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          arrow(Icons.keyboard_arrow_left, -1, 0),
+          const SizedBox(width: 48),
+          arrow(Icons.keyboard_arrow_right, 1, 0),
+        ]),
+        arrow(Icons.keyboard_arrow_down, 0, -1),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(child: Text('Nudge ${_nudge.toStringAsFixed(1)}', style: const TextStyle(color: cText, fontSize: 12))),
+          SizedBox(width: 36, child: _Btn('−', onTap: () => setState(() => _nudge = math.max(0.1, ((_nudge - (_nudge > 1 ? 1 : 0.1)) * 10).round() / 10)))),
+          const SizedBox(width: 4),
+          SizedBox(width: 36, child: _Btn('+', onTap: () => setState(() => _nudge = ((_nudge + (step)) * 10).round() / 10))),
+        ]),
+      ])),
+    );
+  }
   bool _showTabs = true;
   final ScrollController _panelScroll = ScrollController();
   final Map<String, GlobalKey> _sectionKeys = {};
@@ -802,6 +867,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                   padding: EdgeInsets.only(right: pad.right, bottom: pad.bottom),
                   child: Stack(children: [
                     Positioned.fill(child: _stage()),
+                    if (_arrows && !_playing) Positioned(left: _arrowsAt.dx, top: _arrowsAt.dy, child: _arrowsWindow()),
                     if (_viewOptions) Positioned(top: 0, right: 0, bottom: 0, width: 240, child: _viewOptionsPanel()),
                   ]),
                 ),
@@ -1717,6 +1783,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             })),
         _gap,
         _Btn('Fit stage', onTap: () => setState(_fit)),
+        _gap,
+        const Text('The arrows window moves the selected figure in small exact steps.', style: TextStyle(color: cSecondary, fontSize: 11)),
+        _Btn('Show arrows', enabled: !_arrows, onTap: () => setState(() => _arrows = true)),
         if (_engineMs > 0) Padding(padding: const EdgeInsets.only(top: 8), child: Text('${_engineMs.toStringAsFixed(1)} ms per picture', style: const TextStyle(color: cSecondary, fontSize: 11))),
       ]),
     );
