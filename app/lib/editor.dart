@@ -1359,6 +1359,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                     const Positioned(right: 3, top: 2, child: Icon(Icons.timer_outlined, size: 15, color: Color(0xFFFF9F0A))),
                   if (((_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?)?.elementAtOrNull(2) == true)
                     const Positioned(right: 22, bottom: 2, child: Icon(Icons.volume_off, size: 15, color: cDanger)),
+                  // beside the tween arrow: slow motion tweening
+                  if (((_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?)?.elementAtOrNull(3) == true)
+                    const Positioned(right: 41, bottom: 2, child: Icon(Icons.slow_motion_video, size: 15, color: Color(0xFFBF5AF2))),
                   if (((_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?)?.elementAtOrNull(1) == true)
                     const Positioned(left: 3, top: 19, child: Icon(Icons.repeat, size: 15, color: Color(0xFFBF5AF2))),
                   Positioned(
@@ -1672,6 +1675,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final bgTop = (bg['gradient'] as num?)?.toInt() ?? 0x808080ff;
     final bgGradient = bg['useGradient'] == true;
     final delay = (_st['frameDelay'] as num?)?.toDouble() ?? 0;
+    final slow = (_st['frameSlow'] as num?)?.toInt() ?? 0;
     final rep = (_st['frameRepeat'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
     final back = (rep['back'] as num?)?.toInt() ?? 0;
     final times = math.max(1, (rep['times'] as num?)?.toInt() ?? 1);
@@ -1710,6 +1714,20 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ],
       _gap,
       _Toggle('Do not tween this frame', _st['frameNoTween'] == true, (v) => _cmd({'op': 'no_tween', 'on': v})),
+      // Slow Motion Tweening: only while the project tweens
+      Opacity(
+        opacity: _st['tweening'] == true ? 1 : 0.4,
+        child: IgnorePointer(
+          ignoring: _st['tweening'] != true,
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            _Toggle('Slow motion tweening', slow > 0, (v) => _cmd({'op': 'frame_slow', 'n': v ? 10 : 0})),
+            if (slow > 0) ...[
+              _hint('This overrides the number of tweened frames for this one frame: more in-between pictures, so it plays slower.'),
+              _stepper('Tweened frames', '$slow', () => _cmd({'op': 'frame_slow', 'n': math.max(1, slow - 1)}), () => _cmd({'op': 'frame_slow', 'n': slow + 1})),
+            ],
+          ]),
+        ),
+      ),
       _gap,
       _Toggle('Pause on this frame', delay > 0, (v) => _cmd({'op': 'frame_delay', 'seconds': v ? 0.5 : 0})),
       if (delay > 0) _stepper('Seconds', delay.toStringAsFixed(2), () => _cmd({'op': 'frame_delay', 'seconds': math.max(0.01, delay - 0.05)}), () => _cmd({'op': 'frame_delay', 'seconds': delay + 0.05})),

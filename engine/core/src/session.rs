@@ -1534,10 +1534,10 @@ impl Session {
                     });
                 }
             }
-            "frame_delay" | "frame_repeat" | "frame_silence" => {
+            "frame_delay" | "frame_repeat" | "frame_silence" | "frame_slow" => {
                 let c2 = c.clone();
                 let delay = op == "frame_delay";
-                let label = match op { "frame_delay" => "Frame delay", "frame_repeat" => "Repeat frames", _ => "Silence sounds" };
+                let label = match op { "frame_delay" => "Frame delay", "frame_repeat" => "Repeat frames", "frame_slow" => "Slow motion", _ => "Silence sounds" };
                 self.step(label, move |s| {
                     let cam = ensure_camera(s, &sym)?;
                     let (n, fps) = (frame_ops::frame_count(s), st_fps(&s.project));
@@ -1556,6 +1556,11 @@ impl Session {
                     };
                     if let Some(v) = c2["on"].as_bool().filter(|_| c2["op"] == "frame_silence") {
                         set(&mut cm.silence, if v { 1.0 } else { 0.0 });
+                        return Ok(());
+                    }
+                    if c2["op"] == "frame_slow" {
+                        // in-between pictures for this frame (0 = off)
+                        set(&mut cm.slow_motion, c2["n"].as_i64().unwrap_or(0).clamp(0, crate::timing::MAX_SLOW as i64) as f32);
                         return Ok(());
                     }
                     if delay {
@@ -1868,7 +1873,7 @@ impl Session {
             let mut r = Resolver::new(p);
             p.root().map(|s| s.layers.iter().filter(|l| r.b(&l.shown, t)).filter_map(|l| l.as_figure()).map(|f| f.nodes().len()).sum()).unwrap_or(0)
         };
-        let marks: Vec<J> = (0..frames).map(|f| { let (d, _, n) = crate::timing::frame_settings(p, f as i32); json!([d > 0.0, n > 0, crate::timing::frame_silences(p, f as i32)]) }).collect();
+        let marks: Vec<J> = (0..frames).map(|f| { let (d, _, n) = crate::timing::frame_settings(p, f as i32); json!([d > 0.0, n > 0, crate::timing::frame_silences(p, f as i32), crate::timing::frame_slow(p, f as i32) > 0]) }).collect();
         let cam = self.camera_frame();
         let cam_vals = p.root().and_then(|s| s.layers.iter().find_map(|l| if let LayerKind::Camera(c) = &l.kind { Some(c) } else { None })).map(|c| {
             let mut r = Resolver::new(p);
@@ -1894,7 +1899,7 @@ impl Session {
             "drawTool": self.draw.map(shape_name).unwrap_or("none"), "drawLine": draw_line,
             "soundList": sound_list, "frameSound": frame_snd, "soundCopied": self.sound_clip.is_some(),
             "frameDelay": fset.0, "frameRepeat": rep,
-            "frameMarks": marks, "frameSilence": crate::timing::frame_silences(p, self.frame), "nodeCount": node_count,
+            "frameMarks": marks, "frameSilence": crate::timing::frame_silences(p, self.frame), "frameSlow": crate::timing::frame_slow(p, self.frame), "nodeCount": node_count,
             "hasCamera": p.root().is_some_and(|s| s.layers.iter().any(|l| matches!(l.kind, LayerKind::Camera(_)))),
             "opts": {
                 "stretch": self.stretch_all, "scope": if self.tools.key_scope == KeyScope::Joint { "joint" } else { "figure" },

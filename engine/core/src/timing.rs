@@ -16,6 +16,9 @@ pub struct Slot {
     pub delay: f64,
     /// Sounds still playing stop when this slot starts.
     pub silence: bool,
+    /// Slow motion tweening: this many in-between pictures, at the usual
+    /// picture rate, spread over the frame (0 = the project's tweening).
+    pub slow: i32,
 }
 
 #[derive(Clone, Debug)]
@@ -33,6 +36,20 @@ pub const MAX_SLOTS: usize = 100_000;
 
 /// The longest frame delay, in seconds.
 pub const MAX_DELAY: f32 = 600.0;
+
+/// The most in-between pictures slow motion gives one frame.
+pub const MAX_SLOW: i32 = 240;
+
+/// Slow motion in-betweens of a frame (0 = off, or tweening off).
+pub fn frame_slow(p: &Project, frame: i32) -> i32 {
+    if !p.settings.tweening {
+        return 0;
+    }
+    let fps = fps_of(p);
+    p.root()
+        .and_then(|s| s.layers.iter().find_map(|l| if let LayerKind::Camera(c) = &l.kind { Some(c) } else { None }))
+        .map_or(0, |c| (setting(&c.slow_motion, fps, frame).round() as i32).clamp(0, MAX_SLOW))
+}
 
 /// A frame setting: the exact key at the frame's time, no key meaning 0.
 pub fn setting(p: &Property, fps: f64, frame: i32) -> f32 {
@@ -76,14 +93,18 @@ impl Schedule {
         let n = frame_count(p);
         let sets: Vec<(f32, i32, i32)> = (0..n).map(|f| frame_settings(p, f)).collect();
         let silences: Vec<bool> = (0..n).map(|f| frame_silences(p, f)).collect();
-        let identity = sets.iter().all(|s| s.0 == 0.0 && s.2 == 0) && !silences.iter().any(|x| *x);
+        let slows: Vec<i32> = (0..n).map(|f| frame_slow(p, f)).collect();
+        let rate = p.settings.sample_rate();
+        let identity = sets.iter().all(|s| s.0 == 0.0 && s.2 == 0) && !silences.iter().any(|x| *x) && slows.iter().all(|s| *s == 0);
         let mut slots = Vec::with_capacity(n as usize);
         let mut done = vec![0i32; n as usize];
         let (mut f, mut at) = (0i32, 0f64);
         while f < n && slots.len() < MAX_SLOTS {
             let (delay, back, times) = sets[f as usize];
-            let len = 1.0 / fps + delay as f64;
-            slots.push(Slot { frame: f, start: at, len, delay: delay as f64, silence: silences[f as usize] });
+            let slow = slows[f as usize];
+            let shown = if slow > 0 { (slow + 1) as f64 / rate } else { 1.0 / fps };
+            let len = shown + delay as f64;
+            slots.push(Slot { frame: f, start: at, len, delay: delay as f64, silence: silences[f as usize], slow });
             at += len;
             if times > 0 && done[f as usize] < times {
                 done[f as usize] += 1;
@@ -119,6 +140,11 @@ impl Schedule {
             return base;
         }
         let rate = if rate > 0.0 { rate } else { self.fps };
+        if s.slow > 0 {
+            // picture k of slow + 1, each a 1/(slow + 1) step through the frame
+            let k = ((local * rate).floor()).clamp(0.0, s.slow as f64);
+            return base + k / ((s.slow + 1) as f64 * self.fps);
+        }
         let step = ((local * rate).floor() / rate).min((rate / self.fps).ceil().max(1.0) / rate - 1.0 / rate);
         base + step.max(0.0)
     }

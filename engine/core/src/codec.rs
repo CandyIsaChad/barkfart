@@ -398,6 +398,7 @@ fn layer(m: &Obj) -> R<Layer> {
             read_prop(m, "repeatBack", &mut c.repeat_back)?;
             read_prop(m, "repeatTimes", &mut c.repeat_times)?;
             read_prop(m, "silence", &mut c.silence)?;
+            read_prop(m, "slowMotion", &mut c.slow_motion)?;
             l
         }
         other => return err(format!("unknown layer type {other}")),
@@ -918,7 +919,7 @@ fn layer_json(l: &Layer) -> Json {
             if !c.background2.track.is_empty() || c.background2.value.color().a > 0.0 {
                 m.put("background2", prop_json(&c.background2, false));
             }
-            for (k, q) in [("frameDelay", &c.delay), ("repeatBack", &c.repeat_back), ("repeatTimes", &c.repeat_times), ("silence", &c.silence)] {
+            for (k, q) in [("frameDelay", &c.delay), ("repeatBack", &c.repeat_back), ("repeatTimes", &c.repeat_times), ("silence", &c.silence), ("slowMotion", &c.slow_motion)] {
                 if !q.track.is_empty() || q.value != Value::F(0.0) {
                     m.put(k, prop_json(q, false));
                 }

@@ -151,7 +151,7 @@ pub fn set_tween(ed: &Editor, st: &mut State, frame: i32, tween: bool) -> EditRe
 /// Frame delay and repeat (camera properties) belong to one frame; tweened
 /// frames do not inherit them.
 pub fn is_frame_setting(id: &str) -> bool {
-    id.ends_with("/cam/delay") || id.ends_with("/cam/repeatBack") || id.ends_with("/cam/repeatTimes") || id.ends_with("/cam/silence")
+    id.ends_with("/cam/delay") || id.ends_with("/cam/repeatBack") || id.ends_with("/cam/repeatTimes") || id.ends_with("/cam/silence") || id.ends_with("/cam/slowMotion")
 }
 
 /// "Add tweened frame": keys every animated property (all layers, or one)

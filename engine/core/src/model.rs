@@ -1127,6 +1127,9 @@ pub struct CameraLayer {
     pub repeat_times: Property,
     /// 1: every sound still playing stops when this frame starts.
     pub silence: Property,
+    /// "Slow Motion Tweening": in-between pictures for this one frame,
+    /// overriding the project's tweened frames (0 = off; tweening on only).
+    pub slow_motion: Property,
 }
 
 #[derive(Clone, Debug)]
@@ -1264,6 +1267,7 @@ impl Layer {
                 repeat_back: Property::float(format!("{id}/cam/repeatBack"), 0.0),
                 repeat_times: Property::float(format!("{id}/cam/repeatTimes"), 0.0),
                 silence: Property::float(format!("{id}/cam/silence"), 0.0),
+                slow_motion: Property::float(format!("{id}/cam/slowMotion"), 0.0),
             }),
         )
     }
@@ -1301,7 +1305,7 @@ impl Layer {
                     out.push(&c.pan);
                 }
             }
-            LayerKind::Camera(c) => out.extend([&c.x, &c.y, &c.zoom, &c.rotation, &c.background, &c.background2, &c.delay, &c.repeat_back, &c.repeat_times, &c.silence]),
+            LayerKind::Camera(c) => out.extend([&c.x, &c.y, &c.zoom, &c.rotation, &c.background, &c.background2, &c.delay, &c.repeat_back, &c.repeat_times, &c.silence, &c.slow_motion]),
         }
         out
     }
@@ -1341,7 +1345,7 @@ impl Layer {
                     out.push(&mut c.pan);
                 }
             }
-            LayerKind::Camera(c) => out.extend([&mut c.x, &mut c.y, &mut c.zoom, &mut c.rotation, &mut c.background, &mut c.background2, &mut c.delay, &mut c.repeat_back, &mut c.repeat_times, &mut c.silence]),
+            LayerKind::Camera(c) => out.extend([&mut c.x, &mut c.y, &mut c.zoom, &mut c.rotation, &mut c.background, &mut c.background2, &mut c.delay, &mut c.repeat_back, &mut c.repeat_times, &mut c.silence, &mut c.slow_motion]),
         }
         out
     }

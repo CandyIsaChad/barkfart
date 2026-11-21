@@ -1249,3 +1249,38 @@ fn looping_tween_blends_the_last_frame_into_the_first() {
     assert_eq!(x_at(&s, mid), x1, "undone");
     assert!(barkfart_core::codec::encode(s.project()).contains("loopTween") == false);
 }
+
+/// Frame Tools "Slow Motion Tweening": this frame gets its own number of
+/// in-between pictures at the usual picture rate, so it plays longer and
+/// smoother; only with tweening on.
+#[test]
+fn slow_motion_tweening_stretches_one_frame() {
+    use barkfart_core::timing::Schedule;
+    let mut s = two_poses();
+    s.command(&json!({"op": "animation", "tweening": true, "tweened": 1}));
+    let (fps, rate) = (s.project().settings.fps as f64, s.project().settings.sample_rate());
+    let before = Schedule::build(s.project()).total;
+    assert!((before - 2.0 / fps).abs() < 1e-9);
+    let st = s.command(&json!({"op": "frame_slow", "n": 11}));
+    assert_eq!(st["undo"], "Slow motion");
+    assert_eq!(st["frameSlow"], 11);
+    assert_eq!(st["frameMarks"][0][3], true);
+    let sc = Schedule::build(s.project());
+    assert!((sc.total - (12.0 / rate + 1.0 / fps)).abs() < 1e-9, "frame 0 lasts 12 pictures: {}", sc.total);
+    // twelve evenly spaced steps through frame 0, then frame 1
+    let ts: Vec<f64> = (0..12).map(|k| sc.time_at((k as f64 + 0.5) / rate, rate)).collect();
+    for (k, t) in ts.iter().enumerate() {
+        assert!((t - k as f64 / 12.0 / fps).abs() < 1e-9, "picture {k}: {t}");
+    }
+    assert!((sc.time_at(12.5 / rate, rate) - 1.0 / fps).abs() < 1e-9);
+    // only frame 0: frame 1 has no key of its own
+    s.command(&json!({"op": "frame", "i": 1}));
+    assert_eq!(s.state()["frameSlow"], 0);
+    // tweening off: no slow motion
+    s.command(&json!({"op": "animation", "tweening": false}));
+    assert!((Schedule::build(s.project()).total - 2.0 / fps).abs() < 1e-9);
+    s.command(&json!({"op": "undo"}));
+    assert!(codec::encode(s.project()).contains("slowMotion"), "saved");
+    s.command(&json!({"op": "undo"}));
+    assert!((Schedule::build(s.project()).total - before).abs() < 1e-9, "one undo step");
+}
