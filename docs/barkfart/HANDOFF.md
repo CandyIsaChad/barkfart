@@ -35,9 +35,11 @@ Tick items there as they finish.
 
 **Next:** B3 (the Animation popover), then the rest of §7 in order. The script command `toast <text>` shows a toast.
 
-Usage at this note: the 5-hour window was at about 70% and the weekly at about
-85%. The weekly limit resets 2026-11-23 about 22:00 PST. When the weekly runs
-low, arm the sleeper for that time.
+Usage at this note: the 5-hour window was at about 72% and the weekly at 84%.
+
+**No scheduled handoffs.** The user restarts work themselves (2026-11-23).
+Never arm after-reset.sh, cron or any scheduler, and never start other
+models. Near the usage limit: write a status note here, push, and stop.
 
 ## Older brief (2026-11-22, second handoff)
 
