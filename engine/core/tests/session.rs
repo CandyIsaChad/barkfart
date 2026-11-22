@@ -3557,7 +3557,9 @@ fn random_editing_with_undo_and_redo_walks_the_history_exactly() {
             let f = next(frames as usize) as i64;
             s.command(&json!({"op": "frame", "i": f}));
             s.command(&json!({"op": "select", "layer": "L2", "node": (["armR1", "armR2", "legL1", "head"][next(4)])}));
-            let c: Value = match next(38) {
+            let c: Value = match next(41) {
+                38 | 39 => json!({"op": "@join"}),
+                40 => json!({"op": "unjoin"}),
                 34 => json!({"op": "to_movieclip"}),
                 35 | 36 => json!({"op": "@enter_movieclip"}),
                 37 => json!({"op": "movieclip_done"}),
@@ -3617,7 +3619,17 @@ fn random_editing_with_undo_and_redo_walks_the_history_exactly() {
                 }
             } else {
                 let (before, depth) = (saved_text(s.project()), s.doc.undo_depth());
-                if c["op"] == "@enter_movieclip" {
+                if c["op"] == "@join" {
+                    // join the selected figure to a joint of another one
+                    s.command(&json!({"op": "join"}));
+                    let t = s.time();
+                    let other = s.tools.handles(s.project(), t).into_iter().find(|h| h.layer != "L2");
+                    if let Some(h) = other {
+                        s.command(&json!({"op": "down", "x": h.x, "y": h.y, "r": 20}));
+                        s.command(&json!({"op": "up"}));
+                    }
+                    s.command(&json!({"op": "join_cancel"}));
+                } else if c["op"] == "@enter_movieclip" {
                     // select the first movieclip on the stage and edit it
                     let id = s.project().root().and_then(|r| r.layers.iter().find(|l| matches!(l.kind, barkfart_core::model::LayerKind::Symbol(_))).map(|l| l.id.clone()));
                     if let Some(id) = id {
@@ -3649,6 +3661,24 @@ fn random_editing_with_undo_and_redo_walks_the_history_exactly() {
                     why = format!("{} steps to undo, the history says {}", s.doc.undo_depth() - base.min(s.doc.undo_depth()), at);
                 } else if s.doc.redo_depth() != history.len() - 1 - at {
                     why = format!("{} steps to redo, the history says {}", s.doc.redo_depth(), history.len() - 1 - at);
+                } else if let Some(msg) = {
+                    // every layer's parent exists, and no layer is its own ancestor
+                    let layers = &s.project().root().unwrap().layers;
+                    layers.iter().find_map(|l| {
+                        let mut cur = l;
+                        for _ in 0..=layers.len() {
+                            match &cur.parent {
+                                None => return None,
+                                Some(pid) => match layers.iter().find(|x| &x.id == pid) {
+                                    None => return Some(format!("layer {} hangs off {pid}, which is gone", cur.id)),
+                                    Some(par) => cur = par,
+                                },
+                            }
+                        }
+                        Some(format!("layer {} is its own ancestor", l.id))
+                    })
+                } {
+                    why = msg;
                 } else if let Some(msg) = {
                     // what is selected is still there (a panel on a deleted figure is a bug)
                     let st = s.state();
@@ -3950,4 +3980,46 @@ fn edit_time_on_a_big_project() {
         let _ = s.tools.handles(s.project(), s.time());
     });
     eprintln!("TIMING figures={n} frames={}: edit {edit:.1} ms, state() {state:.1} ms, handles() {handles:.1} ms", s.state()["frames"]);
+}
+
+/// A movieclip has its own frames: adding, deleting and pasting frames while
+/// editing it leaves the main animation's frames and pictures alone, the
+/// saved project is always the main animation, and leaving the clip puts the
+/// main timeline back.
+#[test]
+fn editing_a_movieclips_frames_leaves_the_main_animation_alone() {
+    let mut s = two_poses();
+    s.command(&json!({"op": "to_movieclip"}));
+    let id = s.project().root().unwrap().layers.iter().find(|l| matches!(l.kind, barkfart_core::model::LayerKind::Symbol(_))).unwrap().id.clone();
+    let fps = s.project().settings.fps as f64;
+    let main_frames = s.state()["frames"].as_i64().unwrap();
+    let main_pics: Vec<Vec<u8>> = (0..main_frames).map(|i| small_picture(s.project(), i as f64 / fps)).collect();
+    let main_saved = saved_text(&s.saved_project());
+    s.command(&json!({"op": "select", "layer": id, "node": ""}));
+    s.command(&json!({"op": "edit_movieclip"}));
+    let inside = s.state()["frames"].as_i64().unwrap();
+    assert!(inside >= 1);
+    for k in 0..3 {
+        s.command(&json!({"op": "frame", "i": (inside - 1 + k) as i64}));
+        s.command(&json!({"op": "insert_frame"}));
+    }
+    s.command(&json!({"op": "frame", "i": 0}));
+    s.command(&json!({"op": "copy_frame", "n": 0}));
+    s.command(&json!({"op": "paste_frame"}));
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "delete_frame"}));
+    let edited = s.state()["frames"].as_i64().unwrap();
+    assert_ne!(edited, inside, "the clip's own frames changed");
+    // the saved project is the main animation all the while, not the clip being edited
+    assert_ne!(s.saved_project().root_symbol, s.project().root_symbol, "saving writes the main root, not the clip's");
+    assert_eq!(s.saved_project().root().unwrap().duration, main_frames as f64 / fps, "and it keeps the main animation's length");
+    s.command(&json!({"op": "movieclip_done"}));
+    assert_eq!(s.state()["frames"].as_i64().unwrap(), main_frames, "back on the main timeline");
+    let now: Vec<Vec<u8>> = (0..main_frames).map(|i| small_picture(s.project(), i as f64 / fps)).collect();
+    assert_eq!(now, main_pics, "the main animation draws what it drew (the clip's first frames are the same)");
+    // the main animation's own text differs only in the clip's symbol
+    let after = saved_text(&s.saved_project());
+    let (a, b): (Vec<&str>, Vec<&str>) = (main_saved.lines().collect(), after.lines().collect());
+    assert!(a.len() != b.len() || a != b, "the clip's edits are in the project");
+    assert_eq!(s.project().root_symbol, s.saved_project().root_symbol, "the main root is the project's again");
 }
