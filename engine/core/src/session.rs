@@ -660,6 +660,10 @@ impl Session {
                         let at = frame_ops::time(s, fr + 1);
                         let fps = st_fps(&s.project);
                         for (id, keys) in &clip.keys {
+                            // an auto-camera's markers belong to its span, not to a copy
+                            if id.ends_with("/cam/autoCam") || id.ends_with("/cam/autoCamEnd") {
+                                continue;
+                            }
                             let Some(p) = s.project.property_mut(id) else { continue };
                             if keys.is_empty() || !p.ty.checked(&keys[0].value) {
                                 continue;

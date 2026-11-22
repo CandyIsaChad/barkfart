@@ -2162,3 +2162,46 @@ fn random_editing_keeps_the_project_sound() {
         }
     }
 }
+
+/// Adding or pasting frames does not copy an auto-camera's start or end
+/// marker (that would start a second span or cut the first short).
+#[test]
+fn new_and_pasted_frames_do_not_copy_auto_camera_markers() {
+    let mut s = two_poses();
+    s.command(&json!({"op": "add_camera"}));
+    s.command(&json!({"op": "insert_frame"}));
+    s.command(&json!({"op": "frame", "i": 0}));
+    s.command(&json!({"op": "auto_camera", "end": 2, "ease": 1}));
+    let marks = |s: &Session| -> Vec<bool> { s.state()["frameMarks"].as_array().unwrap().iter().map(|m| m[4] == true).collect() };
+    assert_eq!(marks(&s), vec![true, false, false]);
+    // a new frame after the start
+    s.command(&json!({"op": "insert_frame"}));
+    assert_eq!(marks(&s), vec![true, false, false, false], "the new frame does not start another auto-camera");
+    s.command(&json!({"op": "frame", "i": 0}));
+    assert_eq!(s.state()["autoCam"]["end"], 3, "the span still ends on its (moved) frame");
+    // copy the start frame and paste it after the last
+    s.command(&json!({"op": "copy_frame"}));
+    s.command(&json!({"op": "frame", "i": 3}));
+    s.command(&json!({"op": "paste_frame"}));
+    assert_eq!(marks(&s), vec![true, false, false, false, false]);
+    s.command(&json!({"op": "frame", "i": 0}));
+    assert_eq!(s.state()["autoCam"]["end"], 3);
+}
+
+/// A new frame copies the pose and the background, not the pause or the
+/// repeat of the frame it was made from.
+#[test]
+fn new_frames_do_not_inherit_timing() {
+    let mut s = two_poses();
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "frame_delay", "seconds": 0.5}));
+    s.command(&json!({"op": "frame_repeat", "back": 1, "times": 2}));
+    s.command(&json!({"op": "frame_bg", "color": 0x336699ffu32}));
+    let st = s.command(&json!({"op": "insert_frame"}));
+    assert_eq!(st["frame"], 2);
+    assert_eq!(st["frameDelay"], 0.0, "no pause on the new frame");
+    assert_eq!(st["frameRepeat"]["back"], 0, "no repeat on the new frame");
+    assert_eq!(st["frameBg"]["color"], 0x336699ffu32, "the background is copied");
+    s.command(&json!({"op": "frame", "i": 1}));
+    assert_eq!(s.state()["frameDelay"], 0.5, "the original keeps its pause");
+}

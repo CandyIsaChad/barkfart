@@ -96,7 +96,9 @@ pub fn insert_after(st: &mut State, frame: i32, copy_pose: bool) -> EditResult<(
             for k in p.track.keys() {
                 out.put(if k.time > t + eps { Key { time: k.time + dt, ..*k } } else { *k });
             }
-            if copy_pose {
+            // a new frame copies the pose and the look, not this frame's timing
+            // (pause, repeat, silence, slow motion, auto-camera markers)
+            if copy_pose && !is_frame_event(&p.id) {
                 out.put(Key::new(t + dt, p.key_value(t), interp_at(p, t, Interp::Linear)));
             }
             Some(out.keys().to_vec())
@@ -150,6 +152,12 @@ pub fn set_tween(ed: &Editor, st: &mut State, frame: i32, tween: bool) -> EditRe
 
 /// Frame delay and repeat (camera properties) belong to one frame; tweened
 /// frames do not inherit them.
+/// Frame settings about timing and markers, which belong to that one frame
+/// (a new frame does not copy them).
+pub fn is_frame_event(id: &str) -> bool {
+    ["/cam/delay", "/cam/repeatBack", "/cam/repeatTimes", "/cam/repeatTween", "/cam/silence", "/cam/slowMotion", "/cam/autoCam", "/cam/autoCamEnd"].iter().any(|s| id.ends_with(s))
+}
+
 pub fn is_frame_setting(id: &str) -> bool {
     id.ends_with("/cam/delay") || id.ends_with("/cam/repeatBack") || id.ends_with("/cam/repeatTimes") || id.ends_with("/cam/silence") || id.ends_with("/cam/slowMotion") || id.ends_with("/cam/bgExpand") || id.ends_with("/cam/widescreen") || id.contains("/cam/wobble") || id.contains("/cam/autoCam") || id.ends_with("/cam/repeatTween")
 }
