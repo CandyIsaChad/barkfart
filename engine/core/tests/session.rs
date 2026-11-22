@@ -1781,3 +1781,23 @@ fn movieclips_can_be_dragged() {
     s.command(&json!({"op": "undo"}));
     assert_eq!(picture_at(&s, 0.0), before);
 }
+
+/// Movieclip Tools: a selected movieclip's loop mode, speed and offset.
+#[test]
+fn movieclip_tools_set_playback() {
+    let mut s = two_poses();
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    s.command(&json!({"op": "to_movieclip"}));
+    let h = s.tools.handles(s.project(), 0.0).into_iter().find(|h| h.node.is_empty()).unwrap();
+    s.command(&json!({"op": "select", "layer": h.layer, "node": ""}));
+    let st = s.state();
+    assert_eq!(st["movieclip"]["loop"], "loop");
+    assert_eq!(st["movieclip"]["speed"], 1.0);
+    let st = s.command(&json!({"op": "movieclip", "loop": "pingpong", "speed": 0.5, "offset": 0.1}));
+    assert_eq!(st["undo"], "Movieclip");
+    assert_eq!(st["movieclip"]["loop"], "pingpong");
+    assert_eq!(st["movieclip"]["speed"], 0.5);
+    assert_eq!(st["movieclip"]["offset"], 0.1);
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(s.state()["movieclip"]["speed"], 1.0);
+}

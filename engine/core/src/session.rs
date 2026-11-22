@@ -162,7 +162,12 @@ impl Session {
         if let Some((l, node)) = &self.selected {
             let t = self.time();
             let p = self.project();
-            let ok = p.root().and_then(|s| s.layer(l)).filter(|x| Resolver::new(p).b(&x.shown, t)).and_then(|l| l.as_figure()).is_some_and(|f| f.node(node).is_some());
+            // a figure's joint, or (no joint) a movieclip or sprite
+            let ok = p.root().and_then(|s| s.layer(l)).filter(|x| Resolver::new(p).b(&x.shown, t)).is_some_and(|x| match &x.kind {
+                LayerKind::Figure(f) => f.node(node).is_some(),
+                LayerKind::Symbol(_) | LayerKind::Sprite(_) => node.is_empty(),
+                _ => false,
+            });
             if !ok {
                 self.selected = None;
             }
@@ -1821,6 +1826,28 @@ impl Session {
                     }
                 }
             }
+            "movieclip" => {
+                // Movieclip Tools: loop mode, speed, start offset (seconds)
+                if let Some(l) = self.sel_layer() {
+                    let c2 = c.clone();
+                    self.step("Movieclip", |s| {
+                        let Some(x) = s.project.layer_mut(&sym, &l) else { return crate::edit::fail("no layer") };
+                        let LayerKind::Symbol(sl) = &mut x.kind else { return crate::edit::fail("not a movieclip") };
+                        if let Some(m) = c2["loop"].as_str() {
+                            sl.loop_mode = match m { "once" => SymbolLoop::Once, "pingpong" => SymbolLoop::PingPong, _ => SymbolLoop::Loop };
+                        }
+                        if let Some(v) = c2["speed"].as_f64() {
+                            sl.speed.track.clear();
+                            sl.speed.value = Value::D((v.clamp(0.0, 10.0) * 100.0).round() / 100.0);
+                        }
+                        if let Some(v) = c2["offset"].as_f64() {
+                            sl.time_offset.track.clear();
+                            sl.time_offset.value = Value::D((v.clamp(-600.0, 600.0) * 100.0).round() / 100.0);
+                        }
+                        Ok(())
+                    });
+                }
+            }
             "break_apart" => {
                 // a movieclip back into figures, posed as it shows on this frame
                 if let Some(id) = c["layer"].as_str().map(str::to_string) {
@@ -2333,6 +2360,14 @@ impl Session {
             let speed = g(&c.wobble_speed);
             json!({"widescreen": g(&c.widescreen) > 0.5, "wobbleXY": g(&c.wobble_xy), "wobbleRot": g(&c.wobble_rot), "wobbleSpeed": if speed > 0.0 { speed } else { 3.0 }, "wobbleZoom": g(&c.wobble_no_zoom) < 0.5})
         });
+        // Movieclip Tools: the selected movieclip's playback
+        let movieclip = self.selected.as_ref().and_then(|(l, _)| {
+            let layer = p.root()?.layer(l)?;
+            let LayerKind::Symbol(sl) = &layer.kind else { return None };
+            let mut r = Resolver::new(p);
+            let mode = match sl.loop_mode { SymbolLoop::Once => "once", SymbolLoop::Loop => "loop", SymbolLoop::PingPong => "pingpong" };
+            Some(json!({"layer": l, "name": layer.name.clone().unwrap_or_else(|| l.clone()), "loop": mode, "speed": round2(r.d(&sl.speed, t) as f32), "offset": round2(r.d(&sl.time_offset, t) as f32), "frames": p.symbol(&sl.symbol).map(|s| (s.duration * st_fps(p)).round() as i64).unwrap_or(0)}))
+        });
         // Lock Figure To Camera: the locked ones (parallax in the original's units)
         let camera_locks: Vec<J> = p.root().map(|r| {
             r.layers.iter().filter(|l| l.parent.as_ref().is_some_and(|pid| r.layer(pid).is_some_and(|x| matches!(x.kind, LayerKind::Camera(_))))).map(|l| {
@@ -2396,7 +2431,7 @@ impl Session {
             "canUndo": self.doc.can_undo(), "canRedo": self.doc.can_redo(),
             "undo": self.doc.undo_label(), "redo": self.doc.redo_label(), "dirty": self.doc.dirty(),
             "mode": match self.mode { Mode::Figure => "figure", Mode::All => "all", Mode::Camera => "camera" },
-            "handles": handles, "selected": sel, "figures": figures, "camera": cam,
+            "handles": handles, "selected": sel, "figures": figures, "camera": cam, "movieclip": movieclip,
             "branchCopied": self.branch_clip.is_some(),
             "watermark": p.settings.watermark.as_ref().map(|(t, c)| json!({"text": t, "color": c.to_rgba8888()})),
             "propsFrom": self.props_clip.as_ref().and_then(|c| p.root()?.layer(&c.source).map(|l| l.name.clone().unwrap_or_else(|| l.id.clone()))),

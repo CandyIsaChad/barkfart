@@ -999,6 +999,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (_st['mode'] == 'camera') return const ['Camera Tools'];
     if (_frameSelected) return const ['Frame Tools'];
     if (_st['textfield'] != null) return const ['Textfield Tools'];
+    if (_st['movieclip'] != null) return const ['Movieclip Tools'];
     final sel = _sel;
     if (sel != null) return const ['Stickfigure Tools', 'Stickfigure Filters', 'Segment Tools'];
     return const ['App Tools', 'Project Tools', 'Animation Tools', 'Library Tools', 'Textfield Tools'];
@@ -1014,6 +1015,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         return _animationTools();
       case 'Library Tools':
         return _libraryTools();
+      case 'Movieclip Tools':
+        return _movieclipTools(_st['movieclip'] as Map);
       case 'Frame Tools':
         return _frameToolsPanel();
       case 'Stickfigure Tools':
@@ -2414,6 +2417,24 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           })),
       _gap,
       ..._cameraFx(),
+    ];
+  }
+
+  /// Movieclip Tools: the selected movieclip's playback.
+  List<Widget> _movieclipTools(Map mc) {
+    final speed = (mc['speed'] as num?)?.toDouble() ?? 1, off = (mc['offset'] as num?)?.toDouble() ?? 0;
+    const modes = ['once', 'loop', 'pingpong'];
+    return [
+      Text('${mc['name']}  ·  ${mc['frames']} frame${mc['frames'] == 1 ? '' : 's'}', style: const TextStyle(color: cText, fontSize: 13)),
+      _gap,
+      _label('Plays'),
+      _Segmented(const ['Once', 'Loop', 'Ping-pong'], modes.indexOf('${mc['loop']}').clamp(0, 2), (i) => _cmd({'op': 'movieclip', 'loop': modes[i]})),
+      _gap,
+      _stepper('Speed', speed.toStringAsFixed(2), () => _cmd({'op': 'movieclip', 'speed': math.max(0, speed - 0.1)}), () => _cmd({'op': 'movieclip', 'speed': speed + 0.1})),
+      _stepper('Start offset', '${off.toStringAsFixed(2)} s', () => _cmd({'op': 'movieclip', 'offset': off - 0.1}), () => _cmd({'op': 'movieclip', 'offset': off + 0.1})),
+      _hint('Drag the square on the stage to move it. Library Tools can break it apart into figures.'),
+      _gap,
+      _Btn('Break apart', onTap: () => _cmd({'op': 'break_apart', 'layer': mc['layer']})),
     ];
   }
 
