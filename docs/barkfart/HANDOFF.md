@@ -26,8 +26,9 @@ original's UI, control by control) before changing anything.
   `flutter build linux --release`, check it with a scripted run
   (`BARKFART_DOCS=<tmp> BARKFART_SCRIPT="wait 1; ...; shot <png>; quit"
   build/linux/x64/release/bundle/barkfart`, see `_runScript` in
-  `app/lib/editor.dart`) and look at the screenshot. Then commit, push and
-  run `gh workflow run app-ios.yml --ref main`. Do not download or send IPAs.
+  `app/lib/editor.dart`) and look at the screenshot,
+  then commit and push. Do not trigger app-ios.yml until the redesign is good
+  enough to ship (the user, 2026-11-23). Do not download or send IPAs.
 - Keep changes small; one commit per feature.
 
 ## Status (2026-11-22, Claude review after the handoff agent)
