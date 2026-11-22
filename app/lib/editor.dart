@@ -2790,37 +2790,31 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   (double, double)? _camClip;
 
+  /// Camera Tools as rows (D15; REDESIGN §8 Camera page). The guide's four
+  /// spirals share one "Spiral" choice: picking it again turns the spiral.
   List<Widget> _cameraTools() {
     final cam = _st['cam'] as Map<String, dynamic>?;
     final zoom = (cam?['zoom'] as num?)?.toDouble() ?? 1;
     final rot = (cam?['rotation'] as num?)?.toDouble() ?? 0;
-    return [
-      const Text('Drag on the stage to move the camera on this frame.', style: TextStyle(color: cSecondary, fontSize: 12)),
-      _gap,
+    final guide = AppSettings.number('cameraGuide').clamp(0, 6);
+    void setGuide(int i) => setState(() {
+          AppSettings.values['cameraGuide'] = i < 3 ? i : (guide >= 3 ? 3 + (guide - 3 + 1) % 4 : 3);
+          unawaited(AppSettings.save());
+        });
+    final auto = _st['autoCam'] as Map?;
+    final rows = <rw.Desc>[
+      const rw.DHint('Drag on the stage to move the camera on this frame.'),
       // this frame's zoom and rotation onto another frame
-      _pair(
-        _Btn('Copy camera', onTap: () => setState(() => _camClip = (zoom, rot))),
-        _Btn('Paste camera', enabled: _camClip != null, onTap: () => _cmd({'op': 'camera', 'zoom': _camClip!.$1, 'rotation': _camClip!.$2})),
-      ),
-      _gap,
-      _stepper('Zoom', zoom.toStringAsFixed(2), () => _cmd({'op': 'camera', 'zoom': math.max(0.05, zoom - 0.05)}), () => _cmd({'op': 'camera', 'zoom': zoom + 0.05})),
-      _gap,
-      _stepper('Rotation', '${rot.round()}°', () => _cmd({'op': 'camera', 'rotation': rot - 5}), () => _cmd({'op': 'camera', 'rotation': rot + 5})),
-      _gap,
-      _pair(_Btn('Center camera', onTap: () => _cmd({'op': 'camera', 'center': true})), _Btn('Reset', onTap: () => _cmd({'op': 'reset_camera'}))),
-      _gap,
-      _hint("Use auto-camera to have this frame's camera tween across multiple frames automatically."),
-      _Btn(_st['autoCam'] != null ? 'Auto-camera… (to frame ${((_st['autoCam'] as Map)['end'] as num) + 1})' : 'Auto-camera…', onTap: _autoCameraDialog),
-      _gap,
-      _Btn('Lock figure to camera…', onTap: _cameraLockDialog),
-      _gap,
-      _Btn('Mode: ${const ['Default', 'Rule of thirds', 'Phi grid', 'Fib spiral 1', 'Fib spiral 2', 'Fib spiral 3', 'Fib spiral 4'][AppSettings.number('cameraGuide').clamp(0, 6)]}', onTap: () => setState(() {
-            AppSettings.values['cameraGuide'] = (AppSettings.number('cameraGuide') + 1) % 7;
-            unawaited(AppSettings.save());
-          })),
-      _gap,
-      ..._cameraFx(),
+      rw.DButtons('Copy camera', () => setState(() => _camClip = (zoom, rot)), b: 'Paste camera', onB: _camClip == null ? null : () => _cmd({'op': 'camera', 'zoom': _camClip!.$1, 'rotation': _camClip!.$2})),
+      rw.DStep('Zoom', zoom.toStringAsFixed(2), onMinus: zoom > 0.05 ? () => _cmd({'op': 'camera', 'zoom': math.max(0.05, zoom - 0.05)}) : null, onPlus: () => _cmd({'op': 'camera', 'zoom': zoom + 0.05})),
+      rw.DStep('Rotation', '${rot.round()}°', onMinus: () => _cmd({'op': 'camera', 'rotation': rot - 5}), onPlus: () => _cmd({'op': 'camera', 'rotation': rot + 5})),
+      rw.DButtons('Center camera', () => _cmd({'op': 'camera', 'center': true}), b: 'Reset', onB: () => _cmd({'op': 'reset_camera'})),
+      rw.DLink('Auto-camera', auto != null ? 'To frame ${(auto['end'] as num) + 1}' : 'Off', onTap: _autoCameraDialog),
+      const rw.DHint("Auto-camera tweens this frame's camera across several frames."),
+      rw.DLink('Lock a figure to the camera', 'Choose', onTap: _cameraLockDialog),
+      rw.DSeg(const ['None', 'Thirds', 'Phi', 'Spiral'], guide < 3 ? guide : 3, label: guide >= 3 ? 'Guide (spiral ${guide - 2} of 4)' : 'Guide', onSelect: setGuide),
     ];
+    return [for (final d in rows) rw.renderDesc(d), _title('Effects on this frame'), ..._cameraFx()];
   }
 
   /// Movieclip Tools: the selected movieclip's playback.
