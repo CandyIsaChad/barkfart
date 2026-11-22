@@ -33,7 +33,7 @@ Tick items there as they finish.
 - Scripted editor runs as before. The new script command is `savesheet`.
 - The window is capped at the screen size (about 1300x700).
 
-**Next:** B5 (the Export sheet). B3 waits until after C7. Then the rest of §7 in order. B4 (the View card) is done: script command `view` opens it. The script command `toast <text>` shows a toast.
+**Next:** B6 (the Settings screen). B3 waits until after C7. B5 (the Export sheet) is done; watermark and "Make vertical" move into it in C5. Then the rest of §7 in order. B4 (the View card) is done: script command `view` opens it. The script command `toast <text>` shows a toast.
 
 Usage at this note: the 5-hour window was at about 72% and the weekly at 84%.
 

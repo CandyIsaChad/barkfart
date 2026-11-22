@@ -407,7 +407,8 @@ and tests are never weakened.
   looping, fullscreen. **Built right after C7**, because its anchor is the
   timeline toolbar's "fps" button, which C7 adds.
 - [x] B4. The View card (today's View options).
-- [ ] B5. The Export sheet.
+- [x] B5. The Export sheet. Watermark and "Make vertical" join it when C5
+  removes Project Tools.
 - [ ] B6. The Settings screen.
 
 ### C. The editor shell (frames are still snapshots)

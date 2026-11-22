@@ -4049,71 +4049,77 @@ class _ExportDialogState extends State<_ExportDialog> {
 
   static const _widths = [320, 640, 1280, 1920];
 
+  // shown in the redesign's order (REDESIGN §8); the engine's codes stay 0 GIF, 1 PNG frames, 2 video
+  static const _order = [2, 0, 1];
+
   @override
   Widget build(BuildContext context) {
     final w = _widths[_size], h = (w * widget.h / widget.w).round();
     final last = _end == 0 ? widget.frames : _end;
-    return AlertDialog(
-      backgroundColor: cPanel,
-      title: const Text('Export animation', style: TextStyle(color: cText, fontSize: 17)),
-      content: SizedBox(
-        width: 360,
+    final count = last - _start + 1;
+    return Dialog(
+      backgroundColor: cCard,
+      insetPadding: const EdgeInsets.all(12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460),
         child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            TextField(controller: _name, style: const TextStyle(color: cText), decoration: const InputDecoration(labelText: 'Name')),
-            const SizedBox(height: 12),
-            _Segmented(const ['GIF', 'PNG frames', 'Video'], _format, (i) => setState(() => _format = i)),
-            const SizedBox(height: 10),
-            _hint('Size'),
-            const SizedBox(height: 4),
-            _Segmented(const ['320', '640', '1280', '1920'], _size, (i) => setState(() => _size = i)),
-            Padding(padding: const EdgeInsets.only(top: 4), child: _hint('$w × $h')),
-            const SizedBox(height: 10),
-            Row(children: [
-              Expanded(child: Text('From frame $_start', style: const TextStyle(color: cText, fontSize: 13))),
-              SizedBox(width: 40, child: _Btn('−', enabled: _start > 1, onTap: () => setState(() => _start--))),
-              const SizedBox(width: 4),
-              SizedBox(width: 40, child: _Btn('+', enabled: _start < last, onTap: () => setState(() => _start++))),
-            ]),
-            const SizedBox(height: 6),
-            Row(children: [
-              Expanded(child: Text('To frame $last', style: const TextStyle(color: cText, fontSize: 13))),
-              SizedBox(width: 40, child: _Btn('−', enabled: last > _start, onTap: () => setState(() => _end = last - 1))),
-              const SizedBox(width: 4),
-              SizedBox(width: 40, child: _Btn('+', enabled: last < widget.frames, onTap: () => setState(() => _end = last + 1 >= widget.frames ? 0 : last + 1))),
-            ]),
-            if (_format == 1) ...[
-              const SizedBox(height: 6),
-              _Toggle('Transparent background', _transparent, (v) => setState(() => _transparent = v)),
-            ],
-            if (_format == 2) ...[
-              const SizedBox(height: 6),
-              _Toggle('Include sound', _sound, (v) => setState(() => _sound = v)),
-            ],
+            const Padding(padding: EdgeInsets.only(bottom: 8), child: Text('Export', textAlign: TextAlign.center, style: TextStyle(color: cTitle, fontSize: 17, fontWeight: FontWeight.w700))),
+            TextField(
+              controller: _name,
+              style: const TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w700),
+              decoration: InputDecoration(
+                isDense: true,
+                filled: true,
+                fillColor: cControl,
+                hintText: 'Name',
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+              ),
+            ),
             const SizedBox(height: 8),
-            _hint(_format == 2
-                ? 'Saved in the Barkfart Exports folder as a video (H.264, with the sound) that Photos and video players open.'
-                : 'Saved in the Barkfart Exports folder, with the soundtrack as a WAV when there is sound.'),
+            const kit.PropRow('Format', height: 26),
+            kit.Segmented(const ['Video', 'GIF', 'PNG frames'], _order.indexOf(_format), onSelect: (i) => setState(() => _format = _order[i])),
+            const kit.PropRow('Size', height: 26),
+            kit.Segmented(const ['320', '640', '1280', '1920'], _size, onSelect: (i) => setState(() => _size = i)),
+            kit.PropRow('Picture size', trailing: Text('$w × $h', style: const TextStyle(color: cSecondary, fontSize: 13))),
+            kit.StepRow('From frame', '$_start', onMinus: _start > 1 ? () => setState(() => _start--) : null, onPlus: _start < last ? () => setState(() => _start++) : null),
+            kit.StepRow('To frame', '$last', onMinus: last > _start ? () => setState(() => _end = last - 1) : null, onPlus: last < widget.frames ? () => setState(() => _end = last + 1 >= widget.frames ? 0 : last + 1) : null),
+            kit.TickRow('Include sound', _format == 2 ? _sound : false, onChanged: _format == 2 ? (v) => setState(() => _sound = v) : null),
+            kit.TickRow('Transparent background', _format == 1 ? _transparent : false, onChanged: _format == 1 ? (v) => setState(() => _transparent = v) : null),
+            kit.Hint(_format == 2
+                ? 'A video (H.264, with the sound) that Photos and video players open. Videos can’t be transparent.'
+                : _format == 1
+                    ? '$count pictures, with the soundtrack as a WAV when there is sound.'
+                    : 'A GIF, with the soundtrack as a WAV when there is sound. Saved in the Barkfart Exports folder.'),
+            Row(children: [
+              Expanded(child: kit.WordButton('Cancel', onTap: () => Navigator.pop(context), filled: true, expand: true, height: 40)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: kit.WordButton(
+                  _format == 0 ? 'Export GIF' : _format == 2 ? 'Export video' : 'Export $count PNGs',
+                  primary: true,
+                  expand: true,
+                  height: 40,
+                  onTap: () => Navigator.pop(context, <String, Object>{
+                    'format': _format,
+                    'w': w,
+                    'h': h,
+                    'start': _start - 1,
+                    'count': count,
+                    'transparent': _format == 1 && _transparent,
+                    // video: the engine's flag argument means "without sound"
+                    'silent': _format == 2 && !_sound,
+                    'name': _name.text,
+                  }),
+                ),
+              ),
+            ]),
           ]),
         ),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        TextButton(
-          onPressed: () => Navigator.pop(context, <String, Object>{
-            'format': _format,
-            'w': w,
-            'h': h,
-            'start': _start - 1,
-            'count': last - _start + 1,
-            'transparent': _format == 1 && _transparent,
-            // video: the engine's flag argument means "without sound"
-            'silent': _format == 2 && !_sound,
-            'name': _name.text,
-          }),
-          child: Text(_format == 0 ? 'Export GIF' : _format == 2 ? 'Export video' : 'Export ${last - _start + 1} PNGs'),
-        ),
-      ],
     );
   }
 }
