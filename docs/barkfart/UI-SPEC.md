@@ -1,3 +1,6 @@
+> **Superseded by REDESIGN.md (v4, 2026-11-23)** wherever they disagree.
+> Kept for the scaling rules and history.
+
 # Editor screen spec (v2, after design review 2026-11-17)
 
 First interactive screen: pose figures across frames and play back.
