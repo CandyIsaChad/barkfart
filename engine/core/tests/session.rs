@@ -1969,6 +1969,35 @@ fn diff(a: &Value, b: &Value, path: &str, out: &mut Vec<String>) {
     }
 }
 
+/// Runs a row's set-up: one command or a list. "@movieclip" turns the figure
+/// into a movieclip and selects it; "@connector" makes a connector at the arm.
+fn apply_setup(s: &mut Session, setup: &Option<Value>) {
+    let list: Vec<Value> = match setup {
+        Some(Value::Array(a)) => a.clone(),
+        Some(c) => vec![c.clone()],
+        None => vec![],
+    };
+    for c in &list {
+        match c["op"].as_str() {
+            Some("@movieclip") => {
+                s.command(&json!({"op": "to_movieclip"}));
+                let id = s.project().root().expect("root").layers.iter().find(|l| matches!(l.kind, barkfart_core::model::LayerKind::Symbol(_))).expect("a movieclip").id.clone();
+                s.command(&json!({"op": "select", "layer": id, "node": ""}));
+            }
+            Some("@connector") => {
+                s.command(&json!({"op": "build", "layer": "L2"}));
+                s.command(&json!({"op": "connect_start"}));
+                let (x, y) = joint_at(s, "armR2");
+                s.command(&json!({"op": "down", "x": x, "y": y, "r": 4}));
+                s.command(&json!({"op": "up"}));
+            }
+            _ => {
+                s.command(c);
+            }
+        }
+    }
+}
+
 /// The controls the on / off tests flip: (name, set-up before the first
 /// picture (one command or a list), on, off).
 fn toggle_rows() -> Vec<(&'static str, Option<Value>, Value, Value)> {
@@ -2010,7 +2039,7 @@ fn toggle_rows() -> Vec<(&'static str, Option<Value>, Value, Value)> {
         ("visible in onion skin", None, json!({"op": "figure", "onion": false}), json!({"op": "figure", "onion": true})),
         ("flip figure", None, json!({"op": "flip_figure", "h": true}), json!({"op": "flip_figure", "h": true})),
         ("flip branch", None, json!({"op": "flip_branch", "h": true}), json!({"op": "flip_branch", "h": true})),
-        ("layer order", None, json!({"op": "layer_order", "forward": true}), json!({"op": "layer_order", "forward": false})),
+        ("layer order", Some(json!([{"op": "add_figure", "kind": "ball"}, {"op": "select", "layer": "L2", "node": "armR1"}])), json!({"op": "layer_order", "forward": true}), json!({"op": "layer_order", "forward": false})),
         ("nudge", None, json!({"op": "nudge", "dx": 5, "dy": -3}), json!({"op": "nudge", "dx": -5, "dy": 3})),
         ("turn figure", None, json!({"op": "figure", "turn": 45}), json!({"op": "figure", "turn": -45})),
         ("watermark", None, json!({"op": "watermark", "on": true, "text": "hi"}), json!({"op": "watermark", "on": false})),
@@ -2024,6 +2053,18 @@ fn toggle_rows() -> Vec<(&'static str, Option<Value>, Value, Value)> {
         ("textfield font kept while off", Some(json!([{"op": "add_textfield"}, {"op": "textfield", "font": "Bangers"}])), json!({"op": "textfield", "font": null}), json!({"op": "textfield", "font": "Bangers"})),
         ("pause kept while off", Some(json!({"op": "frame_delay", "seconds": 0.4})), json!({"op": "frame_delay", "seconds": 0}), json!({"op": "frame_delay", "seconds": 0.4})),
         ("motion blur distance kept while off", Some(json!([{"op": "filter", "motion": true}, {"op": "filter", "motionDistance": 60}])), json!({"op": "filter", "motion": false}), json!({"op": "filter", "motion": true})),
+        // textfields, movieclips, polyfills and connectors
+        ("textfield locked", Some(json!({"op": "add_textfield"})), json!({"op": "textfield", "locked": true}), json!({"op": "textfield", "locked": false})),
+        ("textfield alignment", Some(json!({"op": "add_textfield"})), json!({"op": "textfield", "align": 2}), json!({"op": "textfield", "align": 1})),
+        ("textfield text", Some(json!({"op": "add_textfield"})), json!({"op": "textfield", "text": "Hi there"}), json!({"op": "textfield", "text": "Hello"})),
+        ("textfield scale", Some(json!({"op": "add_textfield"})), json!({"op": "textfield", "scale": 2.0}), json!({"op": "textfield", "scale": 1.0})),
+        ("textfield colour", Some(json!([{"op": "add_textfield"}, {"op": "textfield", "color": 0xff0000ffu32}])), json!({"op": "textfield", "color": 0x0000ffffu32}), json!({"op": "textfield", "color": 0xff0000ffu32})),
+        ("movieclip speed", Some(json!([{"op": "@movieclip"}])), json!({"op": "movieclip", "speed": 2.0}), json!({"op": "movieclip", "speed": 1.0})),
+        ("movieclip offset", Some(json!([{"op": "@movieclip"}])), json!({"op": "movieclip", "offset": 0.5}), json!({"op": "movieclip", "offset": 0.0})),
+        ("movieclip loop", Some(json!([{"op": "@movieclip"}, {"op": "movieclip", "loop": "loop"}])), json!({"op": "movieclip", "loop": "once"}), json!({"op": "movieclip", "loop": "loop"})),
+        ("polyfill own colour", Some(json!([{"op": "build", "layer": "L2"}, {"op": "polyfill_new"}])), json!({"op": "polyfill_color", "own": false}), json!({"op": "polyfill_color", "own": true})),
+        ("connector reversed", Some(json!([{"op": "@connector"}])), json!({"op": "connector_set", "reversed": true}), json!({"op": "connector_set", "reversed": false})),
+        ("connector percent", Some(json!([{"op": "@connector"}])), json!({"op": "connector_set", "percent": 0.3}), json!({"op": "connector_set", "percent": 0.5})),
         ("camera lock kept while off", Some(json!([{"op": "camera", "zoom": 1.5, "rotation": 10}, {"op": "camera_lock", "layer": "L2", "on": true}])), json!({"op": "camera_lock", "layer": "L2", "on": false}), json!({"op": "camera_lock", "layer": "L2", "on": true})),
     ]
 }
@@ -2052,17 +2093,7 @@ fn toggling_a_control_on_and_off_changes_nothing() {
         s.command(&json!({"op": "add_camera"}));
         s.command(&json!({"op": "frame", "i": 0}));
         s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
-        match setup {
-            Some(serde_json::Value::Array(list)) => {
-                for c in list {
-                    s.command(c);
-                }
-            }
-            Some(c) => {
-                s.command(c);
-            }
-            None => {}
-        }
+        apply_setup(&mut s, setup);
         let fps = s.project().settings.fps as f64;
         let times = [0.0, 0.25 / fps, 0.5 / fps, 0.75 / fps, 1.0 / fps];
         let pictures = |s: &Session| -> Vec<Vec<u8>> { times.iter().map(|t| picture(s, *t)).collect() };
@@ -2098,6 +2129,12 @@ fn toggling_a_control_on_and_off_changes_nothing() {
             assert_eq!(s.state()["textfield"]["font"], "Bangers", "the font is on");
         }
         let switched = (pictures(&s), s.state());
+        // a row that does nothing proves nothing: "on" must change a picture or the panel
+        let mut shown = Vec::new();
+        diff(&base.1, &switched.1, "", &mut shown);
+        if switched.0 == base.0 && shown.is_empty() {
+            failures.push(format!("{name}: turning it on changed neither a picture nor the panel (a wrong set-up or command?)"));
+        }
         s.command(off);
         reopened(&s, "off", &mut failures);
         if *name == "textfield font" {
@@ -2804,17 +2841,7 @@ fn three_frames(setup: &Option<Value>) -> Session {
     s.command(&json!({"op": "insert_frame"}));
     s.command(&json!({"op": "frame", "i": 1}));
     s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
-    match setup {
-        Some(Value::Array(list)) => {
-            for c in list {
-                s.command(c);
-            }
-        }
-        Some(c) => {
-            s.command(c);
-        }
-        None => {}
-    }
+    apply_setup(&mut s, setup);
     s
 }
 
@@ -2823,6 +2850,23 @@ fn all_pictures(s: &Session) -> Vec<Vec<u8>> {
     let fps = s.project().settings.fps as f64;
     let n = s.state()["frames"].as_i64().unwrap() as usize;
     (0..2 * n).map(|k| small_picture(s.project(), k as f64 / (2.0 * fps))).collect()
+}
+
+/// Keys of one property that sit a hair apart (float drift when a frame was
+/// inserted, deleted or held: two keys where there should be one).
+fn stray_keys(p: &barkfart_core::model::Project) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(sym) = p.root() {
+        for l in &sym.layers {
+            for q in l.properties() {
+                let ks = q.track.keys();
+                if ks.windows(2).any(|w| w[1].time - w[0].time < 1e-6) {
+                    out.push(q.id.clone());
+                }
+            }
+        }
+    }
+    out
 }
 
 /// The edits the matrix runs after a switch was flipped on and off.
@@ -2862,6 +2906,12 @@ fn next_edit_matrix(which: usize) {
             s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
             for c in &edit {
                 s.command(c);
+            }
+        }
+        for (what, s) in [("on and off, then", &a), ("alone", &b)] {
+            let stray = stray_keys(s.project());
+            if !stray.is_empty() {
+                failures.push(format!("{name}, {what} {fname}: keys a hair apart on {:?}", stray.iter().take(4).collect::<Vec<_>>()));
             }
         }
         let (pa, pb) = (all_pictures(&a), all_pictures(&b));
@@ -2953,10 +3003,13 @@ fn a_new_frame_draws_what_the_frame_it_copies_draws() {
             }
             let close = |a: &Vec<u8>, b: &Vec<u8>| a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.abs_diff(*y) <= 2);
             let now: Vec<Vec<u8>> = (0..4).map(|i| at(&s, i)).collect();
-            if !close(&now[0], &first) {
+            // a movieclip plays its own animation along the project's time: a frame that
+            // moved in time shows another picture of it, so those rows are held to their settings
+            let timeline = name.starts_with("movieclip");
+            if !timeline && !close(&now[0], &first) {
                 failures.push(format!("{name}, {how}: the first frame changed"));
             }
-            if !close(&now[1], &middle) {
+            if !timeline && !close(&now[1], &middle) {
                 failures.push(format!("{name}, {how}: the copied frame changed"));
             }
             // the settings of the copied frame are on the new one (the panel apart from
@@ -2971,13 +3024,13 @@ fn a_new_frame_draws_what_the_frame_it_copies_draws() {
             }
             // a wobble is a shake that depends on the time: the same setting draws another
             // shake one frame later, so those rows are held to their settings, not their pixels
-            if !name.starts_with("wobble") && !close(&now[2], &middle) {
+            if !name.starts_with("wobble") && !timeline && !close(&now[2], &middle) {
                 failures.push(format!("{name}, {how}: the new frame does not draw what the copied frame draws (its panel differs: {:?})", d.iter().take(8).collect::<Vec<_>>()));
             }
             if !d.is_empty() {
                 failures.push(format!("{name}, {how}: the new frame's settings differ from the copied frame's: {:?}", d.iter().take(8).collect::<Vec<_>>()));
             }
-            if !close(&now[3], &last) {
+            if !timeline && !close(&now[3], &last) {
                 failures.push(format!("{name}, {how}: the last frame changed"));
             }
         }
@@ -3005,10 +3058,12 @@ fn deleting_a_frame_leaves_the_other_frames_as_they_were() {
             failures.push(format!("{name}: {} frames left", s.state()["frames"]));
             continue;
         }
-        if !close(&at(&s, 0), &first) {
+        // (a movieclip plays along the project's time: the last frame moved in time)
+        let timeline = name.starts_with("movieclip");
+        if !timeline && !close(&at(&s, 0), &first) {
             failures.push(format!("{name}: the first frame changed"));
         }
-        if !close(&at(&s, 1), &last) {
+        if !timeline && !close(&at(&s, 1), &last) {
             failures.push(format!("{name}: the last frame changed (or is not where it was)"));
         }
         s.command(&json!({"op": "undo"}));
@@ -3017,4 +3072,68 @@ fn deleting_a_frame_leaves_the_other_frames_as_they_were() {
         }
     }
     assert!(failures.is_empty(), "{} differences:\n{}", failures.len(), failures.join("\n"));
+}
+
+/// Layer up / Layer down step past the next layer that draws: with a camera
+/// (or a sound layer) in between, one press still changes what is in front.
+#[test]
+fn layer_up_and_down_step_over_layers_that_do_not_draw() {
+    use barkfart_core::model::LayerKind;
+    let mut s = two_poses();
+    s.command(&json!({"op": "add_camera"}));
+    let st = s.command(&json!({"op": "add_figure", "kind": "ball"}));
+    let ball = st["selected"]["layer"].as_str().unwrap().to_string();
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    let at = |s: &Session, id: &str| s.project().root().unwrap().layers.iter().position(|l| l.id == id).unwrap();
+    let cam = s.project().root().unwrap().layers.iter().find(|l| matches!(l.kind, LayerKind::Camera(_))).unwrap().id.clone();
+    // the man is below the ball, with the camera between them or not
+    assert!(at(&s, "L2") < at(&s, &ball));
+    let st = s.command(&json!({"op": "layer_order", "forward": true}));
+    assert!(at(&s, "L2") > at(&s, &ball), "one press: the man is in front of the ball");
+    assert_eq!(st["undo"], "Bring forward");
+    s.command(&json!({"op": "layer_order", "forward": false}));
+    assert!(at(&s, "L2") < at(&s, &ball), "one press back: behind the ball again");
+    // at the end of the stack nothing is left to pass
+    let before = saved_text(s.project());
+    s.command(&json!({"op": "layer_order", "forward": false}));
+    assert_eq!(saved_text(s.project()), before, "already at the back");
+    let _ = cam;
+}
+
+/// Shifting keys when a frame is inserted or deleted drifts a hair off the
+/// frame times (0.2 + 0.1 is not 0.3). A figure that is on one frame only
+/// must stay off the others, however many frames come and go around it.
+#[test]
+fn inserting_and_deleting_frames_keep_a_figure_on_its_own_frames() {
+    let mut s = two_poses();
+    // three frames; a ball on the middle one only
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "insert_frame"}));
+    s.command(&json!({"op": "frame", "i": 1}));
+    let st = s.command(&json!({"op": "add_figure", "kind": "ball"}));
+    let ball = st["selected"]["layer"].as_str().unwrap().to_string();
+    let fps = s.project().settings.fps as f64;
+    let shown = |s: &Session| -> Vec<bool> {
+        let p = s.project();
+        let n = s.state()["frames"].as_i64().unwrap();
+        let l = p.root().unwrap().layer(&ball).unwrap();
+        let mut r = barkfart_core::eval::Resolver::new(p);
+        (0..n).map(|i| r.b(&l.shown, i as f64 / fps)).collect()
+    };
+    assert_eq!(shown(&s), [false, true, false]);
+    for (frame, want) in [(1, vec![false, true, true, false]), (2, vec![false, true, true, true, false]), (0, vec![false, false, true, true, true, false])] {
+        s.command(&json!({"op": "frame", "i": frame}));
+        s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+        s.command(&json!({"op": "insert_frame"}));
+        assert_eq!(shown(&s), want, "a frame inserted after frame {}", frame + 1);
+        assert!(stray_keys(s.project()).is_empty(), "no keys a hair apart after inserting after frame {}", frame + 1);
+    }
+    // and taking them away again (the new frame 1 is a copy of the first)
+    for _ in 0..3 {
+        s.command(&json!({"op": "frame", "i": 0}));
+        s.command(&json!({"op": "delete_frame"}));
+        assert!(stray_keys(s.project()).is_empty(), "no keys a hair apart after a delete");
+        let now = shown(&s);
+        assert_eq!(*now.last().unwrap(), false, "the last frame still has no ball: {now:?}");
+    }
 }

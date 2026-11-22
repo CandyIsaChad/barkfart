@@ -249,6 +249,10 @@ impl Session {
         let r = self.doc.edit(label, |s| {
             anchor_poses(s);
             let v = f(s)?;
+            // keys shifted by a frame operation sit a hair off their frames (0.2 + 0.1 is
+            // not 0.3): put them on the frames before anchoring keys the gaps, or the gap
+            // filler (a held value from the key before) wins over the shifted key
+            snap_keys(s);
             anchor_poses(s);
             snap_keys(s);
             Ok(v)
@@ -594,6 +598,7 @@ impl Session {
                 let copy = c.get("copy").and_then(|v| v.as_bool()).unwrap_or(true);
                 let made = self.step("Insert frame", |s| {
                     frame_ops::insert_after(s, fr, copy)?;
+                    snap_keys(s);
                     if copy {
                         // a new frame is a whole pose (a snapshot), like the original's frames
                         anchor_poses(s);
@@ -1272,7 +1277,7 @@ impl Session {
             "layer_order" => {
                 if let Some(l) = self.sel_layer() {
                     let fwd = b("forward");
-                    self.step(if fwd { "Bring forward" } else { "Send back" }, |s| layer_ops::move_with_joined(s, &sym, &l, fwd));
+                    self.step(if fwd { "Bring forward" } else { "Send back" }, |s| move_among_drawn(s, &sym, &l, fwd));
                 }
             }
             "add_segment" => {
@@ -3077,6 +3082,25 @@ fn color_of(r: &mut Resolver, p: &Property, t: f64) -> u32 {
         Value::C(c) => c.to_rgba8888(),
         _ => 0x000000ff,
     }
+}
+
+/// Layer up / down: the figure (with what is joined to it) moves past the next
+/// layer that draws, not past a camera or a sound layer, which show nothing
+/// (one press must change what is in front). The Java reference's
+/// `layer_ops::move_with_joined` steps one layer whatever it is.
+fn move_among_drawn(st: &mut crate::edit::State, sym: &str, id: &str, forward: bool) -> EditResult<()> {
+    let Some(s) = st.project.symbol_mut(sym) else { return crate::edit::fail("no symbol") };
+    let block: std::collections::HashSet<String> = layer_ops::with_joined(s, id).into_iter().collect();
+    let (inb, rest): (Vec<_>, Vec<_>) = s.layers.iter().cloned().partition(|l| block.contains(&l.id));
+    let before = s.layers.iter().take_while(|l| !block.contains(&l.id)).count().min(rest.len());
+    let draws = |l: &std::sync::Arc<Layer>| !matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_));
+    let to = if forward { rest[before..].iter().position(draws).map(|k| before + k + 1) } else { rest[..before].iter().rposition(draws) };
+    let Some(to) = to else { return Ok(()) };
+    let mut out: Vec<_> = rest[..to].to_vec();
+    out.extend(inb);
+    out.extend(rest[to..].iter().cloned());
+    s.layers = out;
+    Ok(())
 }
 
 /// "Use segment color" on or off for one segment. Off: it follows the
