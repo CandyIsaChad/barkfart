@@ -18,7 +18,7 @@ class BarkfartApp extends StatelessWidget {
     return MaterialApp(
       title: 'Barkfart',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(brightness: Brightness.dark, colorSchemeSeed: cAccent, useMaterial3: true),
+      theme: ThemeData(brightness: Brightness.light, colorSchemeSeed: cAccent, useMaterial3: true, scaffoldBackgroundColor: cPanel, dialogTheme: const DialogThemeData(backgroundColor: cCard)),
       home: const EditorPage(),
       builder: (c, child) => RepaintBoundary(key: appShot, child: child),
     );
