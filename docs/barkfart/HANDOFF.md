@@ -33,7 +33,7 @@ Tick items there as they finish.
 - Scripted editor runs as before. The new script command is `savesheet`.
 - The window is capped at the screen size (about 1300x700).
 
-**Next:** C7, the folded timeline: control toolbar, fps ruler (D16), and the
+**Next:** C7b (C7a, the toolbar and the frame-words bar, is done). C7 overall is the folded timeline: control toolbar, fps ruler (D16), and the
 tiled Preview row. It replaces the top frame strip and the top-right grid.
 Then B3 (the Animation popover from the toolbar's fps button) and C6 (the
 "+" menu in the bottom bar). Then D1 onwards.

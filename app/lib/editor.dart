@@ -1165,6 +1165,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                   ]),
                 ),
               ),
+              if (!_fsNow && !_hidePanels) _controlBar(),
+              if (!_fsNow && !_hidePanels) _framesBar(),
             ]),
           ),
           if (!_fsNow) _rightRail(pad, leftHand),
@@ -1545,49 +1547,64 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           },
         ),
       ),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(4, 6, 8, 6),
-        child: Column(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Row(children: [
-            _gridButton(Icons.add_box_outlined, 'Add frame', _playing ? null : () => _cmd({'op': 'insert_frame'})),
-            _gridButton(Icons.copy, 'Copy frame', _playing ? null : () => _cmd({'op': 'copy_frame'})),
-            GestureDetector(onLongPress: _playing ? null : _loopToPopup, child: _gridButton(Icons.play_arrow, 'Play (hold: loop to…)', _playing ? null : _togglePlay, accent: true)),
-          ]),
-          Row(children: [
-            _gridButton(Icons.delete_outline, 'Delete frame', _playing || _frames <= 1 ? null : () => _cmd({'op': 'delete_frame'})),
-            _gridButton(Icons.content_paste, 'Paste frame', _playing || _st['frameCopied'] != true ? null : () => _cmd({'op': 'paste_frame'})),
-            _gridButton(Icons.stop, 'Stop', _playing ? _togglePlay : null),
-          ]),
-          SizedBox(
-            width: 3 * 40 + 8,
-            height: 24,
-            child: _Btn('View options', onTap: _playing ? null : () => setState(() => _viewOptions = !_viewOptions), small: true),
-          ),
-        ]),
-      ),
     ]);
   }
 
-  Widget _gridButton(IconData icon, String tip, VoidCallback? onTap, {bool accent = false}) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 4),
-      child: Tooltip(
-        message: tip,
-        child: Opacity(
-          opacity: onTap == null ? 0.35 : 1,
-          child: Material(
-            color: accent && onTap != null ? cAccent : cControl,
-            borderRadius: BorderRadius.circular(4),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(4),
-              onTap: onTap,
-              child: SizedBox(width: 36, height: 26, child: Icon(icon, size: 18, color: cText)),
-            ),
+  void _goFrame(int i) {
+    if (_playing) _togglePlay();
+    _cmd({'op': 'frame', 'i': i.clamp(0, _frames - 1)});
+    if (!AppSettings.flag('keepSelection')) _cmd({'op': 'select'});
+  }
+
+  /// The timeline's control toolbar (REDESIGN §4): frame steps on the left,
+  /// onion skin, transport in the middle, the frame rate on the right.
+  Widget _controlBar() {
+    return Container(
+      height: 40,
+      decoration: const BoxDecoration(color: cCard, border: Border(top: BorderSide(color: cLine), bottom: BorderSide(color: Color(0xFFE6E8EB)))),
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      child: Stack(alignment: Alignment.center, children: [
+        Row(children: [
+          kit.IconTool('stepBack', label: 'Back one frame', onTap: _frame > 0 ? () => _goFrame(_frame - 1) : null),
+          kit.IconTool('stepFwd', label: 'Forward one frame', onTap: _frame < _frames - 1 ? () => _goFrame(_frame + 1) : null),
+          const SizedBox(width: 20),
+          kit.IconTool('onion', label: 'Onion skin', on: _opts['onion'] == true, onTap: _playing ? null : () => _cmd({'op': 'set', 'k': 'onion', 'v': _opts['onion'] != true})),
+          const Spacer(),
+          kit.WordButton('$_fpsLabel fps', size: 13, onTap: () => _jumpTo('Animation Tools')),
+        ]),
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          kit.IconTool('toStart', label: 'Go to the first frame', onTap: () => _goFrame(0)),
+          GestureDetector(
+            onLongPress: _playing ? null : _loopToPopup,
+            child: kit.IconTool(_playing ? 'pause' : 'play', label: _playing ? 'Stop' : 'Play (hold: loop to…)', size: 22, onTap: _togglePlay),
           ),
-        ),
-      ),
+          kit.IconTool('toEnd', label: 'Go to the last frame', onTap: () => _goFrame(_frames - 1)),
+        ]),
+      ]),
     );
   }
+
+  String get _fpsLabel {
+    final f = _fps;
+    return f == f.roundToDouble() ? f.round().toString() : f.toStringAsFixed(1);
+  }
+
+  /// The timeline's bottom bar: frame words on the right (one grammar).
+  Widget _framesBar() {
+    return Container(
+      height: 40,
+      color: cCard,
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      child: Row(children: [
+        const Spacer(),
+        kit.WordButton('Add frame', size: 14, onTap: _playing ? null : () => _cmd({'op': 'insert_frame'})),
+        kit.WordButton('Copy frame', size: 14, onTap: _playing ? null : () => _cmd({'op': 'copy_frame'})),
+        kit.WordButton('Paste frame', size: 14, onTap: _playing || _st['frameCopied'] != true ? null : () => _cmd({'op': 'paste_frame'})),
+        kit.WordButton('Delete frame', size: 14, danger: true, onTap: _playing || _frames <= 1 ? null : () => _cmd({'op': 'delete_frame'})),
+      ]),
+    );
+  }
+
 
   // ---------------------------------------------------------------- left panel
 
