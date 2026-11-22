@@ -60,6 +60,14 @@ Done and verified (engine suite green: `cargo test -q --workspace`, 3.5 min;
   - Use gradient on / off, then a blank or tween frame: the new frame's hidden
     gradient colour was 0x404040 instead of the default 0x808080.
   - The undo sweep sent `"on"` to `pin` (it reads `"v"`), so it tested Unlock.
+  - Inserting a frame after a frame that a figure is on alone put the figure
+    on the last frame too: shifted keys drift a hair off their frames (0.2 +
+    0.1 is not 0.3), the gap filler keyed the frame first and `snap_keys` then
+    kept the filler. `Session::step` and the insert_frame handler now snap
+    before anchoring. `frame_ops` itself must stay as it is (Java parity).
+  - Layer up / Layer down stepped over the invisible camera layer first (one
+    press did nothing visible): `move_among_drawn` in session.rs.
+  - Modify branch's "Use segment color" had the same loss as Segment Tools.
 Known and left alone:
 - A hidden gradient colour of pure black is stored as transparent black, which
   reads as "no colour chosen" (default grey) after Use gradient off, on.
@@ -74,6 +82,11 @@ Known and left alone:
   `ptyxis --new-window -- /home/caleb/.claude/barkfart-handoff/after-reset.sh "<time>"`.
 
 ## Next (no order; the user: "just keep writing the app. Don't stop.")
+- New rows in `toggle_rows()` need a set-up that really changes something (the
+  test fails a row whose "on" changes neither a picture nor the panel).
+  `@movieclip` and `@connector` are shared set-up steps.
+- Movieclip and wobble rows are held to their settings, not their pixels, in
+  the frame snapshot tests (they depend on the project's time).
 - Keep hunting hidden state with tests that compare pictures or saved
   projects before and after. Ideas not done yet: the matrix over drags
   (pose edits) as follow-ups; textfield, movieclip and polyfill rows in
