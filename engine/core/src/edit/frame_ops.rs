@@ -121,11 +121,26 @@ pub fn delete(st: &mut State, frame: i32) -> EditResult<bool> {
                 return None;
             }
             let mut out = Track::new(p.ty);
+            // an auto-camera ending on the deleted frame ends on the one before
+            let end_here = p.id.ends_with("/cam/autoCamEnd") && p.track.keys().iter().any(|k| (k.time - t).abs() < eps && matches!(k.value, Value::F(v) if v > 0.5));
             for k in p.track.keys() {
                 if (k.time - t).abs() < eps {
                     continue;
                 }
                 out.put(if k.time > t { Key { time: k.time - dt, ..*k } } else { *k });
+            }
+            if end_here && t - dt > -eps {
+                // on the previous frame's own key time (float drift would add a
+                // second key beside it)
+                let at = out.keys().iter().map(|k| k.time).find(|kt| (kt - (t - dt)).abs() < eps).unwrap_or(t - dt);
+                let mut kept = Track::new(p.ty);
+                for k in out.keys() {
+                    if (k.time - at).abs() >= eps {
+                        kept.put(*k);
+                    }
+                }
+                kept.put(Key::new(at, Value::F(1.0), Interp::Hold));
+                out = kept;
             }
             Some(out.keys().to_vec())
         });

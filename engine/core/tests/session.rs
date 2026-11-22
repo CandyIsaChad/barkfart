@@ -2205,3 +2205,19 @@ fn new_frames_do_not_inherit_timing() {
     s.command(&json!({"op": "frame", "i": 1}));
     assert_eq!(s.state()["frameDelay"], 0.5, "the original keeps its pause");
 }
+
+/// Deleting the frame an auto-camera ends on: it then ends on the frame
+/// before (as the reference says, it adapts to deleted frames).
+#[test]
+fn deleting_an_auto_camera_end_frame_moves_the_end() {
+    let mut s = two_poses();
+    s.command(&json!({"op": "add_camera"}));
+    s.command(&json!({"op": "insert_frame"}));
+    s.command(&json!({"op": "insert_frame"}));
+    s.command(&json!({"op": "frame", "i": 0}));
+    s.command(&json!({"op": "auto_camera", "end": 3, "ease": 1}));
+    s.command(&json!({"op": "frame", "i": 3}));
+    s.command(&json!({"op": "delete_frame"}));
+    s.command(&json!({"op": "frame", "i": 0}));
+    assert_eq!(s.state()["autoCam"]["end"], 2, "ends on the frame before the deleted one");
+}
