@@ -811,6 +811,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           _say(w.sublist(1).join(' '));
         case 'view':
           setState(() => _viewOptions = true);
+        case 'projects':
+          unawaited(_projectsMenu());
         case 'savesheet':
           unawaited(_saveSheet('Rooftop fight hasn\u2019t been saved for 10 minutes. The reminder can be changed or turned off in Settings.'));
         case 'savebutton':
@@ -1128,22 +1130,24 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       backgroundColor: cSurround,
       body: RepaintBoundary(
         key: _shot,
-        child: Row(textDirection: leftHand ? TextDirection.rtl : TextDirection.ltr, children: [
+        child: Column(children: [
+        if (!_fsNow) _appBar(pad),
+        Expanded(child: Row(textDirection: leftHand ? TextDirection.rtl : TextDirection.ltr, children: [
           // the tool panel: left, or right in left-hand mode (hidden in fullscreen playback)
           if (!_fsNow)
           Container(
             width: (big ? 220 : 180) + (leftHand ? pad.right : pad.left),
             color: cPanel,
-            padding: EdgeInsets.only(left: leftHand ? 0 : pad.left, right: leftHand ? pad.right : 0, top: pad.top, bottom: pad.bottom),
+            padding: EdgeInsets.only(left: leftHand ? 0 : pad.left, right: leftHand ? pad.right : 0, bottom: pad.bottom),
             child: Directionality(textDirection: TextDirection.ltr, child: _sidebar()),
           ),
           Expanded(
             child: Column(children: [
               if (!_fsNow)
               Container(
-                height: stripH + pad.top,
+                height: stripH,
                 color: cPanel,
-                padding: EdgeInsets.only(top: pad.top, right: leftHand ? 0 : pad.right, left: leftHand ? pad.left : 0),
+                padding: EdgeInsets.only(right: leftHand ? 0 : pad.right, left: leftHand ? pad.left : 0),
                 child: _st['building'] != null ? _buildBar() : _topBar(stripH),
               ),
               if (_showTabs && !_playing) _tabStrip(),
@@ -1154,15 +1158,88 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                     Positioned.fill(child: _stage()),
                     if (_arrows && !_playing) Positioned(left: _arrowsAt.dx, top: _arrowsAt.dy, child: _arrowsWindow()),
                     if (_magnifier && !_playing) Positioned(left: _magAt.dx, top: _magAt.dy, child: _magnifierWindow()),
-                    if (_viewOptions) Positioned(top: 8, right: 8, bottom: 8, width: 330, child: _viewOptionsPanel()),
+                    if (_viewOptions) Positioned(top: 8, left: 8, bottom: 8, width: 330, child: _viewOptionsPanel()),
                   ]),
                 ),
               ),
             ]),
           ),
+        ])),
         ]),
       ),
     );
+  }
+
+  /// The top bar (REDESIGN §4): Projects, View and Export on the left, the
+  /// animation's name and the unsaved dot in the middle.
+  Widget _appBar(EdgeInsets pad) {
+    final dirty = _st['dirty'] == true;
+    return Container(
+      height: 40 + pad.top,
+      padding: EdgeInsets.only(top: pad.top, left: pad.left + 8, right: pad.right + 8),
+      decoration: const BoxDecoration(color: cCard, border: Border(bottom: BorderSide(color: cLine))),
+      child: Stack(alignment: Alignment.center, children: [
+        Row(children: [
+          kit.WordButton('Projects', key: _projectsKey, onTap: _projectsMenu),
+          kit.WordButton('View', onTap: () => setState(() => _viewOptions = !_viewOptions)),
+          kit.WordButton('Export', onTap: _exportDialog),
+        ]),
+        IgnorePointer(
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 320),
+              child: Text(_file?.name ?? 'Untitled', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w700)),
+            ),
+            if (dirty) Container(width: 7, height: 7, margin: const EdgeInsets.only(left: 7), decoration: const BoxDecoration(color: Color(0xFFF2A93B), shape: BoxShape.circle)),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  final GlobalKey _projectsKey = GlobalKey();
+
+  /// "Projects": the animation's file actions, until the Projects screen (E2).
+  Future<void> _projectsMenu() async {
+    final box = _projectsKey.currentContext?.findRenderObject() as RenderBox?;
+    final at = box == null ? const Offset(8, 44) : box.localToGlobal(Offset(0, box.size.height + 4));
+    final pick = await showGeneralDialog<int>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Projects',
+      barrierColor: const Color(0x00000000),
+      transitionDuration: Duration.zero,
+      pageBuilder: (c, a1, a2) => Stack(children: [
+        Positioned(
+          left: at.dx,
+          top: at.dy,
+          child: kit.PanelCard(
+            width: 220,
+            padding: const EdgeInsets.all(6),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+              for (final (i, label) in const [(0, 'New animation'), (1, 'Open…'), (2, 'Save'), (3, 'Save as…'), (4, 'Settings')])
+                kit.Tap(
+                  onTap: () => Navigator.pop(c, i),
+                  minSize: 0,
+                  child: Container(height: 40, alignment: Alignment.centerLeft, padding: const EdgeInsets.symmetric(horizontal: 10), child: Text(label, style: const TextStyle(color: cAccent, fontSize: 15, fontWeight: FontWeight.w700))),
+                ),
+            ]),
+          ),
+        ),
+      ]),
+    );
+    switch (pick) {
+      case 0:
+        await _newProject();
+      case 1:
+        await _openDialog();
+      case 2:
+        await _save();
+      case 3:
+        await _saveAs();
+      case 4:
+        await _settingsDialog();
+    }
   }
 
   Widget _tabStrip() {
