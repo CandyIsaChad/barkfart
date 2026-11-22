@@ -828,6 +828,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         case 'savefigure':
           final bytes = _engine?.figureFile();
           if (bytes != null) await File(w[1]).writeAsBytes(bytes);
+        case 'bgimage':
+          final ok = _engine?.editorImage(await File(w[1]).readAsBytes()) ?? false;
+          setState(() {
+            _editorImage = ok;
+            _drawn = '';
+          });
         case 'modifybranch':
           unawaited(_modifyBranchDialog());
         case 'viewoptions':
@@ -3031,10 +3037,53 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         const SizedBox(height: 4),
         _Btn(tr['frame'] != null ? 'Clear trace (frame ${(tr['frame'] as num) + 1})' : 'Clear trace', small: true, onTap: () => _cmd({'op': 'trace'})),
       ],
+      _hint('Load a background image to trace from.'),
+      _pair(_Btn('Load BG image…', small: true, onTap: _loadEditorImage), _Btn('Clear BG image', small: true, enabled: _editorImage, onTap: () {
+        _engine?.editorImage(null);
+        setState(() {
+          _editorImage = false;
+          _drawn = '';
+        });
+      })),
       _gap,
       _label('Background colour (while editing)'),
       _swatches((_st['editorBg'] as num?)?.toInt() ?? 0xffffffff, (c) => _cmd({'op': 'editor_bg', 'color': c})),
     ];
+  }
+
+  bool _editorImage = false;
+
+  /// Load BG image: a picture from the Barkfart Images folder, faint behind
+  /// the figure being edited (view only, never saved).
+  Future<void> _loadEditorImage() async {
+    final e = _engine;
+    if (e == null) return;
+    final files = await imageFiles();
+    if (!mounted) return;
+    final pick = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: cPanel,
+        title: const Text('Load a background image', style: TextStyle(color: cText, fontSize: 16)),
+        content: SizedBox(
+          width: 360,
+          child: ListView(shrinkWrap: true, children: [
+            const Text('Pictures in the Barkfart Images folder. The image shows only while editing this figure and is not saved.', style: TextStyle(color: cSecondary, fontSize: 12)),
+            const SizedBox(height: 8),
+            if (files.isEmpty) const Text('No pictures in the folder yet.', style: TextStyle(color: cText)),
+            for (final f in files) Padding(padding: const EdgeInsets.only(bottom: 4), child: _Btn(f.path.split(Platform.pathSeparator).last, small: true, onTap: () => Navigator.pop(c, f.path))),
+          ]),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel'))],
+      ),
+    );
+    if (pick == null) return;
+    final ok = e.editorImage(await File(pick).readAsBytes());
+    if (!ok) _say('That picture could not be read.');
+    setState(() {
+      _editorImage = ok;
+      _drawn = '';
+    });
   }
 
   Future<void> _traceFrameDialog() async {

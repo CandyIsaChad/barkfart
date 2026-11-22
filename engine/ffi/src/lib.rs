@@ -22,6 +22,8 @@ pub struct Engine {
     glyphs: GlyphAtlas,
     /// Image ids uploaded for the current project.
     images: Vec<String>,
+    /// Figure editor "Load BG image": its size (texture "editor:bg"); view only.
+    editor_image: Option<(u32, u32)>,
     label: Vec<u8>,
     /// The open project with its history, selection and gestures.
     session: Option<Session>,
@@ -122,6 +124,7 @@ pub extern "C" fn bf_engine_new() -> *mut Engine {
                 audio_label,
                 glyphs,
                 images: Vec::new(),
+                editor_image: None,
                 label,
                 session: None,
                 sounds: Default::default(),
@@ -609,6 +612,23 @@ pub extern "C" fn bf_render_view(e: *const Engine, t: f64, w: u32, h: u32, x0: f
             let ghosts = onion.build_layered(p, &p.root_symbol, t);
             list = if v.onion_in_front { list.with_overlay(ghosts) } else { list.with_underlay(ghosts) };
         }
+        // Figure editor "Load BG image": the picture fitted into the stage, faint
+        if let (Some((iw, ih)), true) = (engine.editor_image, engine.session.as_ref().is_some_and(|s| s.building.is_some())) {
+            let (sw, sh) = (p.settings.width as f32, p.settings.height as f32);
+            let k = (sw / iw.max(1) as f32).min(sh / ih.max(1) as f32);
+            let (hw, hh) = (iw as f32 * k / 2.0, ih as f32 * k / 2.0);
+            let mut g = barkfart_core::eval::Group::new("editor-bg");
+            g.opacity = 0.5;
+            g.children.push(barkfart_core::eval::Item::Shape(barkfart_core::eval::Shape::new(
+                barkfart_core::eval::ShapeKind::Quad { asset: EDITOR_BG.into(), corners: [-hw, -hh, hw, -hh, hw, hh, -hw, hh] },
+                barkfart_core::model::Color::WHITE,
+                "editor-bg",
+            )));
+            let mut root = barkfart_core::eval::Group::new("editor-bg-root");
+            root.children.push(barkfart_core::eval::Item::Group(g));
+            let scene = barkfart_core::eval::Scene { root, time: t, diagnostics: Vec::new(), primitives: 0 };
+            list = list.with_underlay(tess::layered(&scene, None));
+        }
         // Figure editor "Trace": a frame or a figure faintly behind
         if let Some((fr, ly)) = engine.session.as_ref().filter(|s| s.building.is_some()).and_then(|s| s.trace.clone()) {
             let fps = p.settings.fps.max(1.0) as f64;
@@ -675,6 +695,34 @@ pub extern "C" fn bf_save(e: *mut Engine, len: *mut usize) -> *const u8 {
             engine.set_error(err);
             std::ptr::null()
         }
+    }
+}
+
+const EDITOR_BG: &str = "editor:bg";
+
+/// Figure editor "Load BG image": a picture (png, jpg, gif...) shown faintly
+/// behind the figure being edited; len 0 clears it. 0 when loaded.
+#[no_mangle]
+pub extern "C" fn bf_editor_image(e: *mut Engine, data: *const u8, len: usize) -> i32 {
+    if e.is_null() {
+        return 1;
+    }
+    // SAFETY: live handle
+    let engine = unsafe { &mut *e };
+    engine.renderer.remove_texture(EDITOR_BG);
+    engine.editor_image = None;
+    if data.is_null() || len == 0 {
+        return 0;
+    }
+    // SAFETY: the caller passes len bytes
+    let bytes = unsafe { std::slice::from_raw_parts(data, len) };
+    match barkfart_core::image::decode(bytes) {
+        Some(img) => {
+            engine.renderer.set_texture(EDITOR_BG, img.w, img.h, &img.px);
+            engine.editor_image = Some((img.w, img.h));
+            0
+        }
+        None => 2,
     }
 }
 

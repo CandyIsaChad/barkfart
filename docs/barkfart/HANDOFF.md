@@ -34,14 +34,8 @@ Done and reviewed so far: everything ticked in docs/barkfart/GAPS.md (the
 reviewed; the outline now follows the shape, drawn by the engine).
 
 ## Tasks, in order (stop after these; do not start other GAPS items)
-1. **Background image in the figure editor** (reference 12, "Load BG
-   image... / Clear BG image"): a picture from the Barkfart Images folder
-   (`imageFiles()` in app/lib/files.dart) shown faintly behind the figure
-   being edited, view only, never saved. The stage render is
-   `bf_render_view` in engine/ffi/src/lib.rs; the figure editor's trace
-   ghost (`tess::trace_ghost`, `Session::trace`) shows how a view-only
-   underlay is added. Textures for images come from the project's assets,
-   so look at how sprites get theirs before choosing an approach.
+(none open: pick the next unticked item in docs/barkfart/GAPS.md only if
+the brief that starts you says so)
 
 ## Design rules learned since (keep to them)
 - `cargo test -q --workspace` must print no `error` and no `FAILED`: a

@@ -57,7 +57,7 @@ committed). Plainest behaviour where the reference is unsure.
 - [x] Add connector (Connector Tools: percent, reversed, delete)
 - [x] Trace stickfigure / frame
 - [x] Background colour in the figure editor (view only)
-- [ ] Background image in the figure editor
+- [x] Background image in the figure editor (view only)
 - [x] Save stickfigure to a file (.nodes in Barkfart Figures)
 
 ## Textfields (13)

@@ -44,6 +44,8 @@ typedef _FileC = Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, In
 typedef _FileD = int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, int, int, int, Pointer<Uint8>);
 typedef _ImportC = Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, IntPtr);
 typedef _ImportD = Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, int);
+typedef _BytesC = Int32 Function(Pointer<Void>, Pointer<Uint8>, IntPtr);
+typedef _BytesD = int Function(Pointer<Void>, Pointer<Uint8>, int);
 typedef _ImportC2 = Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, IntPtr);
 typedef _ImportD2 = int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, int);
 typedef _SaveC = Pointer<Uint8> Function(Pointer<Void>, Pointer<IntPtr>);
@@ -237,6 +239,17 @@ class Engine {
   }
 
   /// Imports a file into the open project (one undo step); the new editor state.
+  /// Figure editor "Load BG image" (null clears it); false when the picture
+  /// could not be read.
+  bool editorImage(Uint8List? bytes) {
+    final n = bytes?.length ?? 0;
+    final data = calloc<Uint8>(n == 0 ? 1 : n);
+    if (bytes != null) data.asTypedList(n).setAll(0, bytes);
+    final r = _lib.lookupFunction<_BytesC, _BytesD>('bf_editor_image')(_handle, data, n);
+    calloc.free(data);
+    return r == 0;
+  }
+
   Map<String, dynamic>? importFile(String name, Uint8List bytes) {
     final data = calloc<Uint8>(bytes.length);
     data.asTypedList(bytes.length).setAll(0, bytes);
