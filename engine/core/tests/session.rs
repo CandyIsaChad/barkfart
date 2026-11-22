@@ -2147,6 +2147,12 @@ fn random_editing_keeps_the_project_sound() {
                 let _ = barkfart_core::tess::tessellate(&barkfart_core::eval::evaluate(p, &p.root_symbol, k as f64 / (2.0 * fps)), None);
             }
             let _ = barkfart_core::timing::Schedule::build(p);
+            // no two keys of a track a float hair apart (they fight over a frame)
+            for (id, q) in p.property_index() {
+                for w in q.track.keys().windows(2) {
+                    assert!(w[1].time - w[0].time > 0.25 / fps, "seed {seed}, after {c}: {id} has keys {} and {} on one frame", w[0].time, w[1].time);
+                }
+            }
         }
         assert!(steps > 60, "seed {seed}: too few edits ({steps})");
         for _ in 0..1000 {
