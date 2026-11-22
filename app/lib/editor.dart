@@ -11,6 +11,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'engine.dart';
 import 'files.dart';
@@ -702,6 +703,22 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   ExportJob? _export;
 
+  /// After an export: the file's name, and Share (the system share sheet:
+  /// save the video to Photos, send it, open it in another app).
+  Future<void> _exportDone(String path, {bool scripted = false}) async {
+    if (!mounted || (Platform.environment['BARKFART_SCRIPT'] != null && !scripted)) return;
+    final name = path.split(Platform.pathSeparator).last;
+    final share = await _ask('Export finished', '$name is in the Barkfart Exports folder (Files app on iPhone and iPad).', ['Done', 'Share…']);
+    if (share != 'Share…' || !mounted) return;
+    final box = context.findRenderObject() as RenderBox?;
+    final at = box == null ? null : box.localToGlobal(Offset.zero) & box.size;
+    try {
+      await SharePlus.instance.share(ShareParams(files: [XFile(path)], sharePositionOrigin: at));
+    } catch (err) {
+      _say('Could not share: $err');
+    }
+  }
+
   Future<void> _runExport(int format, int w, int h, int start, int count, bool transparent, String title) async {
     final e = _engine;
     if (e == null || _export != null) return;
@@ -709,7 +726,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final name = title.replaceAll(RegExp(r'[^A-Za-z0-9 _-]'), '').trim();
     final stamp = DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
     final base = '${dir.path}/${name.isEmpty ? 'Animation' : name} $stamp';
-    final job = e.export(format, format == 0 ? '$base.gif' : format == 2 ? '$base.mov' : '$base.zip', w, h, start: start, count: count, transparent: transparent);
+    final out = format == 0 ? '$base.gif' : format == 2 ? '$base.mov' : '$base.zip';
+    final job = e.export(format, out, w, h, start: start, count: count, transparent: transparent);
     if (job == null) {
       _say('Export failed: ${e.lastError}');
       return;
@@ -732,6 +750,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             _export = null;
             tm.cancel();
             _say('Exported to Barkfart Exports (Files app)');
+            unawaited(_exportDone(out));
             return;
           }
           if (mounted) setState(() => _status = 'Exporting frame $n of ${j.count}');
@@ -848,6 +867,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           });
         case 'fullscreen':
           setState(() => _fullscreen = true);
+        case 'exportdone':
+          unawaited(_exportDone(w.sublist(1).join(' '), scripted: true));
         case 'modifybranch':
           unawaited(_modifyBranchDialog());
         case 'viewoptions':
