@@ -3137,3 +3137,168 @@ fn inserting_and_deleting_frames_keep_a_figure_on_its_own_frames() {
         assert_eq!(*now.last().unwrap(), false, "the last frame still has no ball: {now:?}");
     }
 }
+
+/// A figure that is on one frame only stays on that frame through frame rate
+/// changes, pastes and deletes at awkward positions (keys are rescaled and
+/// shifted, and float error must not move or add one).
+#[test]
+fn a_one_frame_figure_stays_on_its_frame_through_rate_changes_pastes_and_deletes() {
+    let mut s = two_poses();
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "insert_frame"}));
+    s.command(&json!({"op": "insert_frame"}));
+    s.command(&json!({"op": "insert_frame"}));
+    // five frames; the ball on frame 3 (index 2) only
+    s.command(&json!({"op": "frame", "i": 2}));
+    let st = s.command(&json!({"op": "add_figure", "kind": "ball"}));
+    let ball = st["selected"]["layer"].as_str().unwrap().to_string();
+    let shown = |s: &Session| -> Vec<bool> {
+        let p = s.project();
+        let fps = p.settings.fps as f64;
+        let n = s.state()["frames"].as_i64().unwrap();
+        let l = p.root().unwrap().layer(&ball).unwrap();
+        let mut r = barkfart_core::eval::Resolver::new(p);
+        (0..n).map(|i| r.b(&l.shown, i as f64 / fps)).collect()
+    };
+    assert_eq!(shown(&s), [false, false, true, false, false]);
+    for fps in [24, 7, 30, 12, 10, 3, 25, 10] {
+        s.command(&json!({"op": "fps", "v": fps}));
+        assert_eq!(shown(&s), [false, false, true, false, false], "after the frame rate became {fps}");
+        assert!(stray_keys(s.project()).is_empty(), "no keys a hair apart at {fps} fps");
+    }
+    // copy frame 3 and paste it after frame 5, then after frame 1
+    s.command(&json!({"op": "frame", "i": 2}));
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    s.command(&json!({"op": "copy_frame", "n": 0}));
+    s.command(&json!({"op": "frame", "i": 4}));
+    s.command(&json!({"op": "paste_frame"}));
+    assert_eq!(shown(&s), [false, false, true, false, false, true], "pasted after the last frame");
+    s.command(&json!({"op": "frame", "i": 0}));
+    s.command(&json!({"op": "paste_frame"}));
+    assert_eq!(shown(&s), [false, true, false, true, false, false, true], "pasted after the first frame");
+    assert!(stray_keys(s.project()).is_empty(), "no keys a hair apart after the pastes");
+    // delete each frame in turn from the front: the pattern loses its first entry each time
+    let mut want = shown(&s);
+    while want.len() > 1 {
+        s.command(&json!({"op": "frame", "i": 0}));
+        s.command(&json!({"op": "delete_frame"}));
+        want.remove(0);
+        assert_eq!(shown(&s), want, "after deleting the first frame");
+        assert!(stray_keys(s.project()).is_empty(), "no keys a hair apart after a delete");
+    }
+}
+
+/// Random frame editing against a model: which figure is on which frame.
+/// Inserts, deletes, pastes, figures added or deleted on one frame, and frame
+/// rate changes in any order; after every step the engine must agree with the
+/// model and keep no keys a hair apart.
+#[test]
+fn random_frame_editing_keeps_every_figure_on_exactly_its_frames() {
+    use std::collections::BTreeMap;
+    let mut failures = Vec::new();
+    for seed in 1..=40u64 {
+        let mut rng = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let mut next = move |n: usize| -> usize {
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((rng >> 33) as usize) % n
+        };
+        let mut s = two_poses();
+        let n0 = s.state()["frames"].as_i64().unwrap() as usize;
+        let mut model: BTreeMap<String, Vec<bool>> = BTreeMap::new();
+        model.insert("L2".into(), vec![true; n0]);
+        let mut clip: Option<BTreeMap<String, bool>> = None;
+        let mut log: Vec<String> = Vec::new();
+        for step in 0..30 {
+            let n = model.values().next().map(|v| v.len()).unwrap_or(1).max(s.state()["frames"].as_i64().unwrap() as usize);
+            let f = next(n);
+            s.command(&json!({"op": "frame", "i": f as i64}));
+            match next(8) {
+                0 | 1 => {
+                    log.push(format!("insert after {f}"));
+                    s.command(&json!({"op": "insert_frame"}));
+                    for v in model.values_mut() {
+                        let c = v[f];
+                        v.insert(f + 1, c);
+                    }
+                }
+                2 => {
+                    log.push(format!("delete frame {f}"));
+                    if n > 1 {
+                        s.command(&json!({"op": "delete_frame"}));
+                        for v in model.values_mut() {
+                            v.remove(f);
+                        }
+                    }
+                }
+                3 => {
+                    log.push(format!("add a ball on {f}"));
+                    let st = s.command(&json!({"op": "add_figure", "kind": "ball"}));
+                    if let Some(id) = st["selected"]["layer"].as_str() {
+                        let mut v = vec![false; n];
+                        v[f] = true;
+                        model.insert(id.to_string(), v);
+                    }
+                }
+                4 => {
+                    // delete a figure from this frame
+                    let ids: Vec<String> = model.iter().filter(|(_, v)| v[f]).map(|(k, _)| k.clone()).collect();
+                    if !ids.is_empty() {
+                        let id = ids[next(ids.len())].clone();
+                        log.push(format!("delete {id} on {f}"));
+                        s.command(&json!({"op": "select", "layer": id.clone()}));
+                        s.command(&json!({"op": "delete_here"}));
+                        model.get_mut(&id).unwrap()[f] = false;
+                    }
+                }
+                5 => {
+                    log.push(format!("copy frame {f}"));
+                    s.command(&json!({"op": "copy_frame", "n": 0}));
+                    clip = Some(model.iter().map(|(k, v)| (k.clone(), v[f])).collect());
+                }
+                6 => {
+                    if let Some(c) = &clip {
+                        log.push(format!("paste after {f}"));
+                        s.command(&json!({"op": "paste_frame"}));
+                        for (id, v) in model.iter_mut() {
+                            let val = c.get(id).copied().unwrap_or(v[f]);
+                            v.insert(f + 1, val);
+                        }
+                    }
+                }
+                _ => {
+                    let fps = [24, 7, 30, 12, 10, 25, 5][next(7)];
+                    log.push(format!("fps {fps}"));
+                    s.command(&json!({"op": "fps", "v": fps}));
+                }
+            }
+            // a figure on no frame at all is removed
+            let p = s.project();
+            let fps = p.settings.fps as f64;
+            let frames = s.state()["frames"].as_i64().unwrap() as usize;
+            model.retain(|id, v| v.iter().any(|x| *x) || p.root().unwrap().layer(id).is_some() && false);
+            let mut bad = Vec::new();
+            for (id, want) in &model {
+                let Some(l) = p.root().and_then(|r| r.layer(id)) else {
+                    bad.push(format!("{id} is gone"));
+                    continue;
+                };
+                let mut r = barkfart_core::eval::Resolver::new(p);
+                let got: Vec<bool> = (0..frames).map(|i| r.b(&l.shown, i as f64 / fps)).collect();
+                if got != *want {
+                    bad.push(format!("{id}: want {want:?} got {got:?}"));
+                }
+            }
+            if frames != model.values().next().map(|v| v.len()).unwrap_or(frames) {
+                bad.push(format!("{frames} frames, the model has {}", model.values().next().map(|v| v.len()).unwrap_or(0)));
+            }
+            if !stray_keys(p).is_empty() {
+                bad.push(format!("keys a hair apart on {:?}", stray_keys(p).iter().take(3).collect::<Vec<_>>()));
+            }
+            if !bad.is_empty() {
+                failures.push(format!("seed {seed}, step {step} ({}): {}\n    after: {}", log.last().cloned().unwrap_or_default(), bad.join("; "), log.join(", ")));
+                break;
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} runs went wrong:\n{}", failures.len(), failures.iter().take(5).cloned().collect::<Vec<_>>().join("\n"));
+}
