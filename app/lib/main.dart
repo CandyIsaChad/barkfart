@@ -23,7 +23,7 @@ class BarkfartApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(fontFamily: 'NotoSans', brightness: Brightness.light, colorSchemeSeed: cAccent, useMaterial3: true, scaffoldBackgroundColor: cPanel, dialogTheme: const DialogThemeData(backgroundColor: cCard)),
       home: Platform.environment['BARKFART_GALLERY'] != null
-          ? Gallery(shotKey: appShot, sections: [('Pictograms', pictogramSheet()), ('Kit', kitSheet())], onReady: Platform.environment['BARKFART_GALLERY'] == 'sheet' ? openSheetAndToast : null)
+          ? Gallery(shotKey: appShot, sections: Platform.environment['BARKFART_GALLERY'] == 'page' ? [('A page from descriptors', pageSheet())] : [('Pictograms', pictogramSheet()), ('Kit', kitSheet())], onReady: Platform.environment['BARKFART_GALLERY'] == 'sheet' ? openSheetAndToast : null)
           : const EditorPage(),
       builder: (c, child) => RepaintBoundary(key: appShot, child: child),
     );

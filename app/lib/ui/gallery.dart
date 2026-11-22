@@ -10,6 +10,7 @@ import 'package:flutter/widgets.dart';
 
 import 'kit.dart';
 import 'pictograms.dart';
+import 'rows.dart';
 import 'tokens.dart';
 
 class Gallery extends StatefulWidget {
@@ -144,3 +145,28 @@ void openSheetAndToast(BuildContext context) {
       ]);
   showToast(context, 'Hat lets go of Rival at frame 12', action: 'Undo', onAction: () {}, light: true, icon: 'broken', duration: const Duration(seconds: 30));
 }
+
+/// A page drawn from descriptors (D15), with a row swiped open to "Reset to 32".
+Widget pageSheet() => SizedBox(
+      width: 360,
+      height: 420,
+      child: PropertyPage(
+        tabs: const ['Stickfigure', 'Segment', 'Pose'],
+        tab: 1,
+        onTab: (_) {},
+        footer: DDanger('Reset this segment', () {}),
+        [
+          const DTitle('Segment Tools'),
+          DButtons('Flip sideways', () {}, b: 'Flip over', onB: () {}),
+          const DTitle('Size'),
+          DWidget(SwipeActions(initiallyOpen: true, actions: [SwipeAction('Reset to 32', () {})], child: StepRow('Thickness', '28', onMinus: () {}, onPlus: () {}, changed: true))),
+          DStep('Length', '95', onMinus: () {}, onPlus: () {}, changed: true, reset: DReset('Reset to 90', () {})),
+          DTick('Use segment scale', false, onChanged: (_) {}),
+          DSeg(const ['None', 'Absolute', 'Relative'], 0, label: 'Angle lock', onSelect: (_) {}),
+          DSwatch('Colour', const [Color(0xFF9B1C2E), Color(0xFF2160A8), Color(0xFFEDB98A)], null, mixed: true, onPick: (_) {}, onMore: () {}),
+          DSlider('Opacity', '100%', 1, onChanged: (_) {}),
+          DLink('Blend', 'Normal', onTap: () {}),
+          const DInfo('Graphics', 'Vulkan'),
+        ],
+      ),
+    );
