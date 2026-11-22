@@ -11,6 +11,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'engine.dart';
@@ -1812,11 +1813,42 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         SizedBox(width: 44, child: _Btn('', icon: Icons.edit, onTap: _libraryDialog)),
       ]),
       _hint(_libType == 2 ? 'Put pictures in the Barkfart Images folder; each becomes a sprite on this frame.' : 'The pencil lists the ${type.toLowerCase()}s in this project: rename them, or delete one from every frame.'),
+      _gap,
+      _Btn('Import from Files…', onTap: _importFromFiles),
+      _hint('Stickfigures, movieclips and Stick Nodes projects (.nodes, .nodemc, .stknds), sounds and pictures from anywhere: iCloud, Downloads, other apps.'),
       if (_libType == 1 && _st['editingClip'] == null) ...[
         _gap,
         _Btn('Create new movieclip ›', onTap: () => _cmd({'op': 'new_movieclip'})),
       ],
     ];
+  }
+
+  /// The system file picker (on iOS the Files browser): every file it gives
+  /// goes through the same import as files from Barkfart's folders.
+  Future<void> _importFromFiles() async {
+    final e = _engine;
+    if (e == null) return;
+    List<PlatformFile> picked;
+    try {
+      picked = await FilePicker.pickFiles(dialogTitle: 'Import into Barkfart');
+    } catch (err) {
+      _say('Could not open the file picker: $err');
+      return;
+    }
+    var done = 0;
+    for (final f in picked) {
+      final st = e.importFile(f.name, await f.readAsBytes());
+      if (st == null) {
+        _say('${f.name}: ${e.lastError}');
+      } else {
+        _refresh(st);
+        done++;
+      }
+    }
+    if (done > 0) {
+      _thumbsChanged('import');
+      _say(done == 1 ? 'Imported ${picked.first.name}' : 'Imported $done files');
+    }
   }
 
   Future<void> _importImages() async {
