@@ -28,30 +28,61 @@ original's UI, control by control) before changing anything.
   run `gh workflow run app-ios.yml --ref main`. Do not download or send IPAs.
 - Keep changes small; one commit per feature.
 
-## Status
-Done and reviewed so far: everything ticked in docs/barkfart/GAPS.md (the
-2026-11-22 handoff tasks, Modify branch and Outline selection, were
-reviewed; the outline now follows the shape, drawn by the engine).
+## Status (2026-11-22, Claude review after the handoff agent)
+Done and verified (engine suite green: `cargo test -q --workspace`, 3.5 min;
+`flutter analyze` clean; Linux release build checked with scripted runs):
+- The handoff agent's tests (commit 3c07b98: undo sweep and on / off test for
+  the commands added on 2026-11-22) were reviewed: nothing loosened, every
+  original row kept.
+- New tests (all checked against planted faults or the old code):
+  - `deletes_pastes_and_drags_undo_redo_and_save_exactly`: 24 edits the
+    first sweep left out (deletes, every paste, polyfill delete, reorder,
+    tween, break apart, join, frame sounds, drags): exact undo / redo of the
+    project and the picture, and the saved text reads back as the same project.
+  - `copying_and_looking_never_touch_the_project`: 45 copy / select / trace /
+    tool / view commands leave the saved text, the undo steps and the
+    "unsaved" marker alone.
+  - `toggling_a_control_on_and_off_changes_nothing` is stricter (the panel
+    must match too, and the reverse order: from "on", off and on again) and
+    has about 60 rows (`toggle_rows()`), including rows that start from a
+    value the control must give back.
+  - The matrix `after_a_switch_*_is_unchanged` (13 tests, one per edit in
+    `follow_up_edits()`): "T on, T off, then F" must give the same pictures
+    and panel as "F" alone, for every row T. This is the hidden-key hunt.
+  - `a_per_frame_control_on_the_middle_frame_leaves_the_other_frames_alone`.
+- Bugs found and fixed (each with a test that fails on the old code):
+  - Tween stickfigure colours off, then on, flattened eased and held colour
+    keys to linear (it rewrote the keys). The figure's flag is now read by the
+    evaluator (`Resolver::color_held`) and the keys are never touched.
+  - Use segment colour off threw the segment's own colour away (Segment Tools
+    and Modify branch). It is kept in the node extra `B.ownColor` and comes
+    back when ticked again (`use_own_color` in session.rs).
+  - Use gradient on / off, then a blank or tween frame: the new frame's hidden
+    gradient colour was 0x404040 instead of the default 0x808080.
+  - The undo sweep sent `"on"` to `pin` (it reads `"v"`), so it tested Unlock.
+Known and left alone:
+- A hidden gradient colour of pure black is stored as transparent black, which
+  reads as "no colour chosen" (default grey) after Use gradient off, on.
+- Projects saved earlier on 2026-11-22 with Tween colours off already have Hold
+  keys; ticking it on no longer converts them back (only affects colour keys
+  imported from animations).
+- `git stash list` has one old stash (2026-11-21, textfields / filters /
+  frame backgrounds as a layer): superseded by the camera-layer design, keep
+  it only as a reference; do not apply it.
+- No `get_usage` or `run_in_terminal` tool existed in the 2026-11-22 Claude
+  review session; the terminal is `ptyxis` (Ubuntu), e.g.
+  `ptyxis --new-window -- /home/caleb/.claude/barkfart-handoff/after-reset.sh "<time>"`.
 
-## Tasks, in order (stop after these; do not start other GAPS items)
-1. **Extend the undo / redo sweep** (`every_command_undoes_and_redoes_exactly`
-   in engine/core/tests/session.rs) with the commands added on 2026-11-22
-   that it does not cover yet: `textfield` with `font`, `branch_edit`,
-   `polyfill_new` (inside `build`), `polyfill_color`, `polyfill_undo`,
-   `connector_set` (after making a connector), `camera_lock_set`,
-   `movieclip` (loop / speed / offset on a selected movieclip),
-   `edit_movieclip` / `movieclip_done`, `new_movieclip`, `frame_bg` with
-   `expand`, `segment` with `trapRatio` / `trapRoundStart`, `figure` with
-   `tweenColors` / `keepInTween`. Each must undo to exactly the project
-   before and redo to exactly the project after. Commands that need a set-up
-   (a textfield, the figure editor, a movieclip) get it the way the existing
-   `early` set-up does. Run it; if one fails, find the real cause and fix it
-   with the smallest change (never by loosening the test), one commit each.
-2. **Extend the on / off test** (`toggling_a_control_on_and_off_changes_nothing`)
-   the same way with: expand gradient (with Use gradient on first), use
-   segment colour (on then off), trapezoid rounded start / end, half arc,
-   textfield font (Bangers then back to the default). Same rule for failures.
-Write anything you could not settle under "## Questions" and commit it.
+## Next (no order; the user: "just keep writing the app. Don't stop.")
+- Keep hunting hidden state with tests that compare pictures or saved
+  projects before and after. Ideas not done yet: the matrix over drags
+  (pose edits) as follow-ups; textfield, movieclip and polyfill rows in
+  `toggle_rows()`; a save / reopen between T and F; copy / paste of a frame
+  that carries a gradient or filter; Undo of T then F.
+- Every new control needs a row in `toggle_rows()` and an op in the undo
+  sweep (`every_command_undoes_and_redoes_exactly` or
+  `deletes_pastes_and_drags_undo_redo_and_save_exactly`).
+- GAPS.md: only "filter quality" is open (optional).
 
 ## Design rules learned since (keep to them)
 - `cargo test -q --workspace` must print no `error` and no `FAILED`: a
@@ -75,6 +106,17 @@ Write anything you could not settle under "## Questions" and commit it.
 - Per-frame sounds are clips on the audio layer named "Frame sounds"; only
   that layer's clips move with their frames (the Java reference keeps other
   audio layers on the timeline).
+
+- A switch is a switch: turning a control off must keep what turning it on
+  needs (kept in a flag the evaluator reads, or in a node extra such as
+  `B.ownColor`), never rewrite keys. Tween colours is `Layer::colors_jump`,
+  read by `eval::figure_color`.
+- A control that keys "every frame" for the first time must key the other
+  frames with the value they show, not the property's raw base value (see
+  the hidden gradient colour in `frame_bg`).
+- Hidden defaults (keys equal to the default on every frame) are by design for
+  frame settings, filters and the camera; the tests compare pictures and the
+  panel, not the saved text.
 
 ## Questions
 (none open)
