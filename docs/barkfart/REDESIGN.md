@@ -401,7 +401,7 @@ and tests are never weakened.
   the kit, so every existing page takes the new look at once.
 
 ### B. Small surfaces that already have behaviour
-- [ ] B1. The "Save your work?" sheet.
+- [x] B1. The "Save your work?" sheet.
 - [ ] B2. Toasts replace the status line.
 - [ ] B3. The Animation popover: FPS, smoothness (tweened frames),
   looping, fullscreen.

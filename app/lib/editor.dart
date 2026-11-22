@@ -809,6 +809,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           unawaited(_exportDialog());
         case 'copypopup':
           unawaited(_copyPopup(int.parse(w[1])));
+        case 'savesheet':
+          unawaited(_saveSheet('Rooftop fight hasn\u2019t been saved for 10 minutes. The reminder can be changed or turned off in Settings.'));
         case 'savebutton':
           unawaited(_save());
         case 'picker':
@@ -1637,6 +1639,18 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   bool _reminding = false;
 
   /// "Remember to save": every few minutes (Settings) while there is unsaved work.
+  /// "Save your work?" (REDESIGN §8): Later, Save as…, Save. Returns 0, 2 or 1.
+  Future<int?> _saveSheet(String text) => kit.showSheet<int>(context, title: 'Save your work?', width: 420, children: (c) => [
+        kit.Hint(text),
+        Row(children: [
+          Expanded(child: kit.WordButton('Later', onTap: () => Navigator.pop(c, 0), filled: true, expand: true, height: 38)),
+          const SizedBox(width: 8),
+          Expanded(child: kit.WordButton('Save as…', onTap: () => Navigator.pop(c, 2), filled: true, expand: true, height: 38)),
+          const SizedBox(width: 8),
+          Expanded(child: kit.WordButton('Save', onTap: () => Navigator.pop(c, 1), primary: true, expand: true, height: 38)),
+        ]),
+      ]);
+
   Future<void> _remindToSave() async {
     final mins = AppSettings.number('saveReminder');
     if (mins <= 0 || _reminding || _playing || _st['dirty'] != true || !mounted) return;
@@ -1645,19 +1659,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     // only over the editor itself, never on top of another window
     if (ModalRoute.of(context)?.isCurrent != true) return;
     _reminding = true;
-    final pick = await showDialog<int>(
-      context: context,
-      builder: (c) => AlertDialog(
-        backgroundColor: cPanel,
-        title: const Text('Save your work?', style: TextStyle(color: cText, fontSize: 16)),
-        content: Text('${_file?.name ?? 'This animation has never been saved.'}\nNothing has been saved for $since minutes. The reminder can be changed or turned off in Settings.', style: const TextStyle(color: cSecondary, fontSize: 13)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, 0), child: const Text('Later')),
-          TextButton(onPressed: () => Navigator.pop(c, 2), child: const Text('Save as…')),
-          TextButton(onPressed: () => Navigator.pop(c, 1), child: const Text('Save')),
-        ],
-      ),
-    );
+    final pick = await _saveSheet('${_file?.name ?? 'This animation'} hasn\u2019t been saved for $since minutes. The reminder can be changed or turned off in Settings.');
     _reminding = false;
     // asked again after another interval either way
     _savedAt = DateTime.now();
