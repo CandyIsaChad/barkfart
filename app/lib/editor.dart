@@ -1110,7 +1110,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     return const [];
   }
 
+  String _tab = '';
+
   void _jumpTo(String name) {
+    setState(() => _tab = name);
     final c = _sectionKey(name).currentContext;
     if (c != null) Scrollable.ensureVisible(c, duration: const Duration(milliseconds: 200), alignment: 0);
   }
@@ -1134,14 +1137,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         if (!_fsNow) _appBar(pad),
         Expanded(child: Row(textDirection: leftHand ? TextDirection.rtl : TextDirection.ltr, children: [
           if (!_fsNow) _leftRail(pad, leftHand),
-          // the tool panel: left, or right in left-hand mode (hidden in fullscreen playback)
-          if (!_fsNow && _panelOpen && !_hidePanels)
-          Container(
-            width: big ? 220 : 180,
-            color: cPanel,
-            padding: EdgeInsets.only(bottom: pad.bottom),
-            child: Directionality(textDirection: TextDirection.ltr, child: _sidebar()),
-          ),
           Expanded(
             child: Column(children: [
               if (!_fsNow && !_hidePanels)
@@ -1151,7 +1146,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 padding: EdgeInsets.only(right: leftHand ? 0 : pad.right, left: leftHand ? pad.left : 0),
                 child: _st['building'] != null ? _buildBar() : _topBar(stripH),
               ),
-              if (_showTabs && !_playing) _tabStrip(),
               Expanded(
                 child: Padding(
                   padding: EdgeInsets.only(right: leftHand ? 0 : pad.right, left: leftHand ? pad.left : 0, bottom: pad.bottom),
@@ -1159,6 +1153,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                     Positioned.fill(child: _stage()),
                     if (_arrows && !_playing) Positioned(left: _arrowsAt.dx, top: _arrowsAt.dy, child: _arrowsWindow()),
                     if (_magnifier && !_playing) Positioned(left: _magAt.dx, top: _magAt.dy, child: _magnifierWindow()),
+                    if (!_fsNow && _panelOpen && !_hidePanels) Positioned(top: 8, right: 8, bottom: 8, width: big ? 360 : 320, child: _propertiesCard()),
                     if (_viewOptions) Positioned(top: 8, left: 8, bottom: 8, width: 330, child: _viewOptionsPanel()),
                   ]),
                 ),
@@ -1242,30 +1237,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       case 4:
         await _settingsDialog();
     }
-  }
-
-  Widget _tabStrip() {
-    final names = _sections();
-    return Container(
-      height: 30,
-      color: cSurround,
-      // scrolls sideways when the tabs are wider than the screen (phones)
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Row(children: [
-          for (final n in names)
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => _jumpTo(n),
-              child: Padding(
-                padding: const EdgeInsets.only(right: 16),
-                child: Center(child: Text(n, style: const TextStyle(color: cAccent, fontSize: 12, fontWeight: FontWeight.w600))),
-              ),
-            ),
-        ]),
-      ),
-    );
   }
 
   Widget _stage() {
@@ -1677,42 +1648,57 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     );
   }
 
-  Widget _sidebar() {
-    final mode = _st['mode'] as String? ?? 'figure';
-    final fit = _fitScale();
-    final zoom = fit > 0 ? (_view.s / fit * 100).round() : 100;
-    final modeName = _playing ? 'Playing…' : {'figure': 'Normal', 'all': 'Panning', 'camera': 'Camera'}[mode] ?? 'Normal';
+  static String _tabLabel(String n) => n == 'Stickfigure Filters' ? 'Filters' : n.replaceAll(' Tools', '');
+
+  /// The Properties card (REDESIGN §4): today's sections, tabbed by what is
+  /// selected. It floats over the stage on the right.
+  Widget _propertiesCard() {
     final names = _sections();
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Padding(padding: const EdgeInsets.only(top: 8), child: Center(child: Text(_playing ? modeName : 'Mode: $modeName ($zoom%)', style: const TextStyle(color: cSecondary, fontSize: 12)))),
-      const SizedBox(height: 6),
-      Expanded(
-        child: _playing
-            ? ListView(padding: const EdgeInsets.fromLTRB(10, 4, 10, 10), children: _playbackPanel())
-            : SingleChildScrollView(
-                controller: _panelScroll,
-                padding: const EdgeInsets.fromLTRB(10, 4, 10, 40),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  for (final n in names) ...[
-                    Container(key: _sectionKey(n), width: double.infinity, padding: const EdgeInsets.only(top: 10, bottom: 4), child: Text(n, textAlign: TextAlign.center, style: const TextStyle(color: cTitle, fontSize: 15, fontWeight: FontWeight.w700))),
-                    ..._sectionBody(n),
-                    const SizedBox(height: 10),
-                    const Divider(height: 1, color: cControl),
-                  ],
-                ]),
-              ),
-      ),
-      Container(
-        color: cControl,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        child: Text(
-          _status.isNotEmpty ? _status : 'Frame ${(_playing ? (_playT * _fps).floor() : _frame) + 1} / $_frames${_st['dirty'] == true ? ' · not saved' : ''}',
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(color: cSecondary, fontSize: 11, fontFeatures: [ui.FontFeature.tabularFigures()]),
+    final current = names.contains(_tab) ? names.indexOf(_tab) : 0;
+    return kit.PanelCard(
+      padding: EdgeInsets.zero,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        if (!_playing && _showTabs && names.length > 1)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 10, 10, 0),
+            child: names.length <= 3
+                ? kit.Segmented([for (final n in names) _tabLabel(n)], current, onSelect: (i) => _jumpTo(names[i]))
+                : SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(children: [
+                      for (var i = 0; i < names.length; i++)
+                        Container(
+                          margin: const EdgeInsets.only(right: 2),
+                          decoration: i == current ? BoxDecoration(color: cControl, borderRadius: BorderRadius.circular(9)) : null,
+                          child: kit.WordButton(_tabLabel(names[i]), size: 13, height: 32, onTap: () => _jumpTo(names[i])),
+                        ),
+                    ]),
+                  ),
+          ),
+        Expanded(
+          child: _playing
+              ? ListView(padding: const EdgeInsets.fromLTRB(14, 10, 14, 10), children: _playbackPanel())
+              : SingleChildScrollView(
+                  controller: _panelScroll,
+                  padding: const EdgeInsets.fromLTRB(14, 4, 14, 40),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    for (final n in names) ...[
+                      Container(key: _sectionKey(n), width: double.infinity, padding: const EdgeInsets.only(top: 10, bottom: 4), child: Text(n, textAlign: TextAlign.center, style: const TextStyle(color: cTitle, fontSize: 15, fontWeight: FontWeight.w700))),
+                      ..._sectionBody(n),
+                      const SizedBox(height: 10),
+                    ],
+                  ]),
+                ),
         ),
-      ),
-    ]);
+        // export progress (until the Export sheet shows it, B5)
+        if (_status.isNotEmpty)
+          Container(
+            color: cControl,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            child: Text(_status, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cSecondary, fontSize: 12)),
+          ),
+      ]),
+    );
   }
 
   double _fitScale() {
@@ -3056,6 +3042,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             _clearCache();
           })),
       const rw.DTitle('Helpers'),
+      rw.DInfo('Zoom', '${_fitScale() > 0 ? (_view.s / _fitScale() * 100).round() : 100}%'),
       rw.DButtons('Fit stage', () => setState(_fit), b: 'Nudge arrows', onB: _arrows ? null : () => setState(() => _arrows = true)),
       const rw.DHint('Nudge arrows move the selected figure in small exact steps.'),
       rw.DButtons('Magnifier', _magnifier
