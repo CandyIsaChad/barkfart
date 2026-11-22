@@ -1180,6 +1180,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     ('triangle', 'Triangle', Icons.change_history),
     ('trapezoid', 'Trapezoid', Icons.filter_list),
     ('polygon', 'Polygon', Icons.pentagon_outlined),
+    ('polyfill', 'Polyfill', Icons.format_shapes),
   ];
 
   Widget _buildBar() {
@@ -1204,10 +1205,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               Padding(
                 padding: const EdgeInsets.only(right: 4),
                 child: Material(
-                  color: tool == id ? cAccent : cControl,
+                  color: (id == 'polyfill' ? _st['polyfill'] != null : tool == id && _st['polyfill'] == null) ? cAccent : cControl,
                   borderRadius: BorderRadius.circular(4),
                   child: InkWell(
-                    onTap: () => _cmd({'op': 'draw_tool', 'shape': id}),
+                    // Polyfill: a new polyfill anchored at the selected joint (Polyfill Tools)
+                    onTap: () => id == 'polyfill'
+                        ? (_sel == null ? _say('Tap a joint first: the polyfill is drawn right before it.') : _cmd({'op': 'polyfill_new'}))
+                        : _cmd({'op': 'draw_tool', 'shape': id}),
                     child: SizedBox(
                       width: 62,
                       height: 52,

@@ -894,6 +894,9 @@ impl Session {
                 self.validate();
             }
             "draw_tool" => {
+                // another tool ends polyfill editing and connector picking
+                self.polyfill = None;
+                self.connecting = false;
                 self.draw = match c["shape"].as_str() {
                     None | Some("none") => None,
                     Some(x) => Some(shape_named(x)),
