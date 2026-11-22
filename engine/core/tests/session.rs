@@ -4270,3 +4270,28 @@ fn odd_inputs_never_panic_and_leave_a_project_that_saves_and_draws() {
     }
     assert!(failures.is_empty(), "{} runs went wrong:\n{}", failures.len(), failures.iter().take(6).cloned().collect::<Vec<_>>().join("\n"));
 }
+
+/// The history keeps the last 200 steps and they are exact: after 260 edits, 200
+/// undos land on the state after the 60th edit, nothing more can be undone, and
+/// 200 redos give back the last state.
+#[test]
+fn the_history_keeps_the_last_200_steps_exactly() {
+    let mut s = two_poses();
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    let mut texts = vec![saved_text(s.project())];
+    for i in 0..260 {
+        s.command(&json!({"op": "segment", "thickness": 5 + i}));
+        texts.push(saved_text(s.project()));
+    }
+    for _ in 0..200 {
+        assert!(s.doc.can_undo());
+        s.command(&json!({"op": "undo"}));
+    }
+    assert!(!s.doc.can_undo(), "only the last 200 steps are kept");
+    assert_eq!(saved_text(s.project()), texts[60], "200 undos: the state after the 60th edit");
+    for _ in 0..200 {
+        s.command(&json!({"op": "redo"}));
+    }
+    assert!(!s.doc.can_redo());
+    assert_eq!(saved_text(s.project()), texts[260], "200 redos: the last state");
+}

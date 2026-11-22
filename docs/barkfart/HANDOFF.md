@@ -91,6 +91,14 @@ Done and verified (engine suite green: `cargo test -q --workspace`, 3.5 min;
     and 30 frames state() fell from 490 ms to 30 ms, an edit from 545 to 45 ms.
     Lead: anything else that calls `Resolver::new` in a loop over layers has
     the same problem (grep it); `edit_time_on_a_big_project` is the probe.
+  - One-off deep runs (not committed as defaults, to keep the suite at ~5
+    minutes): the history walk with 224 seeds, the five `random_frame_editing_*`
+    models with 120 seeds each and the odd-inputs fuzz with 260 seeds were
+    clean. To repeat, raise the `for seed in 1..=N` bound in the test.
+  - Lesson: `Document::exact` first used the derived PartialEq, and
+    0.0 == -0.0, so a flip that made an angle -0.0 changed the saved project
+    with no undo step (found at seed 19 of the widened walk). A step is now
+    dropped only when the encodings are byte-identical too.
 Known and left alone:
 - A hidden gradient colour of pure black is stored as transparent black, which
   reads as "no colour chosen" (default grey) after Use gradient off, on.
