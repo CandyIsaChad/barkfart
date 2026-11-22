@@ -84,6 +84,13 @@ Done and verified (engine suite green: `cargo test -q --workspace`, 3.5 min;
     best bug finders): `random_frame_editing_*` (shown frames, per-frame
     background / pause, pose angle, camera zoom + filters) and
     `random_editing_with_undo_and_redo_walks_the_history_exactly`.
+  - Changing the frame rate left the "Frame sounds" clips where they were
+    (keys were rescaled, clips not): each frame's sound moved to another frame.
+  - Speed: `CanvasTools::handles` made a `Resolver` per figure and a Resolver
+    indexes every property of the project when it is made. With 100 figures
+    and 30 frames state() fell from 490 ms to 30 ms, an edit from 545 to 45 ms.
+    Lead: anything else that calls `Resolver::new` in a loop over layers has
+    the same problem (grep it); `edit_time_on_a_big_project` is the probe.
 Known and left alone:
 - A hidden gradient colour of pure black is stored as transparent black, which
   reads as "no colour chosen" (default grey) after Use gradient off, on.
