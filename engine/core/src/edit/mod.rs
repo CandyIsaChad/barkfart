@@ -128,7 +128,10 @@ impl Document {
             self.open = Some((label, before, depth - 1));
             return;
         }
-        if before.same(&self.state) || (self.exact && before.same_content(&self.state)) {
+        // equal contents are not enough to drop the step: 0.0 == -0.0 in a float compare, but the
+        // saved project differs, so the encodings must match too (only checked for the rare edit
+        // that touched the project and ended up equal)
+        if before.same(&self.state) || (self.exact && before.same_content(&self.state) && crate::codec::encode(&before.project) == crate::codec::encode(&self.state.project)) {
             return;
         }
         self.undo.push((label, before));
