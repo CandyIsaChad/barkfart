@@ -3770,3 +3770,78 @@ fn clearing_or_pasting_filters_on_one_frame_leaves_the_other_frames_alone() {
     s.command(&json!({"op": "paste_filters"}));
     assert_eq!([on(&mut s, 0), on(&mut s, 1), on(&mut s, 2)], [(true, 6.0), (true, 6.0), (true, 6.0)], "pasted on the middle frame only");
 }
+
+/// Random editing against a model of which frames play a sound: a frame's sound
+/// stays on its frame through inserts (a new frame has none), deletes (the
+/// sound goes with its frame) and frame rate changes.
+#[test]
+fn random_frame_editing_keeps_every_frame_sound_on_its_frame() {
+    use barkfart_core::audio::{encode_wav, tone};
+    let mut failures = Vec::new();
+    for seed in 1..=20u64 {
+        let mut rng = seed.wrapping_mul(9600629759793949339).wrapping_add(7);
+        let mut next = move |n: usize| -> usize {
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((rng >> 33) as usize) % n
+        };
+        let mut s = two_poses();
+        let st = s.import("beep.wav", &encode_wav(&tone(440.0, 0.2, 8000, 0.5)));
+        let id = st["soundList"][0]["id"].as_str().unwrap().to_string();
+        let n0 = s.state()["frames"].as_i64().unwrap() as usize;
+        let mut model = vec![false; n0];
+        let read = |s: &mut Session, i: usize| -> bool {
+            s.command(&json!({"op": "frame", "i": i as i64}));
+            !s.state()["frameSound"].is_null()
+        };
+        let mut log: Vec<String> = Vec::new();
+        for step in 0..30 {
+            let n = model.len();
+            let f = next(n);
+            s.command(&json!({"op": "frame", "i": f as i64}));
+            match next(7) {
+                0 | 1 => {
+                    log.push(format!("sound on {f}"));
+                    s.command(&json!({"op": "frame_sound", "asset": id}));
+                    model[f] = true;
+                }
+                2 => {
+                    log.push(format!("clear {f}"));
+                    s.command(&json!({"op": "frame_sound", "asset": null}));
+                    model[f] = false;
+                }
+                3 | 4 => {
+                    log.push(format!("insert after {f}"));
+                    s.command(&json!({"op": "insert_frame"}));
+                    model.insert(f + 1, false);
+                }
+                5 => {
+                    log.push(format!("delete {f}"));
+                    if n > 1 {
+                        s.command(&json!({"op": "delete_frame"}));
+                        model.remove(f);
+                    }
+                }
+                _ => {
+                    let fps = [24, 7, 30, 12, 10, 25, 5][next(7)];
+                    log.push(format!("fps {fps}"));
+                    s.command(&json!({"op": "fps", "v": fps}));
+                }
+            }
+            let frames = s.state()["frames"].as_i64().unwrap() as usize;
+            let mut bad = Vec::new();
+            if frames != model.len() {
+                bad.push(format!("{frames} frames, the model has {}", model.len()));
+            } else {
+                let got: Vec<bool> = (0..frames).map(|i| read(&mut s, i)).collect();
+                if got != model {
+                    bad.push(format!("sounds on {got:?}, the model says {model:?}"));
+                }
+            }
+            if !bad.is_empty() {
+                failures.push(format!("seed {seed}, step {step} ({}): {}\n    after: {}", log.last().cloned().unwrap_or_default(), bad.join("; "), log.join(", ")));
+                break;
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} runs went wrong:\n{}", failures.len(), failures.iter().take(4).cloned().collect::<Vec<_>>().join("\n"));
+}

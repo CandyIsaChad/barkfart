@@ -800,6 +800,16 @@ impl Session {
                             }
                         }
                     }
+                    // the frames' own sounds follow their frames like the keys (other sound
+                    // layers stay where they are on the timeline)
+                    let sound_layers: Vec<String> = s.project.root().map(|r| r.layers.iter().filter(|l| matches!(l.kind, LayerKind::Audio(_)) && l.name.as_deref() == Some(frame_ops::FRAME_SOUNDS)).map(|l| l.id.clone()).collect()).unwrap_or_default();
+                    for id in sound_layers {
+                        if let Some(LayerKind::Audio(clips)) = s.project.layer_mut(&root, &id).map(|l| &mut l.kind) {
+                            for c in clips.iter_mut() {
+                                c.start *= k;
+                            }
+                        }
+                    }
                     if let Some(r) = s.project.root_mut() {
                         r.duration *= k;
                     }
