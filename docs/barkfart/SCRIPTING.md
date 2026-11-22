@@ -154,8 +154,20 @@ It runs code that moves other layers. Typical uses:
   instead of fighting from frame to frame, and the hand-made animation
   underneath stays intact. A "Replace" toggle on the script switches to
   overriding, for whole simulations such as a ragdoll.
-- **Mix and range.** A script's block on its row is when it runs. Its keyable
-  Mix (0 to 100%) fades it in and out.
+- **A block is one run.** A script lives as long as its block on the row: it
+  starts on the block's first frame and stops after its last. Drag the block's
+  ends to change that, as with poses. Several blocks of the same script on a
+  row are separate runs, each with its own random seed, so placing the same
+  "dust puff" at every footstep gives a different puff each time.
+- **Ending.** When a block ends, its offsets go away and the figure is back on
+  its keys. A "Keep the last frame" toggle holds the final result instead,
+  for physics that should settle and stay.
+- **Mix.** A keyable Mix (0 to 100%) fades a script in and out.
+- **Bare-bones inputs.** The same `props` and sandbox as effects, but no
+  shader. `t.dt` is the time since the last step and `t.elapsed` the time
+  since the block started. `t.frame` is the frame number. `t.key(target)` is
+  the target's current pose key: its frame and how far along it is to the
+  next one.
 - **State, kept deterministic.** Physics needs the previous frame. So a script
   runs forward from its first frame, and the app caches every frame's result:
   - scrubbing reads the cache;
@@ -173,18 +185,52 @@ return bf.script {
 	targets = { cape = bf.figure() },
 	props = { stiffness = bf.number { default = 0.4, min = 0, max = 1 } },
 
-	start = function(s)                 -- the state at the script's first frame
+	start = function(s)                 -- the block's first frame
 		s.swing, s.speed = 0, 0
 	end,
 
-	step = function(s, p, t, scene)     -- once per frame, in order
-		local push = -scene.cape.velocity.x * 0.002
+	step = function(s, p, t, scene)     -- every frame of the block, in order
+		local push = -scene.cape.velocity.x * t.dt * 0.05
 		s.speed = (s.speed + push - s.swing * p.stiffness) * 0.9
 		s.swing += s.speed
 		return { cape = { rotate = { root = s.swing } } }  -- added on top of the keys
 	end,
 }
 ```
+
+### Emitters
+
+A script can also spawn things instead of moving them: sparks, dust, confetti,
+a flock of birds. `t.spawn(source, settings)` puts out a copy of a library
+figure, picture or movieclip:
+
+```lua
+return bf.script {
+	id = "yeah.dust", name = "Dust puff", version = "1.0.0",
+	props = {
+		amount = bf.number { default = 12, min = 0, max = 200, step = 1 },
+		puff = bf.source { default = "Dust" },   -- picked from the library
+	},
+	step = function(s, p, t)
+		if t.elapsed == 0 then               -- a burst on the block's first frame
+			for _ = 1, p.amount do
+				t.spawn(p.puff, {
+					angle = t.random(200, 340), speed = t.random(40, 120),
+					spin = t.random(-90, 90), gravity = 30, fade = true, life = 0.6,
+				})
+			end
+		end
+	end,
+}
+```
+
+Spawned copies are not layers. Here is how they behave:
+- **No new rows.** 200 sparks don't add 200 rows; the block shows a count.
+- **Shared.** They share their source, the way movieclip instances already do, so they're cheap.
+- **Movement:** the engine moves them, with speed, spin, gravity and fading, for `life` seconds. The script can still nudge them each step. A movieclip source plays its own animation from the moment each copy appears.
+- **Capped:** each emitter has a limit (500 to start), so a phone stays smooth.
+- **Repeatable:** they use the block's seed, so a re-run gives the same burst, and a copied block gets a new seed.
+- **Export:** emitters can't be baked into Stick Nodes formats without turning every copy into a figure. Video and GIF export are fine; Stick Nodes project export warns and leaves them out.
 
 In the engine, the built-in modifiers (wiggle, sine, loop, follow and link)
 are the stateless version of this. A script layer becomes a new `LayerKind`.
