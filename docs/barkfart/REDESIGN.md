@@ -444,8 +444,13 @@ and tests are never weakened.
 - [x] D4. Camera.
 - [x] D5. Frame.
 - [x] D6. Stickfigure.
-- [ ] D7. Segment, with changed-dots and swipe-to-reset. The engine
-  reports file defaults.
+- [ ] D7. Segment, with changed-dots and swipe-to-reset.
+  - [x] D7a. Segment Tools as rows, grouped Size, Colour and Movement.
+    Thickness (default 32) and length (the rest length) get changed-dots and
+    swipe-to-reset.
+  - [ ] D7b. Engine: the selection reports each segment value's file default
+    and whether it changed, plus a "reset segment" op. Then dots and swipes
+    for every value, and the pinned "Reset this segment" button.
 
 ### E. Home
 - [ ] E1. First run.

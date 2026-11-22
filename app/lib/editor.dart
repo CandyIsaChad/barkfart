@@ -2697,41 +2697,54 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     ];
   }
 
+  /// Segment Tools as rows (D15; REDESIGN §4 Segment page). A value that
+  /// differs from its default shows a small dot; swiping its row offers the
+  /// reset (D11). Until the engine reports every file default (D7b), only
+  /// thickness (32) and length (the rest length) can be reset.
   List<Widget> _segmentTools(Map<String, dynamic> sel) {
     final root = sel['root'] == true;
     if (root) {
       return [
-        const Text('The main node moves the whole figure. Tap a joint for its segment.', style: TextStyle(color: cSecondary, fontSize: 12)),
-        _gap,
-        _Toggle('Drag lock', sel['dragLock'] == true, (v) => _cmd({'op': 'node', 'dragLock': v})),
+        for (final d in <rw.Desc>[
+          const rw.DHint('The main node moves the whole figure. Tap a joint for its segment.'),
+          rw.DTick('Drag lock', sel['dragLock'] == true, onChanged: (v) => _cmd({'op': 'node', 'dragLock': v})),
+        ])
+          rw.renderDesc(d),
       ];
     }
     final thick = (sel['thickness'] as num?)?.toDouble() ?? 0;
     final len = (sel['length'] as num?)?.toDouble() ?? 0;
     // the length the segment was made with
     final rest = (sel['restLength'] as num?)?.toDouble() ?? 0;
-    return [
-      _pair(_Btn('Flip sideways', onTap: () => _cmd({'op': 'flip_branch', 'h': true})), _Btn('Flip over', onTap: () => _cmd({'op': 'flip_branch', 'h': false}))),
-      _gap,
-      _Toggle('Use segment colour', sel['ownColor'] == true, (v) => _cmd({'op': 'segment', 'ownColor': v})),
-      _hint('On: this segment keeps its own colour. Off: it follows the stickfigure colour.'),
-      Opacity(
-        opacity: sel['ownColor'] == true ? 1 : 0.4,
-        child: _swatches((sel['color'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'segment', 'color': c})),
-      ),
-      _gap,
-      _stepper('Thickness', thick.round().toString(), () => _cmd({'op': 'segment', 'thickness': math.max(0, thick - 2)}), () => _cmd({'op': 'segment', 'thickness': thick + 2})),
-      _Btn('Reset thickness', small: true, enabled: thick != 32, onTap: () => _cmd({'op': 'segment', 'thickness': 32})),
-      _gap,
-      _stepper('Length', len.round().toString(), () => _cmd({'op': 'node', 'length': math.max(0, len - 5)}), () => _cmd({'op': 'node', 'length': len + 5})),
-      _Btn('Reset length', small: true, enabled: rest > 0 && (len - rest).abs() > 0.01, onTap: () => _cmd({'op': 'node', 'length': rest})),
-      _gap,
-      ..._segmentLook(sel),
-      _Toggle('Is stretchy', sel['stretchy'] == true, (v) => _cmd({'op': 'node', 'stretchy': v})),
-      _Toggle('Lock node', sel['pinned'] == true, (v) => _cmd({'op': 'pin', 'v': v})),
-      _Toggle('Drag lock', sel['dragLock'] == true, (v) => _cmd({'op': 'node', 'dragLock': v})),
+    final thickChanged = thick != 32, lenChanged = rest > 0 && (len - rest).abs() > 0.01;
+    final own = sel['ownColor'] == true;
+    final rows = <rw.Desc>[
+      rw.DButtons('Flip sideways', () => _cmd({'op': 'flip_branch', 'h': true}), b: 'Flip over', onB: () => _cmd({'op': 'flip_branch', 'h': false})),
+      const rw.DTitle('Size'),
+      rw.DStep('Thickness', thick.round().toString(),
+          onMinus: () => _cmd({'op': 'segment', 'thickness': math.max(0, thick - 2)}),
+          onPlus: () => _cmd({'op': 'segment', 'thickness': thick + 2}),
+          changed: thickChanged,
+          reset: thickChanged ? rw.DReset('Reset to 32', () => _cmd({'op': 'segment', 'thickness': 32})) : null),
+      rw.DStep('Length', len.round().toString(),
+          onMinus: () => _cmd({'op': 'node', 'length': math.max(0, len - 5)}),
+          onPlus: () => _cmd({'op': 'node', 'length': len + 5}),
+          changed: lenChanged,
+          reset: lenChanged ? rw.DReset('Reset to ${rest.round()}', () => _cmd({'op': 'node', 'length': rest})) : null),
+      if (thickChanged || lenChanged) const rw.DHint('Swipe a row with a dot (or right-click it) to reset it.'),
+      for (final w in _segmentLook(sel)) rw.DWidget(w),
+      const rw.DTitle('Colour'),
+      rw.DTick('Own colour', own, onChanged: (v) => _cmd({'op': 'segment', 'ownColor': v})),
+      rw.DWidget(Opacity(opacity: own ? 1 : 0.4, child: _swatches((sel['color'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'segment', 'color': c})))),
+      const rw.DHint('On: this segment keeps its own colour. Off: it follows the stickfigure colour.'),
+      const rw.DTitle('Movement'),
+      rw.DTick('Is stretchy', sel['stretchy'] == true, onChanged: (v) => _cmd({'op': 'node', 'stretchy': v})),
+      rw.DTick('Lock node', sel['pinned'] == true, onChanged: (v) => _cmd({'op': 'pin', 'v': v})),
+      rw.DTick('Drag lock', sel['dragLock'] == true, onChanged: (v) => _cmd({'op': 'node', 'dragLock': v})),
     ];
+    return [for (final d in rows) rw.renderDesc(d)];
   }
+
 
   (double, double)? _camClip;
 
