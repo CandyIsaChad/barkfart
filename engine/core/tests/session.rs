@@ -1922,3 +1922,84 @@ fn saved_figure_keeps_connector_positions() {
     let close = want.len() == got.len() && want.iter().zip(&got).all(|(a, b)| (a.0 - b.0).abs() <= 1 && (a.1 - b.1).abs() <= 1);
     assert!(close, "{got:?}\nvs\n{want:?}");
 }
+
+/// "Use gradient" on then off leaves the frame looking as before: no hidden
+/// background key that the in-betweens fade through (user report 2026-11-22).
+#[test]
+fn use_gradient_on_and_off_leaves_no_trace() {
+    let mut s = two_poses();
+    s.command(&json!({"op": "animation", "tweening": true}));
+    let fps = s.project().settings.fps as f64;
+    let bg_at = |s: &Session, t: f64| {
+        let p = s.project();
+        let scene = barkfart_core::eval::evaluate(p, &p.root_symbol, t);
+        scene.root.children.iter().find_map(|i| match i {
+            barkfart_core::eval::Item::Group(g) if g.source == "background" => match &g.children[0] {
+                barkfart_core::eval::Item::Shape(sh) => Some((sh.color.to_rgba8888(), sh.gradient.is_some())),
+                _ => None,
+            },
+            _ => None,
+        })
+    };
+    assert_eq!(bg_at(&s, 0.5 / fps), None, "no frame background to start with");
+    s.command(&json!({"op": "frame_bg", "useGradient": true}));
+    s.command(&json!({"op": "frame_bg", "useGradient": false}));
+    let white = s.project().settings.background.to_rgba8888();
+    for t in [0.0, 0.25 / fps, 0.5 / fps, 0.75 / fps, 1.0 / fps] {
+        if let Some((c, _)) = bg_at(&s, t) {
+            assert_eq!(c, white, "at {t}: the project background, not a fade to black");
+        }
+    }
+    assert_eq!(s.state()["frameBg"]["useGradient"], false);
+}
+
+/// Switching a control on and back off must leave the animation looking as
+/// before, in-betweens included (user report 2026-11-22: "Use gradient" left
+/// a hidden key behind). Every on / off control of the frame, figure, segment,
+/// filter and camera tools.
+#[test]
+fn toggling_a_control_on_and_off_changes_nothing() {
+    let toggles: &[(&str, serde_json::Value, serde_json::Value)] = &[
+        ("use gradient", json!({"op": "frame_bg", "useGradient": true}), json!({"op": "frame_bg", "useGradient": false})),
+        ("widescreen", json!({"op": "camera_fx", "widescreen": true}), json!({"op": "camera_fx", "widescreen": false})),
+        ("wobble", json!({"op": "camera_fx", "wobbleXY": 8}), json!({"op": "camera_fx", "wobbleXY": 0})),
+        ("wobble rotation", json!({"op": "camera_fx", "wobbleRot": 0.5}), json!({"op": "camera_fx", "wobbleRot": 0})),
+        ("do not tween", json!({"op": "no_tween", "on": true}), json!({"op": "no_tween", "on": false})),
+        ("pause", json!({"op": "frame_delay", "seconds": 0.5}), json!({"op": "frame_delay", "seconds": 0})),
+        ("slow motion", json!({"op": "frame_slow", "n": 5}), json!({"op": "frame_slow", "n": 0})),
+        ("tween colours", json!({"op": "figure", "tweenColors": false}), json!({"op": "figure", "tweenColors": true})),
+        ("keep in tween", json!({"op": "figure", "keepInTween": false}), json!({"op": "figure", "keepInTween": true})),
+        ("invert", json!({"op": "filter", "invert": true}), json!({"op": "filter", "invert": false})),
+        ("motion blur", json!({"op": "filter", "motion": true}), json!({"op": "filter", "motion": false})),
+        ("segment gradient", json!({"op": "segment", "gradient": true}), json!({"op": "segment", "gradient": false})),
+        ("lock to camera", json!({"op": "camera_lock", "layer": "L2", "on": true}), json!({"op": "camera_lock", "layer": "L2", "on": false})),
+        ("auto-camera", json!({"op": "auto_camera", "end": 1, "ease": 1}), json!({"op": "auto_camera", "end": null})),
+    ];
+    let picture = |s: &Session, t: f64| -> Vec<u8> {
+        let p = s.project();
+        let list = barkfart_core::tess::layered(&barkfart_core::eval::evaluate(p, &p.root_symbol, t), None);
+        let mut im = barkfart_core::fx::Image::new(160, 90, -640.0, 360.0, 0.125);
+        for v in im.px.iter_mut() {
+            *v = 1.0;
+        }
+        barkfart_core::fx::render(&list, &mut im);
+        im.px.iter().map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8).collect()
+    };
+    for (name, on, off) in toggles {
+        let mut s = two_poses();
+        s.command(&json!({"op": "animation", "tweening": true}));
+        s.command(&json!({"op": "add_camera"}));
+        s.command(&json!({"op": "frame", "i": 0}));
+        s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+        let fps = s.project().settings.fps as f64;
+        let times = [0.0, 0.25 / fps, 0.5 / fps, 0.75 / fps, 1.0 / fps];
+        let before: Vec<Vec<u8>> = times.iter().map(|t| picture(&s, *t)).collect();
+        s.command(on);
+        s.command(off);
+        for (k, t) in times.iter().enumerate() {
+            let now = picture(&s, *t);
+            let bad = now.iter().zip(&before[k]).filter(|(a, b)| a.abs_diff(**b) > 2).count();
+            assert!(bad == 0, "{name}: {bad} channel values differ at t = {t}");
+        }
+    }
+}

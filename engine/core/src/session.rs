@@ -2196,10 +2196,20 @@ impl Session {
                     // gradient colour with zero alpha; with one, top is the gradient colour
                     let (top, bottom) = if use_gradient { (gradient | 0xff, color | 0xff) } else { (color, gradient & !0xff) };
                     let (n, fps) = (frame_ops::frame_count(s), st_fps(&s.project));
+                    let project_bg = s.project.settings.background.to_rgba8888() | 0xff;
                     let l = s.project.layer_mut(&sym, &cam).expect("camera");
                     let LayerKind::Camera(cm) = &mut l.kind else { return crate::edit::fail("not a camera") };
-                    for (q, v) in [(&mut cm.background, top), (&mut cm.background2, bottom)] {
+                    for (first, q, v) in [(true, &mut cm.background, top), (false, &mut cm.background2, bottom)] {
                         key_every_frame(q, n, fps);
+                        // frames with no background of their own show the project's:
+                        // say so, or the in-betweens fade through transparent black
+                        if first {
+                            for k in q.track.keys().to_vec() {
+                                if matches!(k.value, Value::C(c) if c.a <= 0.0) {
+                                    q.track.put(Key::new(k.time, Value::C(Color::rgba8888(project_bg)), k.interp));
+                                }
+                            }
+                        }
                         let interp = q.track.keys().iter().find(|k| k.time == t).map(|k| k.interp).unwrap_or(Interp::Linear);
                         q.track.put(Key::new(t, Value::C(Color::rgba8888(v)), interp));
                     }
@@ -2658,7 +2668,7 @@ impl Session {
                 let scale = n.scale.value.f().max(1e-6) as f64;
                 n.length.value = Value::F((dx.hypot(dy) / scale) as f32);
                 n.rotation.value = Value::F((dy.atan2(dx).to_degrees() - base[k]) as f32);
-                n.legacy_extras.remove(crate::eval::pose::CONNECT_TO);
+                n.legacy_extras.shift_remove(crate::eval::pose::CONNECT_TO);
             }
         }
         let fig = crate::legacy::to_legacy(&copy).map_err(|e| e.0)?;
@@ -2989,7 +2999,7 @@ fn frame_bg(p: &Project, t: f64) -> (u32, u32, bool) {
     if bottom & 0xff != 0 {
         (bottom, top, true)
     } else {
-        let color = if top & 0xff == 0 { 0xffffffff } else { top };
+        let color = if top & 0xff == 0 { p.settings.background.to_rgba8888() | 0xff } else { top };
         let gradient = if bottom == 0 { 0x808080ff } else { bottom | 0xff };
         (color, gradient, false)
     }

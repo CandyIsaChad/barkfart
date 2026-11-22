@@ -432,7 +432,8 @@ pub extern "C" fn bf_export_begin(e: *mut Engine, format: i32, path: *const c_ch
                 let frames = barkfart_core::timing::frame_count(p);
                 let first = (start_frame as i32).clamp(0, frames - 1);
                 let n = if count_frames == 0 { frames - first } else { (count_frames as i32).clamp(1, frames - first) };
-                let sound = engine.plan.as_ref().and_then(|plan| {
+                // for video the flag argument means "without sound"
+                let sound = engine.plan.as_ref().filter(|_| transparent == 0).and_then(|plan| {
                     if sch.identity {
                         barkfart_core::audio::bounce_pcm(plan, first as f64 / p.settings.fps.max(1.0) as f64, n as f64 / p.settings.fps.max(1.0) as f64)
                     } else {
@@ -444,7 +445,7 @@ pub extern "C" fn bf_export_begin(e: *mut Engine, format: i32, path: *const c_ch
             }
             _ => return Err(format!("unknown export format {format}")),
         };
-        Ok(Export { writer: Some(writer), path, w, h, start, count, next: 0, transparent: transparent != 0, error: vec![0], pics })
+        Ok(Export { writer: Some(writer), path, w, h, start, count, next: 0, transparent: transparent != 0 && format == 1, error: vec![0], pics })
     })();
     match r {
         Ok(x) => Box::into_raw(Box::new(x)),
@@ -649,7 +650,13 @@ pub extern "C" fn bf_render_view(e: *const Engine, t: f64, w: u32, h: u32, x0: f
         let start = std::time::Instant::now();
         let camera = flags & 1 != 0;
         let redirect = engine.redirect.filter(|(rt, _)| camera && *rt == t).map(|(_, r)| r);
-        let scene = eval::evaluate_redirected(p, &p.root_symbol, t, false, camera, redirect);
+        let mut scene = eval::evaluate_redirected(p, &p.root_symbol, t, false, camera, redirect);
+        // the frame background goes under the onion skin, not over it
+        let background = if flags & 2 != 0 {
+            scene.root.children.iter().position(|i| matches!(i, eval::Item::Group(g) if g.source == "background")).map(|i| scene.root.children.remove(i))
+        } else {
+            None
+        };
         let mut list = tess::layered(&scene, Some(&engine.glyphs));
         if flags & 2 != 0 {
             let v = &p.view;
@@ -660,6 +667,12 @@ pub extern "C" fn bf_render_view(e: *const Engine, t: f64, w: u32, h: u32, x0: f
             let onion = tess::OnionSkin { apply_camera: camera, before: v.onion_before.clamp(0, 3).min(here), after: v.onion_after.clamp(0, 3).min(frames - 1 - here), ..Default::default() };
             let ghosts = onion.build_layered(p, &p.root_symbol, t);
             list = if v.onion_in_front { list.with_overlay(ghosts) } else { list.with_underlay(ghosts) };
+        }
+        if let Some(bg) = background {
+            let mut root = eval::Group::new(p.root_symbol.clone());
+            root.children.push(bg);
+            let bg_scene = eval::Scene { root, time: t, diagnostics: Vec::new(), primitives: 0 };
+            list = list.with_underlay(tess::layered(&bg_scene, None));
         }
         // Figure editor "Load BG image": the picture fitted into the stage, faint
         if let (Some((iw, ih)), true) = (engine.editor_image, engine.session.as_ref().is_some_and(|s| s.building.is_some())) {

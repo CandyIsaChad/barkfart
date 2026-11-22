@@ -1378,7 +1378,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final sw = (_st['w'] as num).toDouble(), sh = (_st['h'] as num).toDouble();
     final opts = await showDialog<Map<String, Object>>(context: context, builder: (c) => _ExportDialog(sw, sh, _frames, _file?.name ?? 'Animation'));
     if (opts == null) return;
-    await _runExport(opts['format'] as int, opts['w'] as int, opts['h'] as int, opts['start'] as int, opts['count'] as int, opts['transparent'] as bool, opts['name'] as String);
+    await _runExport(opts['format'] as int, opts['w'] as int, opts['h'] as int, opts['start'] as int, opts['count'] as int, opts['transparent'] as bool || opts['silent'] == true, opts['name'] as String);
   }
 
   Widget _topBar(double h) {
@@ -3991,7 +3991,7 @@ class _ExportDialogState extends State<_ExportDialog> {
   int _size = 1;
   int _start = 1;
   int _end = 0;
-  bool _transparent = false;
+  bool _transparent = false, _sound = true;
   late final TextEditingController _name = TextEditingController(text: widget.name);
 
   static const _widths = [320, 640, 1280, 1920];
@@ -4033,6 +4033,10 @@ class _ExportDialogState extends State<_ExportDialog> {
               const SizedBox(height: 6),
               _Toggle('Transparent background', _transparent, (v) => setState(() => _transparent = v)),
             ],
+            if (_format == 2) ...[
+              const SizedBox(height: 6),
+              _Toggle('Include sound', _sound, (v) => setState(() => _sound = v)),
+            ],
             const SizedBox(height: 8),
             _hint(_format == 2
                 ? 'Saved in the Barkfart Exports folder as a video (H.264, with the sound) that Photos and video players open.'
@@ -4050,6 +4054,8 @@ class _ExportDialogState extends State<_ExportDialog> {
             'start': _start - 1,
             'count': last - _start + 1,
             'transparent': _format == 1 && _transparent,
+            // video: the engine's flag argument means "without sound"
+            'silent': _format == 2 && !_sound,
             'name': _name.text,
           }),
           child: Text(_format == 0 ? 'Export GIF' : _format == 2 ? 'Export video' : 'Export ${last - _start + 1} PNGs'),
