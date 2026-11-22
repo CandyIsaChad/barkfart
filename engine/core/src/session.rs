@@ -19,6 +19,9 @@ use serde_json::{json, Value as J};
 /// node extra, so it is saved with the project and undone with the step).
 const KEPT_OWN_COLOR: &str = "B.ownColor";
 
+/// The frame background's gradient colour until one is chosen.
+const DEFAULT_GRADIENT: u32 = 0x808080ff;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     /// Pose figures by their joints.
@@ -964,13 +967,14 @@ impl Session {
                                 if x.color.track.is_empty() && x.color.value.color() == from {
                                     x.color.value = Value::C(to);
                                     x.own_color = true;
+                                    x.legacy_extras.shift_remove(KEPT_OWN_COLOR);
                                 }
                                 if x.gradient_color.track.is_empty() && x.gradient_color.value.color() == from {
                                     x.gradient_color.value = Value::C(to);
                                 }
                             }
                             if let Some(v) = c2["ownColor"].as_bool() {
-                                x.own_color = v;
+                                use_own_color(x, v, fig_color);
                                 if !v {
                                     x.color.track.clear();
                                     x.color.value = Value::C(fig_color);
@@ -1401,22 +1405,7 @@ impl Session {
                             node.legacy_extras.shift_remove(KEPT_OWN_COLOR);
                         }
                         if let Some(v) = c2["ownColor"].as_bool() {
-                            // off: the segment follows the stickfigure colour, and its own
-                            // colour is kept aside (the original greys the swatch out) for
-                            // when "Use segment color" is ticked again
-                            if !v {
-                                let own = node.color.value.color();
-                                if node.own_color && node.color.track.is_empty() && own != fig_color {
-                                    node.legacy_extras.insert(KEPT_OWN_COLOR.into(), format!("s:{:08x}", own.to_rgba8888()));
-                                }
-                                set_static(&mut node.color, Value::C(fig_color));
-                            } else if !node.own_color {
-                                let kept = node.legacy_extras.shift_remove(KEPT_OWN_COLOR).and_then(|t| u32::from_str_radix(t.trim_start_matches("s:"), 16).ok());
-                                if let Some(c) = kept {
-                                    set_static(&mut node.color, Value::C(Color::rgba8888(c)));
-                                }
-                            }
-                            node.own_color = v;
+                            use_own_color(node, v, fig_color);
                         }
                         if let Some(v) = c2["shape"].as_str() {
                             if node.parent.is_some() {
@@ -2218,6 +2207,12 @@ impl Session {
                     let l = s.project.layer_mut(&sym, &cam).expect("camera");
                     let LayerKind::Camera(cm) = &mut l.kind else { return crate::edit::fail("not a camera") };
                     for (first, q, v) in [(true, &mut cm.background, top), (false, &mut cm.background2, bottom)] {
+                        // frames with no gradient of their own have the default gradient
+                        // colour (hidden: alpha 0); key them as that, or a frame added later
+                        // between them and this one blends its colour towards black
+                        if !first && q.track.is_empty() && matches!(q.value, Value::C(c) if c.a <= 0.0) {
+                            q.value = Value::C(Color::rgba8888(DEFAULT_GRADIENT & !0xff));
+                        }
                         key_every_frame(q, n, fps);
                         // frames with no background of their own show the project's:
                         // say so, or the in-betweens fade through transparent black
@@ -3065,14 +3060,14 @@ fn ensure_camera(s: &mut crate::edit::State, sym: &str) -> EditResult<String> {
 /// from the camera's two background colours (see the "frame_bg" command).
 fn frame_bg(p: &Project, t: f64) -> (u32, u32, bool) {
     let cam = p.root().and_then(|s| s.layers.iter().find_map(|l| if let LayerKind::Camera(c) = &l.kind { Some(c) } else { None }));
-    let Some(c) = cam else { return (0xffffffff, 0x808080ff, false) };
+    let Some(c) = cam else { return (0xffffffff, DEFAULT_GRADIENT, false) };
     let mut r = Resolver::new(p);
     let (top, bottom) = (color_of(&mut r, &c.background, t), color_of(&mut r, &c.background2, t));
     if bottom & 0xff != 0 {
         (bottom, top, true)
     } else {
         let color = if top & 0xff == 0 { p.settings.background.to_rgba8888() | 0xff } else { top };
-        let gradient = if bottom == 0 { 0x808080ff } else { bottom | 0xff };
+        let gradient = if bottom == 0 { DEFAULT_GRADIENT } else { bottom | 0xff };
         (color, gradient, false)
     }
 }
@@ -3082,6 +3077,25 @@ fn color_of(r: &mut Resolver, p: &Property, t: f64) -> u32 {
         Value::C(c) => c.to_rgba8888(),
         _ => 0x000000ff,
     }
+}
+
+/// "Use segment color" on or off for one segment. Off: it follows the
+/// stickfigure colour and its own colour is kept aside (the original greys
+/// the swatch out); on: the kept colour comes back.
+fn use_own_color(node: &mut Node, on: bool, fig_color: Color) {
+    if !on {
+        let own = node.color.value.color();
+        if node.own_color && node.color.track.is_empty() && own != fig_color {
+            node.legacy_extras.insert(KEPT_OWN_COLOR.into(), format!("s:{:08x}", own.to_rgba8888()));
+        }
+        set_static(&mut node.color, Value::C(fig_color));
+    } else if !node.own_color {
+        let kept = node.legacy_extras.shift_remove(KEPT_OWN_COLOR).and_then(|t| u32::from_str_radix(t.trim_start_matches("s:"), 16).ok());
+        if let Some(c) = kept {
+            set_static(&mut node.color, Value::C(Color::rgba8888(c)));
+        }
+    }
+    node.own_color = on;
 }
 
 fn set_static(p: &mut Property, v: Value) {

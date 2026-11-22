@@ -1953,14 +1953,26 @@ fn use_gradient_on_and_off_leaves_no_trace() {
     assert_eq!(s.state()["frameBg"]["useGradient"], false);
 }
 
-/// Switching a control on and back off must leave the animation looking as
-/// before, in-betweens included (user report 2026-11-22: "Use gradient" left
-/// a hidden key behind). Every on / off control of the frame, figure, segment,
-/// filter and camera tools.
-#[test]
-fn toggling_a_control_on_and_off_changes_nothing() {
-    // (name, set-up before the first picture, on, off)
-    let toggles: &[(&str, Option<serde_json::Value>, serde_json::Value, serde_json::Value)] = &[
+/// What differs between two panels (state()), without the undo labels.
+fn diff(a: &Value, b: &Value, path: &str, out: &mut Vec<String>) {
+    match (a, b) {
+        (Value::Object(x), Value::Object(y)) => {
+            for k in x.keys().chain(y.keys().filter(|k| !x.contains_key(*k))) {
+                if path.is_empty() && ["undo", "redo", "canUndo", "canRedo", "dirty", "rev", "message"].contains(&k.as_str()) {
+                    continue;
+                }
+                diff(x.get(k).unwrap_or(&Value::Null), y.get(k).unwrap_or(&Value::Null), &format!("{path}/{k}"), out);
+            }
+        }
+        _ if a != b => out.push(format!("{path}: {a} -> {b}")),
+        _ => {}
+    }
+}
+
+/// The controls the on / off tests flip: (name, set-up before the first
+/// picture (one command or a list), on, off).
+fn toggle_rows() -> Vec<(&'static str, Option<Value>, Value, Value)> {
+    vec![
         ("use gradient", None, json!({"op": "frame_bg", "useGradient": true}), json!({"op": "frame_bg", "useGradient": false})),
         ("expand gradient", Some(json!({"op": "frame_bg", "useGradient": true})), json!({"op": "frame_bg", "expand": true}), json!({"op": "frame_bg", "expand": false})),
         ("widescreen", None, json!({"op": "camera_fx", "widescreen": true}), json!({"op": "camera_fx", "widescreen": false})),
@@ -2013,7 +2025,16 @@ fn toggling_a_control_on_and_off_changes_nothing() {
         ("pause kept while off", Some(json!({"op": "frame_delay", "seconds": 0.4})), json!({"op": "frame_delay", "seconds": 0}), json!({"op": "frame_delay", "seconds": 0.4})),
         ("motion blur distance kept while off", Some(json!([{"op": "filter", "motion": true}, {"op": "filter", "motionDistance": 60}])), json!({"op": "filter", "motion": false}), json!({"op": "filter", "motion": true})),
         ("camera lock kept while off", Some(json!([{"op": "camera", "zoom": 1.5, "rotation": 10}, {"op": "camera_lock", "layer": "L2", "on": true}])), json!({"op": "camera_lock", "layer": "L2", "on": false}), json!({"op": "camera_lock", "layer": "L2", "on": true})),
-    ];
+    ]
+}
+
+/// Switching a control on and back off must leave the animation looking as
+/// before, in-betweens included (user report 2026-11-22: "Use gradient" left
+/// a hidden key behind). Every on / off control of the frame, figure, segment,
+/// filter and camera tools.
+#[test]
+fn toggling_a_control_on_and_off_changes_nothing() {
+    let toggles = toggle_rows();
     let picture = |s: &Session, t: f64| -> Vec<u8> {
         let p = s.project();
         let list = barkfart_core::tess::layered(&barkfart_core::eval::evaluate(p, &p.root_symbol, t), None);
@@ -2024,23 +2045,8 @@ fn toggling_a_control_on_and_off_changes_nothing() {
         barkfart_core::fx::render(&list, &mut im);
         im.px.iter().map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8).collect()
     };
-    // the panel as the app shows it, without the undo labels
-    fn diff(a: &serde_json::Value, b: &serde_json::Value, path: &str, out: &mut Vec<String>) {
-        match (a, b) {
-            (serde_json::Value::Object(x), serde_json::Value::Object(y)) => {
-                for k in x.keys().chain(y.keys().filter(|k| !x.contains_key(*k))) {
-                    if path.is_empty() && ["undo", "redo", "canUndo", "canRedo", "dirty", "rev", "message"].contains(&k.as_str()) {
-                        continue;
-                    }
-                    diff(x.get(k).unwrap_or(&serde_json::Value::Null), y.get(k).unwrap_or(&serde_json::Value::Null), &format!("{path}/{k}"), out);
-                }
-            }
-            _ if a != b => out.push(format!("{path}: {a} -> {b}")),
-            _ => {}
-        }
-    }
     let mut failures = Vec::new();
-    for (name, setup, on, off) in toggles {
+    for (name, setup, on, off) in &toggles {
         let mut s = two_poses();
         s.command(&json!({"op": "animation", "tweening": true}));
         s.command(&json!({"op": "add_camera"}));
@@ -2747,4 +2753,165 @@ fn a_segments_own_colour_comes_back_when_use_segment_colour_is_ticked_again() {
     }
     assert_eq!(colour(&s), 0xff0000ff, "undo: back to the first own colour");
     assert_eq!(saved_text(s.project()), round_one, "undo is exact");
+}
+
+/// Modify branch's "Use segment color" keeps own colours aside as well.
+#[test]
+fn modify_branch_use_segment_colour_off_and_on_gives_the_colours_back() {
+    let mut s = two_poses();
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    s.command(&json!({"op": "segment", "branch": true, "color": 0xff0000ffu32}));
+    let own = saved_text(s.project());
+    let before: Vec<u8> = picture_bytes(s.project(), 0.0);
+    s.command(&json!({"op": "branch_edit", "ownColor": false}));
+    assert_ne!(picture_bytes(s.project(), 0.0), before, "off: the branch follows the figure colour");
+    s.command(&json!({"op": "branch_edit", "ownColor": true}));
+    assert_eq!(picture_bytes(s.project(), 0.0), before, "on again: the colours are back");
+    assert_eq!(saved_text(s.project()), own, "and nothing is left behind");
+}
+
+/// A small picture (80 x 45) of the project at time t, for the matrix tests.
+fn small_picture(p: &barkfart_core::model::Project, t: f64) -> Vec<u8> {
+    let list = barkfart_core::tess::layered(&barkfart_core::eval::evaluate(p, &p.root_symbol, t), None);
+    let mut im = barkfart_core::fx::Image::new(80, 45, -640.0, 360.0, 0.0625);
+    for v in im.px.iter_mut() {
+        *v = 1.0;
+    }
+    barkfart_core::fx::render(&list, &mut im);
+    im.px.iter().map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8).collect()
+}
+
+/// Three frames, a camera, tweening on, the middle frame and the man's arm
+/// selected, plus a row's set-up.
+fn three_frames(setup: &Option<Value>) -> Session {
+    let mut s = two_poses();
+    s.command(&json!({"op": "animation", "tweening": true}));
+    s.command(&json!({"op": "add_camera"}));
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "insert_frame"}));
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    match setup {
+        Some(Value::Array(list)) => {
+            for c in list {
+                s.command(c);
+            }
+        }
+        Some(c) => {
+            s.command(c);
+        }
+        None => {}
+    }
+    s
+}
+
+/// What a viewer sees: every frame and every half frame.
+fn all_pictures(s: &Session) -> Vec<Vec<u8>> {
+    let fps = s.project().settings.fps as f64;
+    let n = s.state()["frames"].as_i64().unwrap() as usize;
+    (0..2 * n).map(|k| small_picture(s.project(), k as f64 / (2.0 * fps))).collect()
+}
+
+/// The edits the matrix runs after a switch was flipped on and off.
+fn follow_up_edits() -> Vec<(&'static str, Vec<Value>)> {
+    vec![
+        ("insert frame", vec![json!({"op": "insert_frame"})]),
+        ("insert a blank frame", vec![json!({"op": "insert_frame", "copy": false})]),
+        ("delete frame", vec![json!({"op": "delete_frame"})]),
+        ("copy and paste frame", vec![json!({"op": "copy_frame", "n": 0}), json!({"op": "paste_frame"})]),
+        ("frame rate", vec![json!({"op": "fps", "v": 24})]),
+        ("tween frames", vec![json!({"op": "tween_add", "at": [0.5]})]),
+        ("slow motion", vec![json!({"op": "frame_slow", "n": 3})]),
+        ("clear frame", vec![json!({"op": "clear_frame"})]),
+        ("figure colour and scale", vec![json!({"op": "figure", "color": 0x00ff00ffu32, "scale": 1.3})]),
+        ("segment thickness", vec![json!({"op": "segment", "thickness": 12})]),
+        ("rotate cameras", vec![json!({"op": "rotate_cameras"})]),
+        ("camera zoom", vec![json!({"op": "camera", "zoom": 1.4, "rotation": 8})]),
+        ("background colour", vec![json!({"op": "frame_bg", "color": 0x336699ffu32})]),
+    ]
+}
+
+/// A switch flipped on and off again must not change what the next edit
+/// does: for every control T, "T on, T off, then F" gives the same pictures
+/// (every frame and half frame, new frames too) and the same panel as "F"
+/// alone. This is the test for hidden keys: a leftover that shows nothing
+/// today but bites on the next edit. One test per edit F (they run in
+/// parallel); `matrix_covers_every_edit` keeps the list and the tests in step.
+fn next_edit_matrix(which: usize) {
+    let (fname, edit) = follow_up_edits().swap_remove(which);
+    let mut failures = Vec::new();
+    for (name, setup, on, off) in &toggle_rows() {
+        let (mut a, mut b) = (three_frames(setup), three_frames(setup));
+        a.command(on);
+        a.command(off);
+        for s in [&mut a, &mut b] {
+            s.command(&json!({"op": "frame", "i": 1}));
+            s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+            for c in &edit {
+                s.command(c);
+            }
+        }
+        let (pa, pb) = (all_pictures(&a), all_pictures(&b));
+        let bad: Vec<usize> = pa.iter().zip(&pb).enumerate().filter(|(_, (x, y))| x.len() != y.len() || x.iter().zip(y.iter()).any(|(p, q)| p.abs_diff(*q) > 2)).map(|(k, _)| k).collect();
+        let mut d = Vec::new();
+        diff(&b.state(), &a.state(), "", &mut d);
+        if pa.len() != pb.len() || !bad.is_empty() || !d.is_empty() {
+            failures.push(format!("{name}, on and off, then {fname}: pictures differ at half frames {bad:?} ({} / {} of them); panel {:?}", pa.len(), pb.len(), d.iter().take(3).collect::<Vec<_>>()));
+        }
+    }
+    assert!(failures.is_empty(), "{} switches differ:\n{}", failures.len(), failures.join("\n"));
+}
+
+macro_rules! next_edit_tests {
+    ($($name:ident => $n:expr),* $(,)?) => {
+        $( #[test] fn $name() { next_edit_matrix($n) } )*
+        #[test]
+        fn matrix_covers_every_edit() {
+            assert_eq!(follow_up_edits().len(), [$($n),*].len(), "a test for every edit in follow_up_edits()");
+        }
+    };
+}
+
+next_edit_tests! {
+    after_a_switch_insert_frame_is_unchanged => 0,
+    after_a_switch_insert_blank_frame_is_unchanged => 1,
+    after_a_switch_delete_frame_is_unchanged => 2,
+    after_a_switch_copy_and_paste_frame_is_unchanged => 3,
+    after_a_switch_frame_rate_is_unchanged => 4,
+    after_a_switch_tween_frames_is_unchanged => 5,
+    after_a_switch_slow_motion_is_unchanged => 6,
+    after_a_switch_clear_frame_is_unchanged => 7,
+    after_a_switch_figure_colour_and_scale_is_unchanged => 8,
+    after_a_switch_segment_thickness_is_unchanged => 9,
+    after_a_switch_rotate_cameras_is_unchanged => 10,
+    after_a_switch_camera_zoom_is_unchanged => 11,
+    after_a_switch_background_colour_is_unchanged => 12,
+}
+
+/// Controls that belong to one frame (the middle one) leave the pictures at
+/// the exact times of the first and last frame as they were.
+#[test]
+fn a_per_frame_control_on_the_middle_frame_leaves_the_other_frames_alone() {
+    let per_frame = [
+        "use gradient", "expand gradient", "widescreen", "wobble", "wobble rotation", "do not tween", "pause", "slow motion", "invert", "motion blur",
+        "nudge", "turn figure", "silence frame", "gradient colours kept while off", "pause kept while off", "motion blur distance kept while off",
+    ];
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    for (name, setup, on, _) in &toggle_rows() {
+        if !per_frame.contains(name) {
+            continue;
+        }
+        checked += 1;
+        let mut s = three_frames(setup);
+        let fps = s.project().settings.fps as f64;
+        let ends = |s: &Session| -> Vec<Vec<u8>> { [0.0, 2.0 / fps].iter().map(|t| small_picture(s.project(), *t)).collect() };
+        let before = ends(&s);
+        s.command(on);
+        if ends(&s) != before {
+            failures.push(format!("{name}: changed the first or last frame while set on the middle one"));
+        }
+    }
+    assert_eq!(checked, per_frame.len(), "every name in the list is a row");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
