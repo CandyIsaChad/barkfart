@@ -4295,3 +4295,33 @@ fn the_history_keeps_the_last_200_steps_exactly() {
     assert!(!s.doc.can_redo());
     assert_eq!(saved_text(s.project()), texts[260], "200 redos: the last state");
 }
+
+/// A segment's own colour kept aside while "Use segment color" is off lives in
+/// the project only: a saved .nodes figure still opens (and imports back) and
+/// the figure keeps the colours it had on the stage.
+#[test]
+fn a_kept_own_colour_does_not_disturb_a_saved_nodes_figure() {
+    let mut s = two_poses();
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    s.command(&json!({"op": "segment", "color": 0xff0000ffu32}));
+    s.command(&json!({"op": "segment", "ownColor": false}));
+    assert!(saved_text(s.project()).contains("B.ownColor"), "set-up: a colour is kept aside");
+    let colours = |s: &Session| -> Vec<u32> {
+        let f = s.project().root().unwrap().layer("L2").unwrap().as_figure().unwrap().clone();
+        let mut r = barkfart_core::eval::Resolver::new(s.project());
+        f.nodes().iter().map(|n| r.color(&n.color, 0.0).to_rgba8888()).collect()
+    };
+    let before = colours(&s);
+    let (name, bytes) = s.figure_file().expect("the figure saves");
+    let mut other = Session::new(Document::new(barkfart_core::session::new_editor_project()));
+    let st = other.import(&format!("{name}.nodes"), &bytes);
+    assert!(st["message"].as_str().map_or(true, |m| !m.to_lowercase().contains("not a") && !m.to_lowercase().contains("fail")), "the saved figure imports: {}", st["message"]);
+    let imported: Vec<String> = other.project().root().unwrap().layers.iter().filter(|l| l.as_figure().is_some()).map(|l| l.id.clone()).collect();
+    assert!(imported.len() >= 2, "the figure came in as a new one: {imported:?}");
+    let new_id = imported.last().unwrap().clone();
+    let f = other.project().root().unwrap().layer(&new_id).unwrap().as_figure().unwrap().clone();
+    let mut r = barkfart_core::eval::Resolver::new(other.project());
+    let got: Vec<u32> = f.nodes().iter().map(|n| r.color(&n.color, 0.0).to_rgba8888()).collect();
+    assert_eq!(got.len(), before.len(), "the same joints");
+    assert_eq!(got, before, "the same colours");
+}
