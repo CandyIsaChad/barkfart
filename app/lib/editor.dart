@@ -1002,6 +1002,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (_st['movieclip'] != null) return const ['Movieclip Tools'];
     final sel = _sel;
     if (sel != null) return const ['Stickfigure Tools', 'Stickfigure Filters', 'Segment Tools'];
+    if (_st['editingClip'] != null) return const ['Movieclip editor', 'Animation Tools', 'Library Tools', 'Textfield Tools'];
     return const ['App Tools', 'Project Tools', 'Animation Tools', 'Library Tools', 'Textfield Tools'];
   }
 
@@ -1017,6 +1018,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         return _libraryTools();
       case 'Movieclip Tools':
         return _movieclipTools(_st['movieclip'] as Map);
+      case 'Movieclip editor':
+        return [
+          Text('Editing ${_st['editingClip']}', style: const TextStyle(color: cText, fontSize: 13)),
+          _hint("These are the movieclip's own frames: pose, add and delete frames and figures as usual. Finish goes back to the animation, where the movieclip plays them."),
+          _gap,
+          _Btn('Finish movieclip', accent: true, onTap: () => _cmd({'op': 'movieclip_done'})),
+        ];
       case 'Frame Tools':
         return _frameToolsPanel();
       case 'Stickfigure Tools':
@@ -2433,6 +2441,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _stepper('Speed', speed.toStringAsFixed(2), () => _cmd({'op': 'movieclip', 'speed': math.max(0, speed - 0.1)}), () => _cmd({'op': 'movieclip', 'speed': speed + 0.1})),
       _stepper('Start offset', '${off.toStringAsFixed(2)} s', () => _cmd({'op': 'movieclip', 'offset': off - 0.1}), () => _cmd({'op': 'movieclip', 'offset': off + 0.1})),
       _hint('Drag the square on the stage to move it. Library Tools can break it apart into figures.'),
+      _gap,
+      _Btn('Edit movieclip ›', accent: true, onTap: () => _cmd({'op': 'edit_movieclip'})),
       _gap,
       _Btn('Break apart', onTap: () => _cmd({'op': 'break_apart', 'layer': mc['layer']})),
     ];

@@ -63,6 +63,10 @@ pub struct Session {
     /// Figure editor "Background color": the stage colour while editing a
     /// figure (view only).
     pub editor_bg: Option<u32>,
+    /// The main animation's symbol. While a movieclip is edited the project's
+    /// root symbol is the movieclip's, so every tool works on its frames;
+    /// saving always writes the main one as the root.
+    pub main_root: String,
     /// Creation mode's draw tool (None: select and move).
     pub draw: Option<Shape>,
     gesture: Gesture,
@@ -131,7 +135,8 @@ impl Session {
         let mut doc = doc;
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
-        let mut s = Session { doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let main_root = doc.project().root_symbol.clone();
+        let mut s = Session { main_root, doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -1826,6 +1831,32 @@ impl Session {
                     }
                 }
             }
+            "edit_movieclip" => {
+                // the movieclip editor: its own frames, with every tool
+                let target = self.sel_layer().and_then(|l| self.project().root()?.layer(&l).and_then(|x| if let LayerKind::Symbol(sl) = &x.kind { Some(sl.symbol.clone()) } else { None }));
+                if let Some(sid) = target {
+                    if self.step("Edit movieclip", |s| {
+                        s.project.root_symbol = sid.clone();
+                        Ok(())
+                    }).is_some() {
+                        self.selected = None;
+                        self.frame = 0;
+                        self.validate();
+                    }
+                }
+            }
+            "movieclip_done" => {
+                if self.project().root_symbol != self.main_root {
+                    let main = self.main_root.clone();
+                    self.step("Finish movieclip", |s| {
+                        s.project.root_symbol = main;
+                        Ok(())
+                    });
+                    self.selected = None;
+                    self.frame = 0;
+                    self.validate();
+                }
+            }
             "movieclip" => {
                 // Movieclip Tools: loop mode, speed, start offset (seconds)
                 if let Some(l) = self.sel_layer() {
@@ -2431,7 +2462,7 @@ impl Session {
             "canUndo": self.doc.can_undo(), "canRedo": self.doc.can_redo(),
             "undo": self.doc.undo_label(), "redo": self.doc.redo_label(), "dirty": self.doc.dirty(),
             "mode": match self.mode { Mode::Figure => "figure", Mode::All => "all", Mode::Camera => "camera" },
-            "handles": handles, "selected": sel, "figures": figures, "camera": cam, "movieclip": movieclip,
+            "handles": handles, "selected": sel, "figures": figures, "camera": cam, "movieclip": movieclip, "editingClip": (p.root_symbol != self.main_root).then(|| p.root().and_then(|r| r.name.clone()).unwrap_or_else(|| "Movieclip".into())),
             "branchCopied": self.branch_clip.is_some(),
             "watermark": p.settings.watermark.as_ref().map(|(t, c)| json!({"text": t, "color": c.to_rgba8888()})),
             "propsFrom": self.props_clip.as_ref().and_then(|c| p.root()?.layer(&c.source).map(|l| l.name.clone().unwrap_or_else(|| l.id.clone()))),
@@ -2582,14 +2613,28 @@ impl Session {
     /// The project as a .bark file without marking it saved.
     pub fn save_copy(&self) -> Result<Vec<u8>, String> {
         let assets: IndexMap<String, Vec<u8>> = self.doc.state.assets.iter().map(|(k, v)| (k.clone(), (**v).clone())).collect();
-        crate::codec::write_bark(self.project(), &assets).map_err(|e| e.0)
+        crate::codec::write_bark(&self.saved_project(), &assets).map_err(|e| e.0)
+    }
+
+    /// The project as it is saved: the main animation as the root, even
+    /// while a movieclip is being edited.
+    fn saved_project(&self) -> std::borrow::Cow<'_, Project> {
+        if self.project().root_symbol == self.main_root {
+            std::borrow::Cow::Borrowed(self.project())
+        } else {
+            let mut p = self.project().clone();
+            p.root_symbol = self.main_root.clone();
+            std::borrow::Cow::Owned(p)
+        }
     }
 
     /// The project as a .bark file; marks it saved.
     pub fn save(&mut self) -> Result<Vec<u8>, String> {
-        self.doc.project_mut().view.frame = self.frame;
+        if self.project().root_symbol == self.main_root {
+            self.doc.project_mut().view.frame = self.frame;
+        }
         let assets: IndexMap<String, Vec<u8>> = self.doc.state.assets.iter().map(|(k, v)| (k.clone(), (**v).clone())).collect();
-        let bytes = crate::codec::write_bark(self.project(), &assets).map_err(|e| e.0)?;
+        let bytes = crate::codec::write_bark(&self.saved_project(), &assets).map_err(|e| e.0)?;
         self.doc.mark_saved();
         self.rev += 1;
         Ok(bytes)

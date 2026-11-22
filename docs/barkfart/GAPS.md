@@ -46,7 +46,7 @@ committed). Plainest behaviour where the reference is unsure.
       separate imported-figure list, so "hide from the list" does not apply)
 - [x] Movieclips: convert a figure, break apart, Movieclip Tools (loop, speed,
       offset), move on the stage
-- [ ] Movieclip editor (edit a movieclip's own frames)
+- [x] Movieclip editor (edit a movieclip's own frames)
 
 ## Figure editor (12)
 - [x] Special Segment Tools: reorder segment / branch, split N, copy /

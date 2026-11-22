@@ -1801,3 +1801,32 @@ fn movieclip_tools_set_playback() {
     s.command(&json!({"op": "undo"}));
     assert_eq!(s.state()["movieclip"]["speed"], 1.0);
 }
+
+/// Movieclip editor: the movieclip's own frames with every tool; Finish
+/// returns to the animation; a save in between still has the animation as
+/// its root.
+#[test]
+fn movieclip_editor_edits_its_own_frames() {
+    let mut s = two_poses();
+    let main = s.project().root_symbol.clone();
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    s.command(&json!({"op": "to_movieclip"}));
+    let h = s.tools.handles(s.project(), 0.0).into_iter().find(|h| h.node.is_empty()).unwrap();
+    s.command(&json!({"op": "select", "layer": h.layer, "node": ""}));
+    let st = s.command(&json!({"op": "edit_movieclip"}));
+    assert_eq!(st["undo"], "Edit movieclip");
+    assert!(st["editingClip"].is_string());
+    let clip = s.project().root_symbol.clone();
+    assert_ne!(clip, main);
+    assert_eq!(st["frames"], 2, "the clip's own two frames");
+    s.command(&json!({"op": "insert_frame"}));
+    assert_eq!(s.state()["frames"], 3);
+    // a save now still opens on the animation
+    let bytes = s.save_copy().unwrap();
+    let back = barkfart_core::codec::read_bark(&bytes).unwrap().project;
+    assert_eq!(back.root_symbol, main);
+    let st = s.command(&json!({"op": "movieclip_done"}));
+    assert!(st["editingClip"].is_null());
+    assert_eq!(s.project().root_symbol, main);
+    assert!((s.project().symbol(&clip).unwrap().duration * s.project().settings.fps as f64 - 3.0).abs() < 1e-6, "the clip is three frames now");
+}
