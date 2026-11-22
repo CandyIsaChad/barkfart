@@ -1762,3 +1762,22 @@ fn convert_to_movieclip_and_break_apart() {
     s.command(&json!({"op": "undo"}));
     assert!(s.state()["library"].as_array().unwrap().iter().any(|m| m["layer"] == "L2"));
 }
+
+/// A movieclip (or sprite) has one main handle: dragging it moves it.
+#[test]
+fn movieclips_can_be_dragged() {
+    let mut s = two_poses();
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    s.command(&json!({"op": "to_movieclip"}));
+    let h = s.tools.handles(s.project(), 0.0).into_iter().find(|h| h.node.is_empty()).expect("a movieclip handle");
+    let before = picture_at(&s, 0.0);
+    s.command(&json!({"op": "down", "x": h.x, "y": h.y, "r": 6}));
+    s.command(&json!({"op": "move", "x": h.x + 50.0, "y": h.y}));
+    let st = s.command(&json!({"op": "up"}));
+    assert!(st["undo"].as_str().is_some_and(|u| u.starts_with("Move")), "{}", st["undo"]);
+    let after = picture_at(&s, 0.0);
+    assert_eq!(before.len(), after.len());
+    assert!((after[0] - before[0] - 50.0).abs() < 0.5, "moved right by 50");
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(picture_at(&s, 0.0), before);
+}

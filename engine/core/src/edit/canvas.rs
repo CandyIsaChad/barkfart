@@ -59,6 +59,9 @@ pub struct CanvasTools {
     pub axis_lock: bool,
     /// Joint angles snap to multiples of this (0: off).
     pub snap_degrees: f32,
+    /// Movieclips and sprites get a main handle too (Barkfart's editor; the
+    /// Java reference's canvas has none, so this is off by default).
+    pub layer_handles: bool,
     drag: Option<Drag>,
 }
 
@@ -75,6 +78,7 @@ impl Default for CanvasTools {
             active_figure: None,
             axis_lock: false,
             snap_degrees: 0.0,
+            layer_handles: false,
             drag: None,
         }
     }
@@ -171,6 +175,14 @@ impl CanvasTools {
         let mut r = Resolver::new(p);
         let mut out = Vec::new();
         for l in &s.layers {
+            // movieclips and sprites: one main handle at their origin, to move them
+            if matches!(l.kind, LayerKind::Symbol(_) | LayerKind::Sprite(_)) {
+                if self.layer_handles && l.visible && !l.locked && r.b(&l.shown, t) {
+                    let v = self.view(p, l, t);
+                    out.push(Handle { layer: l.id.clone(), node: String::new(), x: v.map_x(0.0, 0.0) as f32, y: v.map_y(0.0, 0.0) as f32, root: true });
+                }
+                continue;
+            }
             let LayerKind::Figure(f) = &l.kind else { continue };
             if !l.visible || l.locked || !r.b(&l.shown, t) {
                 continue;
@@ -320,10 +332,25 @@ impl CanvasTools {
         let p = d.project();
         let s = root_symbol(p);
         let Some(l) = s.layer(&hit.layer) else { return };
-        let Some(f) = l.as_figure() else { return };
         let view = self.view(p, l, t);
         let start_x = l.transform.x.key_value(t).f();
         let start_y = l.transform.y.key_value(t).f();
+        let Some(f) = l.as_figure() else {
+            // a movieclip or sprite: its position only
+            let ids = [l.transform.x.id.clone(), l.transform.y.id.clone()];
+            d.begin("Move");
+            for id in ids {
+                if let Some(q) = d.state.project.property_mut(&id) {
+                    if q.track.index_of(t).is_err() {
+                        let interp = interp_at(q, t, self.editor.default_interp);
+                        let v = q.key_value(t);
+                        q.track.put(Key::new(t, v, interp));
+                    }
+                }
+            }
+            self.drag = Some(Drag { hit: hit.clone(), view, grab_dx: hit.x - x, grab_dy: hit.y - y, start_x, start_y, start_length: HashMap::new(), pins: Vec::new() });
+            return;
+        };
         let mut r0 = Resolver::new(p);
         let start_length: HashMap<String, f32> = f.nodes().iter().map(|n| (n.id.clone(), r0.f(&n.length, t))).collect();
         let p0 = FigurePose::compute(f, t, &mut r0);
@@ -376,15 +403,21 @@ impl CanvasTools {
         let p = d.project();
         let s = root_symbol(p);
         let Some(l) = s.layer(&drag.hit.layer) else { return Ok(()) };
-        let Some(f) = l.as_figure() else { return Ok(()) };
-        let Some(n) = f.node(&drag.hit.node) else { return Ok(()) };
-        if n.drag_lock == DRAG_HORIZONTAL {
-            ty = drag.hit.y;
-        } else if n.drag_lock == DRAG_VERTICAL {
-            tx = drag.hit.x;
+        let fig = l.as_figure();
+        let n = fig.and_then(|f| f.node(&drag.hit.node));
+        if fig.is_some() && n.is_none() {
+            return Ok(());
+        }
+        if let Some(n) = n {
+            if n.drag_lock == DRAG_HORIZONTAL {
+                ty = drag.hit.y;
+            } else if n.drag_lock == DRAG_VERTICAL {
+                tx = drag.hit.x;
+            }
         }
         let ed = self.editor.clone();
-        if n.parent.is_none() {
+        let is_fig = fig.is_some();
+        if n.is_none_or(|n| n.parent.is_none()) {
             if self.axis_lock {
                 if (tx - drag.hit.x).abs() >= (ty - drag.hit.y).abs() {
                     ty = drag.hit.y;
@@ -401,9 +434,15 @@ impl CanvasTools {
             let (xi, yi) = (l.transform.x.id.clone(), l.transform.y.id.clone());
             ed.change_in(&mut d.state, &xi, Value::F((drag.start_x as f64 + dxp) as f32), t)?;
             ed.change_in(&mut d.state, &yi, Value::F((drag.start_y as f64 + dyp) as f32), t)?;
-            self.hold_pins(d, &drag, t)?;
+            if is_fig {
+                self.hold_pins(d, &drag, t)?;
+            }
             return Ok(());
         }
+        let p = d.project();
+        let Some(l) = root_symbol(p).layer(&drag.hit.layer) else { return Ok(()) };
+        let Some(f) = l.as_figure() else { return Ok(()) };
+        let Some(n) = f.node(&drag.hit.node) else { return Ok(()) };
         let mut r = Resolver::new(p);
         let pose = FigurePose::compute(f, t, &mut r);
         let i = f.index_of(&n.id).expect("node");

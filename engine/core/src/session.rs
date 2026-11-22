@@ -125,6 +125,7 @@ pub fn new_editor_project() -> Project {
 impl Session {
     pub fn new(doc: Document) -> Session {
         let mut tools = CanvasTools::default();
+        tools.layer_handles = true;
         tools.key_scope = KeyScope::Figure;
         let frame = doc.project().view.frame.max(0);
         let mut doc = doc;
