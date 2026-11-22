@@ -2565,3 +2565,65 @@ fn copying_and_looking_never_touch_the_project() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// Tween colours is a switch, not a rewrite: off, then on again, gives back
+/// the very same project whatever easing the colour keys had (an imported
+/// animation can have eased, held and linear colour keys), and while it is
+/// off the colours jump at each frame instead of blending.
+#[test]
+fn tween_colours_off_and_on_keeps_every_colour_key_as_it_was() {
+    use barkfart_core::model::{Color, Ease, Interp, Key, LayerKind, Value};
+    let mut s = two_poses();
+    s.command(&json!({"op": "animation", "tweening": true}));
+    let fps = s.project().settings.fps as f64;
+    let (red, blue) = (Value::C(Color::rgba8888(0xff0000ff)), Value::C(Color::rgba8888(0x0000ffff)));
+    let kinds = [(Interp::Bezier, Ease::new(0.42, 0.0, 0.58, 1.0)), (Interp::Hold, Ease::LINEAR), (Interp::Linear, Ease::LINEAR)];
+    // three segments with colour keys on frames 1 and 2: eased, held, linear
+    let sym = s.project().root_symbol.clone();
+    let ids: Vec<String> = {
+        let LayerKind::Figure(f) = &s.project().root().unwrap().layer("L2").unwrap().kind else { panic!("a figure") };
+        f.nodes().iter().filter(|n| n.parent.is_some()).map(|n| n.id.clone()).take(3).collect()
+    };
+    {
+        let LayerKind::Figure(f) = &mut s.doc.project_mut().layer_mut(&sym, "L2").unwrap().kind else { panic!("a figure") };
+        for (id, (interp, ease)) in ids.iter().zip(kinds) {
+            let n = f.node_mut(id).unwrap();
+            n.own_color = true;
+            n.color.track.put(Key { time: 0.0, value: red, interp, ease });
+            n.color.track.put(Key::new(1.0 / fps, blue, Interp::Linear));
+        }
+    }
+    // the colours as drawn (the evaluator reads the layer's switch)
+    fn collect(g: &barkfart_core::eval::Group, out: &mut Vec<(String, u32)>) {
+        for it in &g.children {
+            match it {
+                barkfart_core::eval::Item::Shape(sh) => out.push((sh.source.clone(), sh.color.to_rgba8888())),
+                barkfart_core::eval::Item::Group(g) => collect(g, out),
+            }
+        }
+    }
+    let colours = |s: &Session, t: f64| -> Vec<u32> {
+        let p = s.project();
+        let mut drawn = Vec::new();
+        collect(&barkfart_core::eval::evaluate(p, &p.root_symbol, t).root, &mut drawn);
+        ids.iter().map(|id| drawn.iter().find(|(src, _)| *src == format!("L2/{id}")).map(|x| x.1).expect("the segment is drawn")).collect()
+    };
+    let times = [0.0, 0.25 / fps, 0.5 / fps, 0.75 / fps, 1.0 / fps];
+    s.command(&json!({"op": "frame", "i": 0}));
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    let (text, blending): (String, Vec<Vec<u32>>) = (saved_text(s.project()), times.iter().map(|t| colours(&s, *t)).collect());
+    assert_ne!(blending[2], blending[0], "with colours tweening the middle is a blend");
+
+    s.command(&json!({"op": "figure", "tweenColors": false}));
+    for (k, t) in times.iter().enumerate() {
+        let want = if k == 4 { colours(&s, 1.0 / fps) } else { colours(&s, 0.0) };
+        assert_eq!(colours(&s, *t), want, "colours off: a jump at time {t}, not a blend");
+    }
+    assert_eq!(colours(&s, 1.0 / fps), blending[4], "the next frame still has its own colours");
+    s.command(&json!({"op": "figure", "tweenColors": true}));
+    assert_eq!(saved_text(s.project()).replace(",\"colorsJump\":true", "").lines().count(), text.lines().count(), "only the flag differs");
+    for (k, t) in times.iter().enumerate() {
+        assert_eq!(colours(&s, *t), blending[k], "on again: the same blend at time {t}");
+    }
+    assert_eq!(saved_text(s.project()), text, "on again: the very same project");
+}

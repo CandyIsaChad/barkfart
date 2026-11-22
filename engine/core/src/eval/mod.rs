@@ -361,7 +361,7 @@ fn eval_symbol<'p>(ctx: &mut Ctx<'p>, w: Work<'p>, stack: &mut Vec<Work<'p>>, on
         let mut slot = w.into.clone();
         slot.push(into.children.len() - 1);
         match &l.kind {
-            LayerKind::Figure(f) => emit_figure(ctx, &l.id, f, &xf, t, &slot),
+            LayerKind::Figure(f) => emit_figure(ctx, &l.id, f, l.colors_jump, &xf, t, &slot),
             LayerKind::Sprite(s) => emit_sprite(ctx, &l.id, s, &xf, t, &slot),
             LayerKind::Symbol(s) => push_instance(ctx, &l.id, s, xf, t, slot, &w.path, stack),
             LayerKind::Text(tl) => {
@@ -505,7 +505,17 @@ fn node_frame(p: &Layer, node_id: &str, rotate: bool, t: f64, r: &mut Resolver, 
     Some(if rotate { a.mul(&Affine::rotate_deg(pose.angle[i])) } else { a })
 }
 
-fn emit_figure(ctx: &mut Ctx, layer_id: &str, f: &Figure, xf: &Affine, t: f64, slot: &[usize]) {
+/// A figure colour at time t: blended between keys, or (with the figure's
+/// "Tween colours" switch off) jumping at each key.
+fn figure_color(ctx: &mut Ctx, jump: bool, p: &Property, t: f64) -> Color {
+    if jump {
+        ctx.r.color_held(p, t)
+    } else {
+        ctx.r.color(p, t)
+    }
+}
+
+fn emit_figure(ctx: &mut Ctx, layer_id: &str, f: &Figure, jump: bool, xf: &Affine, t: f64, slot: &[usize]) {
     let nodes = f.nodes();
     let pose = FigurePose::compute(f, t, &mut ctx.r);
     let (px, py, parent) = (&pose.x, &pose.y, &pose.parent);
@@ -565,7 +575,7 @@ fn emit_figure(ctx: &mut Ctx, layer_id: &str, f: &Figure, xf: &Affine, t: f64, s
                         arc_interior(&mut q, x0, y0, x1, y1, h);
                     }
                 }
-                let pc = if pf.use_own_color { ctx.r.color(&pf.color, t) } else { ctx.r.color(&node.color, t) };
+                let pc = if pf.use_own_color { figure_color(ctx, jump, &pf.color, t) } else { figure_color(ctx, jump, &node.color, t) };
                 out.push(Item::Shape(Shape::new(ShapeKind::Polygon { points: q, convex: false }, pc, format!("{layer_id}/{}", pf.id))));
             }
         }
@@ -577,14 +587,14 @@ fn emit_figure(ctx: &mut Ctx, layer_id: &str, f: &Figure, xf: &Affine, t: f64, s
             break;
         }
         let pi = pi as usize;
-        let mut c = ctx.r.color(&node.color, t);
+        let mut c = figure_color(ctx, jump, &node.color, t);
         let src = format!("{layer_id}/{}", node.id);
         let (ax, ay) = (xf.map_x(px[pi], py[pi]) as f32, xf.map_y(px[pi], py[pi]) as f32);
         let (bx, by) = (xf.map_x(px[i], py[i]) as f32, xf.map_y(px[i], py[i]) as f32);
         let w = (ctx.r.f(&node.thickness, t).abs() as f64 * sf) as f32;
         let mut g_end: Option<Color> = None;
         if node.gradient {
-            let mut e = ctx.r.color(&node.gradient_color, t);
+            let mut e = figure_color(ctx, jump, &node.gradient_color, t);
             if node.gradient_reverse {
                 std::mem::swap(&mut c, &mut e);
             }
@@ -623,7 +633,7 @@ fn emit_figure(ctx: &mut Ctx, layer_id: &str, f: &Figure, xf: &Affine, t: f64, s
                     out.push(Item::Shape(Shape::new(ShapeKind::Circle { cx, cy, r: rad2, start, span }, c, src.clone())));
                 }
                 if node.circle_outline || node.circle_hollow {
-                    let oc = if node.circle_outline { ctx.r.color(&node.outline_color, t) } else { c };
+                    let oc = if node.circle_outline { figure_color(ctx, jump, &node.outline_color, t) } else { c };
                     let ow = w.max(sf as f32);
                     out.push(Item::Shape(Shape::new(ShapeKind::Ring { cx, cy, r: rim, width: ow, start, span }, oc, src.clone())));
                 }

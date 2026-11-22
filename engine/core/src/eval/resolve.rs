@@ -82,6 +82,18 @@ impl<'p> Resolver<'p> {
         self.resolve(p, t).color()
     }
 
+    /// A colour that jumps at each key instead of blending (a figure with
+    /// "Tween colours" off): the value of the last key at or before t. The
+    /// keys themselves are left as they are, so turning the switch back on
+    /// gives the blend (and the easing) they had.
+    pub fn color_held(&mut self, p: &Property, t: f64) -> Color {
+        let keys = p.track.keys();
+        if keys.len() < 2 || !p.modifiers.is_empty() {
+            return self.color(p, t);
+        }
+        keys.iter().rev().find(|k| k.time <= t + 1e-9).unwrap_or(&keys[0]).value.color()
+    }
+
     pub fn resolve(&mut self, p: &Property, t: f64) -> Value {
         let key = (p.id.clone(), t.to_bits());
         if let Some(v) = self.memo.get(&key) {

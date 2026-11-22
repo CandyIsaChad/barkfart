@@ -1507,20 +1507,10 @@ impl Session {
                             layer.vanish_in_tween = !v;
                         }
                         if let Some(v) = c2["tweenColors"].as_bool() {
-                            // colours blend between frames, or jump at each frame
+                            // colours blend between frames, or jump at each frame: a
+                            // switch the evaluator reads (eval::figure_color), so the keys
+                            // keep their easing and off, then on, changes nothing
                             layer.colors_jump = !v;
-                            if let LayerKind::Figure(f) = &mut layer.kind {
-                                let (nodes, fills) = f.parts_mut();
-                                let props = nodes.iter_mut().flat_map(|n| [&mut n.color, &mut n.gradient_color, &mut n.outline_color]).chain(fills.iter_mut().map(|p| &mut p.color));
-                                for q in props {
-                                    let keys: Vec<Key> = q.track.keys().to_vec();
-                                    for mut k in keys {
-                                        // on: held keys tween again (eased ones keep their easing)
-                                        k.interp = if !v { Interp::Hold } else if k.interp == Interp::Hold { Interp::Linear } else { k.interp };
-                                        q.track.put(k);
-                                    }
-                                }
-                            }
                         }
                         if let Some(v) = c2["color"].as_u64() {
                             // the stickfigure colour: segments without their own colour follow it
