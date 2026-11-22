@@ -2228,44 +2228,31 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
 
   /// Frame Tools > Sounds: the sound this frame starts, and its settings.
+  /// The sound this frame plays, as a page of rows (D15; REDESIGN §8 Sound page).
   List<Widget> _soundsBlock() {
     final list = ((_st['soundList'] as List?) ?? const []).cast<Map<String, dynamic>>();
     final snd = _st['frameSound'] as Map<String, dynamic>?;
     final has = snd != null;
     double v(String k, double d) => (snd?[k] as num?)?.toDouble() ?? d;
     void set(Map<String, Object?> m) => _cmd({'op': 'frame_sound', ...m});
+    VoidCallback? when(bool ok, VoidCallback f) => ok ? f : null;
+    final vol = v('volume', 1), pan = v('pan', 0), pitch = v('pitch', 1);
+    final rows = <rw.Desc>[
+      const rw.DTitle('Sound Tools'),
+      rw.DLink('Sound', has ? snd['name'] as String : 'None', onTap: list.isEmpty ? null : () => _pickFrameSound(list, snd?['asset'] as String?)),
+      rw.DStep('Volume', '${(vol * 100).round()}%', onMinus: when(has && vol > 0, () => set({'volume': math.max(0, vol - 0.05)})), onPlus: when(has && vol < 1, () => set({'volume': math.min(1, vol + 0.05)}))),
+      rw.DStep('Pan', pan.abs() < 0.05 ? 'Centre' : pan < 0 ? 'L ${(-pan * 100).round()}' : 'R ${(pan * 100).round()}', onMinus: when(has && pan > -1, () => set({'pan': math.max(-1, pan - 0.1)})), onPlus: when(has && pan < 1, () => set({'pan': math.min(1, pan + 0.1)}))),
+      rw.DStep('Pitch', pitch.toStringAsFixed(2), onMinus: when(has && pitch > 0.25, () => set({'pitch': math.max(0.25, pitch - 0.05)})), onPlus: when(has && pitch < 4, () => set({'pitch': math.min(4, pitch + 0.05)}))),
+      rw.DButtons('Copy sound', when(has, () => _cmd({'op': 'copy_sound'})), b: 'Paste sound', onB: when(_st['soundCopied'] == true, () => _cmd({'op': 'paste_sound'}))),
+      rw.DButtons('Import a sound…', _importSounds),
+      if (has) rw.DDanger('Clear sound', () => set({'asset': null})),
+    ];
     return [
-      Container(
-        key: _sectionKey('Sounds'),
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(color: const Color(0x33FF2D92), borderRadius: BorderRadius.circular(6)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          const Text('Sounds', style: TextStyle(color: cText, fontSize: 13, fontWeight: FontWeight.w600)),
-          _gap,
-          _Btn('Import a sound...', onTap: _importSounds),
-          _gap,
-          _label('Sound this frame plays'),
-          _Btn(has ? snd['name'] as String : '(none)', enabled: list.isNotEmpty, onTap: () => _pickFrameSound(list, snd?['asset'] as String?)),
-          _gap,
-          Opacity(
-            opacity: has ? 1 : 0.4,
-            child: IgnorePointer(
-              ignoring: !has,
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                _stepper('Volume', '${(v('volume', 1) * 100).round()}', () => set({'volume': math.max(0, v('volume', 1) - 0.05)}), () => set({'volume': math.min(1, v('volume', 1) + 0.05)})),
-                _stepper('Pan', v('pan', 0).toStringAsFixed(1), () => set({'pan': math.max(-1, v('pan', 0) - 0.1)}), () => set({'pan': math.min(1, v('pan', 0) + 0.1)})),
-                _stepper('Pitch', v('pitch', 1).toStringAsFixed(2), () => set({'pitch': math.max(0.25, v('pitch', 1) - 0.05)}), () => set({'pitch': math.min(4, v('pitch', 1) + 0.05)})),
-                _gap,
-                _Btn('Clear sound', danger: true, onTap: () => set({'asset': null})),
-              ]),
-            ),
-          ),
-          _gap,
-          _pair(_Btn('Copy sound', enabled: has, onTap: () => _cmd({'op': 'copy_sound'})), _Btn('Paste sound', enabled: _st['soundCopied'] == true, onTap: () => _cmd({'op': 'paste_sound'}))),
-        ]),
-      ),
+      Container(key: _sectionKey('Sounds')),
+      for (final d in rows) rw.renderDesc(d),
     ];
   }
+
 
   Future<void> _pickFrameSound(List<Map<String, dynamic>> list, String? current) async {
     final picked = await showDialog<String>(

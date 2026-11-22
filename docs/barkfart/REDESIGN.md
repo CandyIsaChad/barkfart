@@ -427,7 +427,7 @@ and tests are never weakened.
   checks on small screens.
 
 ### D. Properties pages as descriptors (D15)
-- [ ] D1. Sound.
+- [x] D1. Sound.
 - [ ] D2. Movieclip.
 - [ ] D3. Text.
 - [ ] D4. Camera.

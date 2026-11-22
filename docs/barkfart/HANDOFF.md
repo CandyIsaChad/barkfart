@@ -38,7 +38,7 @@ tiled Preview row. It replaces the top frame strip and the top-right grid.
 Then B3 (the Animation popover from the toolbar's fps button) and C6 (the
 "+" menu in the bottom bar). Then D1 onwards.
 
-**Done so far:** A1–A6, B1, B2, B4, B5, B6, C1–C5, C8.
+**Done so far:** A1–A6, B1, B2, B4, B5, B6, C1–C5, C8, D1 (the frame sound as Sound Tools rows).
 
 **Script commands added:** `savesheet`, `toast <text>`, `view`, `projects`.
 

@@ -259,7 +259,7 @@ class StepperControl extends StatelessWidget {
         );
     return Row(mainAxisSize: MainAxisSize.min, children: [
       sq('-', onMinus),
-      SizedBox(width: 46, child: Text(value, textAlign: TextAlign.center, style: ink(15, FontWeight.w700).copyWith(fontFeatures: const [FontFeature.tabularFigures()]))),
+      SizedBox(width: 58, child: Text(value, maxLines: 1, textAlign: TextAlign.center, style: ink(15, FontWeight.w700).copyWith(fontFeatures: const [FontFeature.tabularFigures()]))),
       sq('+', onPlus),
     ]);
   }
