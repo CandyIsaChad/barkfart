@@ -420,9 +420,11 @@ and tests are never weakened.
 - [x] C5. The Properties card holds today's sections, tabbed by selection.
   It replaces the sidebar and the tab strip.
 - [ ] C6. The "+" menu (absorbs Library Tools) and the stick figure chooser.
+  **Built right after C7**, because "+" lives in the timeline's bottom bar.
 - [ ] C7. The folded timeline: control toolbar, fps ruler (D16), tiled
   Preview row. It replaces the frame strip and the top-right grid.
-- [ ] C8. Big screens dock Properties (D20).
+- [x] C8. Big screens dock Properties (D20). `BARKFART_DOCK=1` forces it for
+  checks on small screens.
 
 ### D. Properties pages as descriptors (D15)
 - [ ] D1. Sound.

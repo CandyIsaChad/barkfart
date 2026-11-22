@@ -1125,6 +1125,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       return Scaffold(backgroundColor: cSurround, body: Center(child: Text(_fatal, style: const TextStyle(color: cText))));
     }
     final big = MediaQuery.sizeOf(context).shortestSide > 600;
+    final screen = MediaQuery.sizeOf(context);
+    // BARKFART_DOCK=1 forces it, for checks on small screens
+    final dock = (screen.width >= 1200 && screen.height >= 900) || Platform.environment['BARKFART_DOCK'] == '1';
     // screen padding from the settings (notches, rounded corners)
     final pad = MediaQuery.paddingOf(context) + EdgeInsets.only(left: AppSettings.number('padLeft').toDouble(), right: AppSettings.number('padRight').toDouble());
     final stripH = big ? 112.0 : 92.0;
@@ -1153,7 +1156,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                     Positioned.fill(child: _stage()),
                     if (_arrows && !_playing) Positioned(left: _arrowsAt.dx, top: _arrowsAt.dy, child: _arrowsWindow()),
                     if (_magnifier && !_playing) Positioned(left: _magAt.dx, top: _magAt.dy, child: _magnifierWindow()),
-                    if (!_fsNow && _panelOpen && !_hidePanels) Positioned(top: 8, right: 8, bottom: 8, width: big ? 360 : 320, child: _propertiesCard()),
+                    if (!_fsNow && _panelOpen && !_hidePanels)
+                      // tablets and big windows dock it as a full-height column (D20)
+                      dock
+                          ? Positioned(top: 0, right: 0, bottom: 0, width: 360, child: _propertiesCard(docked: true))
+                          : Positioned(top: 8, right: 8, bottom: 8, width: big ? 360 : 320, child: _propertiesCard()),
                     if (_viewOptions) Positioned(top: 8, left: 8, bottom: 8, width: 330, child: _viewOptionsPanel()),
                   ]),
                 ),
@@ -1652,10 +1659,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   /// The Properties card (REDESIGN §4): today's sections, tabbed by what is
   /// selected. It floats over the stage on the right.
-  Widget _propertiesCard() {
+  Widget _propertiesCard({bool docked = false}) {
     final names = _sections();
     final current = names.contains(_tab) ? names.indexOf(_tab) : 0;
     return kit.PanelCard(
+      docked: docked,
       padding: EdgeInsets.zero,
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         if (!_playing && _showTabs && names.length > 1)
