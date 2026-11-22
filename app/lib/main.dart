@@ -2,7 +2,10 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 
+import 'dart:io';
+
 import 'editor.dart';
+import 'ui/gallery.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,7 +22,7 @@ class BarkfartApp extends StatelessWidget {
       title: 'Barkfart',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(fontFamily: 'NotoSans', brightness: Brightness.light, colorSchemeSeed: cAccent, useMaterial3: true, scaffoldBackgroundColor: cPanel, dialogTheme: const DialogThemeData(backgroundColor: cCard)),
-      home: const EditorPage(),
+      home: Platform.environment['BARKFART_GALLERY'] != null ? Gallery(sections: [('Pictograms', pictogramSheet())]) : const EditorPage(),
       builder: (c, child) => RepaintBoundary(key: appShot, child: child),
     );
   }

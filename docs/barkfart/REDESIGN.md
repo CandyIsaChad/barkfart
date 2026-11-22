@@ -391,7 +391,7 @@ and tests are never weakened.
 - [x] A2. The font. Noto Sans is bundled: it's Open Sans's sibling, OFL, and
   copied from the system fonts so nothing is downloaded. Swap to Open Sans if
   its files are ever added.
-- [ ] A3. Pictograms. A small SVG-path reader plus the mockups' icon set (one
+- [x] A3. Pictograms. A small SVG-path reader plus the mockups' icon set (one
   stroke weight).
 - [ ] A4. Kit components: word button, rail button, tick box, segmented,
   stepper, swatches, slider, red section title, panel card, sheet, popover,
