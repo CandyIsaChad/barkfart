@@ -1,4 +1,4 @@
-# Handoff brief (2026-11-22, while Claude's usage limit resets)
+# Handoff brief (2026-11-22, second handoff, while Claude's usage limit resets)
 
 You are continuing work on Barkfart: a Rust engine (`engine/`) with a
 Flutter app (`app/`), remaking the Stick Nodes editor. Read
@@ -34,8 +34,24 @@ Done and reviewed so far: everything ticked in docs/barkfart/GAPS.md (the
 reviewed; the outline now follows the shape, drawn by the engine).
 
 ## Tasks, in order (stop after these; do not start other GAPS items)
-(none open: pick the next unticked item in docs/barkfart/GAPS.md only if
-the brief that starts you says so)
+1. **Extend the undo / redo sweep** (`every_command_undoes_and_redoes_exactly`
+   in engine/core/tests/session.rs) with the commands added on 2026-11-22
+   that it does not cover yet: `textfield` with `font`, `branch_edit`,
+   `polyfill_new` (inside `build`), `polyfill_color`, `polyfill_undo`,
+   `connector_set` (after making a connector), `camera_lock_set`,
+   `movieclip` (loop / speed / offset on a selected movieclip),
+   `edit_movieclip` / `movieclip_done`, `new_movieclip`, `frame_bg` with
+   `expand`, `segment` with `trapRatio` / `trapRoundStart`, `figure` with
+   `tweenColors` / `keepInTween`. Each must undo to exactly the project
+   before and redo to exactly the project after. Commands that need a set-up
+   (a textfield, the figure editor, a movieclip) get it the way the existing
+   `early` set-up does. Run it; if one fails, find the real cause and fix it
+   with the smallest change (never by loosening the test), one commit each.
+2. **Extend the on / off test** (`toggling_a_control_on_and_off_changes_nothing`)
+   the same way with: expand gradient (with Use gradient on first), use
+   segment colour (on then off), trapezoid rounded start / end, half arc,
+   textfield font (Bangers then back to the default). Same rule for failures.
+Write anything you could not settle under "## Questions" and commit it.
 
 ## Design rules learned since (keep to them)
 - `cargo test -q --workspace` must print no `error` and no `FAILED`: a
