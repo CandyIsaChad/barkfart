@@ -1,4 +1,45 @@
-# Handoff brief (2026-11-22, second handoff, while Claude's usage limit resets)
+# Handoff brief
+
+## Status (2026-11-23 02:25 PST): building the redesign
+
+The user approved the redesign and asked for it to be built "from easiest to
+hardest… commit when you finish each one… don't ask me for stuff".
+docs/barkfart/REDESIGN.md is the source of truth, and §7 is the build order.
+Tick items there as they finish.
+
+**Done (each one a commit, checked on the Linux build with screenshots):**
+- A1–A6: light tokens, Noto Sans, pictograms, the kit, row descriptors, and
+  today's controls re-skinned.
+- B1: the "Save your work?" sheet.
+
+**Where things are:**
+- `app/lib/ui/tokens.dart`: colours. `editor.dart` re-exports it.
+- `app/lib/ui/pictograms.dart`: `Pictogram('pose')` and friends. The shapes
+  are generated from docs/barkfart/mockups.
+- `app/lib/ui/kit.dart`: `Tap`, `WordButton`, `RailButton`, `IconTool`,
+  `TickBox`, `PropRow`, `TickRow`, `Segmented`, `StepperControl`, `StepRow`,
+  `SwatchRow`, `SliderBar`, `SliderRow`, `LinkRow`, `SectionTitle`, `Hint`,
+  `ButtonPair`, `PanelCard`, `HintBubble`, `showSheet`, `showToast`,
+  `CheckerPainter`, `PanelScroll`.
+- `app/lib/ui/rows.dart`: descriptors (`DTitle`, `DTick`, `DStep`, `DSeg`,
+  `DButtons`, `DSwatch`, `DSlider`, `DLink`, `DHint`, `DInfo`, `DName`,
+  `DDanger`, `DWidget`), `renderDesc`, `PropertyPage` and `SwipeActions`.
+- `editor.dart` imports the kit as `kit.`. `_Btn`, `_Toggle`, `_Segmented`,
+  `_stepper`, `_title` and `_label` now draw with the kit.
+
+**How to check:**
+- The gallery: `BARKFART_GALLERY=1|sheet|page BARKFART_GALLERY_SHOT=<png>
+  build/linux/x64/release/bundle/barkfart`.
+- Scripted editor runs as before. The new script command is `savesheet`.
+- The window is capped at the screen size (about 1300x700).
+
+**Next:** B2 (toasts replace the status line), then the rest of §7 in order.
+
+Usage at this note: the 5-hour window was at about 70% and the weekly at about
+85%. The weekly limit resets 2026-11-23 about 22:00 PST. When the weekly runs
+low, arm the sleeper for that time.
+
+## Older brief (2026-11-22, second handoff)
 
 You are continuing work on Barkfart: a Rust engine (`engine/`) with a
 Flutter app (`app/`), remaking the Stick Nodes editor. Read
