@@ -443,7 +443,7 @@ and tests are never weakened.
 - [x] D3. Text.
 - [x] D4. Camera.
 - [x] D5. Frame.
-- [ ] D6. Stickfigure.
+- [x] D6. Stickfigure.
 - [ ] D7. Segment, with changed-dots and swipe-to-reset. The engine
   reports file defaults.
 

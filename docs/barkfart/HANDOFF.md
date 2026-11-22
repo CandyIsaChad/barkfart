@@ -33,7 +33,7 @@ Tick items there as they finish.
 - Scripted editor runs as before. The new script command is `savesheet`.
 - The window is capped at the screen size (about 1300x700).
 
-**Next:** D6 (the Stickfigure page). D5 (Frame page) is done. D4 (Camera page) is done. D3 (Text page) is done. D2 (the Movieclip page) is written but not yet seen on screen. Section C is done; the figure chooser sheet is done too (script `picker`). (C6a, the "+" menu, is done: script `add`. B3, the Animation popover from "fps", is done: script `animation`. C7 is done: the toolbar, the frame-words bar, the fps ruler and the Preview row; hold a cell to copy frames). C7 was the folded timeline: control toolbar, fps ruler (D16), and the
+**Next:** D7 (the Segment page, with changed-dots and swipe-to-reset; the engine must report file defaults). D6 (Stickfigure page) is done. D5 (Frame page) is done. D4 (Camera page) is done. D3 (Text page) is done. D2 (the Movieclip page) is written but not yet seen on screen. Section C is done; the figure chooser sheet is done too (script `picker`). (C6a, the "+" menu, is done: script `add`. B3, the Animation popover from "fps", is done: script `animation`. C7 is done: the toolbar, the frame-words bar, the fps ruler and the Preview row; hold a cell to copy frames). C7 was the folded timeline: control toolbar, fps ruler (D16), and the
 tiled Preview row. It replaces the top frame strip and the top-right grid.
 Then B3 (the Animation popover from the toolbar's fps button) and C6 (the
 "+" menu in the bottom bar). Then D1 onwards.

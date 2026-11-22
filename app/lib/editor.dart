@@ -2490,94 +2490,57 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   static const _easings = [('linear', 'Linear'), ('smooth', 'Ease'), ('in', 'Ease in'), ('out', 'Ease out'), ('hold', 'None')];
   int _easing = 0;
 
+  /// Stickfigure Tools as rows (D15; REDESIGN §8 Stickfigure page). Every old
+  /// control is kept; the pencil is "Edit segments" (the figure editor).
   List<Widget> _stickfigureTools(Map<String, dynamic> sel) {
     final scale = (sel['scale'] as num?)?.toDouble() ?? 1;
     final angle = (sel['figAngle'] as num?)?.toDouble() ?? 0;
     final pos = sel['layerPos'], count = sel['figureCount'];
     final stretch = _opts['stretch'] == true;
-    return [
-      Text(sel['name'] as String? ?? 'Figure', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 13)),
-      _gap,
-      Row(children: [
-        Expanded(
-          child: GestureDetector(
-            onLongPress: () => _cmd({'op': 'delete_here', 'joined': true}),
-            child: _Btn('Delete stickfigure', danger: true, onTap: () => _cmd({'op': 'delete_here'})),
-          ),
-        ),
-        const SizedBox(width: 6),
-        SizedBox(width: 44, child: _Btn('✎', onTap: () => _cmd({'op': 'build'}))),
-      ]),
-      const Padding(padding: EdgeInsets.only(top: 3), child: Text('Removes it from this frame. Hold: with the figures joined to it. ✎ edits its segments.', style: TextStyle(color: cSecondary, fontSize: 11))),
-      _gap,
-      _pair(_Btn('Previous', onTap: () => _cmd({'op': 'cycle_figure', 'dir': -1})), _Btn('Next', onTap: () => _cmd({'op': 'cycle_figure', 'dir': 1}))),
-      _gap,
-      _label('Stickfigure'),
-      _pair(_Btn('Copy', onTap: () => _cmd({'op': 'copy_figure', 'joined': true})), GestureDetector(onLongPress: _pasteLayeringPopup, child: _Btn('Paste', enabled: _st['figureCopied'] == true, onTap: _pasteFigure))),
-      _gap,
-      _label('All properties'),
-      _pair(_Btn('Copy', onTap: () => _cmd({'op': 'copy_props'})), _Btn('Paste', enabled: _st['propsCopied'] == true, onTap: _pastePropsDialog)),
-      _gap,
-      _label('Pose'),
-      _pair(_Btn('Copy', onTap: () => _cmd({'op': 'copy_pose'})), _Btn('Paste', enabled: _st['pose'] == true, onTap: () => _cmd({'op': 'paste_pose'}))),
-      _gap,
-      _pair(_Btn('Flip sideways', onTap: () => _cmd({'op': 'flip_figure', 'h': true})), _Btn('Flip over', onTap: () => _cmd({'op': 'flip_figure', 'h': false}))),
-      _gap,
-      Row(children: [
-        Expanded(child: _Btn('Layer down', onTap: () => _cmd({'op': 'layer_order', 'forward': false}))),
-        Padding(padding: const EdgeInsets.symmetric(horizontal: 6), child: Text('$pos / $count', style: const TextStyle(color: cSecondary, fontSize: 12))),
-        Expanded(child: _Btn('Layer up', onTap: () => _cmd({'op': 'layer_order', 'forward': true}))),
-      ]),
-      _gap,
-      _Btn('Center stickfigure', onTap: () => _cmd({'op': 'figure', 'center': true})),
-      _gap,
-      _Btn('Convert to movieclip…', onTap: () async {
-        final ok = await _ask('Convert to movieclip?', 'This figure and the figures joined to it become a movieclip that plays their animation in a loop, in their place. Library Tools can break it apart again.', ['Cancel', 'Convert']);
-        if (ok == 'Convert') _cmd({'op': 'to_movieclip'});
-      }),
-      _gap,
-      _label('Stickfigure colour'),
-      _swatches((sel['figColor'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'figure', 'color': c})),
-      _gap,
-      _stepper('Scale', scale.toStringAsFixed(2), () => _cmd({'op': 'figure', 'scale': math.max(0.05, scale - 0.05)}), () => _cmd({'op': 'figure', 'scale': scale + 0.05})),
-      _gap,
-      Row(children: [
-        Expanded(child: Text('Angle  ${angle.round()}°', style: const TextStyle(color: cText, fontSize: 13))),
-        SizedBox(width: 60, child: _Btn('+45°', onTap: () => _cmd({'op': 'figure', 'turn': 45}))),
-      ]),
-      _gap,
-      _Toggle('Locked', sel['locked'] == true, (v) => _cmd({'op': 'figure', 'locked': v})),
-      _Toggle('Visible in onion skin', sel['onion'] != false, (v) => _cmd({'op': 'figure', 'onion': v})),
-      _gap,
-      _label('Drag'),
-      _Segmented(const ['Rotate', 'Stretch'], stretch ? 1 : 0, (i) => _cmd({'op': 'set', 'k': 'stretch', 'v': i == 1})),
-      _gap,
-      if (_st['joining'] == true) ...[
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(border: Border.all(color: cAccent), borderRadius: BorderRadius.circular(4)),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            const Text('Tap a joint on another figure to join this one to it.', style: TextStyle(color: cText, fontSize: 12)),
-            _gap,
-            _Btn('Cancel', onTap: () => _cmd({'op': 'join_cancel'})),
-          ]),
-        ),
-      ] else if (sel['joinedTo'] != null) ...[
-        Text('Joined to ${sel['joinedTo']}', style: const TextStyle(color: cSecondary, fontSize: 12)),
-        _gap,
-        _Btn('Unjoin', onTap: () => _cmd({'op': 'unjoin'})),
-      ] else
-        _Btn('Join to…', onTap: () => _cmd({'op': 'join'})),
-      _gap,
-      _label('Tween to the next frame'),
-      _Btn('Tween: ${_easings[_easing].$2}', onTap: () {
+    final joining = _st['joining'] == true;
+    final rows = <rw.Desc>[
+      rw.DName(sel['name'] as String? ?? 'Figure', link: 'Edit segments ›', onLink: () => _cmd({'op': 'build'})),
+      rw.DWidget(kit.PropRow('Colour', trailing: SizedBox(width: 180, child: _swatches((sel['figColor'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'figure', 'color': c}))))),
+      rw.DButtons('Previous figure', () => _cmd({'op': 'cycle_figure', 'dir': -1}), b: 'Next figure', onB: () => _cmd({'op': 'cycle_figure', 'dir': 1})),
+      rw.DButtons('Flip sideways', () => _cmd({'op': 'flip_figure', 'h': true}), b: 'Flip over', onB: () => _cmd({'op': 'flip_figure', 'h': false})),
+      rw.DButtons('Send back', () => _cmd({'op': 'layer_order', 'forward': false}), b: 'Bring forward', onB: () => _cmd({'op': 'layer_order', 'forward': true})),
+      rw.DInfo('Place in the stack', '$pos of $count'),
+      rw.DStep('Scale', scale.toStringAsFixed(2), onMinus: scale > 0.05 ? () => _cmd({'op': 'figure', 'scale': math.max(0.05, scale - 0.05)}) : null, onPlus: () => _cmd({'op': 'figure', 'scale': scale + 0.05})),
+      rw.DWidget(kit.PropRow('Angle', secondary: '${angle.round()}°', trailing: kit.WordButton('Turn 45°', size: 13, onTap: () => _cmd({'op': 'figure', 'turn': 45})))),
+      rw.DButtons('Center on stage', () => _cmd({'op': 'figure', 'center': true})),
+      rw.DSeg(const ['Rotates', 'Stretches'], stretch ? 1 : 0, label: 'Dragging a joint', onSelect: (i) => _cmd({'op': 'set', 'k': 'stretch', 'v': i == 1})),
+      if (joining) ...[
+        const rw.DHint('Tap a joint on another figure to join this one to it.'),
+        rw.DButtons('Cancel joining', () => _cmd({'op': 'join_cancel'})),
+      ] else if (sel['joinedTo'] != null)
+        rw.DWidget(kit.PropRow('Joined to ${sel['joinedTo']}', trailing: kit.WordButton('Let go', size: 13, onTap: () => _cmd({'op': 'unjoin'}))))
+      else
+        rw.DLink('Joined to', 'Nothing', onTap: () => _cmd({'op': 'join'})),
+      rw.DTick('Locked', sel['locked'] == true, onChanged: (v) => _cmd({'op': 'figure', 'locked': v})),
+      rw.DTick('Visible in onion skin', sel['onion'] != false, onChanged: (v) => _cmd({'op': 'figure', 'onion': v})),
+      const rw.DTitle('Tweening'),
+      rw.DLink('Ease to the next frame', _easings[_easing].$2, onTap: () {
         setState(() => _easing = (_easing + 1) % _easings.length);
         _cmd({'op': 'easing', 'v': _easings[_easing].$1});
       }),
-      _Toggle('Keep stickfigure during tween', sel['keepInTween'] != false, (v) => _cmd({'op': 'figure', 'keepInTween': v})),
-      _Toggle('Tween stickfigure colours', sel['tweenColors'] != false, (v) => _cmd({'op': 'figure', 'tweenColors': v})),
-      _hint('Tweening options only apply if the animation has tweening on. Keep: the figure stays during the in-betweens before a frame it is not on. Colours: they blend between frames instead of changing at the next one.'),
+      rw.DTick('Stay on stage between poses', sel['keepInTween'] != false, onChanged: (v) => _cmd({'op': 'figure', 'keepInTween': v})),
+      rw.DTick('Blend colours between poses', sel['tweenColors'] != false, onChanged: (v) => _cmd({'op': 'figure', 'tweenColors': v})),
+      const rw.DHint('These apply when the animation tweens. Stay: the figure stays during the in-betweens before a frame it is not on. Blend: colours change gradually instead of at the next frame.'),
+      const rw.DTitle('Copy and paste'),
+      rw.DWidget(GestureDetector(
+        onLongPress: _pasteLayeringPopup,
+        child: rw.renderDesc(rw.DButtons('Copy figure', () => _cmd({'op': 'copy_figure', 'joined': true}), b: 'Paste figure', onB: _st['figureCopied'] == true ? _pasteFigure : null)),
+      )),
+      rw.DButtons('Copy properties', () => _cmd({'op': 'copy_props'}), b: 'Paste properties', onB: _st['propsCopied'] == true ? _pastePropsDialog : null),
+      rw.DButtons('Copy pose', () => _cmd({'op': 'copy_pose'}), b: 'Paste pose', onB: _st['pose'] == true ? () => _cmd({'op': 'paste_pose'}) : null),
+      rw.DButtons('Convert to movieclip…', () async {
+        final ok = await _ask('Convert to movieclip?', 'This figure and the figures joined to it become a movieclip that plays their animation in a loop, in their place. It can be broken apart again.', ['Cancel', 'Convert']);
+        if (ok == 'Convert') _cmd({'op': 'to_movieclip'});
+      }),
+      rw.DWidget(GestureDetector(onLongPress: () => _cmd({'op': 'delete_here', 'joined': true}), child: rw.renderDesc(rw.DDanger('Delete stickfigure', () => _cmd({'op': 'delete_here'}))))),
+      const rw.DHint('Removes it from this frame. Hold: with the figures joined to it.'),
     ];
+    return [for (final d in rows) rw.renderDesc(d)];
   }
 
   String? _textClip;
