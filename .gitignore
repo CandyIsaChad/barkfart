@@ -8,3 +8,4 @@ local.properties
 *.iml
 .idea/
 docs/barkfart/research/local/
+.claude/settings.local.json
