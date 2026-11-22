@@ -16,6 +16,7 @@ import 'package:share_plus/share_plus.dart';
 
 import 'engine.dart';
 import 'files.dart';
+import 'ui/kit.dart' as kit;
 import 'ui/tokens.dart';
 
 export 'ui/tokens.dart';
@@ -1588,7 +1589,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 padding: const EdgeInsets.fromLTRB(10, 4, 10, 40),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                   for (final n in names) ...[
-                    Container(key: _sectionKey(n), padding: const EdgeInsets.only(top: 10, bottom: 6), child: Text(n, style: const TextStyle(color: cAccent, fontSize: 14, fontWeight: FontWeight.w700))),
+                    Container(key: _sectionKey(n), width: double.infinity, padding: const EdgeInsets.only(top: 10, bottom: 4), child: Text(n, textAlign: TextAlign.center, style: const TextStyle(color: cTitle, fontSize: 15, fontWeight: FontWeight.w700))),
                     ..._sectionBody(n),
                     const SizedBox(height: 10),
                     const Divider(height: 1, color: cControl),
@@ -3377,21 +3378,17 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   static const _gap = SizedBox(height: 6);
 
-  Widget _title(String s) => Padding(
-        padding: const EdgeInsets.only(top: 12, bottom: 6),
-        child: Text(s, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 13, fontWeight: FontWeight.w600)),
+  Widget _title(String s) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.only(top: 8, bottom: 2),
+        child: Text(s, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: const TextStyle(color: cTitle, fontSize: 15, fontWeight: FontWeight.w700)),
       );
 
-  Widget _label(String s) => Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(s, style: const TextStyle(color: cSecondary, fontSize: 11)));
+  Widget _label(String s) => Padding(padding: const EdgeInsets.only(top: 2, bottom: 4), child: Text(s, style: const TextStyle(color: cText, fontSize: 13)));
 
   Widget _pair(Widget a, Widget b) => Row(children: [Expanded(child: a), const SizedBox(width: 6), Expanded(child: b)]);
 
-  Widget _stepper(String label, String value, VoidCallback minus, VoidCallback plus) => Row(children: [
-        Expanded(child: Text('$label  $value', style: const TextStyle(color: cText, fontSize: 13))),
-        SizedBox(width: 40, child: _Btn('−', onTap: minus)),
-        const SizedBox(width: 4),
-        SizedBox(width: 40, child: _Btn('+', onTap: plus)),
-      ]);
+  Widget _stepper(String label, String value, VoidCallback minus, VoidCallback plus) => kit.StepRow(label, value, onMinus: minus, onPlus: plus);
 }
 
 // ---------------------------------------------------------------- stage overlay
@@ -3730,22 +3727,22 @@ class _Btn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Opacity(
-      opacity: enabled && onTap != null ? 1 : 0.4,
-      child: Material(
-        color: cControl,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4), side: accent ? const BorderSide(color: cAccent) : BorderSide.none),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(4),
-          onTap: enabled ? onTap : null,
-          child: SizedBox(
-            height: small ? 24 : 40,
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: icon != null ? Icon(icon, size: 18, color: danger ? cDanger : cText) : Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: danger ? cDanger : cText, fontSize: small ? 11 : 13)),
-              ),
-            ),
+    // REDESIGN §3: blue words on field grey; the one main action is blue; red for destructive
+    final on = enabled && onTap != null;
+    final fg = !on ? cTag : accent ? cCard : danger ? cDanger : cAccent;
+    final bg = accent ? (on ? cAccent : cTag) : danger ? const Color(0xFFFDECEE) : cControl;
+    return kit.Tap(
+      onTap: on ? onTap : null,
+      minSize: 0,
+      child: Container(
+        height: small ? 30 : 38,
+        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10)),
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: icon != null
+                ? Icon(icon, size: 18, color: fg)
+                : Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: fg, fontSize: small ? 12 : 13, fontWeight: FontWeight.w700)),
           ),
         ),
       ),
@@ -3760,32 +3757,10 @@ class _Segmented extends StatelessWidget {
   const _Segmented(this.labels, this.selected, this.onTap);
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 40,
-      decoration: BoxDecoration(color: cControl, borderRadius: BorderRadius.circular(4)),
-      child: Row(children: [
-        for (var i = 0; i < labels.length; i++)
-          Expanded(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => onTap(i),
-              child: Container(
-                margin: const EdgeInsets.all(2),
-                decoration: BoxDecoration(
-                  color: i == selected ? cSelected : const Color(0x00000000),
-                  borderRadius: BorderRadius.circular(3),
-                  border: i == selected ? Border.all(color: const Color(0xFF5A6068)) : null,
-                ),
-                child: Center(child: Text(labels[i], maxLines: 1, style: TextStyle(color: i == selected ? cText : cSecondary, fontSize: 12))),
-              ),
-            ),
-          ),
-      ]),
-    );
-  }
+  Widget build(BuildContext context) => kit.Segmented(labels, selected, onSelect: onTap);
 }
 
+/// A setting that is on or off: the big square tick box (REDESIGN §3).
 class _Toggle extends StatelessWidget {
   final String label;
   final bool value;
@@ -3793,26 +3768,11 @@ class _Toggle extends StatelessWidget {
   const _Toggle(this.label, this.value, this.onChanged);
 
   @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () => onChanged(!value),
-      child: SizedBox(
-        height: 40,
-        child: Row(children: [
-          Expanded(child: Text(label, style: const TextStyle(color: cText, fontSize: 13))),
-          Container(
-            width: 40,
-            height: 24,
-            decoration: BoxDecoration(color: value ? cAccent : cControl, borderRadius: BorderRadius.circular(12)),
-            alignment: value ? Alignment.centerRight : Alignment.centerLeft,
-            padding: const EdgeInsets.all(3),
-            child: Container(width: 18, height: 18, decoration: const BoxDecoration(color: cText, shape: BoxShape.circle)),
-          ),
-        ]),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => onChanged(!value),
+        child: kit.PropRow(label, trailing: kit.TickBox(value, onChanged: onChanged)),
+      );
 }
 
 class _Chip extends StatelessWidget {
@@ -3827,8 +3787,8 @@ class _Chip extends StatelessWidget {
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        decoration: BoxDecoration(color: selected ? cSelected : cControl, borderRadius: BorderRadius.circular(4), border: selected ? Border.all(color: const Color(0xFF5A6068)) : null),
-        child: Text(label, style: TextStyle(color: selected ? cText : cSecondary, fontSize: 12)),
+        decoration: BoxDecoration(color: selected ? cCard : cControl, borderRadius: BorderRadius.circular(9), border: selected ? Border.all(color: cAccent, width: 2) : null),
+        child: Text(label, style: TextStyle(color: cAccent, fontSize: 12, fontWeight: selected ? FontWeight.w700 : FontWeight.w400)),
       ),
     );
   }

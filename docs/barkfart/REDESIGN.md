@@ -397,7 +397,7 @@ and tests are never weakened.
   stepper, swatches, slider, red section title, panel card, sheet, popover,
   toast, hint bubble.
 - [x] A5. Row descriptors and one renderer (D15).
-- [ ] A6. Today's `_Btn`, `_Toggle`, `_Segmented` and `_stepper` draw with
+- [x] A6. Today's `_Btn`, `_Toggle`, `_Segmented` and `_stepper` draw with
   the kit, so every existing page takes the new look at once.
 
 ### B. Small surfaces that already have behaviour
