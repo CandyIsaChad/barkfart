@@ -1959,21 +1959,28 @@ fn use_gradient_on_and_off_leaves_no_trace() {
 /// filter and camera tools.
 #[test]
 fn toggling_a_control_on_and_off_changes_nothing() {
-    let toggles: &[(&str, serde_json::Value, serde_json::Value)] = &[
-        ("use gradient", json!({"op": "frame_bg", "useGradient": true}), json!({"op": "frame_bg", "useGradient": false})),
-        ("widescreen", json!({"op": "camera_fx", "widescreen": true}), json!({"op": "camera_fx", "widescreen": false})),
-        ("wobble", json!({"op": "camera_fx", "wobbleXY": 8}), json!({"op": "camera_fx", "wobbleXY": 0})),
-        ("wobble rotation", json!({"op": "camera_fx", "wobbleRot": 0.5}), json!({"op": "camera_fx", "wobbleRot": 0})),
-        ("do not tween", json!({"op": "no_tween", "on": true}), json!({"op": "no_tween", "on": false})),
-        ("pause", json!({"op": "frame_delay", "seconds": 0.5}), json!({"op": "frame_delay", "seconds": 0})),
-        ("slow motion", json!({"op": "frame_slow", "n": 5}), json!({"op": "frame_slow", "n": 0})),
-        ("tween colours", json!({"op": "figure", "tweenColors": false}), json!({"op": "figure", "tweenColors": true})),
-        ("keep in tween", json!({"op": "figure", "keepInTween": false}), json!({"op": "figure", "keepInTween": true})),
-        ("invert", json!({"op": "filter", "invert": true}), json!({"op": "filter", "invert": false})),
-        ("motion blur", json!({"op": "filter", "motion": true}), json!({"op": "filter", "motion": false})),
-        ("segment gradient", json!({"op": "segment", "gradient": true}), json!({"op": "segment", "gradient": false})),
-        ("lock to camera", json!({"op": "camera_lock", "layer": "L2", "on": true}), json!({"op": "camera_lock", "layer": "L2", "on": false})),
-        ("auto-camera", json!({"op": "auto_camera", "end": 1, "ease": 1}), json!({"op": "auto_camera", "end": null})),
+    // (name, set-up before the first picture, on, off)
+    let toggles: &[(&str, Option<serde_json::Value>, serde_json::Value, serde_json::Value)] = &[
+        ("use gradient", None, json!({"op": "frame_bg", "useGradient": true}), json!({"op": "frame_bg", "useGradient": false})),
+        ("expand gradient", Some(json!({"op": "frame_bg", "useGradient": true})), json!({"op": "frame_bg", "expand": true}), json!({"op": "frame_bg", "expand": false})),
+        ("widescreen", None, json!({"op": "camera_fx", "widescreen": true}), json!({"op": "camera_fx", "widescreen": false})),
+        ("wobble", None, json!({"op": "camera_fx", "wobbleXY": 8}), json!({"op": "camera_fx", "wobbleXY": 0})),
+        ("wobble rotation", None, json!({"op": "camera_fx", "wobbleRot": 0.5}), json!({"op": "camera_fx", "wobbleRot": 0})),
+        ("do not tween", None, json!({"op": "no_tween", "on": true}), json!({"op": "no_tween", "on": false})),
+        ("pause", None, json!({"op": "frame_delay", "seconds": 0.5}), json!({"op": "frame_delay", "seconds": 0})),
+        ("slow motion", None, json!({"op": "frame_slow", "n": 5}), json!({"op": "frame_slow", "n": 0})),
+        ("tween colours", None, json!({"op": "figure", "tweenColors": false}), json!({"op": "figure", "tweenColors": true})),
+        ("keep in tween", None, json!({"op": "figure", "keepInTween": false}), json!({"op": "figure", "keepInTween": true})),
+        ("invert", None, json!({"op": "filter", "invert": true}), json!({"op": "filter", "invert": false})),
+        ("motion blur", None, json!({"op": "filter", "motion": true}), json!({"op": "filter", "motion": false})),
+        ("segment gradient", None, json!({"op": "segment", "gradient": true}), json!({"op": "segment", "gradient": false})),
+        ("use segment colour", None, json!({"op": "segment", "ownColor": true}), json!({"op": "segment", "ownColor": false})),
+        ("trapezoid rounded start", Some(json!({"op": "segment", "shape": "trapezoid"})), json!({"op": "segment", "trapRoundStart": true}), json!({"op": "segment", "trapRoundStart": false})),
+        ("trapezoid rounded end", Some(json!({"op": "segment", "shape": "trapezoid"})), json!({"op": "segment", "trapRoundEnd": true}), json!({"op": "segment", "trapRoundEnd": false})),
+        ("half arc", Some(json!({"op": "segment", "shape": "circle"})), json!({"op": "segment", "halfArc": 1}), json!({"op": "segment", "halfArc": 0})),
+        ("textfield font", Some(json!({"op": "add_textfield"})), json!({"op": "textfield", "font": "Bangers"}), json!({"op": "textfield", "font": null})),
+        ("lock to camera", None, json!({"op": "camera_lock", "layer": "L2", "on": true}), json!({"op": "camera_lock", "layer": "L2", "on": false})),
+        ("auto-camera", None, json!({"op": "auto_camera", "end": 1, "ease": 1}), json!({"op": "auto_camera", "end": null})),
     ];
     let picture = |s: &Session, t: f64| -> Vec<u8> {
         let p = s.project();
@@ -1985,17 +1992,26 @@ fn toggling_a_control_on_and_off_changes_nothing() {
         barkfart_core::fx::render(&list, &mut im);
         im.px.iter().map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8).collect()
     };
-    for (name, on, off) in toggles {
+    for (name, setup, on, off) in toggles {
         let mut s = two_poses();
         s.command(&json!({"op": "animation", "tweening": true}));
         s.command(&json!({"op": "add_camera"}));
         s.command(&json!({"op": "frame", "i": 0}));
         s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+        if let Some(setup) = setup {
+            s.command(setup);
+        }
         let fps = s.project().settings.fps as f64;
         let times = [0.0, 0.25 / fps, 0.5 / fps, 0.75 / fps, 1.0 / fps];
         let before: Vec<Vec<u8>> = times.iter().map(|t| picture(&s, *t)).collect();
         s.command(on);
+        if *name == "textfield font" {
+            assert_eq!(s.state()["textfield"]["font"], "Bangers", "the font is on");
+        }
         s.command(off);
+        if *name == "textfield font" {
+            assert!(s.state()["textfield"]["font"].is_null(), "the font is back to the default");
+        }
         for (k, t) in times.iter().enumerate() {
             let now = picture(&s, *t);
             let bad = now.iter().zip(&before[k]).filter(|(a, b)| a.abs_diff(**b) > 2).count();
@@ -2017,27 +2033,77 @@ fn every_command_undoes_and_redoes_exactly() {
         json!({"op": "delete_joint"}), json!({"op": "delete_segment"}), json!({"op": "split", "n": 2}), json!({"op": "duplicate_branch"}),
         json!({"op": "flip_branch", "h": true}), json!({"op": "pin", "on": true}), json!({"op": "segment", "thickness": 10, "color": 0xff00ffffu32}),
         json!({"op": "segment", "branch": true, "scaleLength": 1.3}), json!({"op": "branch_edit", "addThickness": 4, "replaceFrom": 0x000000ffu32, "replaceTo": 0xffffffffu32}),
+        json!({"op": "branch_edit", "ownColor": false, "gradientColor": 0x00ff00ffu32, "addLength": 5}),
         json!({"op": "figure", "color": 0x00ff00ffu32, "scale": 1.4, "locked": true}), json!({"op": "node", "stretchy": true, "length": 60}),
+        json!({"op": "figure", "tweenColors": false, "keepInTween": false}),
         json!({"op": "camera", "zoom": 1.5, "rotation": 15}), json!({"op": "unjoin"}), json!({"op": "camera_lock", "on": true}),
+        json!({"op": "camera_lock_set", "layer": "L2", "parallax": 0.5, "rotate": true}),
         json!({"op": "to_movieclip"}), json!({"op": "new_movieclip"}), json!({"op": "library_delete", "layer": "L2"}), json!({"op": "rename", "name": "Bob"}),
         json!({"op": "add_camera"}), json!({"op": "watermark", "on": true, "text": "hi"}), json!({"op": "rotate_cameras"}), json!({"op": "reset_camera"}),
         json!({"op": "frame_delay", "seconds": 0.4}), json!({"op": "frame_repeat", "back": 1, "times": 2, "tween": true}), json!({"op": "frame_silence", "on": true}),
         json!({"op": "frame_slow", "n": 4}), json!({"op": "camera_fx", "widescreen": true, "wobbleXY": 9}), json!({"op": "auto_camera", "end": 1, "ease": 23}),
-        json!({"op": "frame_bg", "color": 0x336699ffu32, "useGradient": true, "expand": true}), json!({"op": "filter", "blur": 6, "invert": true}),
-        json!({"op": "clear_filters"}), json!({"op": "segment", "trapRatio": 0.4, "trapRoundEnd": true, "shape": "trapezoid"}), json!({"op": "segment", "ownColor": false}),
+        json!({"op": "frame_bg", "color": 0x336699ffu32, "useGradient": true, "expand": true}), json!({"op": "frame_bg", "expand": true}), json!({"op": "filter", "blur": 6, "invert": true}),
+        json!({"op": "clear_filters"}), json!({"op": "segment", "trapRatio": 0.4, "trapRoundEnd": true, "shape": "trapezoid"}), json!({"op": "segment", "trapRatio": 0.6, "trapRoundStart": true, "shape": "trapezoid"}), json!({"op": "segment", "ownColor": false}),
+        json!({"op": "textfield", "font": "Bangers"}),
+        json!({"op": "polyfill_new"}), json!({"op": "polyfill_color", "color": 0xff0000ffu32}), json!({"op": "polyfill_undo"}),
+        json!({"op": "connector_set", "percent": 0.3, "reversed": true}),
+        json!({"op": "movieclip", "loop": "once", "speed": 1.5, "offset": 0.2}),
+        json!({"op": "edit_movieclip"}), json!({"op": "movieclip_done"}),
     ];
     let text = |s: &Session| codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
     let mut failures = Vec::new();
     let mut skipped = Vec::new();
     for c in &cmds {
         let mut s = two_poses();
+        let op = c["op"].as_str().unwrap_or("");
         // camera commands need a camera; tweened frames and auto-camera a next frame
-        let early = ["camera", "reset_camera", "auto_camera", "tween_add"].contains(&c["op"].as_str().unwrap_or(""));
+        let early = ["camera", "reset_camera", "auto_camera", "tween_add"].contains(&op);
         if early {
             s.command(&json!({"op": "add_camera"}));
         }
         s.command(&json!({"op": "frame", "i": if early { 0 } else { 1 }}));
         s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+        // the set-up a command needs: a textfield, the figure editor, a connector,
+        // or a movieclip selected (its tools act on the selected layer)
+        let movieclip = |s: &mut Session| {
+            s.command(&json!({"op": "to_movieclip"}));
+            let id = s.project().root().expect("root").layers.iter().find(|l| matches!(l.kind, barkfart_core::model::LayerKind::Symbol(_))).expect("a movieclip").id.clone();
+            s.command(&json!({"op": "select", "layer": id, "node": ""}));
+        };
+        match op {
+            "textfield" => {
+                s.command(&json!({"op": "add_textfield"}));
+            }
+            "polyfill_new" => {
+                s.command(&json!({"op": "build", "layer": "L2"}));
+            }
+            "polyfill_color" => {
+                s.command(&json!({"op": "build", "layer": "L2"}));
+                s.command(&json!({"op": "polyfill_new"}));
+            }
+            "polyfill_undo" => {
+                // a polynode to take back off
+                s.command(&json!({"op": "build", "layer": "L2"}));
+                s.command(&json!({"op": "polyfill_new"}));
+                let h = s.tools.handles(s.project(), s.time()).into_iter().find(|h| h.layer == "L2" && h.node == "armR2").expect("a joint");
+                s.command(&json!({"op": "down", "x": h.x, "y": h.y, "r": 4}));
+                s.command(&json!({"op": "up"}));
+            }
+            "connector_set" => {
+                // a connector to move between its two joints
+                s.command(&json!({"op": "build", "layer": "L2"}));
+                s.command(&json!({"op": "connect_start"}));
+                let h = s.tools.handles(s.project(), s.time()).into_iter().find(|h| h.layer == "L2" && h.node == "armR2").expect("a joint");
+                s.command(&json!({"op": "down", "x": h.x, "y": h.y, "r": 4}));
+                s.command(&json!({"op": "up"}));
+            }
+            "movieclip" | "edit_movieclip" => movieclip(&mut s),
+            "movieclip_done" => {
+                movieclip(&mut s);
+                s.command(&json!({"op": "edit_movieclip"}));
+            }
+            _ => {}
+        }
         let before = text(&s);
         let undo0 = s.state()["undo"].clone();
         let st = s.command(c);
