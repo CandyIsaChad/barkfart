@@ -160,17 +160,18 @@ return bf.tool {
     - `toggle` becomes a tick box;
     - `choice` becomes a list.
 
-## App Store
+## Sharing, and the App Store
+
+There is no plugin store, now or later. Plugins travel as files, through
+AirDrop, Files, messages or a website the author runs themselves, and the user
+imports them.
 
 Apps like Codea already run user-written Lua on iPad. The rule to watch is
 Apple's ban on apps downloading code that changes what they do. Scripts the
-user writes or imports themselves are the usual safe ground; a built-in store
-that downloads plugins would not be. Read Apple's current wording before
-shipping.
+user writes or imports themselves are the usual safe ground. Read Apple's
+current wording before shipping.
 
 ## Open questions
 
-- Sharing: plugins travel as files (AirDrop, Files, messages) and that's it,
-  unless Apple's rules allow more.
 - Whether a plugin may declare its own keyboard shortcut or stage gesture.
 - How much of the editor's command set tools get in the first version.
