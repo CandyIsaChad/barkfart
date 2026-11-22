@@ -159,6 +159,18 @@ impl CanvasTools {
         self.main_nodes_only || self.hide_locked
     }
 
+    /// `view` with a Resolver the caller already has (a Resolver indexes every property of
+    /// the project when it is made, so a loop over the layers must not make one per layer).
+    fn view_with(&self, p: &Project, l: &Layer, t: f64, r: &mut Resolver) -> Affine {
+        let s = root_symbol(p);
+        let _ = p;
+        if self.through_camera {
+            eval::camera_view(s, t, r).mul(&eval::layer_chain(s, l, t, r))
+        } else {
+            eval::layer_chain(s, l, t, r)
+        }
+    }
+
     fn view(&self, p: &Project, l: &Layer, t: f64) -> Affine {
         let s = root_symbol(p);
         if self.through_camera {
@@ -178,7 +190,7 @@ impl CanvasTools {
             // movieclips and sprites: one main handle at their origin, to move them
             if matches!(l.kind, LayerKind::Symbol(_) | LayerKind::Sprite(_)) {
                 if self.layer_handles && l.visible && !l.locked && r.b(&l.shown, t) {
-                    let v = self.view(p, l, t);
+                    let v = self.view_with(p, l, t, &mut r);
                     out.push(Handle { layer: l.id.clone(), node: String::new(), x: v.map_x(0.0, 0.0) as f32, y: v.map_y(0.0, 0.0) as f32, root: true });
                 }
                 continue;
@@ -187,7 +199,7 @@ impl CanvasTools {
             if !l.visible || l.locked || !r.b(&l.shown, t) {
                 continue;
             }
-            let v = self.view(p, l, t);
+            let v = self.view_with(p, l, t, &mut r);
             let pose = FigurePose::compute(f, t, &mut r);
             let anchors = if self.main_nodes_only && self.active_figure.as_deref() != Some(&l.id) { Some(join_anchors(s, &l.id)) } else { None };
             for (i, n) in f.nodes().iter().enumerate() {

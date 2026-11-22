@@ -3901,3 +3901,40 @@ fn random_frame_editing_keeps_every_frame_sound_on_its_frame() {
     }
     assert!(failures.is_empty(), "{} runs went wrong:\n{}", failures.len(), failures.iter().take(4).cloned().collect::<Vec<_>>().join("\n"));
 }
+
+/// Timing probe for big projects (100 figures, 30 frames). Run in release mode:
+/// cargo test --release -p barkfart-core --test session -- --ignored --nocapture edit_time
+/// 2026-11-22 (Intel i7-class dev machine): handles() 4.7 ms, state() 30 ms, an
+/// edit 45 ms; before the Resolver was shared in handles(): 147, 490 and 545 ms
+/// (a Resolver indexes every property of the project when it is made).
+#[test]
+#[ignore = "timing probe; run with --ignored --nocapture"]
+fn edit_time_on_a_big_project() {
+    let mut s = two_poses();
+    for _ in 0..28 {
+        s.command(&json!({"op": "insert_frame"}));
+    }
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    for _ in 0..99 {
+        s.command(&json!({"op": "duplicate_figure"}));
+    }
+    let n = s.state()["figures"].as_array().unwrap().len();
+    let time = |f: &mut dyn FnMut()| {
+        let t = std::time::Instant::now();
+        for _ in 0..10 {
+            f();
+        }
+        t.elapsed().as_secs_f64() * 100.0
+    };
+    let edit = time(&mut || {
+        s.command(&json!({"op": "segment", "thickness": 12}));
+        s.command(&json!({"op": "segment", "thickness": 14}));
+    }) / 2.0;
+    let state = time(&mut || {
+        let _ = s.state();
+    });
+    let handles = time(&mut || {
+        let _ = s.tools.handles(s.project(), s.time());
+    });
+    eprintln!("TIMING figures={n} frames={}: edit {edit:.1} ms, state() {state:.1} ms, handles() {handles:.1} ms", s.state()["frames"]);
+}

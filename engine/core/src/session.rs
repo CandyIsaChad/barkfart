@@ -2381,13 +2381,15 @@ impl Session {
         let p = self.project();
         let t = self.time();
         let mut handles = Vec::new();
+        // every joint's place, worked out once (the handle list and the figures' main joints both need it)
+        let all_handles = self.tools.handles(p, t);
         if self.mode == Mode::Figure {
             // joints connected to the selected one (its parent and children)
             let near: std::collections::HashSet<String> = match &self.selected {
                 Some((l, n)) => self.tools.neighbours(p, l, n, false, t).into_iter().map(|h| h.node).collect(),
                 None => Default::default(),
             };
-            for h in self.tools.handles(p, t) {
+            for h in all_handles.iter() {
                 if self.building.as_ref().is_some_and(|b| *b != h.layer) {
                     continue;
                 }
@@ -2419,7 +2421,7 @@ impl Session {
             .root()
             .map(|s| {
                 // where each figure's main joint is (View options > figure IDs)
-                let roots: std::collections::HashMap<String, (f32, f32)> = self.tools.handles(p, t).into_iter().filter(|h| h.root).map(|h| (h.layer, (h.x, h.y))).collect();
+                let roots: std::collections::HashMap<String, (f32, f32)> = all_handles.iter().filter(|h| h.root).map(|h| (h.layer.clone(), (h.x, h.y))).collect();
                 s.layers.iter().filter(|l| l.as_figure().is_some()).map(|l| json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone()), "at": roots.get(&l.id).map(|(x, y)| json!([round2(*x), round2(*y)]))})).collect()
             })
             .unwrap_or_default();
