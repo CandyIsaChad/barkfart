@@ -68,6 +68,22 @@ Done and verified (engine suite green: `cargo test -q --workspace`, 3.5 min;
   - Layer up / Layer down stepped over the invisible camera layer first (one
     press did nothing visible): `move_among_drawn` in session.rs.
   - Modify branch's "Use segment color" had the same loss as Segment Tools.
+  - Paste frame kept the background of the frame it was inserted after when
+    the copied frame had no background key (copy now remembers each copied
+    frame's background look and filters; paste restores them when they differ).
+  - An edit that changes nothing (Layer down at the back, fps to the same
+    value, Reset camera on a camera that has not moved) left an undo step that
+    undid nothing and marked the project unsaved: `Document::exact` (on for
+    every `Session`) compares contents when the pointers differ. The Java
+    parity tests build a `Document` directly and keep the pointer rule.
+  - Clear filters / Paste filters removed the filter nodes, so they cleared
+    every frame: now one frame (`filters::clear`), and the panel reports a
+    silent filter's off value (blur 0, pixelate 1, ...) instead of another
+    frame's.
+  - Random model tests that found these (keep adding models, they are the
+    best bug finders): `random_frame_editing_*` (shown frames, per-frame
+    background / pause, pose angle, camera zoom + filters) and
+    `random_editing_with_undo_and_redo_walks_the_history_exactly`.
 Known and left alone:
 - A hidden gradient colour of pure black is stored as transparent black, which
   reads as "no colour chosen" (default grey) after Use gradient off, on.
@@ -87,6 +103,9 @@ Known and left alone:
   `@movieclip` and `@connector` are shared set-up steps.
 - Movieclip and wobble rows are held to their settings, not their pixels, in
   the frame snapshot tests (they depend on the project's time).
+- GitHub's iOS run can fail at the last step with "Failed to CreateArtifact:
+  ENOTFOUND" (runner DNS): the IPA was built, it is not a code failure; the
+  next run is the check.
 - Keep hunting hidden state with tests that compare pictures or saved
   projects before and after. Ideas not done yet: the matrix over drags
   (pose edits) as follow-ups; textfield, movieclip and polyfill rows in
