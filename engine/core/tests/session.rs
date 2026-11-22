@@ -2080,13 +2080,26 @@ fn toggling_a_control_on_and_off_changes_nothing() {
                 failures.push(format!("{name} ({what}): the panel shows another value: {:?}", d.iter().take(4).collect::<Vec<_>>()));
             }
         };
+        // saved and opened again, the project draws what it drew
+        let reopened = |s: &Session, what: &str, failures: &mut Vec<String>| {
+            let back = codec::decode(&codec::encode(s.project())).unwrap();
+            for t in &times {
+                let bad = picture_bytes(&back, *t).iter().zip(&picture_bytes(s.project(), *t)).filter(|(a, b)| a.abs_diff(**b) > 2).count();
+                if bad > 0 {
+                    failures.push(format!("{name} ({what}): after saving and opening again {bad} channel values differ at t = {t}"));
+                }
+            }
+        };
         let base = (pictures(&s), s.state());
+        reopened(&s, "before", &mut failures);
         s.command(on);
+        reopened(&s, "on", &mut failures);
         if *name == "textfield font" {
             assert_eq!(s.state()["textfield"]["font"], "Bangers", "the font is on");
         }
         let switched = (pictures(&s), s.state());
         s.command(off);
+        reopened(&s, "off", &mut failures);
         if *name == "textfield font" {
             assert!(s.state()["textfield"]["font"].is_null(), "the font is back to the default");
         }
@@ -2914,4 +2927,94 @@ fn a_per_frame_control_on_the_middle_frame_leaves_the_other_frames_alone() {
     }
     assert_eq!(checked, per_frame.len(), "every name in the list is a row");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Frames are snapshots (UI-SPEC v3.1): whatever a control did on the middle
+/// frame, a frame inserted after it (a copy) or pasted after it draws exactly
+/// what the middle frame draws, and the frames around it draw what they drew.
+#[test]
+fn a_new_frame_draws_what_the_frame_it_copies_draws() {
+    let mut failures = Vec::new();
+    for (name, setup, on, _) in &toggle_rows() {
+        for how in ["insert", "paste"] {
+            let mut s = three_frames(setup);
+            s.command(on);
+            s.command(&json!({"op": "frame", "i": 1}));
+            s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+            let fps = s.project().settings.fps as f64;
+            let at = |s: &Session, i: usize| small_picture(s.project(), i as f64 / fps);
+            let (first, middle, last) = (at(&s, 0), at(&s, 1), at(&s, 2));
+            let panel = s.state();
+            if how == "insert" {
+                s.command(&json!({"op": "insert_frame"}));
+            } else {
+                s.command(&json!({"op": "copy_frame", "n": 0}));
+                s.command(&json!({"op": "paste_frame"}));
+            }
+            let close = |a: &Vec<u8>, b: &Vec<u8>| a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.abs_diff(*y) <= 2);
+            let now: Vec<Vec<u8>> = (0..4).map(|i| at(&s, i)).collect();
+            if !close(&now[0], &first) {
+                failures.push(format!("{name}, {how}: the first frame changed"));
+            }
+            if !close(&now[1], &middle) {
+                failures.push(format!("{name}, {how}: the copied frame changed"));
+            }
+            // the settings of the copied frame are on the new one (the panel apart from
+            // the frame counters and the clipboard)
+            let mut d = Vec::new();
+            diff(&panel, &s.state(), "", &mut d);
+            d.retain(|x| !["/frame:", "/frames:", "/keyed:", "/library:", "/frameMarks:", "/noTweenFrames:", "/frameCopied:", "/frameClipCount:"].iter().any(|p| x.starts_with(p)));
+            // a frame inserted with Add frame does not copy the frame's timing (the pause,
+            // slow motion and silence); a pasted frame does
+            if how == "insert" {
+                d.retain(|x| !["/frameDelay:", "/frameSlow:", "/frameSilence:"].iter().any(|p| x.starts_with(p)));
+            }
+            // a wobble is a shake that depends on the time: the same setting draws another
+            // shake one frame later, so those rows are held to their settings, not their pixels
+            if !name.starts_with("wobble") && !close(&now[2], &middle) {
+                failures.push(format!("{name}, {how}: the new frame does not draw what the copied frame draws (its panel differs: {:?})", d.iter().take(8).collect::<Vec<_>>()));
+            }
+            if !d.is_empty() {
+                failures.push(format!("{name}, {how}: the new frame's settings differ from the copied frame's: {:?}", d.iter().take(8).collect::<Vec<_>>()));
+            }
+            if !close(&now[3], &last) {
+                failures.push(format!("{name}, {how}: the last frame changed"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} differences:\n{}", failures.len(), failures.join("\n"));
+}
+
+/// Deleting the middle frame (with whatever a control did on it) leaves the
+/// first and last frame drawing what they drew, and the saved project reads
+/// back the same.
+#[test]
+fn deleting_a_frame_leaves_the_other_frames_as_they_were() {
+    let mut failures = Vec::new();
+    for (name, setup, on, _) in &toggle_rows() {
+        let mut s = three_frames(setup);
+        s.command(on);
+        s.command(&json!({"op": "frame", "i": 1}));
+        s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+        let fps = s.project().settings.fps as f64;
+        let at = |s: &Session, i: usize| small_picture(s.project(), i as f64 / fps);
+        let (first, last) = (at(&s, 0), at(&s, 2));
+        s.command(&json!({"op": "delete_frame"}));
+        let close = |a: &Vec<u8>, b: &Vec<u8>| a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.abs_diff(*y) <= 2);
+        if s.state()["frames"] != 2 {
+            failures.push(format!("{name}: {} frames left", s.state()["frames"]));
+            continue;
+        }
+        if !close(&at(&s, 0), &first) {
+            failures.push(format!("{name}: the first frame changed"));
+        }
+        if !close(&at(&s, 1), &last) {
+            failures.push(format!("{name}: the last frame changed (or is not where it was)"));
+        }
+        s.command(&json!({"op": "undo"}));
+        if s.state()["frames"] != 3 || !close(&at(&s, 2), &last) {
+            failures.push(format!("{name}: undo of the delete is not the same project"));
+        }
+    }
+    assert!(failures.is_empty(), "{} differences:\n{}", failures.len(), failures.join("\n"));
 }
