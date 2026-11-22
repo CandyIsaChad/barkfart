@@ -17,6 +17,7 @@ import 'package:share_plus/share_plus.dart';
 import 'engine.dart';
 import 'files.dart';
 import 'ui/kit.dart' as kit;
+import 'ui/rows.dart' as rw;
 import 'ui/tokens.dart';
 
 export 'ui/tokens.dart';
@@ -808,6 +809,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           unawaited(_copyPopup(int.parse(w[1])));
         case 'toast':
           _say(w.sublist(1).join(' '));
+        case 'view':
+          setState(() => _viewOptions = true);
         case 'savesheet':
           unawaited(_saveSheet('Rooftop fight hasn\u2019t been saved for 10 minutes. The reminder can be changed or turned off in Settings.'));
         case 'savebutton':
@@ -1151,7 +1154,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                     Positioned.fill(child: _stage()),
                     if (_arrows && !_playing) Positioned(left: _arrowsAt.dx, top: _arrowsAt.dy, child: _arrowsWindow()),
                     if (_magnifier && !_playing) Positioned(left: _magAt.dx, top: _magAt.dy, child: _magnifierWindow()),
-                    if (_viewOptions) Positioned(top: 0, right: 0, bottom: 0, width: 240, child: _viewOptionsPanel()),
+                    if (_viewOptions) Positioned(top: 8, right: 8, bottom: 8, width: 330, child: _viewOptionsPanel()),
                   ]),
                 ),
               ),
@@ -2872,76 +2875,66 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     );
   }
 
+  /// The View card (REDESIGN §8, D15): a page of rows. Nothing from the old
+  /// View options panel is dropped.
   Widget _viewOptionsPanel() {
-    return Material(
-      color: cPanel,
-      elevation: 8,
-      child: ListView(padding: const EdgeInsets.all(12), children: [
-        Row(children: [
-          const Expanded(child: Text('View options', style: TextStyle(color: cText, fontSize: 14, fontWeight: FontWeight.w600))),
-          IconButton(icon: const Icon(Icons.close, color: cSecondary), onPressed: () => setState(() => _viewOptions = false)),
-        ]),
-        _Toggle('Show only main nodes', _opts['mainOnly'] == true, (v) => _cmd({'op': 'set', 'k': 'mainonly', 'v': v})),
-        if (_st['building'] != null) ...[
-          _Toggle('Show static nodes', _opts['static'] != false, (v) => _cmd({'op': 'set', 'k': 'static', 'v': v})),
-          _Toggle('Show draw order', AppSettings.flag('drawOrder'), (v) => setState(() {
-                AppSettings.values['drawOrder'] = v;
-                unawaited(AppSettings.save());
+    void flag(String k, bool v) => setState(() {
+          AppSettings.values[k] = v;
+          unawaited(AppSettings.save());
+        });
+    void number(String k, int v) => setState(() {
+          AppSettings.values[k] = v;
+          unawaited(AppSettings.save());
+        });
+    final before = ((_opts['onionBefore'] as num?) ?? 1).toInt(), after = ((_opts['onionAfter'] as num?) ?? 1).toInt();
+    return rw.PropertyPage([
+      const rw.DTitle('Onion skin'),
+      rw.DTick('Onion skin', _opts['onion'] == true, onChanged: (v) => _cmd({'op': 'set', 'k': 'onion', 'v': v})),
+      if (_opts['onion'] == true) ...[
+        rw.DStep('Frames before', '$before', onMinus: () => _cmd({'op': 'set', 'k': 'onion_before', 'v': before - 1}), onPlus: () => _cmd({'op': 'set', 'k': 'onion_before', 'v': before + 1})),
+        rw.DStep('Frames after', '$after', onMinus: () => _cmd({'op': 'set', 'k': 'onion_after', 'v': after - 1}), onPlus: () => _cmd({'op': 'set', 'k': 'onion_after', 'v': after + 1})),
+        rw.DSeg(const ['Behind', 'In front'], _opts['onionFront'] == true ? 1 : 0, onSelect: (i) => _cmd({'op': 'set', 'k': 'onion_front', 'v': i == 1})),
+      ],
+      const rw.DTitle('Handles'),
+      rw.DTick('Only main joints', _opts['mainOnly'] == true, onChanged: (v) => _cmd({'op': 'set', 'k': 'mainonly', 'v': v})),
+      if (_st['building'] != null) ...[
+        rw.DTick('Static joints', _opts['static'] != false, onChanged: (v) => _cmd({'op': 'set', 'k': 'static', 'v': v})),
+        rw.DTick('Draw order numbers', AppSettings.flag('drawOrder'), onChanged: (v) => flag('drawOrder', v)),
+        rw.DSeg(const ['None', 'Polyfills', 'Connectors', 'Locks'], AppSettings.number('nodeHighlight').clamp(0, 3), label: 'Highlight', onSelect: (i) => number('nodeHighlight', i)),
+      ],
+      const rw.DTitle('Stage'),
+      for (final (k, label) in const [
+        ('showIds', 'Figure names'),
+        ('neighbourLines', 'Neighbour lines'),
+        ('outlineSelection', 'Outline the selection'),
+        ('zoomButtons', 'Zoom buttons'),
+        ('guides', 'Guides'),
+        ('stageBox', 'Stage box'),
+      ])
+        rw.DTick(label, AppSettings.flag(k), onChanged: (v) => flag(k, v)),
+      const rw.DTitle('While editing'),
+      rw.DSeg(const ['None', 'No blur', 'All'], AppSettings.number('showFilters').clamp(0, 2), label: 'Effects', onSelect: (i) => number('showFilters', i)),
+      rw.DTick('Section tabs', _showTabs, onChanged: (v) => setState(() => _showTabs = v)),
+      const rw.DTitle('Playback'),
+      rw.DSeg(const ['Full', 'Half', 'Fast'], _quality == 1 ? 0 : _quality == 0.5 ? 1 : 2, label: 'Quality', onSelect: (i) => setState(() {
+            _quality = [1.0, 0.5, 0.3][i];
+            _clearCache();
+          })),
+      const rw.DTitle('Helpers'),
+      rw.DButtons('Fit stage', () => setState(_fit), b: 'Nudge arrows', onB: _arrows ? null : () => setState(() => _arrows = true)),
+      const rw.DHint('Nudge arrows move the selected figure in small exact steps.'),
+      rw.DButtons('Magnifier', _magnifier
+          ? null
+          : () => setState(() {
+                _magnifier = true;
+                _magKey = '';
               })),
-          _Btn('Node highlight: ${const ['None', 'Polyfills', 'Connectors', 'Drag / angle locks'][AppSettings.number('nodeHighlight').clamp(0, 3)]}', small: true, onTap: () => setState(() {
-                AppSettings.values['nodeHighlight'] = (AppSettings.number('nodeHighlight') + 1) % 4;
-                unawaited(AppSettings.save());
-              })),
-          _gap,
-        ],
-        for (final (k, label) in const [
-          ('showIds', 'Show figure names'),
-          ('neighbourLines', 'Show neighbour lines'),
-          ('outlineSelection', 'Outline selection'),
-          ('zoomButtons', 'Show zoom buttons'),
-          ('guides', 'Show guides'),
-          ('stageBox', 'Show stage box'),
-        ])
-          _Toggle(label, AppSettings.flag(k), (v) => setState(() {
-                AppSettings.values[k] = v;
-                unawaited(AppSettings.save());
-              })),
-        _label('Show filters'),
-        _Segmented(const ['None', 'No blur', 'All'], AppSettings.number('showFilters').clamp(0, 2), (i) => setState(() {
-              AppSettings.values['showFilters'] = i;
-              unawaited(AppSettings.save());
-            })),
-        _gap,
-        _Toggle('Onion skin', _opts['onion'] == true, (v) => _cmd({'op': 'set', 'k': 'onion', 'v': v})),
-        if (_opts['onion'] == true) ...[
-          _stepper('Frames before', '${_opts['onionBefore'] ?? 1}', () => _cmd({'op': 'set', 'k': 'onion_before', 'v': ((_opts['onionBefore'] as num?) ?? 1) - 1}), () => _cmd({'op': 'set', 'k': 'onion_before', 'v': ((_opts['onionBefore'] as num?) ?? 1) + 1})),
-          _gap,
-          _stepper('Frames after', '${_opts['onionAfter'] ?? 1}', () => _cmd({'op': 'set', 'k': 'onion_after', 'v': ((_opts['onionAfter'] as num?) ?? 1) - 1}), () => _cmd({'op': 'set', 'k': 'onion_after', 'v': ((_opts['onionAfter'] as num?) ?? 1) + 1})),
-          _gap,
-          _Segmented(const ['Behind', 'In front'], _opts['onionFront'] == true ? 1 : 0, (i) => _cmd({'op': 'set', 'k': 'onion_front', 'v': i == 1})),
-          _gap,
-        ],
-        _Toggle('Show section tabs', _showTabs, (v) => setState(() => _showTabs = v)),
-        _gap,
-        _label('Playback quality'),
-        _Segmented(const ['Full', 'Half', 'Fast'], _quality == 1 ? 0 : _quality == 0.5 ? 1 : 2, (i) => setState(() {
-              _quality = [1.0, 0.5, 0.3][i];
-              _clearCache();
-            })),
-        _gap,
-        _Btn('Fit stage', onTap: () => setState(_fit)),
-        _gap,
-        _hint('The arrows window moves the selected figure in small exact steps.'),
-        _Btn('Show arrows', enabled: !_arrows, onTap: () => setState(() => _arrows = true)),
-        _gap,
-        _hint('The magnifier shows the stage up close, so joints that sit close together are easy to pick. Move the picked joint on the main stage.'),
-        _Btn('Show magnifier', enabled: !_magnifier, onTap: () => setState(() {
-              _magnifier = true;
-              _magKey = '';
-            })),
-        if (_engineMs > 0) Padding(padding: const EdgeInsets.only(top: 8), child: _hint('${_engineMs.toStringAsFixed(1)} ms per picture')),
-      ]),
-    );
+      const rw.DHint('The magnifier shows the stage up close, so joints that sit close together are easy to pick.'),
+      if (_engineMs > 0) ...[
+        const rw.DTitle('Running slow?'),
+        rw.DHint('${_engineMs.toStringAsFixed(1)} ms per picture. Lower the playback quality, or turn effects off while editing.'),
+      ],
+    ]);
   }
 
   /// Open: a window listing saved animations (filter, sort, open, delete).

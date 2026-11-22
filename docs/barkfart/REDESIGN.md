@@ -404,8 +404,9 @@ and tests are never weakened.
 - [x] B1. The "Save your work?" sheet.
 - [x] B2. Toasts replace the status line.
 - [ ] B3. The Animation popover: FPS, smoothness (tweened frames),
-  looping, fullscreen.
-- [ ] B4. The View card (today's View options).
+  looping, fullscreen. **Built right after C7**, because its anchor is the
+  timeline toolbar's "fps" button, which C7 adds.
+- [x] B4. The View card (today's View options).
 - [ ] B5. The Export sheet.
 - [ ] B6. The Settings screen.
 
