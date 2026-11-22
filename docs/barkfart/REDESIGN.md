@@ -421,12 +421,12 @@ and tests are never weakened.
   It replaces the sidebar and the tab strip.
 - [ ] C6. The "+" menu (absorbs Library Tools) and the stick figure chooser.
   **Built right after C7**, because "+" lives in the timeline's bottom bar.
-- [ ] C7. The folded timeline: control toolbar, fps ruler (D16), tiled
+- [x] C7. The folded timeline: control toolbar, fps ruler (D16), tiled
   Preview row. It replaces the frame strip and the top-right grid.
   - [x] C7a. The control toolbar (steps, onion skin, transport, fps) and the
     bottom bar of frame words (Add, Copy, Paste, Delete frame) replace the
     grid.
-  - [ ] C7b. The ruler and the tiled Preview row move into the timeline,
+  - [x] C7b. The ruler and the tiled Preview row move into the timeline,
     replacing the top strip. Keep every per-frame mark and the copy popup
     (D17).
 - [x] C8. Big screens dock Properties (D20). `BARKFART_DOCK=1` forces it for

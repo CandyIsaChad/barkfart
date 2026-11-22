@@ -1142,12 +1142,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           if (!_fsNow) _leftRail(pad, leftHand),
           Expanded(
             child: Column(children: [
-              if (!_fsNow && !_hidePanels)
+              if (!_fsNow && !_hidePanels && _st['building'] != null)
               Container(
                 height: stripH,
                 color: cPanel,
                 padding: EdgeInsets.only(right: leftHand ? 0 : pad.right, left: leftHand ? pad.left : 0),
-                child: _st['building'] != null ? _buildBar() : _topBar(stripH),
+                child: _buildBar(),
               ),
               Expanded(
                 child: Padding(
@@ -1166,6 +1166,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 ),
               ),
               if (!_fsNow && !_hidePanels) _controlBar(),
+              if (!_fsNow && !_hidePanels && _st['building'] == null) _previewRow(),
               if (!_fsNow && !_hidePanels) _framesBar(),
             ]),
           ),
@@ -1470,85 +1471,102 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     await _runExport(opts['format'] as int, opts['w'] as int, opts['h'] as int, opts['start'] as int, opts['count'] as int, opts['transparent'] as bool || opts['silent'] == true, opts['name'] as String);
   }
 
-  Widget _topBar(double h) {
-    final cellH = h - 16;
-    final cellW = cellH * 16 / 9;
-    return Row(children: [
-      Expanded(
-        child: ListView.builder(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.all(8),
-          itemCount: _frames,
-          itemBuilder: (c, i) {
-            final cur = _playing ? (_playT * _fps).floor() == i : i == _frame;
-            final img = _thumbs[i];
-            return GestureDetector(
-              onTap: () {
-                if (_playing) _togglePlay();
-                setState(() => _frameSelected = true);
-                _cmd({'op': 'frame', 'i': i});
-                if (!AppSettings.flag('keepSelection')) _cmd({'op': 'select'});
-              },
-              child: Container(
-                width: cellW,
-                margin: const EdgeInsets.only(right: 6),
-                decoration: BoxDecoration(color: const Color(0xFFF2F2F2), border: Border.all(color: cur ? cAccent : cControl, width: cur ? 3 : 1)),
-                child: Stack(fit: StackFit.expand, children: [
-                  if (img != null) RawImage(image: img, fit: BoxFit.contain),
-                  // bottom left: copy this frame (and the ones after it)
-                  Positioned(
-                    left: 2,
-                    bottom: 2,
-                    child: GestureDetector(
-                      onTap: () => _copyPopup(i),
-                      child: Container(
-                        decoration: BoxDecoration(color: const Color(0xCC2B2E33), borderRadius: BorderRadius.circular(3)),
-                        padding: const EdgeInsets.all(2),
-                        child: const Icon(Icons.copy_all, size: 14, color: cText),
-                      ),
-                    ),
+  final ScrollController _stripScroll = ScrollController();
+
+  /// The ruler and the Preview row (REDESIGN §4, D16): one cell per frame in a
+  /// continuous strip; numbers follow the frame rate (every quarter second,
+  /// whole seconds bold); the current frame is a pale pill. Per-frame marks
+  /// stay, small and quiet (D17); hold a cell to copy frames from it.
+  Widget _previewRow() {
+    const cell = 56.0, rulerH = 22.0, thumbH = 32.0;
+    final fps = _fps.round().clamp(1, 240);
+    final step = math.max(1, (fps / 4).round());
+    final cur = _playing ? (_playT * _fps).floor() : _frame;
+    Widget mark(String icon, Color c) => Padding(padding: const EdgeInsets.only(right: 1), child: Icon(_markIcons[icon], size: 10, color: c));
+    return Container(
+      height: rulerH + thumbH + 10,
+      color: cCard,
+      child: ListView.builder(
+        controller: _stripScroll,
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        itemCount: _frames,
+        itemBuilder: (c, i) {
+          final f = i + 1, isCur = i == cur, sec = f % fps == 0, label = f == 1 || sec || f % step == 0;
+          final marks = (_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?;
+          final noTween = (_st['noTweenFrames'] as List?)?.elementAtOrNull(i) == true;
+          final img = _thumbs[i];
+          return GestureDetector(
+            onTap: () {
+              if (_playing) _togglePlay();
+              setState(() => _frameSelected = true);
+              _cmd({'op': 'frame', 'i': i});
+              if (!AppSettings.flag('keepSelection')) _cmd({'op': 'select'});
+            },
+            onLongPress: _playing ? null : () => _copyPopup(i),
+            child: SizedBox(
+              width: cell,
+              child: Column(children: [
+                SizedBox(
+                  width: cell,
+                  height: rulerH,
+                  child: Stack(alignment: Alignment.bottomCenter, clipBehavior: Clip.none, children: [
+                    Container(width: 1, height: sec ? 8 : label ? 6 : 4, color: sec ? cInk2b : label ? const Color(0xFF9AA0A8) : const Color(0xFFC4C8CE)),
+                    if (isCur)
+                      Positioned(
+                        top: 2,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          height: 17,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(color: const Color(0xFFDCEAF9), borderRadius: BorderRadius.circular(9)),
+                          child: Text('$f', style: const TextStyle(color: cAccent, fontSize: 11, fontWeight: FontWeight.w700)),
+                        ),
+                      )
+                    else if (label)
+                      Positioned(top: 2, child: Text('$f', style: TextStyle(color: sec ? cText : cSecondary, fontSize: 11, fontWeight: sec ? FontWeight.w700 : FontWeight.w400, fontFeatures: const [ui.FontFeature.tabularFigures()]))),
+                  ]),
+                ),
+                Container(
+                  height: thumbH,
+                  margin: const EdgeInsets.only(right: 1),
+                  decoration: BoxDecoration(
+                    color: cCard,
+                    border: Border.all(color: isCur ? cAccent : cLine, width: isCur ? 2 : 1),
+                    borderRadius: BorderRadius.horizontal(left: Radius.circular(i == 0 ? 5 : 0), right: Radius.circular(i == _frames - 1 ? 5 : 0)),
                   ),
-                  // bottom right: tweens to the next frame / does not
-                  if (_st['tweening'] == true && i < _frames - 1)
+                  child: Stack(fit: StackFit.expand, children: [
+                    if (img != null) RawImage(image: img, fit: BoxFit.cover),
                     Positioned(
-                      right: 3,
-                      bottom: 2,
-                      child: Icon(
-                        ((_st['noTweenFrames'] as List?)?.elementAtOrNull(i) == true) ? Icons.block : Icons.arrow_forward,
-                        size: 15,
-                        color: ((_st['noTweenFrames'] as List?)?.elementAtOrNull(i) == true) ? cDanger : cAccent,
-                      ),
+                      left: 2,
+                      bottom: 1,
+                      child: Row(children: [
+                        if (marks?.first == true) mark('pause', const Color(0xFFD9821E)),
+                        if (marks?.elementAtOrNull(1) == true) mark('repeat', cConnected),
+                        if (marks?.elementAtOrNull(2) == true) mark('silence', cDanger),
+                        if (marks?.elementAtOrNull(3) == true) mark('slow', cConnected),
+                        if (marks?.elementAtOrNull(4) == true) mark('camera', const Color(0xFFD94F94)),
+                        if (_st['tweening'] == true && noTween && i < _frames - 1) mark('notween', cDanger),
+                      ]),
                     ),
-                  // top right: this frame pauses; under the number: it repeats a series
-                  if (((_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?)?.first == true)
-                    const Positioned(right: 3, top: 2, child: Icon(Icons.timer_outlined, size: 15, color: Color(0xFFFF9F0A))),
-                  if (((_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?)?.elementAtOrNull(2) == true)
-                    const Positioned(right: 22, bottom: 2, child: Icon(Icons.volume_off, size: 15, color: cDanger)),
-                  // auto-camera starts here
-                  if (((_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?)?.elementAtOrNull(4) == true)
-                    const Positioned(left: 22, bottom: 2, child: Icon(Icons.videocam, size: 15, color: Color(0xFFFF6FB5))),
-                  // beside the tween arrow: slow motion tweening
-                  if (((_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?)?.elementAtOrNull(3) == true)
-                    const Positioned(right: 41, bottom: 2, child: Icon(Icons.slow_motion_video, size: 15, color: Color(0xFFBF5AF2))),
-                  if (((_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?)?.elementAtOrNull(1) == true)
-                    const Positioned(left: 3, top: 19, child: Icon(Icons.repeat, size: 15, color: Color(0xFFBF5AF2))),
-                  Positioned(
-                    left: 0,
-                    top: 0,
-                    child: Container(
-                      color: cur ? cAccent : const Color(0xCC2B2E33),
-                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                      child: Text('${i + 1}', style: const TextStyle(color: cText, fontSize: 11, fontFeatures: [ui.FontFeature.tabularFigures()])),
-                    ),
-                  ),
-                ]),
-              ),
-            );
-          },
-        ),
+                  ]),
+                ),
+              ]),
+            ),
+          );
+        },
       ),
-    ]);
+    );
   }
+
+  static const _markIcons = {
+    'pause': Icons.timer_outlined,
+    'repeat': Icons.repeat,
+    'silence': Icons.volume_off,
+    'slow': Icons.slow_motion_video,
+    'camera': Icons.videocam,
+    'notween': Icons.block,
+  };
 
   void _goFrame(int i) {
     if (_playing) _togglePlay();
