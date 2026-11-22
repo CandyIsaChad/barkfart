@@ -38,6 +38,26 @@ tiled Preview row. It replaces the top frame strip and the top-right grid.
 Then B3 (the Animation popover from the toolbar's fps button) and C6 (the
 "+" menu in the bottom bar). Then D1 onwards.
 
+**D7b plan (engine).** Figures don't remember their source file today: only
+`Node::rest_length` keeps the made-with length.
+
+1. When a figure enters a project (added from the library or a file,
+   pasted, or imported from a legacy file), store its as-loaded nodes as a
+   base. Use `Figure::base: Option<Arc<Figure>>`, or a per-node map of the
+   defaults, shared so it costs nothing until edited.
+2. Save it in the native format (FORMAT.md) as an optional field. Older
+   files load with base = as-loaded.
+3. The selection JSON (session.rs, the `"thickness": …` block near
+   line 2430) gains `defaults: {thickness, length, color, segScale, curve,
+   …}` for the selected node.
+4. New op `reset_segment`: restore every value of the selected node from the
+   base in one undo step.
+5. Tests: add, edit, reset gives the same as add; save and load keep the
+   base; undo and redo are exact (session.rs sweeps and `toggle_rows`).
+6. Flutter: every DStep, DTick and DSwatch on the Segment page gets
+   `changed` and `reset` from `defaults`, plus the pinned footer
+   `DDanger('Reset this segment')`.
+
 **Done so far:** A1–A6, B1, B2, B4, B5, B6, C1–C5, C8, D1 (the frame sound as Sound Tools rows).
 
 **Script commands added:** `savesheet`, `toast <text>`, `view`, `projects`.
