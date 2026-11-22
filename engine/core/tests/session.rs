@@ -3588,7 +3588,9 @@ fn random_editing_with_undo_and_redo_walks_the_history_exactly() {
             let f = next(frames as usize) as i64;
             s.command(&json!({"op": "frame", "i": f}));
             s.command(&json!({"op": "select", "layer": "L2", "node": (["armR1", "armR2", "legL1", "head"][next(4)])}));
-            let c: Value = match next(41) {
+            let c: Value = match next(45) {
+                41 | 42 => json!({"op": "@drag"}),
+                43 => json!({"op": "@drag_cancelled"}),
                 38 | 39 => json!({"op": "@join"}),
                 40 => json!({"op": "unjoin"}),
                 34 => json!({"op": "to_movieclip"}),
@@ -3650,7 +3652,19 @@ fn random_editing_with_undo_and_redo_walks_the_history_exactly() {
                 }
             } else {
                 let (before, depth) = (saved_text(s.project()), s.doc.undo_depth());
-                if c["op"] == "@join" {
+                if c["op"] == "@drag" || c["op"] == "@drag_cancelled" {
+                    // a drag of a random joint: several moves, then up (or cancelled)
+                    let t = s.time();
+                    let hs = s.tools.handles(s.project(), t);
+                    if !hs.is_empty() {
+                        let h = &hs[next(hs.len())];
+                        s.command(&json!({"op": "down", "x": h.x, "y": h.y, "r": 20}));
+                        for _ in 0..(1 + next(4)) {
+                            s.command(&json!({"op": "move", "x": h.x + next(120) as f32 - 60.0, "y": h.y + next(120) as f32 - 60.0}));
+                        }
+                        s.command(&json!({"op": if c["op"] == "@drag" { "up" } else { "cancel" }}));
+                    }
+                } else if c["op"] == "@join" {
                     // join the selected figure to a joint of another one
                     s.command(&json!({"op": "join"}));
                     let t = s.time();
