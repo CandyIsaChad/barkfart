@@ -3437,25 +3437,33 @@ fn random_frame_editing_keeps_every_pose_with_its_frame() {
         };
         let mut s = two_poses();
         let n0 = s.state()["frames"].as_i64().unwrap() as usize;
-        let read = |s: &mut Session, i: usize| -> f64 {
+        let read = |s: &mut Session, i: usize| -> (f64, f64) {
             s.command(&json!({"op": "frame", "i": i as i64}));
             s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
-            s.state()["selected"]["angle"].as_f64().unwrap()
+            let st = s.state();
+            let at = st["figures"].as_array().unwrap().iter().find(|f| f["id"] == "L2").map(|f| f["at"][0].as_f64().unwrap()).unwrap_or(0.0);
+            (st["selected"]["angle"].as_f64().unwrap(), at)
         };
-        let mut model: Vec<f64> = (0..n0).map(|i| read(&mut s, i)).collect();
-        let mut clip: Option<f64> = None;
+        let mut model: Vec<(f64, f64)> = (0..n0).map(|i| read(&mut s, i)).collect();
+        let mut clip: Option<(f64, f64)> = None;
         let mut log: Vec<String> = Vec::new();
         for step in 0..30 {
             let n = model.len();
             let f = next(n);
             s.command(&json!({"op": "frame", "i": f as i64}));
             s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
-            match next(8) {
+            match next(9) {
                 0 | 1 => {
                     let a = (next(12) as f64) * 15.0 - 90.0;
                     log.push(format!("angle {a} on {f}"));
                     s.command(&json!({"op": "node", "angle": a}));
-                    model[f] = a;
+                    model[f].0 = a;
+                }
+                8 => {
+                    let dx = (next(5) as f64 + 1.0) * 10.0;
+                    log.push(format!("nudge {dx} on {f}"));
+                    s.command(&json!({"op": "nudge", "dx": dx, "dy": 0}));
+                    model[f].1 += dx;
                 }
                 2 | 3 => {
                     log.push(format!("insert after {f}"));
@@ -3495,8 +3503,8 @@ fn random_frame_editing_keeps_every_pose_with_its_frame() {
             } else {
                 for (i, want) in model.clone().iter().enumerate() {
                     let got = read(&mut s, i);
-                    if (got - want).abs() > 0.02 {
-                        bad.push(format!("frame {i}: want {want} got {got}"));
+                    if (got.0 - want.0).abs() > 0.02 || (got.1 - want.1).abs() > 0.05 {
+                        bad.push(format!("frame {i}: want {want:?} got {got:?}"));
                     }
                 }
             }
@@ -3536,7 +3544,10 @@ fn random_editing_with_undo_and_redo_walks_the_history_exactly() {
             let f = next(frames as usize) as i64;
             s.command(&json!({"op": "frame", "i": f}));
             s.command(&json!({"op": "select", "layer": "L2", "node": (["armR1", "armR2", "legL1", "head"][next(4)])}));
-            let c: Value = match next(34) {
+            let c: Value = match next(38) {
+                34 => json!({"op": "to_movieclip"}),
+                35 | 36 => json!({"op": "@enter_movieclip"}),
+                37 => json!({"op": "movieclip_done"}),
                 0 => json!({"op": "insert_frame"}),
                 1 => json!({"op": "delete_frame"}),
                 2 => json!({"op": "fps", "v": ([24, 12, 10, 30][next(4)])}),
@@ -3593,7 +3604,16 @@ fn random_editing_with_undo_and_redo_walks_the_history_exactly() {
                 }
             } else {
                 let (before, depth) = (saved_text(s.project()), s.doc.undo_depth());
-                s.command(&c);
+                if c["op"] == "@enter_movieclip" {
+                    // select the first movieclip on the stage and edit it
+                    let id = s.project().root().and_then(|r| r.layers.iter().find(|l| matches!(l.kind, barkfart_core::model::LayerKind::Symbol(_))).map(|l| l.id.clone()));
+                    if let Some(id) = id {
+                        s.command(&json!({"op": "select", "layer": id, "node": ""}));
+                        s.command(&json!({"op": "edit_movieclip"}));
+                    }
+                } else {
+                    s.command(&c);
+                }
                 log.push(c.to_string());
                 let after = saved_text(s.project());
                 let stepped = s.doc.undo_depth() > depth;
@@ -3616,6 +3636,17 @@ fn random_editing_with_undo_and_redo_walks_the_history_exactly() {
                     why = format!("{} steps to undo, the history says {}", s.doc.undo_depth() - base.min(s.doc.undo_depth()), at);
                 } else if s.doc.redo_depth() != history.len() - 1 - at {
                     why = format!("{} steps to redo, the history says {}", s.doc.redo_depth(), history.len() - 1 - at);
+                } else {
+                    // saved and read back: the very same project
+                    match codec::decode(&codec::encode(s.project())) {
+                        Ok(back) => {
+                            if saved_text(&back) != now {
+                                let first = saved_text(&back).lines().zip(now.lines()).position(|(a, b)| a != b).unwrap_or(0);
+                                why = format!("the saved project reads back as another project (first difference at line {first})");
+                            }
+                        }
+                        Err(e) => why = format!("the saved project does not read back: {e:?}"),
+                    }
                 }
             }
             if !why.is_empty() {
