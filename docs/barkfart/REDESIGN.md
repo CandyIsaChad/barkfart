@@ -415,7 +415,7 @@ and tests are never weakened.
 - [x] C1. Checkerboard offstage.
 - [x] C2. Top bar: Projects, View and Export words, the project name, the
   unsaved dot.
-- [ ] C3. Left rail: the mode pictograms.
+- [x] C3. Left rail: the mode pictograms.
 - [ ] C4. Right rail: undo, redo, Properties, delete, hide panels.
 - [ ] C5. The Properties card holds today's sections, tabbed by selection.
   It replaces the sidebar and the tab strip.

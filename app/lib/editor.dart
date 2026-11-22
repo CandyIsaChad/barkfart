@@ -1133,12 +1133,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         child: Column(children: [
         if (!_fsNow) _appBar(pad),
         Expanded(child: Row(textDirection: leftHand ? TextDirection.rtl : TextDirection.ltr, children: [
+          if (!_fsNow) _leftRail(pad, leftHand),
           // the tool panel: left, or right in left-hand mode (hidden in fullscreen playback)
           if (!_fsNow)
           Container(
-            width: (big ? 220 : 180) + (leftHand ? pad.right : pad.left),
+            width: big ? 220 : 180,
             color: cPanel,
-            padding: EdgeInsets.only(left: leftHand ? 0 : pad.left, right: leftHand ? pad.right : 0, bottom: pad.bottom),
+            padding: EdgeInsets.only(bottom: pad.bottom),
             child: Directionality(textDirection: TextDirection.ltr, child: _sidebar()),
           ),
           Expanded(
@@ -1611,6 +1612,35 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   // ---------------------------------------------------------------- left panel
 
+  /// Switch between posing figures, moving everything and the camera.
+  void _setMode(String m) {
+    setState(() => _frameSelected = false);
+    if (m == 'camera' && _st['hasCamera'] != true) {
+      _cmd({'op': 'add_camera'});
+    } else {
+      _cmd({'op': 'mode', 'v': m});
+    }
+    if (m != 'figure') _cmd({'op': 'select'});
+  }
+
+  /// The left rail (REDESIGN §4): the modes as stick-figure pictograms; the
+  /// current one is red.
+  Widget _leftRail(EdgeInsets pad, bool leftHand) {
+    final mode = _st['mode'] as String? ?? 'figure';
+    return Container(
+      width: 64 + (leftHand ? pad.right : pad.left),
+      padding: EdgeInsets.only(left: leftHand ? 0 : pad.left, right: leftHand ? pad.right : 0, top: 6, bottom: pad.bottom),
+      decoration: BoxDecoration(color: cPanel, border: Border(right: leftHand ? BorderSide.none : const BorderSide(color: cLine), left: leftHand ? const BorderSide(color: cLine) : BorderSide.none)),
+      child: Column(children: [
+        for (final (m, icon, label) in const [('figure', 'pose', 'Pose one figure'), ('all', 'all', 'Move everything'), ('camera', 'camera', 'Camera')])
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: kit.RailButton(icon, label: label, active: mode == m, onTap: _playing ? null : () => _setMode(m)),
+          ),
+      ]),
+    );
+  }
+
   Widget _sidebar() {
     final mode = _st['mode'] as String? ?? 'figure';
     final fit = _fitScale();
@@ -1626,41 +1656,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         ),
       ),
       Center(child: Text(_playing ? modeName : 'Mode: $modeName ($zoom%)', style: const TextStyle(color: cSecondary, fontSize: 12))),
-      const SizedBox(height: 4),
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        child: Row(children: [
-          for (final m in const [('figure', Icons.accessibility_new, 'Normal: pose figures'), ('all', Icons.groups, 'Panning: move everything'), ('camera', Icons.videocam_outlined, 'Camera')]) ...[
-            Expanded(
-              child: Tooltip(
-                message: m.$3,
-                child: Opacity(
-                  opacity: _playing ? 0.35 : 1,
-                  child: Material(
-                    color: mode == m.$1 ? cSelected : cControl,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4), side: mode == m.$1 ? const BorderSide(color: cAccent) : BorderSide.none),
-                    child: InkWell(
-                      onTap: _playing
-                          ? null
-                          : () {
-                              setState(() => _frameSelected = false);
-                              if (m.$1 == 'camera' && _st['hasCamera'] != true) {
-                                _cmd({'op': 'add_camera'});
-                              } else {
-                                _cmd({'op': 'mode', 'v': m.$1});
-                              }
-                              if (m.$1 != 'figure') _cmd({'op': 'select'});
-                            },
-                      child: SizedBox(height: 40, child: Icon(m.$2, color: mode == m.$1 ? cAccent : cText)),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            if (m.$1 != 'camera') const SizedBox(width: 4),
-          ],
-        ]),
-      ),
       const SizedBox(height: 6),
       Expanded(
         child: _playing
