@@ -63,7 +63,8 @@ committed). Plainest behaviour where the reference is unsure.
 ## Textfields (13)
 - [x] Locked to camera (textfields)
 - [ ] Fonts (the original bundles third-party fonts; Barkfart would need
-      openly licensed ones), outline, background box
+      openly licensed ones). The reference's Textfield Tools has no outline
+      or background box control.
 
 ## Done today
 - [x] Colour picker (copied colours, hue / saturation, brightness, hex)
