@@ -22,7 +22,14 @@ static void my_application_activate(GApplication* application) {
 
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
-  gtk_window_set_default_size(window, 1280, 720);
+  // BARKFART_WINDOW=WxH (laptop checks of phone and tablet sizes)
+  int win_w = 1280, win_h = 720;
+  const char* win = g_getenv("BARKFART_WINDOW");
+  if (win != nullptr && sscanf(win, "%dx%d", &win_w, &win_h) != 2) {
+    win_w = 1280;
+    win_h = 720;
+  }
+  gtk_window_set_default_size(window, win_w, win_h);
 
   // If you want to use a header bar, uncomment the following lines.
   // Header bars are commonly used in GNOME based desktop environments and
