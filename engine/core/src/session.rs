@@ -97,6 +97,8 @@ pub struct Session {
     branch_clip: Option<(Vec<Node>, Vec<Polyfill>)>,
     /// Copied frame: its keys (times relative to the frame).
     frame_clip: Option<(crate::edit::editor::KeyClip, i32)>,
+    /// The background look of each copied frame (a frame with no key of its own has the default one)
+    frame_looks: Vec<J>,
     /// Bumped on every change the app should redraw for (drags included).
     rev: u64,
     pub message: String,
@@ -146,7 +148,7 @@ impl Session {
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
         let main_root = doc.project().root_symbol.clone();
-        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, frame_looks: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -662,11 +664,13 @@ impl Session {
                     sel.extend(self.keys_at(t + k as f64 / fps, None));
                 }
                 self.frame_clip = Some((self.tools.editor.copy(self.project(), &sel), n + 1));
+                self.frame_looks = (0..=n).map(|k| frame_look(self.project(), self.frame + k)).collect();
                 self.message = if n == 0 { "Frame copied.".into() } else { format!("{} frames copied.", n + 1) };
                 self.rev += 1;
             }
             "paste_frame" => {
                 if let Some((clip, count)) = self.frame_clip.clone() {
+                    let looks = self.frame_looks.clone();
                     let fr = self.frame;
                     let made = self.step("Paste frame", |s| {
                         for k in 0..count {
@@ -687,6 +691,15 @@ impl Session {
                                 // onto the frame grid (clip times are relative to the first copied frame)
                                 let tt = at + ((k.time * fps).round() / fps);
                                 p.track.put(Key { time: tt, ..*k });
+                            }
+                        }
+                        // a copied frame with no background key had the default one: a pasted
+                        // frame has the look of the frame it was copied from, not of the one
+                        // it was inserted after
+                        let has_camera = s.project.root().is_some_and(|r| r.layers.iter().any(|l| matches!(l.kind, LayerKind::Camera(_))));
+                        for (k, look) in looks.iter().enumerate().take(count as usize) {
+                            if has_camera && frame_look(&s.project, fr + 1 + k as i32) != *look {
+                                set_frame_bg(s, &sym, frame_ops::time(s, fr + 1 + k as i32), look)?;
                             }
                         }
                         Ok(())
@@ -2191,60 +2204,7 @@ impl Session {
             }
             "frame_bg" => {
                 let c2 = c.clone();
-                self.step("Background colour", move |s| {
-                    let cam = ensure_camera(s, &sym)?;
-                    let (mut color, mut gradient, mut use_gradient) = frame_bg(&s.project, t);
-                    if let Some(v) = c2["color"].as_u64() {
-                        color = v as u32;
-                    }
-                    if let Some(v) = c2["gradient"].as_u64() {
-                        gradient = v as u32;
-                    }
-                    if let Some(v) = c2["useGradient"].as_bool() {
-                        use_gradient = v;
-                    }
-                    let expand = c2["expand"].as_bool();
-                    // no gradient: the fill is `background` and `background2` keeps the
-                    // gradient colour with zero alpha; with one, top is the gradient colour
-                    let (top, bottom) = if use_gradient { (gradient | 0xff, color | 0xff) } else { (color, gradient & !0xff) };
-                    let (n, fps) = (frame_ops::frame_count(s), st_fps(&s.project));
-                    let project_bg = s.project.settings.background.to_rgba8888() | 0xff;
-                    let l = s.project.layer_mut(&sym, &cam).expect("camera");
-                    let LayerKind::Camera(cm) = &mut l.kind else { return crate::edit::fail("not a camera") };
-                    for (first, q, v) in [(true, &mut cm.background, top), (false, &mut cm.background2, bottom)] {
-                        // frames with no gradient of their own have the default gradient
-                        // colour (hidden: alpha 0); key them as that, or a frame added later
-                        // between them and this one blends its colour towards black
-                        if !first && q.track.is_empty() && matches!(q.value, Value::C(c) if c.a <= 0.0) {
-                            q.value = Value::C(Color::rgba8888(DEFAULT_GRADIENT & !0xff));
-                        }
-                        key_every_frame(q, n, fps);
-                        // frames with no background of their own show the project's:
-                        // say so, or the in-betweens fade through transparent black
-                        if first {
-                            for k in q.track.keys().to_vec() {
-                                if matches!(k.value, Value::C(c) if c.a <= 0.0) {
-                                    q.track.put(Key::new(k.time, Value::C(Color::rgba8888(project_bg)), k.interp));
-                                }
-                            }
-                        }
-                        let interp = q.track.keys().iter().find(|k| k.time == t).map(|k| k.interp).unwrap_or(Interp::Linear);
-                        q.track.put(Key::new(t, Value::C(Color::rgba8888(v)), interp));
-                    }
-                    if let Some(on) = expand {
-                        // a frame setting: exact HOLD keys, every frame its own
-                        let q = &mut cm.bg_expand;
-                        for i in 0..n {
-                            let ti = i as f64 / fps;
-                            if q.track.index_of(ti).is_err() {
-                                let old = crate::timing::setting(q, fps, i);
-                                q.track.put(Key::new(ti, Value::F(old), Interp::Hold));
-                            }
-                        }
-                        q.track.put(Key::new(t, Value::F(if on { 1.0 } else { 0.0 }), Interp::Hold));
-                    }
-                    Ok(())
-                });
+                self.step("Background colour", move |s| set_frame_bg(s, &sym, t, &c2));
             }
             "filter" => {
                 if let Some(l) = self.sel_layer() {
@@ -3101,6 +3061,71 @@ fn move_among_drawn(st: &mut crate::edit::State, sym: &str, id: &str, forward: b
     out.extend(rest[to..].iter().cloned());
     s.layers = out;
     Ok(())
+}
+
+/// The frame background at time t (the "frame_bg" command's work, also used by
+/// a paste): colour, gradient, use gradient and expand gradient.
+fn set_frame_bg(s: &mut crate::edit::State, sym: &str, t: f64, c2: &J) -> EditResult<()> {
+    let cam = ensure_camera(s, sym)?;
+    let (mut color, mut gradient, mut use_gradient) = frame_bg(&s.project, t);
+    if let Some(v) = c2["color"].as_u64() {
+        color = v as u32;
+    }
+    if let Some(v) = c2["gradient"].as_u64() {
+        gradient = v as u32;
+    }
+    if let Some(v) = c2["useGradient"].as_bool() {
+        use_gradient = v;
+    }
+    let expand = c2["expand"].as_bool();
+    // no gradient: the fill is `background` and `background2` keeps the
+    // gradient colour with zero alpha; with one, top is the gradient colour
+    let (top, bottom) = if use_gradient { (gradient | 0xff, color | 0xff) } else { (color, gradient & !0xff) };
+    let (n, fps) = (frame_ops::frame_count(s), st_fps(&s.project));
+    let project_bg = s.project.settings.background.to_rgba8888() | 0xff;
+    let l = s.project.layer_mut(sym, &cam).expect("camera");
+    let LayerKind::Camera(cm) = &mut l.kind else { return crate::edit::fail("not a camera") };
+    for (first, q, v) in [(true, &mut cm.background, top), (false, &mut cm.background2, bottom)] {
+        // frames with no gradient of their own have the default gradient
+        // colour (hidden: alpha 0); key them as that, or a frame added later
+        // between them and this one blends its colour towards black
+        if !first && q.track.is_empty() && matches!(q.value, Value::C(c) if c.a <= 0.0) {
+            q.value = Value::C(Color::rgba8888(DEFAULT_GRADIENT & !0xff));
+        }
+        key_every_frame(q, n, fps);
+        // frames with no background of their own show the project's:
+        // say so, or the in-betweens fade through transparent black
+        if first {
+            for k in q.track.keys().to_vec() {
+                if matches!(k.value, Value::C(c) if c.a <= 0.0) {
+                    q.track.put(Key::new(k.time, Value::C(Color::rgba8888(project_bg)), k.interp));
+                }
+            }
+        }
+        let interp = q.track.keys().iter().find(|k| k.time == t).map(|k| k.interp).unwrap_or(Interp::Linear);
+        q.track.put(Key::new(t, Value::C(Color::rgba8888(v)), interp));
+    }
+    if let Some(on) = expand {
+        // a frame setting: exact HOLD keys, every frame its own
+        let q = &mut cm.bg_expand;
+        for i in 0..n {
+            let ti = i as f64 / fps;
+            if q.track.index_of(ti).is_err() {
+                let old = crate::timing::setting(q, fps, i);
+                q.track.put(Key::new(ti, Value::F(old), Interp::Hold));
+            }
+        }
+        q.track.put(Key::new(t, Value::F(if on { 1.0 } else { 0.0 }), Interp::Hold));
+    }
+    Ok(())
+}
+
+/// What a frame's background is, as the command takes it (to copy and paste a frame's look).
+fn frame_look(p: &Project, i: i32) -> J {
+    let fps = st_fps(p);
+    let (color, gradient, use_gradient) = frame_bg(p, i as f64 / fps);
+    let expand = p.root().and_then(|s| s.layers.iter().find_map(|l| if let LayerKind::Camera(c) = &l.kind { Some(crate::timing::setting(&c.bg_expand, fps, i) > 0.5) } else { None })).unwrap_or(false);
+    json!({"color": color, "gradient": gradient, "useGradient": use_gradient, "expand": expand})
 }
 
 /// "Use segment color" on or off for one segment. Off: it follows the

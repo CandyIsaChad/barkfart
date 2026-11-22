@@ -3302,3 +3302,100 @@ fn random_frame_editing_keeps_every_figure_on_exactly_its_frames() {
     }
     assert!(failures.is_empty(), "{} runs went wrong:\n{}", failures.len(), failures.iter().take(5).cloned().collect::<Vec<_>>().join("\n"));
 }
+
+/// Random editing against a model of the per-frame settings: the background
+/// colour and the pause travel with their frame through inserts (a new frame
+/// copies the look, not the timing), deletes and pastes (which copy both).
+#[test]
+fn random_frame_editing_keeps_every_frame_setting_with_its_frame() {
+    let mut failures = Vec::new();
+    let colours = [0x336699ffu32, 0xcc3333ffu32, 0x33cc66ffu32];
+    let delays = [0.1f64, 0.2, 0.5];
+    for seed in 1..=24u64 {
+        let mut rng = seed.wrapping_mul(2862933555777941757).wrapping_add(3037000493);
+        let mut next = move |n: usize| -> usize {
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((rng >> 33) as usize) % n
+        };
+        let mut s = two_poses();
+        s.command(&json!({"op": "add_camera"}));
+        let n0 = s.state()["frames"].as_i64().unwrap() as usize;
+        let read = |s: &mut Session, i: usize| -> (u32, f64) {
+            s.command(&json!({"op": "frame", "i": i as i64}));
+            let st = s.state();
+            (st["frameBg"]["color"].as_u64().unwrap() as u32, st["frameDelay"].as_f64().unwrap())
+        };
+        let mut model: Vec<(u32, f64)> = (0..n0).map(|i| read(&mut s, i)).collect();
+        let mut clip: Option<(u32, f64)> = None;
+        let mut log: Vec<String> = Vec::new();
+        for step in 0..30 {
+            let n = model.len();
+            let f = next(n);
+            s.command(&json!({"op": "frame", "i": f as i64}));
+            match next(8) {
+                0 => {
+                    let c = colours[next(3)];
+                    log.push(format!("background {c:08x} on {f}"));
+                    s.command(&json!({"op": "frame_bg", "color": c}));
+                    model[f].0 = c;
+                }
+                1 => {
+                    let d = delays[next(3)];
+                    log.push(format!("pause {d} on {f}"));
+                    s.command(&json!({"op": "frame_delay", "seconds": d}));
+                    model[f].1 = d;
+                }
+                2 | 3 => {
+                    log.push(format!("insert after {f}"));
+                    s.command(&json!({"op": "insert_frame"}));
+                    let look = model[f].0;
+                    model.insert(f + 1, (look, 0.0));
+                }
+                4 => {
+                    log.push(format!("delete {f}"));
+                    if n > 1 {
+                        s.command(&json!({"op": "delete_frame"}));
+                        model.remove(f);
+                    }
+                }
+                5 => {
+                    log.push(format!("copy {f}"));
+                    s.command(&json!({"op": "copy_frame", "n": 0}));
+                    clip = Some(model[f]);
+                }
+                6 => {
+                    if let Some(c) = clip {
+                        log.push(format!("paste after {f}"));
+                        s.command(&json!({"op": "paste_frame"}));
+                        model.insert(f + 1, c);
+                    }
+                }
+                _ => {
+                    let fps = [24, 7, 30, 12, 10, 25, 5][next(7)];
+                    log.push(format!("fps {fps}"));
+                    s.command(&json!({"op": "fps", "v": fps}));
+                }
+            }
+            let frames = s.state()["frames"].as_i64().unwrap() as usize;
+            let mut bad = Vec::new();
+            if frames != model.len() {
+                bad.push(format!("{frames} frames, the model has {}", model.len()));
+            } else {
+                for (i, want) in model.clone().iter().enumerate() {
+                    let got = read(&mut s, i);
+                    if got.0 != want.0 || (got.1 - want.1).abs() > 1e-6 {
+                        bad.push(format!("frame {i}: want ({:08x}, {}) got ({:08x}, {})", want.0, want.1, got.0, got.1));
+                    }
+                }
+            }
+            if !stray_keys(s.project()).is_empty() {
+                bad.push(format!("keys a hair apart on {:?}", stray_keys(s.project()).iter().take(3).collect::<Vec<_>>()));
+            }
+            if !bad.is_empty() {
+                failures.push(format!("seed {seed}, step {step} ({}): {}\n    after: {}", log.last().cloned().unwrap_or_default(), bad.join("; "), log.join(", ")));
+                break;
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} runs went wrong:\n{}", failures.len(), failures.iter().take(5).cloned().collect::<Vec<_>>().join("\n"));
+}
