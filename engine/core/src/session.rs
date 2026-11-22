@@ -139,7 +139,8 @@ pub fn new_editor_project() -> Project {
 }
 
 impl Session {
-    pub fn new(doc: Document) -> Session {
+    pub fn new(mut doc: Document) -> Session {
+        doc.exact = true; // an edit that changes nothing is not an undo step
         let mut tools = CanvasTools::default();
         tools.layer_handles = true;
         tools.key_scope = KeyScope::Figure;

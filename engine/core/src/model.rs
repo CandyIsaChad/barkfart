@@ -377,7 +377,7 @@ impl Key {
 }
 
 /// Sparse, time-sorted keys with unique times.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Track {
     pub ty: ValueType,
     keys: Vec<Key>,
@@ -515,7 +515,7 @@ pub fn loop_remap(mode: LoopMode, start: f64, end: f64, t: f64) -> f64 {
 
 /// An animatable value: static value, sparse track, modifiers after the keys.
 /// The id is a project-unique path ("L3/n7/rotation") modifiers link to.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Property {
     pub id: String,
     pub ty: ValueType,
@@ -572,7 +572,7 @@ impl Property {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Transform {
     pub x: Property,
     pub y: Property,
@@ -641,7 +641,7 @@ pub const LOCK_RELATIVE: i32 = 2;
 /// drawOrder "not set": Figure::add puts the node in front.
 pub const UNASSIGNED: i32 = i32::MIN;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Node {
     pub id: String,
     pub parent: Option<String>,
@@ -740,7 +740,7 @@ impl Node {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Polyfill {
     pub id: String,
     pub anchor: String,
@@ -762,7 +762,7 @@ impl Polyfill {
 }
 
 /// Nodes in parent-first order, with an id index.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Figure {
     nodes: Vec<Node>,
     pub polyfills: Vec<Polyfill>,
@@ -960,7 +960,7 @@ pub struct Scope {
     pub node: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EffectNode {
     pub id: String,
     pub ty: String,
@@ -991,7 +991,7 @@ impl EffectNode {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct EffectStack {
     pub nodes: IndexMap<String, EffectNode>,
     pub output: Option<String>,
@@ -1037,7 +1037,7 @@ impl EffectStack {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Clip {
     pub id: String,
     pub asset: Option<String>,
@@ -1077,7 +1077,7 @@ pub enum SymbolLoop {
     PingPong,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SpriteLayer {
     pub asset: Option<String>,
     pub width: f32,
@@ -1093,7 +1093,7 @@ impl SpriteLayer {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TextLayer {
     pub text: Option<String>,
     pub font: Option<String>,
@@ -1107,7 +1107,7 @@ pub struct TextLayer {
     pub above_bars: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SymbolLayer {
     pub symbol: String,
     pub time_offset: Property,
@@ -1116,7 +1116,7 @@ pub struct SymbolLayer {
     pub recursion_limit: i32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CameraLayer {
     pub x: Property,
     pub y: Property,
@@ -1161,7 +1161,7 @@ pub struct CameraLayer {
     pub repeat_tween: Property,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum LayerKind {
     Figure(Figure),
     Sprite(SpriteLayer),
@@ -1186,7 +1186,7 @@ impl LayerKind {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Layer {
     pub id: String,
     pub name: Option<String>,
@@ -1414,20 +1414,20 @@ impl Layer {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Marker {
     pub time: f64,
     pub name: Option<String>,
     pub color: Color,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ScopedStack {
     pub scope: Scope,
     pub stack: EffectStack,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Symbol {
     pub id: String,
     pub name: Option<String>,
@@ -1538,7 +1538,7 @@ impl Default for View {
 
 pub const FORMAT_VERSION: i64 = 1;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Project {
     pub settings: Settings,
     pub view: View,

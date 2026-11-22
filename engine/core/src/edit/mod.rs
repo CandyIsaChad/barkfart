@@ -27,6 +27,21 @@ pub struct State {
 }
 
 impl State {
+    /// True when nothing an undo step would restore differs by content (a symbol
+    /// that was touched mutably but ended up equal counts as the same).
+    fn same_content(&self, o: &State) -> bool {
+        let (a, b) = (&self.project, &o.project);
+        a.library.len() == b.library.len()
+            && a.library.iter().zip(b.library.iter()).all(|((ka, va), (kb, vb))| ka == kb && (Arc::ptr_eq(va, vb) || **va == **vb))
+            && a.settings == b.settings
+            && a.view == b.view
+            && a.root_symbol == b.root_symbol
+            && a.assets == b.assets
+            && a.node_sets == b.node_sets
+            && self.assets.len() == o.assets.len()
+            && self.assets.iter().zip(o.assets.iter()).all(|((ka, va), (kb, vb))| ka == kb && (Arc::ptr_eq(va, vb) || **va == **vb))
+    }
+
     /// True when nothing an undo step would restore differs.
     fn same(&self, o: &State) -> bool {
         let (a, b) = (&self.project, &o.project);
@@ -68,6 +83,10 @@ pub struct Document {
     limit: usize,
     revision: u64,
     saved: u64,
+    /// An edit that ends with the same content leaves no history entry, even if it
+    /// touched the project mutably on the way (the editor session switches this on;
+    /// the Java reference's comparisons keep the pointer rule).
+    pub exact: bool,
 }
 
 pub const DEFAULT_HISTORY: usize = 200;
@@ -78,7 +97,7 @@ impl Document {
     }
 
     pub fn with_assets(project: Project, assets: IndexMap<String, Arc<Vec<u8>>>) -> Document {
-        Document { state: State { project, assets }, undo: Vec::new(), redo: Vec::new(), open: None, limit: DEFAULT_HISTORY, revision: 0, saved: 0 }
+        Document { state: State { project, assets }, undo: Vec::new(), redo: Vec::new(), open: None, limit: DEFAULT_HISTORY, revision: 0, saved: 0, exact: false }
     }
 
     pub fn project(&self) -> &Project {
@@ -109,7 +128,7 @@ impl Document {
             self.open = Some((label, before, depth - 1));
             return;
         }
-        if before.same(&self.state) {
+        if before.same(&self.state) || (self.exact && before.same_content(&self.state)) {
             return;
         }
         self.undo.push((label, before));
@@ -157,6 +176,15 @@ impl Document {
 
     pub fn can_redo(&self) -> bool {
         self.open.is_none() && !self.redo.is_empty()
+    }
+
+    /// How many steps can be undone / redone (for the tests that walk the history).
+    pub fn undo_depth(&self) -> usize {
+        self.undo.len()
+    }
+
+    pub fn redo_depth(&self) -> usize {
+        self.redo.len()
     }
 
     pub fn undo_label(&self) -> Option<&str> {

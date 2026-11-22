@@ -2200,7 +2200,19 @@ fn every_command_undoes_and_redoes_exactly() {
             let id = s.project().root().expect("root").layers.iter().find(|l| matches!(l.kind, barkfart_core::model::LayerKind::Symbol(_))).expect("a movieclip").id.clone();
             s.command(&json!({"op": "select", "layer": id, "node": ""}));
         };
+        // "Use segment color" off has something to give up only after a colour of its own
+        if op == "segment" && c["ownColor"] == json!(false) {
+            s.command(&json!({"op": "segment", "color": 0xff0000ffu32}));
+        }
         match op {
+            // a figure in front to step past; a camera that is not where it starts
+            "layer_order" => {
+                s.command(&json!({"op": "add_figure", "kind": "ball"}));
+                s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+            }
+            "reset_camera" => {
+                s.command(&json!({"op": "camera", "zoom": 1.5, "rotation": 12}));
+            }
             "textfield" => {
                 s.command(&json!({"op": "add_textfield"}));
             }
@@ -2238,7 +2250,7 @@ fn every_command_undoes_and_redoes_exactly() {
         let undo0 = s.state()["undo"].clone();
         let st = s.command(c);
         if st["undo"] == undo0 && text(&s) == before {
-            skipped.push(c["op"].to_string()); // not applicable here: nothing changed
+            skipped.push(c.to_string()); // not applicable here: nothing changed
             continue;
         }
         let after = text(&s);
@@ -3398,4 +3410,208 @@ fn random_frame_editing_keeps_every_frame_setting_with_its_frame() {
         }
     }
     assert!(failures.is_empty(), "{} runs went wrong:\n{}", failures.len(), failures.iter().take(5).cloned().collect::<Vec<_>>().join("\n"));
+}
+
+/// Random editing against a model of a pose: the angle of the man's upper
+/// right arm on each frame travels with its frame through inserts, deletes,
+/// pastes and frame rate changes.
+#[test]
+fn random_frame_editing_keeps_every_pose_with_its_frame() {
+    let mut failures = Vec::new();
+    for seed in 1..=12u64 {
+        let mut rng = seed.wrapping_mul(1103515245).wrapping_add(12345);
+        let mut next = move |n: usize| -> usize {
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((rng >> 33) as usize) % n
+        };
+        let mut s = two_poses();
+        let n0 = s.state()["frames"].as_i64().unwrap() as usize;
+        let read = |s: &mut Session, i: usize| -> f64 {
+            s.command(&json!({"op": "frame", "i": i as i64}));
+            s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+            s.state()["selected"]["angle"].as_f64().unwrap()
+        };
+        let mut model: Vec<f64> = (0..n0).map(|i| read(&mut s, i)).collect();
+        let mut clip: Option<f64> = None;
+        let mut log: Vec<String> = Vec::new();
+        for step in 0..30 {
+            let n = model.len();
+            let f = next(n);
+            s.command(&json!({"op": "frame", "i": f as i64}));
+            s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+            match next(8) {
+                0 | 1 => {
+                    let a = (next(12) as f64) * 15.0 - 90.0;
+                    log.push(format!("angle {a} on {f}"));
+                    s.command(&json!({"op": "node", "angle": a}));
+                    model[f] = a;
+                }
+                2 | 3 => {
+                    log.push(format!("insert after {f}"));
+                    s.command(&json!({"op": "insert_frame"}));
+                    let v = model[f];
+                    model.insert(f + 1, v);
+                }
+                4 => {
+                    log.push(format!("delete {f}"));
+                    if n > 1 {
+                        s.command(&json!({"op": "delete_frame"}));
+                        model.remove(f);
+                    }
+                }
+                5 => {
+                    log.push(format!("copy {f}"));
+                    s.command(&json!({"op": "copy_frame", "n": 0}));
+                    clip = Some(model[f]);
+                }
+                6 => {
+                    if let Some(c) = clip {
+                        log.push(format!("paste after {f}"));
+                        s.command(&json!({"op": "paste_frame"}));
+                        model.insert(f + 1, c);
+                    }
+                }
+                _ => {
+                    let fps = [24, 7, 30, 12, 10, 25, 5][next(7)];
+                    log.push(format!("fps {fps}"));
+                    s.command(&json!({"op": "fps", "v": fps}));
+                }
+            }
+            let frames = s.state()["frames"].as_i64().unwrap() as usize;
+            let mut bad = Vec::new();
+            if frames != model.len() {
+                bad.push(format!("{frames} frames, the model has {}", model.len()));
+            } else {
+                for (i, want) in model.clone().iter().enumerate() {
+                    let got = read(&mut s, i);
+                    if (got - want).abs() > 0.02 {
+                        bad.push(format!("frame {i}: want {want} got {got}"));
+                    }
+                }
+            }
+            if !stray_keys(s.project()).is_empty() {
+                bad.push(format!("keys a hair apart on {:?}", stray_keys(s.project()).iter().take(3).collect::<Vec<_>>()));
+            }
+            if !bad.is_empty() {
+                failures.push(format!("seed {seed}, step {step} ({}): {}\n    after: {}", log.last().cloned().unwrap_or_default(), bad.join("; "), log.join(", ")));
+                break;
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} runs went wrong:\n{}", failures.len(), failures.iter().take(5).cloned().collect::<Vec<_>>().join("\n"));
+}
+
+/// Random editing with undo and redo mixed in: the undo and redo stacks and
+/// the project always walk the history of its saved texts exactly (undo gives
+/// the text before the edit, redo the text after it, a new edit after an undo
+/// drops the redo steps), and an edit that changes the project is one step.
+#[test]
+fn random_editing_with_undo_and_redo_walks_the_history_exactly() {
+    let mut failures = Vec::new();
+    for seed in 1..=16u64 {
+        let mut rng = seed.wrapping_mul(2685821657736338717).wrapping_add(11);
+        let mut next = move |n: usize| -> usize {
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((rng >> 33) as usize) % n
+        };
+        let mut s = two_poses();
+        s.command(&json!({"op": "add_camera"}));
+        let base = s.doc.undo_depth();
+        let mut history = vec![saved_text(s.project())];
+        let mut at = 0usize;
+        let mut log: Vec<String> = Vec::new();
+        for step in 0..40 {
+            let frames = s.state()["frames"].as_i64().unwrap();
+            let f = next(frames as usize) as i64;
+            s.command(&json!({"op": "frame", "i": f}));
+            s.command(&json!({"op": "select", "layer": "L2", "node": (["armR1", "armR2", "legL1", "head"][next(4)])}));
+            let c: Value = match next(34) {
+                0 => json!({"op": "insert_frame"}),
+                1 => json!({"op": "delete_frame"}),
+                2 => json!({"op": "fps", "v": ([24, 12, 10, 30][next(4)])}),
+                3 => json!({"op": "figure", "scale": 1.0 + next(5) as f64 * 0.2}),
+                4 => json!({"op": "figure", "color": ([0xff0000ffu32, 0x00ff00ffu32, 0x0000ffffu32][next(3)])}),
+                5 => json!({"op": "figure", "turn": 15 * (next(5) as i64 + 1)}),
+                6 => json!({"op": "segment", "thickness": 4 + next(30) as i64}),
+                7 => json!({"op": "segment", "color": ([0xff00ffffu32, 0x00ffffffu32][next(2)])}),
+                8 => json!({"op": "segment", "shape": (["circle", "trapezoid", "triangle", "line"][next(4)])}),
+                9 => json!({"op": "segment", "gradient": next(2) == 0, "gradientColor": 0x00ff00ffu32}),
+                10 => json!({"op": "segment", "ownColor": next(2) == 0}),
+                11 => json!({"op": "node", "angle": next(24) as i64 * 15 - 180}),
+                12 => json!({"op": "nudge", "dx": next(9) as i64 - 4, "dy": next(9) as i64 - 4}),
+                13 => json!({"op": "flip_figure", "h": next(2) == 0}),
+                14 => json!({"op": "layer_order", "forward": next(2) == 0}),
+                15 => json!({"op": "add_figure", "kind": "ball"}),
+                16 => json!({"op": "duplicate_figure"}),
+                17 => json!({"op": "delete_here"}),
+                18 => json!({"op": "filter", "invert": next(2) == 0, "blur": next(8) as i64}),
+                19 => json!({"op": "clear_filters"}),
+                20 => json!({"op": "frame_bg", "color": ([0x336699ffu32, 0xcc3333ffu32][next(2)]), "useGradient": next(2) == 0, "expand": next(2) == 0}),
+                21 => json!({"op": "camera_fx", "widescreen": next(2) == 0, "wobbleXY": next(4) as i64}),
+                22 => json!({"op": "camera", "zoom": 1.0 + next(4) as f64 * 0.25}),
+                23 => json!({"op": "frame_delay", "seconds": next(4) as f64 * 0.1}),
+                24 => json!({"op": "frame_slow", "n": next(4) as i64}),
+                25 => json!({"op": "copy_frame", "n": next(2) as i64}),
+                26 => json!({"op": "paste_frame"}),
+                27 => json!({"op": "copy_figure"}),
+                28 => json!({"op": "paste_figure"}),
+                29 => json!({"op": "add_textfield"}),
+                30 => json!({"op": "no_tween", "on": next(2) == 0}),
+                31 => json!({"op": "tween_add", "at": [0.5]}),
+                32 => json!({"op": "pin", "v": next(2) == 0}),
+                _ => json!({"op": "easing", "v": (["hold", "smooth", "in", "out", "linear"][next(5)])}),
+            };
+            let what = next(10);
+            let mut why = String::new();
+            if what < 2 {
+                if at == 0 {
+                    continue; // not past where the test started
+                }
+                s.command(&json!({"op": "undo"}));
+                log.push("undo".into());
+                at -= 1;
+            } else if what < 4 {
+                if at + 1 >= history.len() {
+                    if s.doc.redo_depth() != 0 {
+                        why = format!("redo steps left at the end of the history ({})", s.doc.redo_depth());
+                    }
+                } else {
+                    s.command(&json!({"op": "redo"}));
+                    log.push("redo".into());
+                    at += 1;
+                }
+            } else {
+                let (before, depth) = (saved_text(s.project()), s.doc.undo_depth());
+                s.command(&c);
+                log.push(c.to_string());
+                let after = saved_text(s.project());
+                let stepped = s.doc.undo_depth() > depth;
+                if stepped && after == before {
+                    why = format!("{c} left an undo step that changes nothing");
+                } else if !stepped && after != before {
+                    why = format!("{c} changed the project without an undo step");
+                } else if stepped {
+                    history.truncate(at + 1);
+                    history.push(after);
+                    at += 1;
+                }
+            }
+            if why.is_empty() {
+                let now = saved_text(s.project());
+                if now != history[at] {
+                    let first = now.lines().zip(history[at].lines()).position(|(a, b)| a != b).unwrap_or(0);
+                    why = format!("the project is not the history's text {at} (first difference at line {first})");
+                } else if s.doc.undo_depth() != base + at {
+                    why = format!("{} steps to undo, the history says {}", s.doc.undo_depth() - base.min(s.doc.undo_depth()), at);
+                } else if s.doc.redo_depth() != history.len() - 1 - at {
+                    why = format!("{} steps to redo, the history says {}", s.doc.redo_depth(), history.len() - 1 - at);
+                }
+            }
+            if !why.is_empty() {
+                failures.push(format!("seed {seed}, step {step}: {why}\n    after: {}", log.join(", ")));
+                break;
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} runs went wrong:\n{}", failures.len(), failures.iter().take(4).cloned().collect::<Vec<_>>().join("\n"));
 }
