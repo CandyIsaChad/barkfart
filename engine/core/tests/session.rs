@@ -3235,7 +3235,19 @@ fn random_frame_editing_keeps_every_figure_on_exactly_its_frames() {
             let n = model.values().next().map(|v| v.len()).unwrap_or(1).max(s.state()["frames"].as_i64().unwrap() as usize);
             let f = next(n);
             s.command(&json!({"op": "frame", "i": f as i64}));
-            match next(8) {
+            match next(9) {
+                8 => {
+                    // a textfield is on its frame only, like a figure
+                    log.push(format!("add a textfield on {f}"));
+                    let before: std::collections::HashSet<String> = s.project().root().unwrap().layers.iter().map(|l| l.id.clone()).collect();
+                    s.command(&json!({"op": "add_textfield"}));
+                    let made: Vec<String> = s.project().root().unwrap().layers.iter().map(|l| l.id.clone()).filter(|id| !before.contains(id)).collect();
+                    for id in made {
+                        let mut v = vec![false; n];
+                        v[f] = true;
+                        model.insert(id, v);
+                    }
+                }
                 0 | 1 => {
                     log.push(format!("insert after {f}"));
                     s.command(&json!({"op": "insert_frame"}));
@@ -3264,7 +3276,8 @@ fn random_frame_editing_keeps_every_figure_on_exactly_its_frames() {
                 }
                 4 => {
                     // delete a figure from this frame
-                    let ids: Vec<String> = model.iter().filter(|(_, v)| v[f]).map(|(k, _)| k.clone()).collect();
+                    // (a textfield is selected by tapping it, not by id: figures only)
+                    let ids: Vec<String> = model.iter().filter(|(k, v)| v[f] && s.project().root().and_then(|r| r.layer(k)).is_some_and(|l| l.as_figure().is_some())).map(|(k, _)| k.clone()).collect();
                     if !ids.is_empty() {
                         let id = ids[next(ids.len())].clone();
                         log.push(format!("delete {id} on {f}"));
