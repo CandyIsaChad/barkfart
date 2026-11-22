@@ -19,19 +19,20 @@ pub struct Resolver<'p> {
     budget_reported: bool,
     /// Animation Tools "Is looping animation" (tweening on): between the last
     /// frame's time and the end, tracks keyed on the last frame tween into
-    /// their value at frame 1. (last frame time, end time)
-    wrap: Option<(f64, f64)>,
+    /// their value at frame 1; a repeat with "use frame tweening properties"
+    /// blends into the frame it jumps to. (from, to, target time)
+    wrap: Option<(f64, f64, f64)>,
     pub diagnostics: Vec<Diagnostic>,
 }
 
-fn wrap_of(project: &Project) -> Option<(f64, f64)> {
+fn wrap_of(project: &Project) -> Option<(f64, f64, f64)> {
     let st = &project.settings;
     if !(st.tweening && st.loop_tween) {
         return None;
     }
     let fps = if st.fps > 0.0 { st.fps as f64 } else { 30.0 };
     let frames = (project.root()?.duration * fps).round() as i64;
-    (frames > 1).then(|| ((frames - 1) as f64 / fps, frames as f64 / fps))
+    (frames > 1).then(|| ((frames - 1) as f64 / fps, frames as f64 / fps, 0.0))
 }
 
 impl<'p> Resolver<'p> {
@@ -54,6 +55,15 @@ impl<'p> Resolver<'p> {
 
     pub fn has(&self, kind: DiagnosticKind) -> bool {
         self.diagnostics.iter().any(|d| d.kind == kind)
+    }
+
+    /// Blends the in-betweens of one frame into another (a repeat's jump).
+    pub fn with_redirect(mut self, r: Option<crate::timing::Redirect>) -> Self {
+        if r.is_some() {
+            self.wrap = r;
+            self.memo.clear();
+        }
+        self
     }
 
     pub fn f(&mut self, p: &Property, t: f64) -> f32 {
@@ -101,12 +111,13 @@ impl<'p> Resolver<'p> {
             start = 1;
         }
         let mut v = p.key_value(kt);
-        if let Some((a, e)) = self.wrap {
+        if let Some((a, e, target)) = self.wrap {
             if kt > a && kt < e {
-                if let Some(k) = p.track.keys().last() {
-                    // only tracks whose last key is the last frame's, tweening there
-                    if (k.time - a).abs() < 1e-6 && k.interp != Interp::Hold && p.ty.continuous() {
-                        v = p.ty.lerp(&k.value, &p.key_value(0.0), ((kt - a) / (e - a)) as f32);
+                // only tracks keyed on that frame, tweening there
+                if let Ok(i) = p.track.index_of(a) {
+                    let k = &p.track.keys()[i];
+                    if k.interp != Interp::Hold && p.ty.continuous() {
+                        v = p.ty.lerp(&k.value, &p.key_value(target), ((kt - a) / (e - a)) as f32);
                     }
                 }
             }

@@ -1847,3 +1847,50 @@ fn create_new_movieclip() {
     assert!(lib.iter().any(|m| m["kind"] == "movieclip" && m["frames"] == 1), "{lib:?}");
     assert_eq!(st["frames"], 2, "back on the animation");
 }
+
+/// "Use frame tweening properties during repeat": while a repeat jumps back,
+/// the repeating frame's in-betweens tween into the frame it jumps to; off,
+/// the frame holds until the jump. Exports follow, slow motion included.
+#[test]
+fn repeat_tweens_into_the_frame_it_jumps_to() {
+    use barkfart_core::timing::Schedule;
+    let mut s = two_poses();
+    s.command(&json!({"op": "animation", "tweening": true, "tweened": 3}));
+    let fps = s.project().settings.fps as f64;
+    let rate = s.project().settings.sample_rate();
+    // frame 2 repeats back to frame 1 once
+    s.command(&json!({"op": "frame", "i": 1}));
+    let st = s.command(&json!({"op": "frame_repeat", "back": 1, "times": 1}));
+    assert_eq!(st["frameRepeat"]["tween"], false);
+    let x = |p: &barkfart_core::model::Project, t: f64, r: Option<barkfart_core::timing::Redirect>| {
+        let l = p.root().unwrap().layer("L2").unwrap();
+        barkfart_core::eval::Resolver::new(p).with_redirect(r).f(&l.transform.x, t)
+    };
+    let (x0, x1) = (x(s.project(), 0.0, None), x(s.project(), 1.0 / fps, None));
+    let sch = Schedule::build(s.project());
+    // the first pass of frame 2 is the second slot; in its middle the frame holds
+    let mid = sch.slots[1].start + sch.slots[1].len / 2.0;
+    assert_eq!(sch.time_at(mid, rate), 1.0 / fps, "holds until the jump");
+    assert!(sch.redirect_at(mid).is_none());
+    // on: it tweens into frame 1
+    let st = s.command(&json!({"op": "frame_repeat", "back": 1, "times": 1, "tween": true}));
+    assert_eq!(st["frameRepeat"]["tween"], true);
+    let sch = Schedule::build(s.project());
+    let t = sch.time_at(mid, rate);
+    let r = sch.redirect_at(mid).expect("blends");
+    let xm = x(s.project(), t, Some(r));
+    assert!((xm - x1).abs() > 1.0 && (xm - x0).abs() < (x1 - x0).abs(), "between frame 2 and frame 1: {x0} {xm} {x1}");
+    // the last pass of frame 2 (no jump after it) does not blend
+    let last = sch.slots.last().unwrap();
+    assert!(sch.redirect_at(last.start + last.len / 2.0).is_none());
+    // exports: the in-betweens of the jumping pass carry the blend
+    let pics = barkfart_core::export::pictures(&sch, 0, 2, rate, false);
+    assert!(pics.iter().any(|p| p.2.is_some()));
+    // slow motion gives its frame its own number of pictures in exports
+    s.command(&json!({"op": "frame", "i": 0}));
+    s.command(&json!({"op": "frame_slow", "n": 9}));
+    let sch = Schedule::build(s.project());
+    let pics = barkfart_core::export::pictures(&sch, 0, 2, rate, false);
+    let first = pics.iter().filter(|p| p.0 < 1.0 / fps - 1e-9).count();
+    assert_eq!(first / 2, 10, "frame 1 plays twice, ten pictures each time: {}", first);
+}

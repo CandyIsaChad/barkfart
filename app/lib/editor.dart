@@ -280,9 +280,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       x1 = _view.x1;
       y1 = _view.y1;
     }
-    final key = '${_st['rev']} $t $w $h $x0 $y0 $x1 $y1 $camera $onion $filters ${outline ? _sel!['layer'] : ''}';
+    // a repeat's in-between blending into another frame is its own picture
+    final redirect = camera ? e.wallRedirect : -1.0;
+    final key = '${_st['rev']} $t $redirect $w $h $x0 $y0 $x1 $y1 $camera $onion $filters ${outline ? _sel!['layer'] : ''}';
     if (key == _drawn) return;
-    final fi = (t * ((_st['rate'] as num?)?.toDouble() ?? _fps)).round();
+    final fi = (t * ((_st['rate'] as num?)?.toDouble() ?? _fps)).round() + (redirect >= 0 ? 1000000 * (1 + (redirect * _fps).round()) : 0);
     if (camera) {
       final ck = '${_st['rev']} $w $h $filters';
       if (ck != _cacheKey) {
@@ -1976,6 +1978,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _hint('After this frame, playback jumps back and plays the series again: a short loop without a movieclip.'),
         _stepper('Back', '$back frames', () => _cmd({'op': 'frame_repeat', 'back': math.max(1, back - 1), 'times': times}), () => _cmd({'op': 'frame_repeat', 'back': math.min(_frame, back + 1), 'times': times})),
         _stepper('Repeat', '$times times', () => _cmd({'op': 'frame_repeat', 'back': back, 'times': math.max(1, times - 1)}), () => _cmd({'op': 'frame_repeat', 'back': back, 'times': times + 1})),
+        _Toggle('Use frame tweening during repeat', (_st['frameRepeat'] as Map?)?['tween'] == true, (v) => _cmd({'op': 'frame_repeat', 'back': back, 'times': times, 'tween': v})),
+        _hint('With tweening on: this frame tweens into the frame it jumps back to. Off: it holds until the jump.'),
       ],
       _gap,
       _Toggle('Silence all sounds', _st['frameSilence'] == true, (v) => _cmd({'op': 'frame_silence', 'on': v})),

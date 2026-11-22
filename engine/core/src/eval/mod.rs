@@ -73,7 +73,13 @@ pub fn evaluate(project: &Project, symbol_id: &str, t: f64) -> Scene {
 /// onion_only: skip top-level layers whose onion flag is off.
 /// apply_camera false: stage (world) space, for editing.
 pub fn evaluate_with(project: &Project, symbol_id: &str, t: f64, onion_only: bool, apply_camera: bool) -> Scene {
-    let mut ctx = Ctx { project, r: Resolver::new(project), primitives: 0, root: Group::new(symbol_id) };
+    evaluate_redirected(project, symbol_id, t, onion_only, apply_camera, None)
+}
+
+/// Like evaluate_with, with a repeat's in-betweens blending into the frame it
+/// jumps back to (timing::Schedule::redirect_at).
+pub fn evaluate_redirected(project: &Project, symbol_id: &str, t: f64, onion_only: bool, apply_camera: bool, redirect: Option<crate::timing::Redirect>) -> Scene {
+    let mut ctx = Ctx { project, r: Resolver::new(project).with_redirect(redirect), primitives: 0, root: Group::new(symbol_id) };
     let Some(sym) = project.library.get(symbol_id) else {
         ctx.r.diag(DiagnosticKind::MissingRef, symbol_id);
         return Scene { root: ctx.root, time: t, diagnostics: ctx.r.diagnostics, primitives: 0 };

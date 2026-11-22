@@ -1155,6 +1155,10 @@ pub struct CameraLayer {
     /// in between say; the keys move with their frames.
     pub auto_cam: Property,
     pub auto_cam_end: Property,
+    /// "Use frame tweening properties during repeat": 1 = when this frame
+    /// repeats a series, its in-betweens tween into the frame it jumps back
+    /// to (0: it holds until the jump).
+    pub repeat_tween: Property,
 }
 
 #[derive(Clone, Debug)]
@@ -1312,6 +1316,7 @@ impl Layer {
                 wobble_no_zoom: Property::float(format!("{id}/cam/wobbleNoZoom"), 0.0),
                 auto_cam: Property::float(format!("{id}/cam/autoCam"), 0.0),
                 auto_cam_end: Property::float(format!("{id}/cam/autoCamEnd"), 0.0),
+                repeat_tween: Property::float(format!("{id}/cam/repeatTween"), 0.0),
             }),
         )
     }
@@ -1349,7 +1354,7 @@ impl Layer {
                     out.push(&c.pan);
                 }
             }
-            LayerKind::Camera(c) => out.extend([&c.x, &c.y, &c.zoom, &c.rotation, &c.background, &c.background2, &c.delay, &c.repeat_back, &c.repeat_times, &c.silence, &c.slow_motion, &c.bg_expand, &c.widescreen, &c.wobble_xy, &c.wobble_rot, &c.wobble_speed, &c.wobble_no_zoom, &c.auto_cam, &c.auto_cam_end]),
+            LayerKind::Camera(c) => out.extend([&c.x, &c.y, &c.zoom, &c.rotation, &c.background, &c.background2, &c.delay, &c.repeat_back, &c.repeat_times, &c.silence, &c.slow_motion, &c.bg_expand, &c.widescreen, &c.wobble_xy, &c.wobble_rot, &c.wobble_speed, &c.wobble_no_zoom, &c.auto_cam, &c.auto_cam_end, &c.repeat_tween]),
         }
         out
     }
@@ -1389,7 +1394,7 @@ impl Layer {
                     out.push(&mut c.pan);
                 }
             }
-            LayerKind::Camera(c) => out.extend([&mut c.x, &mut c.y, &mut c.zoom, &mut c.rotation, &mut c.background, &mut c.background2, &mut c.delay, &mut c.repeat_back, &mut c.repeat_times, &mut c.silence, &mut c.slow_motion, &mut c.bg_expand, &mut c.widescreen, &mut c.wobble_xy, &mut c.wobble_rot, &mut c.wobble_speed, &mut c.wobble_no_zoom, &mut c.auto_cam, &mut c.auto_cam_end]),
+            LayerKind::Camera(c) => out.extend([&mut c.x, &mut c.y, &mut c.zoom, &mut c.rotation, &mut c.background, &mut c.background2, &mut c.delay, &mut c.repeat_back, &mut c.repeat_times, &mut c.silence, &mut c.slow_motion, &mut c.bg_expand, &mut c.widescreen, &mut c.wobble_xy, &mut c.wobble_rot, &mut c.wobble_speed, &mut c.wobble_no_zoom, &mut c.auto_cam, &mut c.auto_cam_end, &mut c.repeat_tween]),
         }
         out
     }

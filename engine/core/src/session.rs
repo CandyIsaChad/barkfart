@@ -2097,6 +2097,9 @@ impl Session {
                         let times = c2["times"].as_i64().unwrap_or(1).clamp(1, 1000) as f32;
                         set(&mut cm.repeat_back, back);
                         set(&mut cm.repeat_times, if back > 0.0 { times } else { 0.0 });
+                        if let Some(v) = c2["tween"].as_bool() {
+                            set(&mut cm.repeat_tween, if v && back > 0.0 { 1.0 } else { 0.0 });
+                        }
                     }
                     Ok(())
                 });
@@ -2472,7 +2475,7 @@ impl Session {
         };
         let fset = crate::timing::frame_settings(p, self.frame);
         // per thumbnail: [delay, repeat] flags
-        let rep = json!({"back": fset.1, "times": fset.2});
+        let rep = json!({"back": fset.1, "times": fset.2, "tween": crate::timing::frame_repeat_tween(p, self.frame)});
         // joints of everything shown on this frame (the original's node counter)
         let node_count: usize = {
             let mut r = Resolver::new(p);

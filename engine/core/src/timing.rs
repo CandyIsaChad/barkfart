@@ -19,6 +19,20 @@ pub struct Slot {
     /// Slow motion tweening: this many in-between pictures, at the usual
     /// picture rate, spread over the frame (0 = the project's tweening).
     pub slow: i32,
+    /// The frame played next when it is not the following one (a repeat
+    /// jumping back), and whether the in-betweens tween into it ("Use frame
+    /// tweening properties during repeat"); otherwise the frame holds.
+    pub jump: Option<(i32, bool)>,
+}
+
+/// (frame time, next frame time, target time): an in-between of `frame`
+/// blends from its pose toward the target's instead of the next frame's.
+pub type Redirect = (f64, f64, f64);
+
+/// "Use frame tweening properties during repeat" on a frame.
+pub fn frame_repeat_tween(p: &Project, frame: i32) -> bool {
+    let fps = fps_of(p);
+    p.root().and_then(|s| s.layers.iter().find_map(|l| if let LayerKind::Camera(c) = &l.kind { Some(c) } else { None })).is_some_and(|c| setting(&c.repeat_tween, fps, frame) > 0.5)
 }
 
 #[derive(Clone, Debug)]
@@ -104,11 +118,14 @@ impl Schedule {
             let slow = slows[f as usize];
             let shown = if slow > 0 { (slow + 1) as f64 / rate } else { 1.0 / fps };
             let len = shown + delay as f64;
-            slots.push(Slot { frame: f, start: at, len, delay: delay as f64, silence: silences[f as usize], slow });
+            slots.push(Slot { frame: f, start: at, len, delay: delay as f64, silence: silences[f as usize], slow, jump: None });
             at += len;
             if times > 0 && done[f as usize] < times {
                 done[f as usize] += 1;
                 let to = (f - back).max(0);
+                if let Some(s) = slots.last_mut() {
+                    s.jump = Some((to, frame_repeat_tween(p, f)));
+                }
                 // repeats inside the series start over on every pass
                 for g in to..f {
                     done[g as usize] = 0;
@@ -140,6 +157,10 @@ impl Schedule {
             return base;
         }
         let rate = if rate > 0.0 { rate } else { self.fps };
+        if matches!(s.jump, Some((_, false))) {
+            // a repeat jumps back after this frame: no tween toward the next one
+            return base;
+        }
         if s.slow > 0 {
             // picture k of slow + 1, each a 1/(slow + 1) step through the frame
             let k = ((local * rate).floor()).clamp(0.0, s.slow as f64);
@@ -147,6 +168,19 @@ impl Schedule {
         }
         let step = ((local * rate).floor() / rate).min((rate / self.fps).ceil().max(1.0) / rate - 1.0 / rate);
         base + step.max(0.0)
+    }
+
+    /// Where an in-between at wall time w blends to, when its frame repeats
+    /// a series with "Use frame tweening properties during repeat".
+    pub fn redirect_at(&self, w: f64) -> Option<Redirect> {
+        if self.slots.is_empty() || !w.is_finite() {
+            return None;
+        }
+        let s = self.slot_at(w.max(0.0));
+        match s.jump {
+            Some((to, true)) => Some((s.frame as f64 / self.fps, (s.frame + 1) as f64 / self.fps, to as f64 / self.fps)),
+            _ => None,
+        }
     }
 
     /// Only the slots of frames [first, first + frames), played back to back
@@ -203,10 +237,10 @@ mod tests {
     #[test]
     fn sounds_start_on_every_slot_of_their_frame() {
         let fps = 10.0;
-        let slot = |frame, start| Slot { frame, start, len: 0.1, delay: 0.0, silence: false, slow: 0 };
+        let slot = |frame, start| Slot { frame, start, len: 0.1, delay: 0.0, silence: false, slow: 0, jump: None };
         // frames 0 1 2, frame 0 pauses 1 s, then 1 2 repeat once
         let sch = Schedule {
-            slots: vec![Slot { frame: 0, start: 0.0, len: 1.1, delay: 1.0, silence: false, slow: 0 }, slot(1, 1.1), slot(2, 1.2), slot(1, 1.3), slot(2, 1.4)],
+            slots: vec![Slot { frame: 0, start: 0.0, len: 1.1, delay: 1.0, silence: false, slow: 0, jump: None }, slot(1, 1.1), slot(2, 1.2), slot(1, 1.3), slot(2, 1.4)],
             fps,
             total: 1.5,
             identity: false,
@@ -231,7 +265,7 @@ mod export_tests {
     #[test]
     fn exports_hold_delays_and_play_repeats() {
         let fps = 10.0;
-        let slot = |frame, start, delay: f64| Slot { frame, start, len: 0.1 + delay, delay, silence: false, slow: 0 };
+        let slot = |frame, start, delay: f64| Slot { frame, start, len: 0.1 + delay, delay, silence: false, slow: 0, jump: None };
         let sch = Schedule { slots: vec![slot(0, 0.0, 0.0), slot(1, 0.1, 0.3), slot(0, 0.5, 0.0), slot(1, 0.6, 0.3)], fps, total: 1.0, identity: false };
         // GIF: the delayed picture carries its extra time
         let gif = crate::export::pictures(&sch, 0, 2, fps, false);

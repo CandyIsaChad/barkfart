@@ -14,6 +14,8 @@ committed). Plainest behaviour where the reference is unsure.
 - [x] Play long-press: "Loop to" start / end frame popup (7.3)
 - [x] Animation Tools: looping on/off (7.1)
 
+- [x] Use frame tweening properties during repeat (8.4)
+
 ## Stickfigure Tools (9.2)
 - [x] Paste stickfigure with layering (long-press)
 - [x] Paste all properties: the window with a checkbox per property

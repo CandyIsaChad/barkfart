@@ -115,6 +115,10 @@ class Engine {
 
   late final _TimeD _wallTotal = _lib.lookupFunction<_TimeC, _TimeD>('bf_wall_total');
   late final _WallD _wallTime = _lib.lookupFunction<_WallC, _WallD>('bf_wall_time');
+  late final _TimeD _wallRedirect = _lib.lookupFunction<_TimeC, _TimeD>('bf_wall_redirect');
+
+  /// Where the last wallTime picture blends to (a repeat's jump), or -1.
+  double get wallRedirect => _wallRedirect(_handle);
   late final _FrameWallD _frameWall = _lib.lookupFunction<_FrameWallC, _FrameWallD>('bf_frame_wall');
 
   /// Seconds one pass plays for (frame delays and repeats included).

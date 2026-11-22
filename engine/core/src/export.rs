@@ -223,31 +223,38 @@ impl<W: Write + Seek> PngZip<W> {
     }
 }
 
-/// Time of the n-th exported frame (0-based) of a range starting at start_frame.
 /// The pictures of an export of frames [first, first + frames) in playing
 /// order: (project time, extra seconds it shows for). Frame delays hold the
 /// slot's first picture; repeats play their frames again. `rate` pictures
 /// per second (the fps, or more with tweening on); with `hold_as_copies` a
 /// delay becomes copies of the picture (PNG frames have no durations).
-pub fn pictures(sch: &crate::timing::Schedule, first: i32, frames: i32, rate: f64, hold_as_copies: bool) -> Vec<(f64, f64)> {
+pub fn pictures(sch: &crate::timing::Schedule, first: i32, frames: i32, rate: f64, hold_as_copies: bool) -> Vec<(f64, f64, Option<crate::timing::Redirect>)> {
     let rate = if rate > 0.0 { rate } else { sch.fps };
     let per = ((rate / sch.fps).round() as i32).max(1);
     let mut out = Vec::new();
     for s in sch.slots.iter().filter(|s| s.frame >= first && s.frame < first + frames) {
         let base = s.frame as f64 / sch.fps;
-        for k in 0..per {
-            let t = base + k as f64 / rate;
+        // slow motion: its own number of in-betweens at the same picture rate
+        let n = if s.slow > 0 { s.slow + 1 } else { per };
+        let redirect = match s.jump {
+            Some((to, true)) => Some((base, (s.frame + 1) as f64 / sch.fps, to as f64 / sch.fps)),
+            _ => None,
+        };
+        // a repeat jumping back without "use frame tweening": the frame holds
+        let hold = matches!(s.jump, Some((_, false)));
+        for k in 0..n {
+            let t = if hold { base } else { base + k as f64 / (n as f64 * sch.fps) };
             if k == 0 && s.delay > 0.0 {
                 if hold_as_copies {
                     for _ in 0..(s.delay * rate).round() as i64 {
-                        out.push((t, 0.0));
+                        out.push((t, 0.0, redirect));
                     }
-                    out.push((t, 0.0));
+                    out.push((t, 0.0, redirect));
                 } else {
-                    out.push((t, s.delay));
+                    out.push((t, s.delay, redirect));
                 }
             } else {
-                out.push((t, 0.0));
+                out.push((t, 0.0, redirect));
             }
             if out.len() >= 1_000_000 {
                 return out;
@@ -257,6 +264,7 @@ pub fn pictures(sch: &crate::timing::Schedule, first: i32, frames: i32, rate: f6
     out
 }
 
+/// Time of the n-th exported frame (0-based) of a range starting at start_frame.
 pub fn frame_time(start_frame: u32, n: u32, fps: f64) -> f64 {
     let fps = if fps > 0.0 { fps } else { 30.0 };
     (start_frame + n) as f64 / fps

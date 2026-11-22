@@ -24,6 +24,8 @@ pub struct Engine {
     images: Vec<String>,
     /// Figure editor "Load BG image": its size (texture "editor:bg"); view only.
     editor_image: Option<(u32, u32)>,
+    /// The playback picture last asked for and where its in-betweens blend.
+    redirect: Option<(f64, barkfart_core::timing::Redirect)>,
     label: Vec<u8>,
     /// The open project with its history, selection and gestures.
     session: Option<Session>,
@@ -125,6 +127,7 @@ pub extern "C" fn bf_engine_new() -> *mut Engine {
                 glyphs,
                 images: Vec::new(),
                 editor_image: None,
+                redirect: None,
                 label,
                 session: None,
                 sounds: Default::default(),
@@ -294,7 +297,26 @@ pub extern "C" fn bf_wall_total(e: *const Engine) -> f64 {
 /// The project time shown at wall time w, one picture per 1/rate seconds.
 #[no_mangle]
 pub extern "C" fn bf_wall_time(e: *const Engine, w: f64, rate: f64) -> f64 {
-    with_schedule(e, |s| s.time_at(w, rate))
+    let t = with_schedule(e, |s| s.time_at(w, rate));
+    if !e.is_null() {
+        // SAFETY: live handle; the app calls in from one thread
+        let engine = unsafe { &mut *(e as *mut Engine) };
+        // a repeat's in-between blending into the frame it jumps to: kept for the
+        // picture of this time (bf_render_view with the camera)
+        engine.redirect = engine.schedule.as_ref().and_then(|s| s.redirect_at(w)).map(|r| (t, r));
+    }
+    t
+}
+
+/// Where the last bf_wall_time picture blends to (project time), or -1.
+#[no_mangle]
+pub extern "C" fn bf_wall_redirect(e: *const Engine) -> f64 {
+    if e.is_null() {
+        return -1.0;
+    }
+    // SAFETY: live handle
+    let engine = unsafe { &*e };
+    engine.redirect.map_or(-1.0, |(_, r)| r.2)
 }
 
 /// The wall time a frame first plays at.
@@ -347,7 +369,7 @@ pub struct Export {
     transparent: bool,
     error: Vec<u8>,
     /// (time, extra seconds) per picture when frames pause or repeat.
-    pics: Option<Vec<(f64, f64)>>,
+    pics: Option<Vec<(f64, f64, Option<barkfart_core::timing::Redirect>)>>,
 }
 
 fn cstr(p: *const c_char) -> Option<String> {
@@ -436,11 +458,11 @@ pub extern "C" fn bf_export_step(e: *const Engine, x: *mut Export) -> i32 {
             }
             return Ok(true);
         }
-        let (t, extra) = match &job.pics {
+        let (t, extra, redirect) = match &job.pics {
             Some(v) => v[job.next as usize],
-            None => (barkfart_core::export::frame_time(job.start, job.next, p.settings.sample_rate()), 0.0),
+            None => (barkfart_core::export::frame_time(job.start, job.next, p.settings.sample_rate()), 0.0, None),
         };
-        let mut scene = eval::evaluate(p, &p.root_symbol, t);
+        let mut scene = eval::evaluate_redirected(p, &p.root_symbol, t, false, true, redirect);
         // Project Tools > watermark: small, at the top right of every exported picture
         if let Some((text, color)) = p.settings.watermark.as_ref().filter(|w| !w.0.trim().is_empty()) {
             let (hw, hh) = (p.settings.width as f64 / 2.0, p.settings.height as f64 / 2.0);
@@ -600,7 +622,8 @@ pub extern "C" fn bf_render_view(e: *const Engine, t: f64, w: u32, h: u32, x0: f
     let r = catch_unwind(AssertUnwindSafe(|| {
         let start = std::time::Instant::now();
         let camera = flags & 1 != 0;
-        let scene = eval::evaluate_with(p, &p.root_symbol, t, false, camera);
+        let redirect = engine.redirect.filter(|(rt, _)| camera && *rt == t).map(|(_, r)| r);
+        let scene = eval::evaluate_redirected(p, &p.root_symbol, t, false, camera, redirect);
         let mut list = tess::layered(&scene, Some(&engine.glyphs));
         if flags & 2 != 0 {
             let v = &p.view;
