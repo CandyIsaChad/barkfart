@@ -3636,7 +3636,32 @@ fn random_editing_with_undo_and_redo_walks_the_history_exactly() {
                     why = format!("{} steps to undo, the history says {}", s.doc.undo_depth() - base.min(s.doc.undo_depth()), at);
                 } else if s.doc.redo_depth() != history.len() - 1 - at {
                     why = format!("{} steps to redo, the history says {}", s.doc.redo_depth(), history.len() - 1 - at);
+                } else if let Some(msg) = {
+                    // what is selected is still there (a panel on a deleted figure is a bug)
+                    let st = s.state();
+                    let sel = &st["selected"];
+                    match (sel["layer"].as_str(), sel["node"].as_str()) {
+                        (Some(l), Some(n)) => match s.project().root().and_then(|r| r.layer(l)) {
+                            None => Some(format!("the selected figure {l} is gone")),
+                            Some(layer) => match layer.as_figure() {
+                                Some(f) if f.node(n).is_none() => Some(format!("the selected joint {n} is gone from {l}")),
+                                _ => None,
+                            },
+                        },
+                        _ => None,
+                    }
+                } {
+                    why = msg;
                 } else {
+                    // the .bark file the app saves (the main animation, even inside a movieclip)
+                    let bark = s.save_copy().map_err(|e| format!("save failed: {e}")).and_then(|bytes| codec::read_bark(&bytes).map_err(|e| format!("the saved file does not open: {e:?}")));
+                    match bark {
+                        Ok(b) if saved_text(&b.project) != saved_text(&s.saved_project()) => why = "the saved .bark file opens as another project".to_string(),
+                        Err(e) => why = e,
+                        Ok(_) => {}
+                    }
+                }
+                if why.is_empty() {
                     // saved and read back: the very same project
                     match codec::decode(&codec::encode(s.project())) {
                         Ok(back) => {

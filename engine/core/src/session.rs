@@ -2735,7 +2735,7 @@ impl Session {
 
     /// The project as it is saved: the main animation as the root, even
     /// while a movieclip is being edited.
-    fn saved_project(&self) -> std::borrow::Cow<'_, Project> {
+    pub fn saved_project(&self) -> std::borrow::Cow<'_, Project> {
         if self.project().root_symbol == self.main_root {
             std::borrow::Cow::Borrowed(self.project())
         } else {
