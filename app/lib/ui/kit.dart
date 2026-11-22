@@ -506,16 +506,22 @@ Future<T?> showSheet<T>(BuildContext context, {required String title, required L
 
 /// A short message at the bottom of the screen. Dark for errors and
 /// warnings, light for undoable events (D19).
-void showToast(BuildContext context, String text, {String? action, VoidCallback? onAction, bool light = false, String? icon, Duration duration = const Duration(seconds: 4)}) {
+VoidCallback? _closeToast;
+
+void showToast(BuildContext context, String text, {String? action, VoidCallback? onAction, bool light = false, String? icon, Color? iconColor, Duration duration = const Duration(seconds: 4)}) {
   final overlay = Overlay.maybeOf(context, rootOverlay: true);
   if (overlay == null) return;
+  _closeToast?.call(); // one toast at a time: the newest replaces the last
   late OverlayEntry entry;
   var gone = false;
   void close() {
     if (gone) return;
     gone = true;
     entry.remove();
+    if (_closeToast == close) _closeToast = null;
   }
+
+  _closeToast = close;
 
   entry = OverlayEntry(
     builder: (c) => Positioned(
@@ -532,7 +538,7 @@ void showToast(BuildContext context, String text, {String? action, VoidCallback?
             boxShadow: const [BoxShadow(color: Color(0x40000000), blurRadius: 18, offset: Offset(0, 6))],
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            if (icon != null) Padding(padding: const EdgeInsets.only(right: 8), child: Pictogram(icon, size: 16, color: light ? cInk2b : cCard)),
+            if (icon != null) Padding(padding: const EdgeInsets.only(right: 8), child: Pictogram(icon, size: 16, color: iconColor ?? (light ? cInk2b : cCard))),
             Flexible(child: Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text(text, style: ink(14, FontWeight.w400, light ? cText : cCard)))),
             if (action != null)
               Tap(

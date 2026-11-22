@@ -10,7 +10,7 @@ Tick items there as they finish.
 **Done (each one a commit, checked on the Linux build with screenshots):**
 - A1–A6: light tokens, Noto Sans, pictograms, the kit, row descriptors, and
   today's controls re-skinned.
-- B1: the "Save your work?" sheet.
+- B1: the "Save your work?" sheet. B2: toasts (`_say(text, light: true)` for confirmations; export progress still uses the footer until B5).
 
 **Where things are:**
 - `app/lib/ui/tokens.dart`: colours. `editor.dart` re-exports it.
@@ -33,7 +33,7 @@ Tick items there as they finish.
 - Scripted editor runs as before. The new script command is `savesheet`.
 - The window is capped at the screen size (about 1300x700).
 
-**Next:** B2 (toasts replace the status line), then the rest of §7 in order.
+**Next:** B3 (the Animation popover), then the rest of §7 in order. The script command `toast <text>` shows a toast.
 
 Usage at this note: the 5-hour window was at about 70% and the weekly at about
 85%. The weekly limit resets 2026-11-23 about 22:00 PST. When the weekly runs

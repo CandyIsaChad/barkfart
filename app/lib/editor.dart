@@ -97,7 +97,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   // files
   ProjectFile? _file;
   String _status = '';
-  Timer? _statusTimer;
 
   final GlobalKey _shot = GlobalKey();
 
@@ -133,7 +132,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         // unsaved work from last time comes back, still marked unsaved
         _file = rec.$2 == null ? null : ProjectFile(rec.$2!);
         e.command({'op': 'mark_unsaved'});
-        _say('Restored unsaved changes');
+        _say('Restored unsaved changes', light: true);
       } else if (last != null && e.load(await last.read()) == null) {
         _file = last;
       } else {
@@ -195,12 +194,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     return st;
   }
 
-  void _say(String s) {
-    _statusTimer?.cancel();
-    setState(() => _status = s);
-    _statusTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted) setState(() => _status = '');
-    });
+  /// A toast (REDESIGN D19): light for confirmations, dark for problems.
+  void _say(String s, {bool light = false}) {
+    if (!mounted || s.isEmpty) return;
+    kit.showToast(context, s, light: light);
   }
 
   int get _frame => (_st['frame'] as num?)?.toInt() ?? 0;
@@ -584,7 +581,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _file = f;
     await Recovery.clear();
     _refresh(e.command({'op': 'state'}));
-    if (!quiet) _say('Saved ${f.name}');
+    if (!quiet) _say('Saved ${f.name}', light: true);
     return true;
   }
 
@@ -664,7 +661,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _frameSelected = false;
     _refresh(_engine?.command({'op': 'state'}));
     _thumbsChanged('new');
-    _say('New animation');
+    _say('New animation', light: true);
   }
 
   /// A new project starting with the original's default stickfigure.
@@ -742,7 +739,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           if (n == null) {
             _export = null;
             tm.cancel();
-            _say('Exported to Barkfart Exports (Files app)');
+            _say('Exported to Barkfart Exports (Files app)', light: true);
             unawaited(_exportDone(out));
             return;
           }
@@ -809,6 +806,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           unawaited(_exportDialog());
         case 'copypopup':
           unawaited(_copyPopup(int.parse(w[1])));
+        case 'toast':
+          _say(w.sublist(1).join(' '));
         case 'savesheet':
           unawaited(_saveSheet('Rooftop fight hasn\u2019t been saved for 10 minutes. The reminder can be changed or turned off in Settings.'));
         case 'savebutton':
@@ -1886,7 +1885,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     }
     if (done > 0) {
       _thumbsChanged('import');
-      _say(done == 1 ? 'Imported ${picked.first.name}' : 'Imported $done files');
+      _say(done == 1 ? 'Imported ${picked.first.name}' : 'Imported $done files', light: true);
     }
   }
 
@@ -3146,7 +3145,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       f = File('${dir.path}/$clean ($k).nodes');
     }
     await f.writeAsBytes(bytes);
-    _say('Saved ${f.path.split(Platform.pathSeparator).last} in Barkfart Figures.');
+    _say('Saved ${f.path.split(Platform.pathSeparator).last} in Barkfart Figures.', light: true);
   }
 
   /// Figure editor: trace over another frame or figure (shown faintly behind).
