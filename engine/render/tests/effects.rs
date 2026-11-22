@@ -7,6 +7,15 @@ use barkfart_core::{codec, eval, fx, tess};
 use barkfart_render::{Options, Renderer, View};
 use std::path::PathBuf;
 
+/// The GPU tests take turns (two devices made at once can crash the Linux
+/// driver; see spike.rs).
+static GPU: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn gpu() -> std::sync::MutexGuard<'static, ()> {
+    GPU.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+
 fn ref_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/ref")
 }
@@ -114,17 +123,20 @@ fn check(backends: wgpu::Backends, label: &str) {
 
 #[test]
 fn vulkan_or_metal_matches_the_reference() {
+    let _gpu = gpu();
     check(wgpu::Backends::PRIMARY, "primary");
 }
 
 #[test]
 fn gl_matches_the_reference() {
+    let _gpu = gpu();
     check(wgpu::Backends::GL, "gl");
 }
 
 #[test]
 #[ignore] // writes GPU and CPU images of one case: BARKFART_CASE=name
 fn dump_case() {
+    let _gpu = gpu();
     let n = std::env::var("BARKFART_CASE").unwrap();
     let r = Renderer::headless_with(&[wgpu::Backends::PRIMARY], Options { samples: 1 }).unwrap();
     let p = codec::decode(&std::fs::read_to_string(ref_dir().join(&n).join("project.json")).unwrap()).unwrap();

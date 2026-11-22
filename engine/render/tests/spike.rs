@@ -6,6 +6,15 @@ fn kitchen_sink() -> barkfart_core::model::Project {
     codec::decode(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
+/// The GPU tests take turns: creating GL and Vulkan devices on two threads
+/// at once crashes the Linux driver now and then (SIGSEGV in about one run
+/// in four). The app only ever makes one renderer.
+static GPU: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn gpu() -> std::sync::MutexGuard<'static, ()> {
+    GPU.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn renderer(order: &[wgpu::Backends]) -> Option<Renderer> {
     match Renderer::headless(order) {
         Ok(r) => {
@@ -29,6 +38,7 @@ fn shot(r: &Renderer, p: &barkfart_core::model::Project, t: f64, w: u32, h: u32)
 
 #[test]
 fn renders_the_kitchen_sink_project() {
+    let _gpu = gpu();
     let Some(r) = renderer(&[wgpu::Backends::PRIMARY, wgpu::Backends::GL]) else { return };
     let p = kitchen_sink();
     let (w, h) = (640u32, 360u32);
@@ -48,6 +58,7 @@ fn renders_the_kitchen_sink_project() {
 
 #[test]
 fn the_gl_backend_renders_the_same() {
+    let _gpu = gpu();
     let (Some(gl), Some(vk)) = (renderer(&[wgpu::Backends::GL]), renderer(&[wgpu::Backends::PRIMARY])) else { return };
     let p = kitchen_sink();
     let (a, b) = (shot(&gl, &p, 0.6, 320, 180), shot(&vk, &p, 0.6, 320, 180));
@@ -58,6 +69,7 @@ fn the_gl_backend_renders_the_same() {
 #[test]
 #[ignore] // timing: cargo test --release -p barkfart-render -- --ignored --nocapture
 fn timing() {
+    let _gpu = gpu();
     let r = Renderer::headless_default().unwrap();
     let p = kitchen_sink();
     for (w, h) in [(1280u32, 720u32), (2048, 1536)] {
@@ -104,6 +116,7 @@ fn matches_the_locked_v1_reference_render() {
 #[test]
 #[ignore] // timing with gaps between frames, like 24 fps playback
 fn timing_spaced() {
+    let _gpu = gpu();
     let r = Renderer::headless_default().unwrap();
     let p = kitchen_sink();
     shot(&r, &p, 0.0, 1280, 720);
@@ -121,6 +134,7 @@ fn timing_spaced() {
 
 #[test]
 fn export_frames_are_supersampled_and_composited() {
+    let _gpu = gpu();
     let Some(r) = renderer(&[wgpu::Backends::PRIMARY, wgpu::Backends::GL]) else { return };
     let p = kitchen_sink();
     let d = tess::layered(&eval::evaluate(&p, &p.root_symbol, 0.6), None);

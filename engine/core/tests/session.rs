@@ -2060,3 +2060,105 @@ fn every_command_undoes_and_redoes_exactly() {
     assert!(skipped.len() <= 1, "commands that did nothing: {skipped:?}");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// Random editing (fixed seeds): no panics, every state saves and loads back
+/// identically, every in-between evaluates, and undoing everything returns
+/// to the start.
+#[test]
+fn random_editing_keeps_the_project_sound() {
+    // all four seeds in release builds; two in debug, which is slower
+    let seeds: &[u64] = if cfg!(debug_assertions) { &[1, 42] } else { &[1, 7, 42, 2026] };
+    for &seed in seeds {
+        let mut rng = seed;
+        let mut next = move |n: usize| {
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((rng >> 33) as usize) % n.max(1)
+        };
+        let mut s0 = two_poses();
+        s0.command(&json!({"op": "add_camera"}));
+        // a fresh history: undoing everything stops at this start
+        let mut s = Session::new(Document::new(s0.project().clone()));
+        let start = codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
+        let mut steps = 0;
+        // fewer edits than the undo history keeps (200)
+        for _ in 0..150 {
+            let frames = s.state()["frames"].as_i64().unwrap_or(1) as usize;
+            let figs: Vec<String> = s.project().root().unwrap().layers.iter().filter(|l| l.as_figure().is_some()).map(|l| l.id.clone()).collect();
+            if !figs.is_empty() && next(3) > 0 {
+                let l = &figs[next(figs.len())];
+                let nodes: Vec<String> = s.project().root().unwrap().layer(l).unwrap().as_figure().unwrap().nodes().iter().map(|n| n.id.clone()).collect();
+                s.command(&json!({"op": "select", "layer": l, "node": nodes[next(nodes.len())]}));
+            }
+            let c = match next(24) {
+                0 => json!({"op": "frame", "i": next(frames)}),
+                1 => json!({"op": "insert_frame"}),
+                2 => json!({"op": "delete_frame"}),
+                3 => json!({"op": "add_figure"}),
+                4 => {
+                    let shape = ["line", "circle", "trapezoid", "triangle", "polygon"][next(5)];
+                    json!({"op": "segment", "thickness": next(60), "shape": shape})
+                }
+                5 => json!({"op": "node", "length": 10 + next(150), "stretchy": next(2) == 0}),
+                6 => json!({"op": "figure", "color": (next(0xffffff) as u32) << 8 | 0xff, "scale": 0.5 + next(20) as f64 / 10.0}),
+                7 => json!({"op": "frame_bg", "useGradient": next(2) == 0, "color": (next(0xffffff) as u32) << 8 | 0xff}),
+                8 => json!({"op": "frame_delay", "seconds": next(3) as f64 * 0.2}),
+                9 => json!({"op": "frame_repeat", "back": next(3), "times": 1 + next(2), "tween": next(2) == 0}),
+                10 => json!({"op": "animation", "tweening": next(2) == 0, "tweened": next(9), "loop": next(2) == 0}),
+                11 => json!({"op": "frame_slow", "n": next(6)}),
+                12 => json!({"op": "camera", "zoom": 0.5 + next(20) as f64 / 10.0, "rotation": next(90)}),
+                13 => json!({"op": "camera_fx", "widescreen": next(2) == 0, "wobbleXY": next(20)}),
+                14 => json!({"op": "auto_camera", "end": next(frames + 1), "ease": 1 + next(5)}),
+                15 => json!({"op": "filter", "blur": next(10), "invert": next(2) == 0}),
+                16 => json!({"op": "delete_here"}),
+                17 => json!({"op": "copy_frame"}),
+                18 => json!({"op": "paste_frame"}),
+                19 => json!({"op": "add_segment"}),
+                20 => json!({"op": "delete_joint"}),
+                21 => json!({"op": "to_movieclip"}),
+                22 => json!({"op": "camera_lock", "on": next(2) == 0}),
+                _ => json!({"op": "nudge", "dx": next(20) as f64 - 10.0, "dy": next(20) as f64 - 10.0}),
+            };
+            let text_of = |s: &Session| codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
+            let before = text_of(&s);
+            let st = s.command(&c);
+            if st["undo"].is_string() {
+                steps += 1;
+            }
+            let after = text_of(&s);
+            if after != before {
+                // each edit undoes on its own, and redoes
+                s.command(&json!({"op": "undo"}));
+                let undone = text_of(&s);
+                if undone != before {
+                    let line = before.lines().zip(undone.lines()).position(|(a, b)| a != b).unwrap_or(0);
+                    panic!("seed {seed}: undo of {c} differs at line {line}: {:?} vs {:?}", before.lines().nth(line), undone.lines().nth(line));
+                }
+                s.command(&json!({"op": "redo"}));
+                assert!(text_of(&s) == after, "seed {seed}: redo of {c} differs");
+            }
+            let p = s.project();
+            let text = codec::encode(p);
+            let back = codec::decode(&text).unwrap_or_else(|e| panic!("seed {seed}, after {c}: does not load back: {e:?}"));
+            assert_eq!(codec::encode(&back), text, "seed {seed}, after {c}: changes when loaded back");
+            let fps = p.settings.fps as f64;
+            let n = barkfart_core::timing::frame_count(p);
+            // three pictures: the start, an in-between and a random frame
+            for k in [0, 1, 2 * next(n as usize) as i32] {
+                let _ = barkfart_core::tess::tessellate(&barkfart_core::eval::evaluate(p, &p.root_symbol, k as f64 / (2.0 * fps)), None);
+            }
+            let _ = barkfart_core::timing::Schedule::build(p);
+        }
+        assert!(steps > 60, "seed {seed}: too few edits ({steps})");
+        for _ in 0..1000 {
+            let st = s.command(&json!({"op": "undo"}));
+            if st["canUndo"] == false {
+                break;
+            }
+        }
+        let end = codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
+        if end != start {
+            let line = start.lines().zip(end.lines()).position(|(a, b)| a != b).unwrap_or(0);
+            panic!("seed {seed} ({steps} edits): undoing everything does not return to the start, line {line}:\n{:?}\n{:?}", start.lines().nth(line), end.lines().nth(line));
+        }
+    }
+}

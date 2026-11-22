@@ -3,6 +3,15 @@ use barkfart_core::{eval, tess};
 use barkfart_render::glyphs::{GlyphAtlas, PAGE};
 use barkfart_render::{Renderer, View};
 
+/// The GPU tests take turns (two devices made at once can crash the Linux
+/// driver; see spike.rs).
+static GPU: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn gpu() -> std::sync::MutexGuard<'static, ()> {
+    GPU.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+
 fn project(l: Layer) -> Project {
     let mut p = Project { root_symbol: "S1".into(), ..Default::default() };
     let mut s = Symbol::new("S1", Some("root"), 1.0);
@@ -18,6 +27,7 @@ fn px(img: &[u8], w: u32, x: u32, y: u32) -> [u8; 4] {
 
 #[test]
 fn sprites_sample_their_image_and_missing_images_draw_plain() {
+    let _gpu = gpu();
     let Ok(r) = Renderer::headless_default() else { return };
     let mut l = Layer::sprite("L1", Some("s"));
     if let LayerKind::Sprite(s) = &mut l.kind {
@@ -44,6 +54,7 @@ fn sprites_sample_their_image_and_missing_images_draw_plain() {
 
 #[test]
 fn text_draws_through_the_glyph_atlas() {
+    let _gpu = gpu();
     let Ok(r) = Renderer::headless_default() else { return };
     let atlas = GlyphAtlas::new();
     r.set_texture(PAGE, atlas.width, atlas.height, &atlas.rgba);
