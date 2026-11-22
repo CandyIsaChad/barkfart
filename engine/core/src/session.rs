@@ -2641,6 +2641,26 @@ impl Session {
                 q.track.clear();
             }
         }
+        // connectors made in Barkfart: the original has no record of their
+        // endpoint, so they are saved where they sit (their angle and length)
+        if let LayerKind::Figure(f) = &mut copy.kind {
+            let pose = crate::eval::pose::FigurePose::compute(f, 0.0, &mut Resolver::new(p));
+            let ids: Vec<usize> = f.nodes().iter().enumerate().filter(|(_, n)| n.legacy_extras.contains_key(crate::eval::pose::CONNECT_TO) && n.parent.is_some()).map(|(i, _)| i).collect();
+            let base: Vec<f64> = ids.iter().map(|&i| pose.base_angle(f.nodes(), i)).collect();
+            for (k, &i) in ids.iter().enumerate() {
+                let pi = pose.parent[i];
+                if pi < 0 {
+                    continue;
+                }
+                let pi = pi as usize;
+                let (dx, dy) = (pose.x[i] - pose.x[pi], pose.y[i] - pose.y[pi]);
+                let n = &mut f.nodes_mut()[i];
+                let scale = n.scale.value.f().max(1e-6) as f64;
+                n.length.value = Value::F((dx.hypot(dy) / scale) as f32);
+                n.rotation.value = Value::F((dy.atan2(dx).to_degrees() - base[k]) as f32);
+                n.legacy_extras.remove(crate::eval::pose::CONNECT_TO);
+            }
+        }
         let fig = crate::legacy::to_legacy(&copy).map_err(|e| e.0)?;
         Ok((l.name.clone().unwrap_or_else(|| "Stickfigure".into()), crate::legacy::write_nodes(&fig)))
     }

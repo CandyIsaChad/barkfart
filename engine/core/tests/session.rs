@@ -1894,3 +1894,31 @@ fn repeat_tweens_into_the_frame_it_jumps_to() {
     let first = pics.iter().filter(|p| p.0 < 1.0 / fps - 1e-9).count();
     assert_eq!(first / 2, 10, "frame 1 plays twice, ten pictures each time: {}", first);
 }
+
+/// Save stickfigure with a Barkfart connector: it is saved where it sits
+/// (every joint of the saved figure lands where it was, the connector too).
+#[test]
+fn saved_figure_keeps_connector_positions() {
+    let mut s = session();
+    s.command(&json!({"op": "select", "layer": "L2", "node": "torso"}));
+    s.command(&json!({"op": "build", "layer": "L2"}));
+    s.command(&json!({"op": "connect_start"}));
+    let h = s.tools.handles(s.project(), 0.0).into_iter().find(|h| h.layer == "L2" && h.node == "armR2").unwrap();
+    s.command(&json!({"op": "down", "x": h.x, "y": h.y, "r": 4}));
+    s.command(&json!({"op": "up"}));
+    let points = |p: &barkfart_core::model::Project, layer: &str| {
+        let f = p.root().unwrap().layer(layer).unwrap().as_figure().unwrap();
+        let pose = barkfart_core::eval::pose::FigurePose::compute(f, 0.0, &mut barkfart_core::eval::Resolver::new(p));
+        let mut v: Vec<(i64, i64)> = (0..pose.x.len()).map(|i| ((pose.x[i] - pose.x[0]).round() as i64, (pose.y[i] - pose.y[0]).round() as i64)).collect();
+        v.sort();
+        v
+    };
+    let want = points(s.project(), "L2");
+    let (_, bytes) = s.figure_file().unwrap();
+    let mut p = s.project().clone();
+    barkfart_core::import::import_file(&mut p, "Saved.nodes", &bytes).unwrap();
+    let new_layer = p.root().unwrap().layers.iter().rev().find(|l| l.as_figure().is_some()).unwrap().id.clone();
+    let got = points(&p, &new_layer);
+    let close = want.len() == got.len() && want.iter().zip(&got).all(|(a, b)| (a.0 - b.0).abs() <= 1 && (a.1 - b.1).abs() <= 1);
+    assert!(close, "{got:?}\nvs\n{want:?}");
+}
