@@ -1981,6 +1981,38 @@ fn toggling_a_control_on_and_off_changes_nothing() {
         ("textfield font", Some(json!({"op": "add_textfield"})), json!({"op": "textfield", "font": "Bangers"}), json!({"op": "textfield", "font": null})),
         ("lock to camera", None, json!({"op": "camera_lock", "layer": "L2", "on": true}), json!({"op": "camera_lock", "layer": "L2", "on": false})),
         ("auto-camera", None, json!({"op": "auto_camera", "end": 1, "ease": 1}), json!({"op": "auto_camera", "end": null})),
+        // more of the app's switches
+        ("lock joint", None, json!({"op": "pin", "v": true}), json!({"op": "pin", "v": false})),
+        ("segment static", None, json!({"op": "segment", "static": true}), json!({"op": "segment", "static": false})),
+        ("smart stretch", None, json!({"op": "segment", "smart": true}), json!({"op": "segment", "smart": false})),
+        ("is stretchy", None, json!({"op": "node", "stretchy": true}), json!({"op": "node", "stretchy": false})),
+        ("drag lock", None, json!({"op": "node", "dragLock": true}), json!({"op": "node", "dragLock": false})),
+        ("angle lock", None, json!({"op": "segment", "angleLock": 1}), json!({"op": "segment", "angleLock": 0})),
+        ("circle outline", Some(json!({"op": "segment", "shape": "circle"})), json!({"op": "segment", "outline": true}), json!({"op": "segment", "outline": false})),
+        ("hollow circle", Some(json!({"op": "segment", "shape": "circle"})), json!({"op": "segment", "hollow": true}), json!({"op": "segment", "hollow": false})),
+        ("right triangle", Some(json!({"op": "segment", "shape": "triangle"})), json!({"op": "segment", "rightTriangle": 1}), json!({"op": "segment", "rightTriangle": 0})),
+        ("upside-down triangle", Some(json!({"op": "segment", "shape": "triangle"})), json!({"op": "segment", "upsideDown": true}), json!({"op": "segment", "upsideDown": false})),
+        ("reverse gradient", Some(json!({"op": "segment", "gradient": true, "gradientColor": 0x00ff00ffu32})), json!({"op": "segment", "gradientReverse": true}), json!({"op": "segment", "gradientReverse": false})),
+        ("sideways gradient", Some(json!({"op": "segment", "gradient": true, "gradientColor": 0x00ff00ffu32})), json!({"op": "segment", "gradientSideways": true}), json!({"op": "segment", "gradientSideways": false})),
+        ("figure locked", None, json!({"op": "figure", "locked": true}), json!({"op": "figure", "locked": false})),
+        ("visible in onion skin", None, json!({"op": "figure", "onion": false}), json!({"op": "figure", "onion": true})),
+        ("flip figure", None, json!({"op": "flip_figure", "h": true}), json!({"op": "flip_figure", "h": true})),
+        ("flip branch", None, json!({"op": "flip_branch", "h": true}), json!({"op": "flip_branch", "h": true})),
+        ("layer order", None, json!({"op": "layer_order", "forward": true}), json!({"op": "layer_order", "forward": false})),
+        ("nudge", None, json!({"op": "nudge", "dx": 5, "dy": -3}), json!({"op": "nudge", "dx": -5, "dy": 3})),
+        ("turn figure", None, json!({"op": "figure", "turn": 45}), json!({"op": "figure", "turn": -45})),
+        ("watermark", None, json!({"op": "watermark", "on": true, "text": "hi"}), json!({"op": "watermark", "on": false})),
+        ("loop animation", None, json!({"op": "animation", "loop": true}), json!({"op": "animation", "loop": false})),
+        ("silence frame", None, json!({"op": "frame_silence", "on": true}), json!({"op": "frame_silence", "on": false})),
+        // from a value the control has to give back when it is ticked again
+        ("segment colour kept while off", Some(json!({"op": "segment", "color": 0xff0000ffu32})), json!({"op": "segment", "ownColor": false}), json!({"op": "segment", "ownColor": true})),
+        ("gradient colours kept while off", Some(json!({"op": "frame_bg", "color": 0x336699ffu32, "gradient": 0xff8800ffu32, "useGradient": true})), json!({"op": "frame_bg", "useGradient": false}), json!({"op": "frame_bg", "useGradient": true})),
+        ("segment gradient colour kept while off", Some(json!({"op": "segment", "gradient": true, "gradientColor": 0x00ff00ffu32})), json!({"op": "segment", "gradient": false}), json!({"op": "segment", "gradient": true})),
+        ("half arc kept while off", Some(json!([{"op": "segment", "shape": "circle"}, {"op": "segment", "halfArc": 1}])), json!({"op": "segment", "halfArc": 0}), json!({"op": "segment", "halfArc": 1})),
+        ("textfield font kept while off", Some(json!([{"op": "add_textfield"}, {"op": "textfield", "font": "Bangers"}])), json!({"op": "textfield", "font": null}), json!({"op": "textfield", "font": "Bangers"})),
+        ("pause kept while off", Some(json!({"op": "frame_delay", "seconds": 0.4})), json!({"op": "frame_delay", "seconds": 0}), json!({"op": "frame_delay", "seconds": 0.4})),
+        ("motion blur distance kept while off", Some(json!([{"op": "filter", "motion": true}, {"op": "filter", "motionDistance": 60}])), json!({"op": "filter", "motion": false}), json!({"op": "filter", "motion": true})),
+        ("camera lock kept while off", Some(json!([{"op": "camera", "zoom": 1.5, "rotation": 10}, {"op": "camera_lock", "layer": "L2", "on": true}])), json!({"op": "camera_lock", "layer": "L2", "on": false}), json!({"op": "camera_lock", "layer": "L2", "on": true})),
     ];
     let picture = |s: &Session, t: f64| -> Vec<u8> {
         let p = s.project();
@@ -1992,32 +2024,74 @@ fn toggling_a_control_on_and_off_changes_nothing() {
         barkfart_core::fx::render(&list, &mut im);
         im.px.iter().map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8).collect()
     };
+    // the panel as the app shows it, without the undo labels
+    fn diff(a: &serde_json::Value, b: &serde_json::Value, path: &str, out: &mut Vec<String>) {
+        match (a, b) {
+            (serde_json::Value::Object(x), serde_json::Value::Object(y)) => {
+                for k in x.keys().chain(y.keys().filter(|k| !x.contains_key(*k))) {
+                    if path.is_empty() && ["undo", "redo", "canUndo", "canRedo", "dirty", "rev", "message"].contains(&k.as_str()) {
+                        continue;
+                    }
+                    diff(x.get(k).unwrap_or(&serde_json::Value::Null), y.get(k).unwrap_or(&serde_json::Value::Null), &format!("{path}/{k}"), out);
+                }
+            }
+            _ if a != b => out.push(format!("{path}: {a} -> {b}")),
+            _ => {}
+        }
+    }
+    let mut failures = Vec::new();
     for (name, setup, on, off) in toggles {
         let mut s = two_poses();
         s.command(&json!({"op": "animation", "tweening": true}));
         s.command(&json!({"op": "add_camera"}));
         s.command(&json!({"op": "frame", "i": 0}));
         s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
-        if let Some(setup) = setup {
-            s.command(setup);
+        match setup {
+            Some(serde_json::Value::Array(list)) => {
+                for c in list {
+                    s.command(c);
+                }
+            }
+            Some(c) => {
+                s.command(c);
+            }
+            None => {}
         }
         let fps = s.project().settings.fps as f64;
         let times = [0.0, 0.25 / fps, 0.5 / fps, 0.75 / fps, 1.0 / fps];
-        let before: Vec<Vec<u8>> = times.iter().map(|t| picture(&s, *t)).collect();
+        let pictures = |s: &Session| -> Vec<Vec<u8>> { times.iter().map(|t| picture(s, *t)).collect() };
+        // does `now` show `then`: the pictures within 2 / 255 and the panel exactly
+        let same = |s: &Session, then: &(Vec<Vec<u8>>, serde_json::Value), what: &str, failures: &mut Vec<String>| {
+            for (k, t) in times.iter().enumerate() {
+                let bad = picture(s, *t).iter().zip(&then.0[k]).filter(|(a, b)| a.abs_diff(**b) > 2).count();
+                if bad > 0 {
+                    failures.push(format!("{name} ({what}): {bad} channel values differ at t = {t}"));
+                }
+            }
+            let mut d = Vec::new();
+            diff(&then.1, &s.state(), "", &mut d);
+            if !d.is_empty() {
+                failures.push(format!("{name} ({what}): the panel shows another value: {:?}", d.iter().take(4).collect::<Vec<_>>()));
+            }
+        };
+        let base = (pictures(&s), s.state());
         s.command(on);
         if *name == "textfield font" {
             assert_eq!(s.state()["textfield"]["font"], "Bangers", "the font is on");
         }
+        let switched = (pictures(&s), s.state());
         s.command(off);
         if *name == "textfield font" {
             assert!(s.state()["textfield"]["font"].is_null(), "the font is back to the default");
         }
-        for (k, t) in times.iter().enumerate() {
-            let now = picture(&s, *t);
-            let bad = now.iter().zip(&before[k]).filter(|(a, b)| a.abs_diff(**b) > 2).count();
-            assert!(bad == 0, "{name}: {bad} channel values differ at t = {t}");
-        }
+        same(&s, &base, "on, then off", &mut failures);
+        // the other way round: from the switched state, off and on again gives it back
+        s.command(on);
+        same(&s, &switched, "on again", &mut failures);
+        s.command(off);
+        same(&s, &base, "off again", &mut failures);
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Every editing command undoes exactly (the project is as it was) and
@@ -2031,7 +2105,7 @@ fn every_command_undoes_and_redoes_exactly() {
         json!({"op": "add_figure"}), json!({"op": "add_textfield"}), json!({"op": "duplicate_figure"}), json!({"op": "flip_figure", "h": true}),
         json!({"op": "rotate_figure", "deg": 30}), json!({"op": "layer_order", "forward": true}), json!({"op": "add_segment"}),
         json!({"op": "delete_joint"}), json!({"op": "delete_segment"}), json!({"op": "split", "n": 2}), json!({"op": "duplicate_branch"}),
-        json!({"op": "flip_branch", "h": true}), json!({"op": "pin", "on": true}), json!({"op": "segment", "thickness": 10, "color": 0xff00ffffu32}),
+        json!({"op": "flip_branch", "h": true}), json!({"op": "pin", "v": true}), json!({"op": "segment", "thickness": 10, "color": 0xff00ffffu32}),
         json!({"op": "segment", "branch": true, "scaleLength": 1.3}), json!({"op": "branch_edit", "addThickness": 4, "replaceFrom": 0x000000ffu32, "replaceTo": 0xffffffffu32}),
         json!({"op": "branch_edit", "ownColor": false, "gradientColor": 0x00ff00ffu32, "addLength": 5}),
         json!({"op": "figure", "color": 0x00ff00ffu32, "scale": 1.4, "locked": true}), json!({"op": "node", "stretchy": true, "length": 60}),
@@ -2626,4 +2700,51 @@ fn tween_colours_off_and_on_keeps_every_colour_key_as_it_was() {
         assert_eq!(colours(&s, *t), blending[k], "on again: the same blend at time {t}");
     }
     assert_eq!(saved_text(s.project()), text, "on again: the very same project");
+}
+
+/// "Use segment color" off keeps the segment's own colour aside (the
+/// original greys the swatch out): ticking it again brings the colour back,
+/// even after the stickfigure colour changed or the project was saved and
+/// opened again, and a ticked, unchanged segment leaves nothing behind.
+#[test]
+fn a_segments_own_colour_comes_back_when_use_segment_colour_is_ticked_again() {
+    let colour = |s: &Session| s.state()["selected"]["color"].as_u64().unwrap() as u32;
+    let mut s = two_poses();
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    s.command(&json!({"op": "figure", "color": 0x00ff00ffu32}));
+    let plain = saved_text(s.project());
+    // own colour on, off, on with nothing changed in between: no trace
+    s.command(&json!({"op": "segment", "ownColor": true}));
+    s.command(&json!({"op": "segment", "ownColor": false}));
+    assert_eq!(saved_text(s.project()), plain, "an own colour equal to the figure's keeps nothing aside");
+
+    s.command(&json!({"op": "segment", "color": 0xff0000ffu32}));
+    s.command(&json!({"op": "segment", "ownColor": false}));
+    assert_eq!(colour(&s), 0x00ff00ff, "off: the figure colour");
+    assert!(saved_text(s.project()).contains("B.ownColor"), "the own colour is kept in the project");
+    s.command(&json!({"op": "figure", "color": 0x0000ffffu32}));
+    assert_eq!(colour(&s), 0x0000ffff, "off: the segment follows the figure colour");
+
+    // saved and opened again while it is off
+    let mut again = Session::new(Document::new(codec::decode(&codec::encode(s.project())).unwrap()));
+    again.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    again.command(&json!({"op": "segment", "ownColor": true}));
+    assert_eq!(colour(&again), 0xff0000ff, "ticked again after a reload: its own colour");
+
+    s.command(&json!({"op": "segment", "ownColor": true}));
+    assert_eq!(colour(&s), 0xff0000ff, "ticked again: its own colour");
+    assert!(!saved_text(s.project()).contains("B.ownColor"), "nothing kept aside any more");
+    let round_one = saved_text(s.project());
+    // a new own colour while off replaces the kept one
+    s.command(&json!({"op": "segment", "ownColor": false}));
+    s.command(&json!({"op": "segment", "color": 0xffff00ffu32}));
+    s.command(&json!({"op": "segment", "ownColor": false}));
+    s.command(&json!({"op": "segment", "ownColor": true}));
+    assert_eq!(colour(&s), 0xffff00ff, "the new own colour comes back, not the one kept before");
+    // undo goes back one step at a time: on, off, the new colour, off
+    for _ in 0..4 {
+        s.command(&json!({"op": "undo"}));
+    }
+    assert_eq!(colour(&s), 0xff0000ff, "undo: back to the first own colour");
+    assert_eq!(saved_text(s.project()), round_one, "undo is exact");
 }

@@ -15,6 +15,10 @@ use crate::model::*;
 use indexmap::IndexMap;
 use serde_json::{json, Value as J};
 
+/// Where a segment keeps its own colour while "Use segment color" is off (a
+/// node extra, so it is saved with the project and undone with the step).
+const KEPT_OWN_COLOR: &str = "B.ownColor";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     /// Pose figures by their joints.
@@ -1376,6 +1380,7 @@ impl Session {
                                     for id in f.subtree(&n) {
                                         if let Some(x) = f.node_mut(&id).filter(|x| x.parent.is_some()) {
                                             x.own_color = true;
+                                            x.legacy_extras.shift_remove(KEPT_OWN_COLOR);
                                         }
                                     }
                                 }
@@ -1393,13 +1398,25 @@ impl Session {
                             // a colour of its own ("Use segment color" on)
                             set_static(&mut node.color, Value::C(Color::rgba8888(v as u32)));
                             node.own_color = true;
+                            node.legacy_extras.shift_remove(KEPT_OWN_COLOR);
                         }
                         if let Some(v) = c2["ownColor"].as_bool() {
-                            // off: back to the stickfigure colour
-                            node.own_color = v;
+                            // off: the segment follows the stickfigure colour, and its own
+                            // colour is kept aside (the original greys the swatch out) for
+                            // when "Use segment color" is ticked again
                             if !v {
+                                let own = node.color.value.color();
+                                if node.own_color && node.color.track.is_empty() && own != fig_color {
+                                    node.legacy_extras.insert(KEPT_OWN_COLOR.into(), format!("s:{:08x}", own.to_rgba8888()));
+                                }
                                 set_static(&mut node.color, Value::C(fig_color));
+                            } else if !node.own_color {
+                                let kept = node.legacy_extras.shift_remove(KEPT_OWN_COLOR).and_then(|t| u32::from_str_radix(t.trim_start_matches("s:"), 16).ok());
+                                if let Some(c) = kept {
+                                    set_static(&mut node.color, Value::C(Color::rgba8888(c)));
+                                }
                             }
+                            node.own_color = v;
                         }
                         if let Some(v) = c2["shape"].as_str() {
                             if node.parent.is_some() {
