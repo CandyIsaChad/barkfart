@@ -374,6 +374,20 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
   - "Open a file…" (first run and Projects) imports from disk, including
     Stick Nodes files.
 
+- **D22. Real figures, never likenesses (the user, 2026-11-23).** Wherever
+  the app shows a stick figure (the first-run greeting, empty states,
+  tiles), it is an actual figure drawn by the engine in its own small render,
+  not a hand-drawn lookalike. Pictograms stay for small icons only.
+- **D23. What "Reset this segment" goes back to (D7b).** A figure remembers
+  each segment's look when it enters the project: added from the "+" menu,
+  imported from a file, or the starter figure of a new animation (pasting
+  carries the copy's memory along). That memory is saved in the file
+  (FORMAT.md, "base"). It covers shape, made-with length, thickness, scale,
+  colours, curve, gradient, outline and the shape settings; angles and locks
+  are not part of it. Figures from older projects have none, and the page
+  then compares only thickness (32) and length, as in D7a. The pinned red
+  button shows only on the Segment tab while something differs.
+
 ## 7. Build order (easiest to hardest, nested)
 
 The user's instruction (2026-11-23): "From easiest to hardest. List out
@@ -461,7 +475,7 @@ and tests are never weakened.
   - [x] D7a. Segment Tools as rows, grouped Size, Colour and Movement.
     Thickness (default 32) and length (the rest length) get changed-dots and
     swipe-to-reset.
-  - [ ] D7b. Engine: the selection reports each segment value's file default
+  - [x] D7b. Engine: the selection reports each segment value's file default
     and whether it changed, plus a "reset segment" op. Then dots and swipes
     for every value, and the pinned "Reset this segment" button.
 
@@ -471,7 +485,7 @@ and tests are never weakened.
 - [x] E3. The backups list.
 
 ### F. Engine: layers keep their own keys (D2, D3)
-- [ ] F1. The break-off-and-join command.
+- [x] F1. The break-off-and-join command.
 - [ ] F2. Hold or Tween per key, read by the evaluator. Tweened frames
   become "smoothness".
 - [ ] F3. The whole-figure key rule replaces anchor_poses. Legacy imports
@@ -518,7 +532,8 @@ components.
   - a grid of cards, four across on phones, each with a thumbnail, name,
     unsaved dot, and "N frames, S seconds. Edited …";
   - the first card is "New animation".
-- **First run:** a waving stock figure, "No animations yet", the blue "Make
+- **First run:** the stock figure a new animation starts with, drawn by the
+  engine (D22), "No animations yet", the blue "Make
   an animation" button, and a yellow hint saying Stick Nodes files open
   through "Open a file…".
 - **Settings** (two cards side by side):

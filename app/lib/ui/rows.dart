@@ -118,10 +118,13 @@ class DDanger extends Desc {
   final VoidCallback? onTap;
 }
 
-/// Any widget, for rows not (yet) described by data.
+/// Any widget, for rows not (yet) described by data. It can carry a
+/// changed-dot and a swipe reset like the other rows.
 class DWidget extends Desc {
-  const DWidget(this.child);
+  const DWidget(this.child, {this.changed = false, this.reset});
   final Widget child;
+  final bool changed;
+  final DReset? reset;
 }
 
 /// Draws one descriptor.
@@ -154,7 +157,14 @@ Widget renderDesc(Desc d) {
     DInfo() => PropRow(d.label, trailing: Text(d.value, style: ink(13, FontWeight.w400, cSecondary))),
     DName() => PropRow(d.name, trailing: d.link == null ? null : WordButton(d.link!, onTap: d.onLink, size: 13)),
     DDanger() => Padding(padding: const EdgeInsets.only(top: 8), child: WordButton(d.label, onTap: d.onTap, filled: true, danger: true, expand: true, height: 38)),
-    DWidget() => d.child,
+    DWidget() => swipe(
+        d.changed
+            ? Row(children: [
+                Container(width: 6, height: 6, margin: const EdgeInsets.only(right: 6), decoration: const BoxDecoration(color: cAccent, shape: BoxShape.circle)),
+                Expanded(child: d.child),
+              ])
+            : d.child,
+        d.reset),
   };
 }
 

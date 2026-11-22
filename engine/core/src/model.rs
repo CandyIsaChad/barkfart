@@ -740,6 +740,70 @@ impl Node {
     }
 }
 
+/// A segment's look as its figure came into the project (D7b): what
+/// "Reset this segment" goes back to. Angles and locks are not part of it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NodeBase {
+    pub shape: Shape,
+    /// The made-with length (`Node::rest_length` when known, else the first
+    /// frame's length).
+    pub length: f32,
+    pub thickness: f32,
+    pub scale: f32,
+    pub color: Color,
+    pub own_color: bool,
+    pub curve: f32,
+    pub is_static: bool,
+    pub stretchy: bool,
+    pub smart_stretch: bool,
+    pub gradient: bool,
+    pub gradient_color: Color,
+    pub gradient_reverse: bool,
+    pub gradient_sideways: bool,
+    pub circle_outline: bool,
+    pub outline_color: Color,
+    pub circle_hollow: bool,
+    pub half_arc: i32,
+    pub polygon_sides: i32,
+    pub trapezoid_ratio: f32,
+    pub trapezoid_round_start: bool,
+    pub trapezoid_round_end: bool,
+    pub right_triangle: i32,
+    pub triangle_upside_down: bool,
+}
+
+impl NodeBase {
+    /// The node's values on the first frame.
+    pub fn of(n: &Node) -> NodeBase {
+        NodeBase {
+            shape: n.shape,
+            length: if n.rest_length > 0.0 { n.rest_length } else { n.length.key_value(0.0).f() },
+            thickness: n.thickness.key_value(0.0).f(),
+            scale: n.scale.key_value(0.0).f(),
+            color: n.color.key_value(0.0).color(),
+            own_color: n.own_color,
+            curve: n.curve,
+            is_static: n.is_static,
+            stretchy: n.stretchy,
+            smart_stretch: n.smart_stretch,
+            gradient: n.gradient,
+            gradient_color: n.gradient_color.key_value(0.0).color(),
+            gradient_reverse: n.gradient_reverse,
+            gradient_sideways: n.gradient_sideways,
+            circle_outline: n.circle_outline,
+            outline_color: n.outline_color.key_value(0.0).color(),
+            circle_hollow: n.circle_hollow,
+            half_arc: n.half_arc,
+            polygon_sides: n.polygon_sides,
+            trapezoid_ratio: n.trapezoid_ratio,
+            trapezoid_round_start: n.trapezoid_round_start,
+            trapezoid_round_end: n.trapezoid_round_end,
+            right_triangle: n.right_triangle,
+            triangle_upside_down: n.triangle_upside_down,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Polyfill {
     pub id: String,
@@ -770,6 +834,9 @@ pub struct Figure {
     /// The stickfigure colour (segments without their own colour use it);
     /// None: older files, where the first segment's colour stands in.
     pub color: Option<Color>,
+    /// Each segment's look as the figure came into the project (D7b), by
+    /// node id. None: projects from before D7b (nothing to reset to).
+    pub base: Option<Arc<IndexMap<String, NodeBase>>>,
 }
 
 impl Figure {
@@ -783,6 +850,19 @@ impl Figure {
 
     pub fn root(&self) -> Option<&Node> {
         self.nodes.first()
+    }
+
+    /// Remembers every segment as it is now as the figure's base (D7b). Done
+    /// when a figure enters a project; a base already there is kept.
+    pub fn capture_base(&mut self) {
+        if self.base.is_none() {
+            self.base = Some(Arc::new(self.nodes.iter().filter(|n| n.parent.is_some()).map(|n| (n.id.clone(), NodeBase::of(n))).collect()));
+        }
+    }
+
+    /// The base of one segment, if the figure has one.
+    pub fn base_of(&self, id: &str) -> Option<&NodeBase> {
+        self.base.as_ref().and_then(|b| b.get(id))
     }
 
     /// Nodes and polyfills to change together.
@@ -1403,6 +1483,13 @@ impl Layer {
         match &self.kind {
             LayerKind::Figure(f) => Some(f),
             _ => None,
+        }
+    }
+
+    /// A figure entering a project remembers its segments (D7b).
+    pub fn capture_base(&mut self) {
+        if let LayerKind::Figure(f) = &mut self.kind {
+            f.capture_base();
         }
     }
 

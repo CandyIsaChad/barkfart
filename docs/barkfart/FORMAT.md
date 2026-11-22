@@ -17,3 +17,15 @@ re-encoding, so autosave stays cheap. `formatVersion` is 1. These rules keep eve
 4. **Unknown fields are ignored** within a version (tested).
 5. A file with a newer formatVersion than the app is refused with a message,
    never half-loaded.
+
+## Optional fields added within version 1
+
+- **Figure `base`** (2026-11-23, D7b): a list with one object per segment:
+  `id`, plus the segment's look as the figure came into the project
+  (`shape`, `length`, `thickness`, `scale`, `color`, `ownColor`, `curve`,
+  `static`, `stretchy`, `smartStretch`, `gradient`, `gradientColor`,
+  `gradientReverse`, `gradientSideways`, `outline`, `outlineColor`, `hollow`,
+  `halfArc`, `sides`, `trapezoidRatio`, `roundStart`, `roundEnd`,
+  `rightTriangle`, `upsideDown`). "Reset this segment" restores these. A figure
+  without `base` (every file from before) has nothing to reset to, which is
+  the default.

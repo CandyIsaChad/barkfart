@@ -151,3 +151,94 @@ pub fn flip_joined(st: &mut State, sym: &str, anchor_layer: &str, node: Option<&
     }
     Ok(())
 }
+
+/// Break off (REDESIGN D3, F1): the branch from `node` down becomes its own
+/// figure, joined to this one at the joint it hung from, so nothing moves on
+/// any frame. The new figure is drawn just above this one. Figures joined to
+/// a joint of the branch follow it to the new figure. Returns the new
+/// figure's layer id.
+pub fn break_off(st: &mut State, sym: &str, layer: &str, node: &str) -> EditResult<String> {
+    let (src, sub, parent, absolute, index) = {
+        let Some(s) = st.project.symbol(sym) else { return fail("no symbol") };
+        let Some(l) = s.layer(layer) else { return fail(format!("no layer {layer}")) };
+        let Some(f) = l.as_figure() else { return fail("only a figure's branch can break off") };
+        let Some(n) = f.node(node) else { return fail(format!("no node {node}")) };
+        let Some(parent) = n.parent.clone() else { return fail("The main joint is the whole figure; pick a joint further out.") };
+        let sub = f.subtree(node);
+        let inside = |id: &str| sub.iter().any(|x| x == id);
+        // a connector across the break would lose its other end
+        for (ci, (ei, _)) in crate::eval::pose::connector_links(f) {
+            if inside(&f.nodes()[ci].id) != inside(&f.nodes()[ei].id) {
+                return fail("A connector ties this branch to the rest of the figure, so it can't break off.");
+            }
+        }
+        // so would a polyfill spanning it
+        for pf in &f.polyfills {
+            let ids: Vec<&str> = std::iter::once(pf.anchor.as_str()).chain(pf.nodes.iter().map(String::as_str)).collect();
+            let k = ids.iter().filter(|x| inside(x)).count();
+            if k > 0 && k < ids.len() {
+                return fail("A polyfill spans this joint, so the branch can't break off.");
+            }
+        }
+        (l.clone(), sub, parent, n.angle_lock == LOCK_ABSOLUTE, s.layer_index(layer).unwrap_or(0))
+    };
+    let new_id = st.project.new_id("L");
+    let mut ids = std::collections::HashMap::new();
+    ids.insert(layer.to_string(), new_id.clone());
+    let mut l2 = super::structure::copy_layer(&src, &ids)?;
+    let name = src.name.clone().unwrap_or_else(|| src.id.clone());
+    l2.name = Some(format!("{name} part"));
+    // the new figure: a main joint where the branch hung, then the branch
+    {
+        let LayerKind::Figure(f2) = &mut l2.kind else { return fail("not a figure") };
+        let root_id = f2.root().map(|r| r.id.clone()).unwrap_or_else(|| "root".into());
+        let mut list = vec![Node::new(&new_id, &root_id, None, Shape::Line)];
+        for id in &sub {
+            let mut n = f2.node(id).expect("copied").clone();
+            if id == node {
+                n.parent = Some(root_id.clone());
+            }
+            list.push(n);
+        }
+        f2.set_nodes(list).map_err(super::EditError)?;
+        let keep: Vec<Polyfill> = f2.polyfills.iter().filter(|pf| sub.iter().any(|x| *x == pf.anchor)).cloned().collect();
+        f2.polyfills = keep;
+        if let Some(b) = &f2.base {
+            let b: indexmap::IndexMap<String, NodeBase> = b.iter().filter(|(k, _)| sub.contains(k)).map(|(k, v)| (k.clone(), v.clone())).collect();
+            f2.base = Some(std::sync::Arc::new(b));
+        }
+    }
+    // placed by the joint alone (the joint's frame already carries this
+    // figure's position, turn and scale)
+    {
+        let tr = &mut l2.transform;
+        for (q, v) in [(&mut tr.x, 0.0), (&mut tr.y, 0.0), (&mut tr.rotation, 0.0), (&mut tr.scale_x, 1.0), (&mut tr.scale_y, 1.0), (&mut tr.anchor_x, 0.0), (&mut tr.anchor_y, 0.0)] {
+            q.track.clear();
+            q.value = Value::F(v);
+        }
+        l2.parent = Some(layer.to_string());
+        l2.parent_node = Some(parent);
+        // a branch locked to the stage's angle keeps it
+        l2.parent_node_rotate = !absolute;
+    }
+    // the branch leaves this figure
+    {
+        let Some(l) = st.project.layer_mut(sym, layer) else { return fail("no layer") };
+        let LayerKind::Figure(f) = &mut l.kind else { return fail("not a figure") };
+        f.remove_subtree(node).map_err(super::EditError)?;
+        f.polyfills.retain(|pf| !sub.iter().any(|x| *x == pf.anchor));
+    }
+    // figures joined to a joint of the branch go with it
+    let followers: Vec<String> = st
+        .project
+        .symbol(sym)
+        .map(|s| s.layers.iter().filter(|x| x.parent.as_deref() == Some(layer) && x.parent_node.as_ref().is_some_and(|n| sub.contains(n))).map(|x| x.id.clone()).collect())
+        .unwrap_or_default();
+    for id in followers {
+        if let Some(x) = st.project.layer_mut(sym, &id) {
+            x.parent = Some(new_id.clone());
+        }
+    }
+    super::structure::add_layer(st, sym, l2, index + 1)?;
+    Ok(new_id)
+}

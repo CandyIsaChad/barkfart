@@ -4393,3 +4393,137 @@ fn the_unsaved_marker_follows_the_saved_state() {
     s.command(&json!({"op": "cancel"}));
     assert!(!s.doc.dirty(), "a cancelled drag changes nothing");
 }
+
+#[test]
+fn reset_segment_goes_back_to_how_the_figure_came() {
+    // D7b: a figure added to the project remembers each segment's look
+    let mut s = session();
+    let st = s.command(&json!({"op": "add_figure", "kind": "stickman"}));
+    let fig = st["figures"].as_array().unwrap().last().unwrap()["id"].as_str().unwrap().to_string();
+    let st = s.command(&json!({"op": "select", "layer": fig, "node": "armR1"}));
+    let keys = ["thickness", "segScale", "color", "ownColor", "curve", "shape", "length", "stretchy", "gradient", "outline"];
+    let pick = |st: &Value| keys.iter().map(|k| (k.to_string(), st["selected"][*k].clone())).collect::<Vec<_>>();
+    let came = pick(&st);
+    let d = &st["selected"]["defaults"];
+    assert!(d.is_object(), "an added figure reports its defaults");
+    assert_eq!(d["thickness"], st["selected"]["thickness"]);
+    assert_eq!(d["shape"], st["selected"]["shape"]);
+    s.command(&json!({"op": "segment", "thickness": 77.0}));
+    s.command(&json!({"op": "segment", "color": 0x11aa33ffu32}));
+    s.command(&json!({"op": "segment", "segScale": 2.5, "curve": 40.0, "shape": "circle", "gradient": true, "outline": true}));
+    s.command(&json!({"op": "node", "length": 3.0, "stretchy": true}));
+    let edited = pick(&s.command(&json!({"op": "state"})));
+    assert_ne!(edited, came);
+    let undo_before = s.command(&json!({"op": "state"}))["undo"].clone();
+    let st = s.command(&json!({"op": "reset_segment"}));
+    assert_eq!(pick(&st), came, "every value is back");
+    assert_eq!(st["selected"]["defaults"], *d, "the base itself does not change");
+    // one step
+    let st = s.command(&json!({"op": "undo"}));
+    assert_eq!(st["undo"], undo_before);
+    assert_eq!(pick(&st), edited, "undo brings the edits back");
+    let st = s.command(&json!({"op": "redo"}));
+    assert_eq!(pick(&st), came);
+
+    // edited again, saved and opened: the base comes along
+    s.command(&json!({"op": "segment", "thickness": 5.0}));
+    let text = codec::encode(s.project());
+    let mut t = Session::new(Document::new(codec::decode(&text).unwrap()));
+    let st = t.command(&json!({"op": "select", "layer": fig, "node": "armR1"}));
+    assert_eq!(st["selected"]["defaults"], *d);
+    assert_eq!(codec::encode(t.project()), text, "the base round-trips exactly");
+    let st = t.command(&json!({"op": "reset_segment"}));
+    assert_eq!(pick(&st), came);
+}
+
+#[test]
+fn figures_from_before_d7b_have_no_defaults_and_reset_changes_nothing() {
+    let mut s = session();
+    let st = s.command(&json!({"op": "state"}));
+    let fig = st["figures"][0]["id"].as_str().unwrap().to_string();
+    let st = s.command(&json!({"op": "select", "layer": fig, "node": "armR1"}));
+    assert!(st["selected"]["defaults"].is_null());
+    let undo = st["undo"].clone();
+    let st = s.command(&json!({"op": "reset_segment"}));
+    assert_eq!(st["undo"], undo, "nothing to reset to: no step");
+}
+
+#[test]
+fn an_imported_stick_nodes_figure_remembers_how_it_came() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata/legacy/synthetic/fig-v300b0.nodes");
+    let mut s = session();
+    let st = s.import("fig-v300b0.nodes", &std::fs::read(path).unwrap());
+    let fig = st["selected"]["layer"].as_str().unwrap().to_string();
+    let p = s.project();
+    let f = p.root().unwrap().layer(&fig).unwrap().as_figure().unwrap();
+    let node = f.nodes()[1].id.clone();
+    let st = s.command(&json!({"op": "select", "layer": fig, "node": node}));
+    assert!(st["selected"]["defaults"].is_object());
+    assert_eq!(st["selected"]["defaults"]["thickness"], st["selected"]["thickness"]);
+}
+
+/// Triangles with their colours, in any order (breaking a branch off changes
+/// which layer draws it, not what is drawn).
+fn triangles(s: &Session, frame: i32) -> Vec<Vec<i64>> {
+    let p = s.project();
+    let t = frame as f64 / p.settings.fps as f64;
+    let list = barkfart_core::tess::tessellate(&barkfart_core::eval::evaluate(p, &p.root_symbol, t), None);
+    let mut out: Vec<Vec<i64>> = Vec::new();
+    for b in &list.batches {
+        for (tri, col) in b.xy.chunks(6).zip(b.rgba.chunks(3)) {
+            let mut v: Vec<i64> = tri.iter().map(|x| (x * 100.0).round() as i64).collect();
+            v.extend(col.iter().map(|c| *c as i64));
+            out.push(v);
+        }
+    }
+    out.sort();
+    out
+}
+
+#[test]
+fn breaking_a_branch_off_changes_nothing_on_screen() {
+    let mut s = animated();
+    let before: Vec<_> = (0..4).map(|f| triangles(&s, f)).collect();
+    let text = codec::encode(s.project());
+    s.command(&json!({"op": "frame", "i": 2}));
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    let st = s.command(&json!({"op": "break_off"}));
+    let figs = st["figures"].as_array().unwrap();
+    assert_eq!(figs.len(), 2, "the branch is a figure of its own");
+    let new_id = st["selected"]["layer"].as_str().unwrap().to_string();
+    assert_ne!(new_id, "L2");
+    assert_eq!(st["selected"]["node"], "armR1");
+    assert_eq!(st["selected"]["joinedTo"], figs[0]["name"]);
+    for f in 0..4 {
+        assert_eq!(triangles(&s, f), before[f as usize], "frame {f} looks the same");
+    }
+    // the old figure no longer has the arm
+    let p = s.project();
+    assert!(p.root().unwrap().layer("L2").unwrap().as_figure().unwrap().node("armR1").is_none());
+    // one step, exactly undone and redone (undo keeps the id counter on
+    // purpose, so ids are never reused: compare everything else)
+    let after = codec::encode(s.project());
+    s.command(&json!({"op": "undo"}));
+    let no_counter = |x: &str| x.lines().filter(|l| !l.contains("\"idCounter\"")).collect::<Vec<_>>().join("\n");
+    assert_eq!(no_counter(&codec::encode(s.project())), no_counter(&text));
+    s.command(&json!({"op": "redo"}));
+    assert_eq!(codec::encode(s.project()), after);
+    // saved and opened, it still looks the same
+    let t = Session::new(Document::new(codec::decode(&after).unwrap()));
+    for f in 0..4 {
+        assert_eq!(triangles(&t, f), before[f as usize], "reopened frame {f}");
+    }
+}
+
+#[test]
+fn the_main_joint_cannot_break_off() {
+    let mut s = session();
+    let st = s.command(&json!({"op": "state"}));
+    let fig = st["figures"][0]["id"].as_str().unwrap().to_string();
+    let root = s.project().root().unwrap().layer(&fig).unwrap().as_figure().unwrap().nodes()[0].id.clone();
+    s.command(&json!({"op": "select", "layer": fig, "node": root}));
+    let undo = s.command(&json!({"op": "state"}))["undo"].clone();
+    let st = s.command(&json!({"op": "break_off"}));
+    assert_eq!(st["undo"], undo);
+    assert_eq!(st["figures"].as_array().unwrap().len(), 1);
+}

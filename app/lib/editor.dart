@@ -156,7 +156,27 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   /// The first run (REDESIGN §8): no animations yet.
-  Future<void> _firstRun() => Navigator.of(context).push(PageRouteBuilder<void>(
+  /// The figure a new animation starts with, drawn by the engine (the real
+  /// figure, not a likeness), w x h with transparency around it.
+  Future<ui.Image?> _starterFigureImage(int w, int h) async {
+    final e = _engine;
+    if (e == null) return null;
+    try {
+      final bytes = (await rootBundle.load('assets/stock/figures/Stickfigure.nodes')).buffer.asUint8List();
+      final px = e.renderFile('Stickfigure.nodes', bytes, w, h);
+      if (px == null) return null;
+      final c = Completer<ui.Image>();
+      ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, c.complete);
+      return await c.future;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _firstRun() async {
+    final figure = await _starterFigureImage(280, 400);
+    if (!mounted) return;
+    await Navigator.of(context).push(PageRouteBuilder<void>(
         transitionDuration: const Duration(milliseconds: 120),
         pageBuilder: (c, a1, a2) => Scaffold(
           backgroundColor: cPanel,
@@ -184,7 +204,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 child: Center(
                   child: SingleChildScrollView(
                     child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      const SizedBox(width: 140, height: 200, child: CustomPaint(painter: _WavePainter())),
+                      SizedBox(width: 140, height: 200, child: figure == null ? null : RawImage(image: figure, fit: BoxFit.contain, filterQuality: FilterQuality.medium)),
                       const SizedBox(height: 10),
                       const Text('No animations yet', style: TextStyle(color: cText, fontSize: 20, fontWeight: FontWeight.w700)),
                       const SizedBox(height: 4),
@@ -201,6 +221,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           ),
         ),
       ));
+  }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState s) {
@@ -2084,6 +2105,22 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                   ]),
                 ),
         ),
+        // D7b: the loud reset, pinned while the Segment page is in front and
+        // the segment differs from how its figure came
+        if (!_playing && names[current] == 'Segment Tools' && _sel != null && _segAnyChanged(_sel!))
+          Container(
+            decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFFE6E8EB)))),
+            padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+            child: kit.WordButton(_sel!['defaults'] is Map ? 'Reset this segment' : 'Reset thickness and length', onTap: () {
+              if (_sel!['defaults'] is Map) {
+                _cmd({'op': 'reset_segment'});
+              } else {
+                final d = _segDefaults(_sel!);
+                _cmd({'op': 'segment', 'thickness': d['thickness']});
+                if (d['length'] != null) _cmd({'op': 'node', 'length': d['length']});
+              }
+            }, filled: true, danger: true, expand: true, height: 38),
+          ),
         // export progress (until the Export sheet shows it, B5)
         if (_status.isNotEmpty)
           Container(
@@ -2905,62 +2942,44 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   /// Segment Tools: gradient, segment scale, the shape's own options and
   /// angle lock (not keyed: they belong to the segment, like its colour).
-  List<Widget> _segmentLook(Map<String, dynamic> sel) {
-    void seg(Map<String, Object?> m) => _cmd({'op': 'segment', ...m});
-    final shape = sel['shape'] as String? ?? 'line';
-    final grad = sel['gradient'] == true;
-    final scale = (sel['segScale'] as num?)?.toDouble() ?? 1;
-    final curve = (sel['curve'] as num?)?.toDouble() ?? 0;
-    final sides = (sel['sides'] as num?)?.toInt() ?? 5;
-    final right = (sel['rightTriangle'] as num?)?.toInt() ?? 0;
-    final half = (sel['halfArc'] as num?)?.toInt() ?? 0;
-    final lock = (sel['angleLock'] as num?)?.toInt() ?? 0;
-    return [
-      _Toggle('Use gradient colour', grad, (v) => seg({'gradient': v})),
-      if (grad) ...[
-        _swatches((sel['gradientColor'] as num?)?.toInt() ?? 0x808080ff, (c) => seg({'gradientColor': c})),
-        _Toggle('Reverse gradient', sel['gradientReverse'] == true, (v) => seg({'gradientReverse': v})),
-        _Toggle('Sideways gradient', sel['gradientSideways'] == true, (v) => seg({'gradientSideways': v})),
-      ],
-      _gap,
-      _Toggle('Use segment scale', (scale - 1).abs() > 1e-3, (v) => seg({'segScale': v ? 1.5 : 1.0})),
-      if ((scale - 1).abs() > 1e-3) _stepper('Segment scale', scale.toStringAsFixed(2), () => seg({'segScale': math.max(0.05, scale - 0.05)}), () => seg({'segScale': scale + 0.05})),
-      _gap,
-      if (shape == 'line' || shape == 'square' || shape == 'trapezoid')
-        _stepper('Curve radius', curve.round().toString(), () => seg({'curve': curve - 5}), () => seg({'curve': curve + 5})),
-      if (shape == 'trapezoid') ...[
-        _stepper('End thickness', '${(((sel['trapRatio'] as num?) ?? 1) * 100).round()}%', () => seg({'trapRatio': math.max(0, ((sel['trapRatio'] as num?) ?? 1) - 0.1)}), () => seg({'trapRatio': ((sel['trapRatio'] as num?) ?? 1) + 0.1})),
-        _Toggle('Start rounded', sel['trapRoundStart'] == true, (v) => seg({'trapRoundStart': v})),
-        _Toggle('End rounded', sel['trapRoundEnd'] == true, (v) => seg({'trapRoundEnd': v})),
-      ],
-      if (shape == 'circle' || shape == 'ellipse') ...[
-        _Toggle('Half arc', half != 0, (v) => seg({'halfArc': v ? 1 : 0})),
-        if (half != 0) _Toggle('Upside down', half < 0, (v) => seg({'halfArc': v ? -1 : 1})),
-      ],
-      if (shape == 'circle') ...[
-        _Toggle('Circle outline colour', sel['outline'] == true, (v) => seg({'outline': v})),
-        if (sel['outline'] == true) ...[
-          _swatches((sel['outlineColor'] as num?)?.toInt() ?? 0x000000ff, (c) => seg({'outlineColor': c})),
-          _Toggle('Is hollow', sel['hollow'] == true, (v) => seg({'hollow': v})),
-        ],
-      ],
-      if (shape == 'triangle') ...[
-        _Toggle('Right triangle', right != 0, (v) => seg({'rightTriangle': v ? 1 : 0})),
-        if (right != 0) _Toggle('Flipped', right < 0, (v) => seg({'rightTriangle': v ? -1 : 1})),
-        _Toggle('Upside down', sel['upsideDown'] == true, (v) => seg({'upsideDown': v})),
-      ],
-      if (shape == 'polygon') _stepper('Vertices', '$sides', () => seg({'sides': math.max(3, sides - 1)}), () => seg({'sides': sides + 1})),
-      _gap,
-      _label('Angle lock'),
-      _Segmented(const ['None', 'Absolute', 'Relative'], lock, (i) => seg({'angleLock': i})),
-      _gap,
-    ];
+  /// Break off (D3): the selected joint and everything below it become a
+  /// figure of their own, joined where they were. Nothing moves.
+  void _breakOff() {
+    final before = _sel?['layer'];
+    final st = _cmd({'op': 'break_off'});
+    final now = (st?['selected'] as Map?)?['layer'];
+    if (now == null || now == before) return; // the engine said why
+    kit.showToast(context, 'That limb is its own figure now, joined where it was.', light: true, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
+  }
+
+  /// The selected segment's values next to how its figure came (D7b):
+  /// `defaults` from the engine; figures from before D7b have none, and then
+  /// only thickness (32) and length (the made-with length) compare (D7a).
+  Map<String, dynamic> _segDefaults(Map<String, dynamic> sel) {
+    final d = sel['defaults'];
+    if (d is Map) return Map<String, dynamic>.from(d);
+    final rest = (sel['restLength'] as num?)?.toDouble() ?? 0;
+    return {'thickness': 32, if (rest > 0) 'length': rest};
+  }
+
+  bool _segChanged(Map<String, dynamic> sel, Map<String, dynamic> d, String k) {
+    if (!d.containsKey(k)) return false;
+    final a = sel[k], b = d[k];
+    if (a is num && b is num) return (a - b).abs() > 0.01;
+    return a != b;
+  }
+
+  /// Every value that differs from how the segment came.
+  bool _segAnyChanged(Map<String, dynamic> sel) {
+    if (sel['root'] == true) return false;
+    final d = _segDefaults(sel);
+    return d.keys.any((k) => _segChanged(sel, d, k));
   }
 
   /// Segment Tools as rows (D15; REDESIGN §4 Segment page). A value that
-  /// differs from its default shows a small dot; swiping its row offers the
-  /// reset (D11). Until the engine reports every file default (D7b), only
-  /// thickness (32) and length (the rest length) can be reset.
+  /// differs from how the figure came shows a small dot; swiping its row (or
+  /// right-clicking it) offers the reset (D11). "Reset this segment" is pinned
+  /// under the card while anything differs.
   List<Widget> _segmentTools(Map<String, dynamic> sel) {
     final root = sel['root'] == true;
     if (root) {
@@ -2972,37 +2991,83 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           rw.renderDesc(d),
       ];
     }
+    void seg(Map<String, Object?> m) => _cmd({'op': 'segment', ...m});
+    final d = _segDefaults(sel);
+    bool ch(String k) => _segChanged(sel, d, k);
+    String onOff(Object? v) => v == true ? 'on' : 'off';
+    // the reset for one value: "Reset to 32", "Reset to off"
+    rw.DReset? reset(String k, String label, Map<String, Object?> cmd) => ch(k) ? rw.DReset('Reset to $label', () => _cmd(cmd)) : null;
+    rw.DReset? resetSeg(String k, [String? label]) => reset(k, label ?? (d[k] is bool ? onOff(d[k]) : '${d[k]}'), {'op': 'segment', k: d[k]});
+    rw.DTick tick(String label, String k) => rw.DTick(label, sel[k] == true, onChanged: (v) => seg({k: v}), changed: ch(k), reset: resetSeg(k));
+    String hex(Object? c) => '#${(((c as num?)?.toInt() ?? 0) >> 8).toRadixString(16).padLeft(6, '0').toUpperCase()}';
+
     final thick = (sel['thickness'] as num?)?.toDouble() ?? 0;
     final len = (sel['length'] as num?)?.toDouble() ?? 0;
-    // the length the segment was made with
-    final rest = (sel['restLength'] as num?)?.toDouble() ?? 0;
-    final thickChanged = thick != 32, lenChanged = rest > 0 && (len - rest).abs() > 0.01;
+    final shape = sel['shape'] as String? ?? 'line';
+    final grad = sel['gradient'] == true;
+    final scale = (sel['segScale'] as num?)?.toDouble() ?? 1;
+    final curve = (sel['curve'] as num?)?.toDouble() ?? 0;
+    final sides = (sel['sides'] as num?)?.toInt() ?? 5;
+    final right = (sel['rightTriangle'] as num?)?.toInt() ?? 0;
+    final half = (sel['halfArc'] as num?)?.toInt() ?? 0;
+    final lock = (sel['angleLock'] as num?)?.toInt() ?? 0;
+    final trap = ((sel['trapRatio'] as num?) ?? 1).toDouble();
     final own = sel['ownColor'] == true;
     final rows = <rw.Desc>[
       rw.DButtons('Flip sideways', () => _cmd({'op': 'flip_branch', 'h': true}), b: 'Flip over', onB: () => _cmd({'op': 'flip_branch', 'h': false})),
       const rw.DTitle('Size'),
       rw.DStep('Thickness', thick.round().toString(),
-          onMinus: () => _cmd({'op': 'segment', 'thickness': math.max(0, thick - 2)}),
-          onPlus: () => _cmd({'op': 'segment', 'thickness': thick + 2}),
-          changed: thickChanged,
-          reset: thickChanged ? rw.DReset('Reset to 32', () => _cmd({'op': 'segment', 'thickness': 32})) : null),
+          onMinus: () => seg({'thickness': math.max(0, thick - 2)}), onPlus: () => seg({'thickness': thick + 2}), changed: ch('thickness'), reset: reset('thickness', '${(d['thickness'] as num?)?.round()}', {'op': 'segment', 'thickness': d['thickness']})),
       rw.DStep('Length', len.round().toString(),
-          onMinus: () => _cmd({'op': 'node', 'length': math.max(0, len - 5)}),
-          onPlus: () => _cmd({'op': 'node', 'length': len + 5}),
-          changed: lenChanged,
-          reset: lenChanged ? rw.DReset('Reset to ${rest.round()}', () => _cmd({'op': 'node', 'length': rest})) : null),
-      if (thickChanged || lenChanged) const rw.DHint('Swipe a row with a dot (or right-click it) to reset it.'),
-      for (final w in _segmentLook(sel)) rw.DWidget(w),
+          onMinus: () => _cmd({'op': 'node', 'length': math.max(0, len - 5)}), onPlus: () => _cmd({'op': 'node', 'length': len + 5}), changed: ch('length'), reset: reset('length', '${(d['length'] as num?)?.round()}', {'op': 'node', 'length': d['length']})),
+      rw.DTick('Use segment scale', (scale - 1).abs() > 1e-3, onChanged: (v) => seg({'segScale': v ? 1.5 : 1.0}), changed: ch('segScale'), reset: resetSeg('segScale')),
+      if ((scale - 1).abs() > 1e-3) rw.DStep('Segment scale', scale.toStringAsFixed(2), onMinus: () => seg({'segScale': math.max(0.05, scale - 0.05)}), onPlus: () => seg({'segScale': scale + 0.05}), changed: ch('segScale'), reset: resetSeg('segScale')),
+      if (shape == 'line' || shape == 'square' || shape == 'trapezoid') rw.DStep('Curve radius', curve.round().toString(), onMinus: () => seg({'curve': curve - 5}), onPlus: () => seg({'curve': curve + 5}), changed: ch('curve'), reset: resetSeg('curve', '${(d['curve'] as num?)?.round()}')),
+      if (shape == 'trapezoid') ...[
+        rw.DStep('End thickness', '${(trap * 100).round()}%', onMinus: () => seg({'trapRatio': math.max(0, trap - 0.1)}), onPlus: () => seg({'trapRatio': trap + 0.1}), changed: ch('trapRatio'), reset: resetSeg('trapRatio', '${(((d['trapRatio'] as num?) ?? 1) * 100).round()}%')),
+        tick('Start rounded', 'trapRoundStart'),
+        tick('End rounded', 'trapRoundEnd'),
+      ],
+      if (shape == 'circle' || shape == 'ellipse') ...[
+        rw.DTick('Half arc', half != 0, onChanged: (v) => seg({'halfArc': v ? 1 : 0}), changed: ch('halfArc'), reset: resetSeg('halfArc', d['halfArc'] == 0 ? 'off' : 'on')),
+        if (half != 0) rw.DTick('Upside down', half < 0, onChanged: (v) => seg({'halfArc': v ? -1 : 1}), changed: ch('halfArc')),
+      ],
+      if (shape == 'triangle') ...[
+        rw.DTick('Right triangle', right != 0, onChanged: (v) => seg({'rightTriangle': v ? 1 : 0}), changed: ch('rightTriangle'), reset: resetSeg('rightTriangle', d['rightTriangle'] == 0 ? 'off' : 'on')),
+        if (right != 0) rw.DTick('Flipped', right < 0, onChanged: (v) => seg({'rightTriangle': v ? -1 : 1}), changed: ch('rightTriangle')),
+        tick('Upside down', 'upsideDown'),
+      ],
+      if (shape == 'polygon') rw.DStep('Vertices', '$sides', onMinus: () => seg({'sides': math.max(3, sides - 1)}), onPlus: () => seg({'sides': sides + 1}), changed: ch('sides'), reset: resetSeg('sides')),
       const rw.DTitle('Colour'),
-      rw.DTick('Own colour', own, onChanged: (v) => _cmd({'op': 'segment', 'ownColor': v})),
-      rw.DWidget(Opacity(opacity: own ? 1 : 0.4, child: _swatches((sel['color'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'segment', 'color': c})))),
+      tick('Own colour', 'ownColor'),
+      rw.DWidget(Opacity(opacity: own ? 1 : 0.4, child: _swatches((sel['color'] as num?)?.toInt() ?? 0xff, (c) => seg({'color': c}))),
+          changed: own && ch('color'), reset: own && ch('color') ? rw.DReset('Reset to ${hex(d['color'])}', () => seg({'color': d['color']})) : null),
       const rw.DHint('On: this segment keeps its own colour. Off: it follows the stickfigure colour.'),
+      tick('Use gradient colour', 'gradient'),
+      if (grad) ...[
+        rw.DWidget(_swatches((sel['gradientColor'] as num?)?.toInt() ?? 0x808080ff, (c) => seg({'gradientColor': c})),
+            changed: ch('gradientColor'), reset: ch('gradientColor') ? rw.DReset('Reset to ${hex(d['gradientColor'])}', () => seg({'gradientColor': d['gradientColor']})) : null),
+        tick('Reverse gradient', 'gradientReverse'),
+        tick('Sideways gradient', 'gradientSideways'),
+      ],
+      if (shape == 'circle') ...[
+        tick('Circle outline colour', 'outline'),
+        if (sel['outline'] == true) ...[
+          rw.DWidget(_swatches((sel['outlineColor'] as num?)?.toInt() ?? 0x000000ff, (c) => seg({'outlineColor': c})),
+              changed: ch('outlineColor'), reset: ch('outlineColor') ? rw.DReset('Reset to ${hex(d['outlineColor'])}', () => seg({'outlineColor': d['outlineColor']})) : null),
+          tick('Is hollow', 'hollow'),
+        ],
+      ],
       const rw.DTitle('Movement'),
-      rw.DTick('Is stretchy', sel['stretchy'] == true, onChanged: (v) => _cmd({'op': 'node', 'stretchy': v})),
+      rw.DTick('Is stretchy', sel['stretchy'] == true, onChanged: (v) => _cmd({'op': 'node', 'stretchy': v}), changed: ch('stretchy'), reset: reset('stretchy', onOff(d['stretchy']), {'op': 'node', 'stretchy': d['stretchy']})),
       rw.DTick('Lock node', sel['pinned'] == true, onChanged: (v) => _cmd({'op': 'pin', 'v': v})),
       rw.DTick('Drag lock', sel['dragLock'] == true, onChanged: (v) => _cmd({'op': 'node', 'dragLock': v})),
+      rw.DSeg(const ['None', 'Absolute', 'Relative'], lock, label: 'Angle lock', onSelect: (i) => seg({'angleLock': i})),
+      // D3 / F1: the limb becomes its own figure, joined where it was
+      rw.DButtons('Break off as a figure', _breakOff),
+      if (_segAnyChanged(sel)) const rw.DHint('A dot marks a value that differs from how the figure came. Swipe its row (or right-click it) to reset it.'),
     ];
-    return [for (final d in rows) rw.renderDesc(d)];
+    return [for (final r in rows) rw.renderDesc(r)];
   }
 
 
@@ -3911,35 +3976,6 @@ Shader _checker() {
     _checkerTile = rec.endRecording().toImageSync(16, 16);
   }
   return ImageShader(_checkerTile!, TileMode.repeated, TileMode.repeated, Matrix4.identity().storage);
-}
-
-/// A waving stick figure for the first run, in the stock colours.
-class _WavePainter extends CustomPainter {
-  const _WavePainter();
-  @override
-  void paint(Canvas canvas, Size size) {
-    final k = size.height / 330;
-    canvas.scale(k);
-    Paint pen(Color c, double w) => Paint()
-      ..color = c
-      ..strokeWidth = w
-      ..strokeCap = StrokeCap.round;
-    const skin = Color(0xFFEDB98A), shirt = Color(0xFF9B1C2E), pants = Color(0xFF2A2B30);
-    void bar(double x1, double y1, double x2, double y2, Color c, double w) => canvas.drawLine(Offset(x1, y1), Offset(x2, y2), pen(c, w));
-    bar(70, 175, 52, 245, pants, 15);
-    bar(52, 245, 46, 318, skin, 13);
-    bar(70, 175, 88, 245, pants, 15);
-    bar(88, 245, 94, 318, skin, 13);
-    bar(70, 95, 70, 175, shirt, 18);
-    bar(70, 100, 40, 140, shirt, 13);
-    bar(40, 140, 32, 182, skin, 12);
-    bar(70, 100, 104, 72, shirt, 13);
-    bar(104, 72, 118, 28, skin, 12);
-    canvas.drawCircle(const Offset(70, 62), 28, Paint()..color = skin);
-  }
-
-  @override
-  bool shouldRepaint(_WavePainter old) => false;
 }
 
 class _Overlay extends CustomPainter {

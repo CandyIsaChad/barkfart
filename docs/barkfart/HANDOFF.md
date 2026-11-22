@@ -33,11 +33,9 @@ Tick items there as they finish.
 - Scripted editor runs as before. The new script command is `savesheet`.
 - The window is capped at the screen size (about 1300x700).
 
-**Next:** D7b (engine: a figure's base from its file, a `reset_segment` op, then dots and swipes for every Segment value and the pinned "Reset this segment"; plan below). Then section F. (Watermark and Make vertical are in the Export sheet now: script `exportfull`.)
-- Done: A1–A6, B1–B6, C1–C8, D1–D6, D7a, E1–E3. D2 (the Movieclip page) is written but not yet seen on screen.
+**Next:** F2 (Hold or Tween per key, read by the evaluator). F1 is done: `break_off` (Segment page › Break off as a figure).
+- Done: A1–A6, B1–B6, C1–C8, D1–D7b, E1–E3. D2 (the Movieclip page) is written but not yet seen on screen. D7b: `reset_segment`, `selected.defaults` and `Figure::base` (FORMAT.md); the first-run figure is the engine's render of Stickfigure.nodes (D22).
 - Home script commands: `firstrun`, `projectsscreen`, `backups`, `makeprojects N` (copies the open save N times). Saving writes a picture to `.thumbs/<name>.png`.
-
-**If the tree is dirty with D7b engine changes, that work was cut off unfinished.** Run `cd engine && cargo test -q --workspace` before keeping any of it.
 
 **D7b plan (engine).** Decided 2026-11-23: the base sits on `Figure` (`base: Option<Arc<IndexMap<node id, NodeBase>>>`), filled only by the entry ops (library add, importFile, paste). Native files save it when present; files without it load with `None`, and the page then falls back to D7a's defaults. No equality tricks. Figures don't remember their source file today: only
 `Node::rest_length` keeps the made-with length.

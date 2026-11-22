@@ -249,6 +249,40 @@ fn read_stack(m: &Obj, st: &mut EffectStack, owner: &str) -> R<()> {
     Ok(())
 }
 
+/// One segment's base (D7b; FORMAT.md "base").
+fn node_base(m: &Obj) -> R<NodeBase> {
+    let col = |k: &str, def: Color| -> R<Color> { str_(m, k)?.map(parse_color).unwrap_or(Ok(def)) };
+    Ok(NodeBase {
+        shape: match str_(m, "shape")? {
+            None => Shape::Line,
+            Some(s) => Shape::from_name(s).ok_or_else(|| FormatError(format!("shape {s}")))?,
+        },
+        length: f(m, "length", 0.0)?,
+        thickness: f(m, "thickness", 10.0)?,
+        scale: f(m, "scale", 1.0)?,
+        color: col("color", Color::BLACK)?,
+        own_color: b(m, "ownColor", false)?,
+        curve: f(m, "curve", 0.0)?,
+        is_static: b(m, "static", false)?,
+        stretchy: b(m, "stretchy", false)?,
+        smart_stretch: b(m, "smartStretch", false)?,
+        gradient: b(m, "gradient", false)?,
+        gradient_color: col("gradientColor", Color::WHITE)?,
+        gradient_reverse: b(m, "gradientReverse", false)?,
+        gradient_sideways: b(m, "gradientSideways", false)?,
+        circle_outline: b(m, "outline", false)?,
+        outline_color: col("outlineColor", Color::BLACK)?,
+        circle_hollow: b(m, "hollow", false)?,
+        half_arc: i(m, "halfArc", 0)?,
+        polygon_sides: i(m, "sides", 0)?,
+        trapezoid_ratio: f(m, "trapezoidRatio", 1.0)?,
+        trapezoid_round_start: b(m, "roundStart", false)?,
+        trapezoid_round_end: b(m, "roundEnd", false)?,
+        right_triangle: i(m, "rightTriangle", 0)?,
+        triangle_upside_down: b(m, "upsideDown", false)?,
+    })
+}
+
 fn node(layer_id: &str, m: &Obj) -> R<Node> {
     let shape = match str_(m, "shape")? {
         None => Shape::Line,
@@ -323,6 +357,14 @@ fn layer(m: &Obj) -> R<Layer> {
                 pf.use_own_color = b(pm, "ownColor", false)?;
                 read_prop(pm, "color", &mut pf.color)?;
                 fig.polyfills.push(pf);
+            }
+            if m.contains_key("base") {
+                let mut base = indexmap::IndexMap::new();
+                for o in list(m, "base")? {
+                    let bm = as_map(o, "base")?;
+                    base.insert(req(bm, "id")?.to_string(), node_base(bm)?);
+                }
+                fig.base = Some(std::sync::Arc::new(base));
             }
             l
         }
@@ -822,6 +864,36 @@ fn node_json(n: &Node) -> Json {
     m.done()
 }
 
+fn node_base_json(id: &str, nb: &NodeBase) -> Json {
+    let mut m = JObj::new();
+    m.put("id", json::s(id))
+        .put("shape", json::s(nb.shape.name()))
+        .put("length", json::f32(nb.length))
+        .put("thickness", json::f32(nb.thickness))
+        .put("scale", json::f32(nb.scale))
+        .put("color", color_hex(&nb.color))
+        .put("ownColor", Json::Bool(nb.own_color))
+        .put("curve", json::f32(nb.curve))
+        .put("static", Json::Bool(nb.is_static))
+        .put("stretchy", Json::Bool(nb.stretchy))
+        .put("smartStretch", Json::Bool(nb.smart_stretch))
+        .put("gradient", Json::Bool(nb.gradient))
+        .put("gradientColor", color_hex(&nb.gradient_color))
+        .put("gradientReverse", Json::Bool(nb.gradient_reverse))
+        .put("gradientSideways", Json::Bool(nb.gradient_sideways))
+        .put("outline", Json::Bool(nb.circle_outline))
+        .put("outlineColor", color_hex(&nb.outline_color))
+        .put("hollow", Json::Bool(nb.circle_hollow))
+        .put("halfArc", json::int(nb.half_arc as i64))
+        .put("sides", json::int(nb.polygon_sides as i64))
+        .put("trapezoidRatio", json::f32(nb.trapezoid_ratio))
+        .put("roundStart", Json::Bool(nb.trapezoid_round_start))
+        .put("roundEnd", Json::Bool(nb.trapezoid_round_end))
+        .put("rightTriangle", json::int(nb.right_triangle as i64))
+        .put("upsideDown", Json::Bool(nb.triangle_upside_down));
+    m.done()
+}
+
 fn layer_json(l: &Layer) -> Json {
     let mut m = JObj::new();
     m.put("id", json::s(&l.id))
@@ -884,6 +956,9 @@ fn layer_json(l: &Layer) -> Json {
             m.put("polyfills", Json::List(fills));
             if let Some(c) = f.color {
                 m.put("figureColor", json::s(&format!("#{:08x}", c.to_rgba8888())));
+            }
+            if let Some(base) = &f.base {
+                m.put("base", Json::List(base.iter().map(|(id, nb)| node_base_json(id, nb)).collect()));
             }
         }
         LayerKind::Sprite(s) => {

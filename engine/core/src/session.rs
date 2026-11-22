@@ -122,7 +122,15 @@ pub fn new_editor_project_with(name: &str, figure: &[u8]) -> Project {
         r.layers.clear();
     }
     match crate::import::import_file(&mut p, name, figure) {
-        Ok(_) => p,
+        Ok(_) => {
+            // the starter figure can be reset to how it came (D7b)
+            if let Some(r) = p.root_mut() {
+                for l in r.layers.iter_mut() {
+                    std::sync::Arc::make_mut(l).capture_base();
+                }
+            }
+            p
+        }
         Err(_) => backup,
     }
 }
@@ -136,6 +144,10 @@ pub fn new_editor_project() -> Project {
     p.settings.height = 1080;
     if let Some(r) = p.root_mut() {
         r.duration = 0.1;
+        // the starter figure can be reset to how it came (D7b)
+        for l in r.layers.iter_mut() {
+            std::sync::Arc::make_mut(l).capture_base();
+        }
     }
     p
 }
@@ -1161,6 +1173,7 @@ impl Session {
                         }
                     };
                     l.name = Some(if kind == "stickman" { format!("Figure {n}") } else { format!("{name} {n}") });
+                    l.capture_base();
                     // offset so it does not sit exactly on the last one
                     // side by side: left, right, further left, further right ...
                     let k = (n as i32) / 2;
@@ -1399,6 +1412,16 @@ impl Session {
                     self.step("Flip branch", |s| figure_ops::flip_branch(s, &sym, &l, &n, h, t));
                 }
             }
+            "break_off" => {
+                // D3 / F1: the selected joint's branch becomes its own figure,
+                // joined where it was (one step); the new figure is selected
+                if let Some((l, n)) = self.selected.clone() {
+                    if let Some(id) = self.step("Break off", |s| crate::edit::join_ops::break_off(s, &sym, &l, &n)) {
+                        self.selected = Some((id, n));
+                        self.rev += 1;
+                    }
+                }
+            }
             "pin" => {
                 if let Some((l, n)) = self.selected.clone() {
                     let on = b("v");
@@ -1607,6 +1630,56 @@ impl Session {
                         if let Some(v) = c2["dragLock"].as_bool() {
                             node.drag_lock = if v { crate::edit::canvas::DRAG_HORIZONTAL | crate::edit::canvas::DRAG_VERTICAL } else { 0 };
                         }
+                        Ok(())
+                    });
+                }
+            }
+            "reset_segment" => {
+                // "Reset this segment" (D7b): every look value of the selected
+                // segment back to how its figure came into the project, and its
+                // length on this frame back to the made-with length. One step.
+                if let Some((l, n)) = self.selected.clone() {
+                    let ed = self.tools.editor.clone();
+                    self.step("Reset segment", move |s| {
+                        let (base, len_id) = {
+                            let Some(f) = s.project.root().and_then(|r| r.layer(&l)).and_then(|x| x.as_figure()) else { return crate::edit::fail("no figure") };
+                            let Some(node) = f.node(&n) else { return crate::edit::fail("no segment") };
+                            let Some(b) = f.base_of(&n) else { return crate::edit::fail("This figure came from an older project, so there is nothing to reset it to.") };
+                            (b.clone(), node.length.id.clone())
+                        };
+                        ed.change_in(s, &len_id, Value::F(base.length), t)?;
+                        let Some(layer) = s.project.layer_mut(&sym, &l) else { return crate::edit::fail("no figure") };
+                        let LayerKind::Figure(fig) = &mut layer.kind else { return crate::edit::fail("not a figure") };
+                        let fig_color = figure_ops::figure_color(fig);
+                        let Some(node) = fig.node_mut(&n) else { return crate::edit::fail("no segment") };
+                        node.shape = base.shape;
+                        set_static(&mut node.thickness, Value::F(base.thickness));
+                        set_static(&mut node.scale, Value::F(base.scale));
+                        if base.own_color {
+                            set_static(&mut node.color, Value::C(base.color));
+                            node.own_color = true;
+                        } else {
+                            use_own_color(node, false, fig_color);
+                        }
+                        node.legacy_extras.shift_remove(KEPT_OWN_COLOR);
+                        node.curve = base.curve;
+                        node.is_static = base.is_static;
+                        node.stretchy = base.stretchy;
+                        node.smart_stretch = base.smart_stretch;
+                        node.gradient = base.gradient;
+                        set_static(&mut node.gradient_color, Value::C(base.gradient_color));
+                        node.gradient_reverse = base.gradient_reverse;
+                        node.gradient_sideways = base.gradient_sideways;
+                        node.circle_outline = base.circle_outline;
+                        set_static(&mut node.outline_color, Value::C(base.outline_color));
+                        node.circle_hollow = base.circle_hollow;
+                        node.half_arc = base.half_arc;
+                        node.polygon_sides = base.polygon_sides;
+                        node.trapezoid_ratio = base.trapezoid_ratio;
+                        node.trapezoid_round_start = base.trapezoid_round_start;
+                        node.trapezoid_round_end = base.trapezoid_round_end;
+                        node.right_triangle = base.right_triangle;
+                        node.triangle_upside_down = base.triangle_upside_down;
                         Ok(())
                     });
                 }
@@ -2297,6 +2370,10 @@ impl Session {
             let added: Vec<String> = s.project.root().map(|r| r.layers.iter().filter(|l| !before.contains(&l.id)).map(|l| l.id.clone()).collect()).unwrap_or_default();
             for id in &added {
                 only_on_frame(s, &sym, id, fr_now);
+                // an imported figure remembers how it came (D7b)
+                if let Some(l) = s.project.layer_mut(&sym, id) {
+                    l.capture_base();
+                }
             }
             Ok((got.layer, got.message))
         });
@@ -2440,6 +2517,15 @@ impl Session {
                 "segScale": round2(r.f(&node.scale, t)), "curve": round2(node.curve), "outline": node.circle_outline, "outlineColor": color_of(&mut r, &node.outline_color, t),
                 "hollow": node.circle_hollow, "halfArc": node.half_arc, "sides": node.polygon_sides, "trapRatio": round2(node.trapezoid_ratio), "trapRoundStart": node.trapezoid_round_start, "trapRoundEnd": node.trapezoid_round_end, "rightTriangle": node.right_triangle, "upsideDown": node.triangle_upside_down, "angleLock": node.angle_lock,
                 "stretchy": node.stretchy, "ownColor": node.own_color,
+                // how the segment came (D7b), for changed-dots and resets; absent
+                // for figures from before D7b
+                "defaults": f.base_of(n).map(|b| json!({
+                    "shape": shape_name(b.shape), "length": round2(b.length), "thickness": b.thickness, "segScale": round2(b.scale), "color": b.color.to_rgba8888(),
+                    "ownColor": b.own_color, "curve": round2(b.curve), "static": b.is_static, "stretchy": b.stretchy, "smart": b.smart_stretch,
+                    "gradient": b.gradient, "gradientColor": b.gradient_color.to_rgba8888(), "gradientReverse": b.gradient_reverse, "gradientSideways": b.gradient_sideways,
+                    "outline": b.circle_outline, "outlineColor": b.outline_color.to_rgba8888(), "hollow": b.circle_hollow, "halfArc": b.half_arc, "sides": b.polygon_sides,
+                    "trapRatio": round2(b.trapezoid_ratio), "trapRoundStart": b.trapezoid_round_start, "trapRoundEnd": b.trapezoid_round_end, "rightTriangle": b.right_triangle, "upsideDown": b.triangle_upside_down,
+                })),
                 "connector": node.legacy_extras.get(crate::eval::pose::CONNECT_TO).map(|to| {
                     let num = |k: &str, d: f64| node.legacy_extras.get(k).and_then(|v| v.split_once(':')).and_then(|(_, x)| x.parse::<f64>().ok()).unwrap_or(d);
                     json!({"to": to.trim_start_matches("s:"), "percent": num("C.cPercent", 0.5), "reversed": num("C.cReversed", 0.0) != 0.0})
