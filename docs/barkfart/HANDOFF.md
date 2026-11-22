@@ -29,25 +29,31 @@ original's UI, control by control) before changing anything.
 - Keep changes small; one commit per feature.
 
 ## Status
-Done and reviewed so far: everything ticked in docs/barkfart/GAPS.md.
+Done and reviewed so far: everything ticked in docs/barkfart/GAPS.md (the
+2026-11-22 handoff tasks, Modify branch and Outline selection, were
+reviewed; the outline now follows the shape, drawn by the engine).
 
 ## Tasks, in order (stop after these; do not start other GAPS items)
-1. **Modify branch window** (figure editor, reference 12.5 "Modify Node
-   Branch"). A button "Modify branch…" in the figure editor panel
-   (`_builder` in app/lib/editor.dart) opens a window whose rows each have
-   their own Set button and apply one property to the selected joint and
-   everything below it: segment colour, thickness, shape, static, scale of
-   the lengths. The engine already has `figure_ops::modify_branch` with
-   `BranchChange::{Static, Thickness, Color, Shape, ScaleLength}` and the
-   session command `{"op":"segment","branch":true,...}` (extend it for
-   ScaleLength). Add stretchy (`BranchChange::Stretchy`) the same way. One
-   undo step per Set. Test in engine/core/tests/session.rs.
-2. **Outline selection** (View options, reference 8.6): a switch (kept
-   like the other View options in `AppSettings`, app/lib/files.dart) that
-   draws a thin outline box around the selected figure's joints in
-   `_Overlay` (the handles of the selected figure have flag bit 4 = 1 << 2).
+1. **Background image in the figure editor** (reference 12, "Load BG
+   image... / Clear BG image"): a picture from the Barkfart Images folder
+   (`imageFiles()` in app/lib/files.dart) shown faintly behind the figure
+   being edited, view only, never saved. The stage render is
+   `bf_render_view` in engine/ffi/src/lib.rs; the figure editor's trace
+   ghost (`tess::trace_ghost`, `Session::trace`) shows how a view-only
+   underlay is added. Textures for images come from the project's assets,
+   so look at how sprites get theirs before choosing an approach.
 
 ## Design rules learned since (keep to them)
+- `cargo test -q --workspace` must print no `error` and no `FAILED`: a
+  compile error in one test target stops cargo before the other suites.
+- The Java reference comparisons (tests edit.rs, legacy.rs, reference.rs)
+  must stay byte-identical. Barkfart-only behaviour goes in the session
+  or behind a switch (e.g. `CanvasTools::layer_handles`), never into
+  functions the Java tests call (`figure_ops::modify_branch`,
+  `CanvasTools::handles` defaults).
+- While a movieclip is edited, the project's root symbol is the
+  movieclip's (`Session::main_root` keeps the animation's); saving always
+  writes the main one.
 - The camera layer holds the per-frame settings: background colour and
   gradient, frame delay, repeat. They are keyed (HOLD) on their own frame
   and read as the exact key there (no key = 0); a project without a camera
