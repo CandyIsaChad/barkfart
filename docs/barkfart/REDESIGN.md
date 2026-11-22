@@ -442,7 +442,7 @@ and tests are never weakened.
 - [x] D2. Movieclip. (Not yet seen on screen: a scripted run could not select a movieclip; check it with one placed from the + menu.)
 - [x] D3. Text.
 - [x] D4. Camera.
-- [ ] D5. Frame.
+- [x] D5. Frame.
 - [ ] D6. Stickfigure.
 - [ ] D7. Segment, with changed-dots and swipe-to-reset. The engine
   reports file defaults.

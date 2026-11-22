@@ -2279,79 +2279,61 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final rep = (_st['frameRepeat'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
     final back = (rep['back'] as num?)?.toInt() ?? 0;
     final times = math.max(1, (rep['times'] as num?)?.toInt() ?? 1);
-    return [
-      Text('Frame ${_frame + 1} of $_frames · Nodes: ${_st['nodeCount'] ?? 0}', style: const TextStyle(color: cSecondary, fontSize: 12)),
-      _gap,
-      GestureDetector(
+    VoidCallback? when(bool ok, VoidCallback f) => ok ? f : null;
+    final tweening = _st['tweening'] == true;
+    final rows = <rw.Desc>[
+      rw.DInfo('Frame ${_frame + 1} of $_frames', '${_st['nodeCount'] ?? 0} nodes'),
+      const rw.DHint('Changes here apply to every layer at this moment.'),
+      rw.DButtons('Copy frame', () => _cmd({'op': 'copy_frame'}), b: 'Paste frame', onB: when(_st['frameCopied'] == true, () => _cmd({'op': 'paste_frame'}))),
+      rw.DSeg(const ['Halfway', 'A third in', 'A tenth in'], ['50', '33/67', '10/90'].indexOf(_tweenAt), label: 'Add an in-between', onSelect: (i) => setState(() {
+            final v = ['50', '33/67', '10/90'][i];
+            // tapping the chosen pair again: both, then the first, then the second
+            _tweenPick = v == _tweenAt && v != '50' ? (_tweenPick + 1) % 3 : 0;
+            _tweenAt = v;
+          })),
+      rw.DWidget(GestureDetector(
         onLongPress: last ? null : _tweenCountPopup,
-        child: _Btn('Add tweened frame ($label)', enabled: !last, onTap: () => _cmd({'op': 'tween_add', 'at': at})),
-      ),
-      if (last) const Padding(padding: EdgeInsets.only(top: 4), child: Text('Tweened frames go between two frames.', style: TextStyle(color: cSecondary, fontSize: 11))),
-      _gap,
-      Row(children: [
-        Expanded(
-          child: _Segmented(const ['50', '33/67', '10/90'], ['50', '33/67', '10/90'].indexOf(_tweenAt), (i) => setState(() {
-                final v = ['50', '33/67', '10/90'][i];
-                // tapping the chosen pair again: both, then the first, then the second
-                _tweenPick = v == _tweenAt && v != '50' ? (_tweenPick + 1) % 3 : 0;
-                _tweenAt = v;
-              })),
-        ),
-        const SizedBox(width: 4),
-        SizedBox(width: 36, child: _Btn('?', onTap: _tweenHelp)),
-      ]),
-      if (_tweenAt != '50') _hint('Tap ${_tweenAt.replaceAll('/', ' / ')} again to add only one of the two frames.'),
-      _gap,
-      _hint('Hold the button to add several evenly spaced frames.'),
-      _gap,
-      _label('Background colour'),
-      _swatches(bgColor, (c) => _cmd({'op': 'frame_bg', 'color': c})),
-      _gap,
-      _Toggle('Use gradient', bgGradient, (v) => _cmd({'op': 'frame_bg', 'useGradient': v})),
+        child: rw.renderDesc(rw.DButtons('Add tweened frame ($label)', when(!last, () => _cmd({'op': 'tween_add', 'at': at})), b: 'How it works', onB: _tweenHelp)),
+      )),
+      rw.DHint(last
+          ? 'Tweened frames go between two frames.'
+          : '${_tweenAt != '50' ? 'Tap ${_tweenAt.replaceAll('/', ' / ')} again to add only one of the two frames. ' : ''}Hold the button to add several evenly spaced frames.'),
+      const rw.DTitle('Background'),
+      rw.DWidget(kit.PropRow('Colour', trailing: SizedBox(width: 180, child: _swatches(bgColor, (c) => _cmd({'op': 'frame_bg', 'color': c}))))),
+      rw.DTick('Use gradient', bgGradient, onChanged: (v) => _cmd({'op': 'frame_bg', 'useGradient': v})),
       if (bgGradient) ...[
-        _label('Gradient colour (top)'),
-        _swatches(bgTop, (c) => _cmd({'op': 'frame_bg', 'gradient': c})),
-        _Toggle('Expand gradient', (_st['frameBg'] as Map?)?['expand'] == true, (v) => _cmd({'op': 'frame_bg', 'expand': v})),
-        _hint('Stretches the gradient taller: most of the stage is the gradient colour.'),
+        rw.DWidget(kit.PropRow('Top colour', trailing: SizedBox(width: 180, child: _swatches(bgTop, (c) => _cmd({'op': 'frame_bg', 'gradient': c}))))),
+        rw.DTick('Expand gradient', (_st['frameBg'] as Map?)?['expand'] == true, onChanged: (v) => _cmd({'op': 'frame_bg', 'expand': v})),
+        const rw.DHint('Stretches the gradient taller: most of the stage is the gradient colour.'),
       ],
-      _gap,
-      _Toggle('Do not tween this frame', _st['frameNoTween'] == true, (v) => _cmd({'op': 'no_tween', 'on': v})),
-      // Slow Motion Tweening: only while the project tweens
-      Opacity(
-        opacity: _st['tweening'] == true ? 1 : 0.4,
-        child: IgnorePointer(
-          ignoring: _st['tweening'] != true,
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            _Toggle('Slow motion tweening', slow > 0, (v) => _cmd({'op': 'frame_slow', 'n': v ? 10 : 0})),
-            if (slow > 0) ...[
-              _hint('This overrides the number of tweened frames for this one frame: more in-between pictures, so it plays slower.'),
-              _stepper('Tweened frames', '$slow', () => _cmd({'op': 'frame_slow', 'n': math.max(1, slow - 1)}), () => _cmd({'op': 'frame_slow', 'n': slow + 1})),
-            ],
-          ]),
-        ),
-      ),
-      _gap,
-      _Toggle('Pause on this frame', delay > 0, (v) => _cmd({'op': 'frame_delay', 'seconds': v ? 0.5 : 0})),
-      if (delay > 0) _stepper('Seconds', delay.toStringAsFixed(2), () => _cmd({'op': 'frame_delay', 'seconds': math.max(0.01, delay - 0.05)}), () => _cmd({'op': 'frame_delay', 'seconds': delay + 0.05})),
-      _gap,
-      if (_frame > 0) _Toggle('Repeat frames before this one', back > 0, (v) => _cmd({'op': 'frame_repeat', 'back': v ? 1 : 0, 'times': 1})),
+      const rw.DTitle('Timing'),
+      rw.DTick('Do not tween this frame', _st['frameNoTween'] == true, onChanged: (v) => _cmd({'op': 'no_tween', 'on': v})),
+      // slow motion: only while the project tweens
+      rw.DTick('Slow motion', slow > 0, onChanged: tweening ? (v) => _cmd({'op': 'frame_slow', 'n': v ? 10 : 0}) : null),
+      if (slow > 0) ...[
+        rw.DStep('In-between pictures', '$slow', onMinus: when(tweening, () => _cmd({'op': 'frame_slow', 'n': math.max(1, slow - 1)})), onPlus: when(tweening, () => _cmd({'op': 'frame_slow', 'n': slow + 1}))),
+        const rw.DHint('More in-between pictures for this one frame, so it plays slower.'),
+      ],
+      rw.DTick('Pause here', delay > 0, onChanged: (v) => _cmd({'op': 'frame_delay', 'seconds': v ? 0.5 : 0})),
+      if (delay > 0) rw.DStep('Seconds', delay.toStringAsFixed(2), onMinus: () => _cmd({'op': 'frame_delay', 'seconds': math.max(0.01, delay - 0.05)}), onPlus: () => _cmd({'op': 'frame_delay', 'seconds': delay + 0.05})),
+      if (_frame > 0) rw.DTick('Repeat the frames before this', back > 0, onChanged: (v) => _cmd({'op': 'frame_repeat', 'back': v ? 1 : 0, 'times': 1})),
       if (back > 0) ...[
-        _hint('After this frame, playback jumps back and plays the series again: a short loop without a movieclip.'),
-        _stepper('Back', '$back frames', () => _cmd({'op': 'frame_repeat', 'back': math.max(1, back - 1), 'times': times}), () => _cmd({'op': 'frame_repeat', 'back': math.min(_frame, back + 1), 'times': times})),
-        _stepper('Repeat', '$times times', () => _cmd({'op': 'frame_repeat', 'back': back, 'times': math.max(1, times - 1)}), () => _cmd({'op': 'frame_repeat', 'back': back, 'times': times + 1})),
-        _Toggle('Use frame tweening during repeat', (_st['frameRepeat'] as Map?)?['tween'] == true, (v) => _cmd({'op': 'frame_repeat', 'back': back, 'times': times, 'tween': v})),
-        _hint('With tweening on: this frame tweens into the frame it jumps back to. Off: it holds until the jump.'),
+        const rw.DHint('After this frame, playback jumps back and plays the series again: a short loop without a movieclip.'),
+        rw.DStep('Back', '$back', onMinus: () => _cmd({'op': 'frame_repeat', 'back': math.max(1, back - 1), 'times': times}), onPlus: () => _cmd({'op': 'frame_repeat', 'back': math.min(_frame, back + 1), 'times': times})),
+        rw.DStep('Times', '$times', onMinus: () => _cmd({'op': 'frame_repeat', 'back': back, 'times': math.max(1, times - 1)}), onPlus: () => _cmd({'op': 'frame_repeat', 'back': back, 'times': times + 1})),
+        rw.DTick('Use tweening during repeat', (_st['frameRepeat'] as Map?)?['tween'] == true, onChanged: (v) => _cmd({'op': 'frame_repeat', 'back': back, 'times': times, 'tween': v})),
+        const rw.DHint('On: this frame tweens into the frame it jumps back to. Off: it holds until the jump.'),
       ],
-      _gap,
-      _Toggle('Silence all sounds', _st['frameSilence'] == true, (v) => _cmd({'op': 'frame_silence', 'on': v})),
-      _hint('Sounds still playing stop when this frame starts.'),
-      _gap,
+      rw.DTick('Silence all sounds', _st['frameSilence'] == true, onChanged: (v) => _cmd({'op': 'frame_silence', 'on': v})),
+      const rw.DHint('Sounds still playing stop when this frame starts.'),
+    ];
+    return [
+      for (final d in rows) rw.renderDesc(d),
       ..._soundsBlock(),
-      _gap,
-      _Btn('Clear frame', danger: true, onTap: () async {
+      rw.renderDesc(rw.DDanger('Clear frame', () async {
         final ok = await _ask('Clear this frame?', 'Every figure and textfield on this frame is taken off it. The frame itself stays. Undo brings them back.', ['Cancel', 'Clear frame']);
         if (ok == 'Clear frame') _cmd({'op': 'clear_frame'});
-      }),
+      })),
     ];
   }
 
