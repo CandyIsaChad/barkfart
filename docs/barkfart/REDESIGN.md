@@ -440,7 +440,7 @@ and tests are never weakened.
 ### D. Properties pages as descriptors (D15)
 - [x] D1. Sound.
 - [x] D2. Movieclip. (Not yet seen on screen: a scripted run could not select a movieclip; check it with one placed from the + menu.)
-- [ ] D3. Text.
+- [x] D3. Text.
 - [ ] D4. Camera.
 - [ ] D5. Frame.
 - [ ] D6. Stickfigure.

@@ -2600,57 +2600,44 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   String? _textClip;
 
+  /// Textfield Tools as rows (D15; REDESIGN §8 Text page).
   List<Widget> _textfieldTools(Map<String, dynamic>? tf) {
+    final List<rw.Desc> rows;
     if (tf == null) {
-      return [
-        _Btn('Add textfield', accent: true, onTap: () => _cmd({'op': 'add_textfield'})),
-        _gap,
-        _Btn('Paste', enabled: _st['textfieldCopied'] == true, onTap: () => _cmd({'op': 'paste_textfield'})),
-        _gap,
-        _hint('A textfield sits on this frame only. Tap its box to select it, then drag to move it.'),
+      rows = [
+        rw.DButtons('Add textfield', () => _cmd({'op': 'add_textfield'}), b: 'Paste', onB: _st['textfieldCopied'] == true ? () => _cmd({'op': 'paste_textfield'}) : null),
+        const rw.DHint('A textfield sits on this frame only. Tap its box to select it, then drag to move it.'),
+      ];
+    } else {
+      final align = {'left': 0, 'center': 1, 'right': 2}[tf['align'] as String?] ?? 1;
+      final scale = (tf['scale'] as num?)?.toDouble() ?? 1;
+      rows = [
+        rw.DName(tf['name'] as String? ?? 'Textfield'),
+        rw.DWidget(_TextFieldBox(text: tf['text'] as String? ?? '', onChanged: (v) => _cmd({'op': 'textfield', 'text': v}))),
+        const rw.DWidget(SizedBox(height: 6)),
+        // the words alone, between textfields
+        rw.DButtons('Copy text', () => setState(() => _textClip = tf['text'] as String? ?? ''), b: 'Paste text', onB: _textClip != null ? () => _cmd({'op': 'textfield', 'text': _textClip}) : null),
+        for (final w in _fontChoice(tf)) rw.DWidget(w),
+        rw.DSeg(const ['Left', 'Center', 'Right'], align, label: 'Alignment', onSelect: (i) => _cmd({'op': 'textfield', 'align': i})),
+        rw.DWidget(kit.PropRow('Colour', trailing: SizedBox(width: 180, child: _swatches((tf['color'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'textfield', 'color': c}))))),
+        rw.DStep('Scale', scale.toStringAsFixed(2), onMinus: scale > 0.05 ? () => _cmd({'op': 'textfield', 'scale': math.max(0.05, scale - 0.05)}) : null, onPlus: () => _cmd({'op': 'textfield', 'scale': scale + 0.05})),
+        rw.DTick('Locked', tf['locked'] == true, onChanged: (v) {
+          // the two locks exclude each other
+          if (v && tf['cameraLocked'] == true) _cmd({'op': 'camera_lock', 'layer': tf['layer'], 'on': false});
+          _cmd({'op': 'textfield', 'locked': v});
+        }),
+        rw.DTick('Locked to camera', tf['cameraLocked'] == true, onChanged: (v) {
+          if (v && tf['locked'] == true) _cmd({'op': 'textfield', 'locked': false});
+          _cmd({'op': 'camera_lock', 'layer': tf['layer'], 'on': v});
+        }),
+        const rw.DHint('Locked to camera: it stays put in the shot however the camera moves, for titles and captions.'),
+        rw.DButtons('Copy', () => _cmd({'op': 'copy_textfield'}), b: 'Paste', onB: _st['textfieldCopied'] == true ? () => _cmd({'op': 'paste_textfield'}) : null),
+        rw.DButtons('Add textfield', () => _cmd({'op': 'add_textfield'})),
+        rw.DDanger('Delete textfield', () => _cmd({'op': 'delete_textfield'})),
+        const rw.DHint('Removes it from this frame.'),
       ];
     }
-    final align = {'left': 0, 'center': 1, 'right': 2}[tf['align'] as String?] ?? 1;
-    final scale = (tf['scale'] as num?)?.toDouble() ?? 1;
-    return [
-      Text(tf['name'] as String? ?? 'Textfield', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 13)),
-      _gap,
-      _TextFieldBox(text: tf['text'] as String? ?? '', onChanged: (v) => _cmd({'op': 'textfield', 'text': v})),
-      const SizedBox(height: 4),
-      // the words alone, between textfields
-      _pair(
-        _Btn('Copy text', small: true, onTap: () => setState(() => _textClip = tf['text'] as String? ?? '')),
-        _Btn('Paste text', small: true, enabled: _textClip != null, onTap: () => _cmd({'op': 'textfield', 'text': _textClip})),
-      ),
-      _gap,
-      ..._fontChoice(tf),
-      _gap,
-      _label('Alignment'),
-      _Segmented(const ['Left', 'Center', 'Right'], align, (i) => _cmd({'op': 'textfield', 'align': i})),
-      _gap,
-      _label('Text colour'),
-      _swatches((tf['color'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'textfield', 'color': c})),
-      _gap,
-      _stepper('Scale', scale.toStringAsFixed(2), () => _cmd({'op': 'textfield', 'scale': math.max(0.05, scale - 0.05)}), () => _cmd({'op': 'textfield', 'scale': scale + 0.05})),
-      _gap,
-      _Toggle('Locked', tf['locked'] == true, (v) {
-        // the two locks exclude each other
-        if (v && tf['cameraLocked'] == true) _cmd({'op': 'camera_lock', 'layer': tf['layer'], 'on': false});
-        _cmd({'op': 'textfield', 'locked': v});
-      }),
-      _Toggle('Locked to camera', tf['cameraLocked'] == true, (v) {
-        if (v && tf['locked'] == true) _cmd({'op': 'textfield', 'locked': false});
-        _cmd({'op': 'camera_lock', 'layer': tf['layer'], 'on': v});
-      }),
-      _hint('Locked to camera: the text stays put in the shot however the camera moves (a title, a caption).'),
-      _gap,
-      _pair(_Btn('Copy', onTap: () => _cmd({'op': 'copy_textfield'})), _Btn('Paste', enabled: _st['textfieldCopied'] == true, onTap: () => _cmd({'op': 'paste_textfield'}))),
-      _gap,
-      _Btn('Add textfield', onTap: () => _cmd({'op': 'add_textfield'})),
-      _gap,
-      _Btn('Delete textfield', danger: true, onTap: () => _cmd({'op': 'delete_textfield'})),
-      const Padding(padding: EdgeInsets.only(top: 3), child: Text('Removes it from this frame.', style: TextStyle(color: cSecondary, fontSize: 11))),
-    ];
+    return [for (final d in rows) rw.renderDesc(d)];
   }
 
   List<Widget> _stickfigureFilters(Map<String, dynamic> sel) {
