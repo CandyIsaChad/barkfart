@@ -418,8 +418,10 @@ and tests are never weakened.
   looping, fullscreen. **Built right after C7**, because its anchor is the
   timeline toolbar's "fps" button, which C7 adds.
 - [x] B4. The View card (today's View options).
-- [x] B5. The Export sheet. Watermark and "Make vertical" join it when C5
-  removes Project Tools.
+- [x] B5. The Export sheet. Watermark and "Make vertical" joined it after
+  E3 (script `exportfull`). "Turn the cameras 90°" stays a press of its own
+  under the tick, because it changes the animation (one undo step) while
+  the rest of the sheet only sets up the export.
 - [x] B6. The Settings screen.
 
 ### C. The editor shell (frames are still snapshots)

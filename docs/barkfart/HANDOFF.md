@@ -33,7 +33,7 @@ Tick items there as they finish.
 - Scripted editor runs as before. The new script command is `savesheet`.
 - The window is capped at the screen size (about 1300x700).
 
-**Next:** D7b (engine: a figure's base from its file, a `reset_segment` op, then dots and swipes for every Segment value and the pinned "Reset this segment"; plan below). Then Watermark and Make vertical into the Export sheet, then section F.
+**Next:** D7b (engine: a figure's base from its file, a `reset_segment` op, then dots and swipes for every Segment value and the pinned "Reset this segment"; plan below). Then section F. (Watermark and Make vertical are in the Export sheet now: script `exportfull`.)
 - Done: A1–A6, B1–B6, C1–C8, D1–D6, D7a, E1–E3. D2 (the Movieclip page) is written but not yet seen on screen.
 - Home script commands: `firstrun`, `projectsscreen`, `backups`, `makeprojects N` (copies the open save N times). Saving writes a picture to `.thumbs/<name>.png`.
 

@@ -1078,6 +1078,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           unawaited(_projectsScreen());
         case 'backups':
           unawaited(_backupsSheet());
+        case 'exportfull':
+          _vertical = true;
+          _cmd({'op': 'watermark', 'on': true});
+          unawaited(_exportDialog());
         case 'makeprojects':
           // test helper: n saved animations with distinct names
           for (var i = 0; i < (w.length > 1 ? int.parse(w[1]) : 8); i++) {
@@ -1733,7 +1737,19 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   Future<void> _exportDialog() async {
     if (_export != null) return;
     final sw = (_st['w'] as num).toDouble(), sh = (_st['h'] as num).toDouble();
-    final opts = await showDialog<Map<String, Object>>(context: context, builder: (c) => _ExportDialog(sw, sh, _frames, _file?.name ?? 'Animation'));
+    final opts = await showDialog<Map<String, Object>>(
+        context: context,
+        builder: (c) => _ExportDialog(
+              sw,
+              sh,
+              _frames,
+              _file?.name ?? 'Animation',
+              watermark: _st['watermark'] as Map?,
+              cmd: (m) => _cmd(m),
+              swatches: _swatches,
+              vertical: _vertical,
+              onVertical: (v) => _vertical = v,
+            ));
     if (opts == null) return;
     await _runExport(opts['format'] as int, opts['w'] as int, opts['h'] as int, opts['start'] as int, opts['count'] as int, opts['transparent'] as bool || opts['silent'] == true, opts['name'] as String);
   }
@@ -2227,20 +2243,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _pair(_Btn('Save', onTap: _save), _Btn('Save as…', onTap: _saveAs)),
         _gap,
         _Btn('Export…', onTap: _exportDialog),
-        _gap,
-        _Toggle('Show watermark', _st['watermark'] != null, (v) => _cmd({'op': 'watermark', 'on': v})),
-        if (_st['watermark'] != null) ...[
-          _hint('Drawn small at the top right of exported pictures.'),
-          _TextFieldBox(text: (_st['watermark'] as Map)['text'] as String? ?? '', onChanged: (v) => _cmd({'op': 'watermark', 'text': v})),
-          const SizedBox(height: 4),
-          _swatches(((_st['watermark'] as Map)['color'] as num?)?.toInt() ?? 0xff3b30ff, (c) => _cmd({'op': 'watermark', 'color': c})),
-        ],
-        _gap,
-        _Toggle('Make vertical (phone video)', _vertical, (v) => setState(() => _vertical = v)),
-        if (_vertical) ...[
-          _hint('Turns the camera of every frame a quarter turn; the right edge becomes the top of the video.'),
-          _Btn('Rotate cameras 90°', onTap: () => _cmd({'op': 'rotate_cameras'})),
-        ],
       ];
 
   bool _vertical = false;
@@ -4144,7 +4146,8 @@ class _Overlay extends CustomPainter {
 class _TextFieldBox extends StatefulWidget {
   final String text;
   final ValueChanged<String> onChanged;
-  const _TextFieldBox({required this.text, required this.onChanged});
+  final bool oneLine;
+  const _TextFieldBox({required this.text, required this.onChanged, this.oneLine = false});
 
   @override
   State<_TextFieldBox> createState() => _TextFieldBoxState();
@@ -4172,17 +4175,17 @@ class _TextFieldBoxState extends State<_TextFieldBox> {
     return TextField(
       controller: _ctl,
       focusNode: _focus,
-      maxLines: 4,
-      minLines: 2,
-      style: const TextStyle(color: cText, fontSize: 13),
-      decoration: const InputDecoration(
+      maxLines: widget.oneLine ? 1 : 4,
+      minLines: widget.oneLine ? 1 : 2,
+      style: const TextStyle(color: cText, fontSize: 14),
+      decoration: InputDecoration(
         hintText: 'Text',
-        hintStyle: TextStyle(color: cSecondary),
+        hintStyle: const TextStyle(color: cSecondary),
         filled: true,
         fillColor: cControl,
         isDense: true,
-        border: OutlineInputBorder(borderSide: BorderSide(color: cSelected)),
-        contentPadding: EdgeInsets.all(8),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       ),
       onChanged: widget.onChanged,
     );
@@ -4403,7 +4406,13 @@ class _ExportDialog extends StatefulWidget {
   final double w, h;
   final int frames;
   final String name;
-  const _ExportDialog(this.w, this.h, this.frames, this.name);
+  // the watermark and "Make vertical" (Project Tools before the redesign)
+  final Map? watermark;
+  final void Function(Map<String, Object?>) cmd;
+  final Widget Function(int, void Function(int)) swatches;
+  final bool vertical;
+  final ValueChanged<bool> onVertical;
+  const _ExportDialog(this.w, this.h, this.frames, this.name, {this.watermark, required this.cmd, required this.swatches, this.vertical = false, required this.onVertical});
 
   @override
   State<_ExportDialog> createState() => _ExportDialogState();
@@ -4416,6 +4425,10 @@ class _ExportDialogState extends State<_ExportDialog> {
   int _end = 0;
   bool _transparent = false, _sound = true;
   late final TextEditingController _name = TextEditingController(text: widget.name);
+  // mirrors the engine's watermark setting (its defaults: ":)" in red)
+  late Map _wm = widget.watermark == null ? const {} : Map.of(widget.watermark!);
+  late bool _wmOn = widget.watermark != null;
+  late bool _vertical = widget.vertical;
 
   static const _widths = [320, 640, 1280, 1920];
 
@@ -4459,6 +4472,32 @@ class _ExportDialogState extends State<_ExportDialog> {
             kit.StepRow('To frame', '$last', onMinus: last > _start ? () => setState(() => _end = last - 1) : null, onPlus: last < widget.frames ? () => setState(() => _end = last + 1 >= widget.frames ? 0 : last + 1) : null),
             kit.TickRow('Include sound', _format == 2 ? _sound : false, onChanged: _format == 2 ? (v) => setState(() => _sound = v) : null),
             kit.TickRow('Transparent background', _format == 1 ? _transparent : false, onChanged: _format == 1 ? (v) => setState(() => _transparent = v) : null),
+            kit.TickRow('Show watermark', _wmOn, onChanged: (v) {
+              widget.cmd({'op': 'watermark', 'on': v});
+              setState(() => _wmOn = v);
+            }),
+            if (_wmOn) ...[
+              const kit.Hint('Drawn small at the top right of the exported pictures. Saved with the animation.'),
+              _TextFieldBox(oneLine: true, text: _wm['text'] as String? ?? ':)', onChanged: (v) {
+                widget.cmd({'op': 'watermark', 'text': v});
+                _wm = {..._wm, 'text': v};
+              }),
+              const SizedBox(height: 6),
+              widget.swatches((_wm['color'] as num?)?.toInt() ?? 0xff3b30ff, (c) {
+                widget.cmd({'op': 'watermark', 'color': c});
+                setState(() => _wm = {..._wm, 'color': c});
+              }),
+              const SizedBox(height: 4),
+            ],
+            kit.TickRow('Make vertical (phone video)', _vertical, onChanged: (v) {
+              widget.onVertical(v);
+              setState(() => _vertical = v);
+            }),
+            if (_vertical) ...[
+              const kit.Hint('Turns the camera of every frame a quarter turn, so the right edge becomes the top of the video. It changes the animation; Undo turns them back.'),
+              kit.WordButton('Turn the cameras 90°', filled: true, expand: true, height: 36, onTap: () => widget.cmd({'op': 'rotate_cameras'})),
+              const SizedBox(height: 4),
+            ],
             kit.Hint(_format == 2
                 ? 'A video (H.264, with the sound) that Photos and video players open. Videos can’t be transparent.'
                 : _format == 1
