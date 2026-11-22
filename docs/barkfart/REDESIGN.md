@@ -305,16 +305,62 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
   - Script layers: a block is one run; additive by default; cached forward
     runs; bake to keys.
   - Emitters spawn shared copies, not layers.
-- **D15. UI technology: no ECS.**
+- **D15. UI technology: no ECS, but nothing hand-built twice.**
   - Flutter is already a retained, diffed tree, and the Rust engine owns all
-    document state (Session JSON commands).
-  - An ECS would be a third model to keep in sync.
-  - Performance comes from these instead:
+    document state (Session JSON commands). An ECS would be a third model to
+    keep in sync.
+  - The user's real worry is a hardcoded UI instead of element types that
+    are initialised properly. The answer is a **data-driven UI**:
+    - **Pages are lists of row descriptors:** title, tick, step, seg, pair,
+      one, swatch, slider, link, text, hint, info, name, search, ease, fx,
+      buttons. One renderer draws every page: Stickfigure, Segment, Pose,
+      Frame, Camera, Text, Picture, Movieclip, Sound, Group, the multi-select
+      page, View, Animation, Export, Settings.
+    - **The engine supplies them.** It reports "the properties of the
+      selection" as descriptors (type, label, value, range, keyable,
+      file-default for reset, changed-from-file). Flutter has no per-tool code.
+    - **Plugins use the same descriptors** (SCRIPTING.md `props`), so a plugin
+      effect's controls are built exactly like built-in ones.
+    - **Layer rows come from a kind registry:** icon, name, block painter
+      (pose blocks, clip, waveform, group summary, script block) and Properties
+      page. Adding a layer kind means adding one entry.
+    - **One of each component:** panel card, sheet, popover, rail button,
+      swipe row, toast. Pages, sheets and popovers differ only in their
+      descriptors.
+    - The mockup generator (docs/barkfart/mockups) already works this way:
+      `rowsHtml`, `page`, `ROWDEF`, `PAGES`.
+  - Performance:
     - CustomPainter for the stage, timeline cells and Preview row;
     - thumbnails rendered by the engine and cached by (layer, frame, revision);
     - only visible rows and frames built;
     - one immutable snapshot of the engine state per change, with widgets
       reading only their slice of it.
+- **D16. The ruler follows the frame rate.**
+  - The mockups first counted in fives while saying 24 fps. That must not
+    reach the app.
+  - Labels sit at frame 1 and every fps/4 frames (12 fps: 3, 6, 9, 12…).
+  - Every whole second (each multiple of fps) gets a taller tick and a bold
+    number.
+  - Zooming out steps the labels to fps/2, fps, then 2×fps.
+  - Numbers are always frames, never seconds.
+- **D17. Leave nothing behind.** Every control in today's editor has a home.
+  The mapping is in section 9. A few are deliberately replaced:
+  - ◀ ▶ "previous/next figure" by tapping rows;
+  - Library Tools by the "+" menu and chooser;
+  - "Show section tabs" by nothing, since the tabs are gone;
+  - per-frame sound by Sound rows (old files import each frame's sound as a
+    clip).
+- **D18. Mixed values.** With several things selected, a tick box shows a
+  dash, a swatch row says "Mixed", and actions apply to all of them.
+- **D19. Undo is offered where a surprise is likely.** For example, joining or
+  letting go on the stage shows a light toast with Undo. Errors use dark
+  toasts and always say what happened and what to do.
+- **D20. Tablet and big windows.**
+  - From iPad size up (or a Linux window at least 900 pt tall and 1200 pt
+    wide), Properties docks as a full-height column beside the right rail,
+    with no float or shadow.
+  - The stage grows and more layer rows show.
+  - Below that, panels float as on phones.
 
 ## 7. Build plan
 
@@ -355,19 +401,169 @@ weakened. Laptop first; iOS builds only near "good enough to ship".
 
 Later: groups, the plugin runtime and Script layers, emitters.
 
-## 8. Not designed yet
+## 8. Designed in round 10 (2026-11-23)
 
-Each gets a mockup round before its pass:
-- **Projects screen:** recent projects, new, open, an empty first run.
-- **Export sheet:** video, GIF or frames; range; watermark; vertical.
-- **View options:** onion settings, guides, which handles show, UI size,
-  the "Running slow?" tips, memory.
-- **Settings.**
-- **The "+ Stick figure" chooser:** stock figures, yours, effects.
-- **Pose page** as a panel page (it was drawn only as a card).
-- **Properties pages** for the camera, text, picture, movieclip and sound.
-- **Editing a movieclip:** breadcrumbs back to the scene.
-- **Group rows,** and Properties when several things are selected.
-- **States:** missing plugin, unsaved prompt, backups, errors, empty
-  timeline.
-- **iPad and resizable Linux windows:** what grows, and when the panels dock.
+The boards are on the canvas under "Round 10". All of them use the same
+components.
+
+- **Projects** (the home screen):
+  - top bar: the title "Your animations"; on the right, "Open a file…",
+    "Backups" and "Settings";
+  - a grid of cards, four across on phones, each with a thumbnail, name,
+    unsaved dot, and "N frames, S seconds. Edited …";
+  - the first card is "New animation".
+- **First run:** a waving stock figure, "No animations yet", the blue "Make
+  an animation" button, and a yellow hint saying Stick Nodes files open
+  through "Open a file…".
+- **Settings** (two cards side by side):
+  - Screen: UI size 80–180%, screen padding;
+  - Joints: joint style Legacy, Modern or Solid; line width;
+  - Saving: save reminder, keep backups every 5 minutes;
+  - This device: graphics, sound;
+  - About: version, the no-network line, licences, backups.
+- **"+ Stick figure" chooser** (a sheet):
+  - Stock or Yours, then search;
+  - tiles, with "New figure" first (it opens the figure editor);
+  - footer: "Import from Files…" and "Paste figure" (dimmed when the
+    clipboard is empty).
+- **Export** (a sheet):
+  - Format: Video, GIF or PNG frames. Size: 640, 1280 or 1920, with the
+    picture size shown.
+  - From and To frame.
+  - Include sound; transparent background (dimmed for video); show
+    watermark; make vertical (phone video), which also turns the cameras a
+    quarter turn.
+  - A one-line summary, then Cancel and Export.
+- **Save your work?** (a sheet): "Later", "Save as…", "Save".
+- **Pose page:**
+  - "Hold until the next pose" or "Tween into it";
+  - Ease (even, slow end, slow both ends, bounce);
+  - Length in frames;
+  - Copy pose and Paste pose;
+  - "Delete this pose" pinned at the bottom.
+- **Frame page.** It opens when you tap the ruler or the Preview row, and
+  acts on every layer at that moment. It holds all of today's Frame Tools:
+  - Copy frame, Paste frame, Add time here, Remove this frame;
+  - add an in-between (halfway, a third in, a tenth in);
+  - background colour and gradient;
+  - do not tween this frame;
+  - slow motion, with in-between pictures;
+  - pause here, with seconds;
+  - repeat the frames before this, with back, repeat and "use tweening
+    during repeat";
+  - silence all sounds;
+  - "Clear frame" pinned at the bottom.
+- **Stickfigure page** (complete):
+  - the name, with "Edit as a new figure…";
+  - Colour;
+  - Effects;
+  - Blending (opacity, blend);
+  - Stickfigure Tools: flip sideways and over, send back and bring forward,
+    scale, turn 45°, center on stage, "Dragging a joint: Rotates or
+    Stretches", joined to…, locked, visible in onion skin, draw order: free;
+  - Tweening: stay on stage between poses, blend colours between poses;
+  - Copy and paste: figure, properties;
+  - "Convert to movieclip…";
+  - "Delete stickfigure" pinned.
+- **Camera mode and page.**
+  - The camera pictogram turns red. The stage shows the camera frame with
+    corner handles and the chosen guide. Figure handles hide.
+  - Page:
+    - copy and paste camera;
+    - zoom, rotation;
+    - center, reset;
+    - auto-camera ›;
+    - lock a figure to the camera ›;
+    - guide: None, Thirds, Phi or Spiral (spiral cycles through its four
+      orientations);
+    - effects on this frame: widescreen, wobble position, wobble rotation,
+      wobble speed, scale wobble with zoom, copy and paste wobble.
+- **Text page:**
+  - a text field;
+  - alignment;
+  - colour;
+  - scale;
+  - locked, locked to camera (with a hint);
+  - copy and paste text;
+  - "Delete text".
+  - The row's block shows the text itself.
+- **Picture page:**
+  - picture › (replace);
+  - scale;
+  - flip;
+  - blending;
+  - locked, locked to camera;
+  - "Delete picture".
+  - On the stage it gets a dashed box with corner handles.
+- **Movieclip page:**
+  - Plays: once, loop or ping-pong;
+  - speed;
+  - start offset;
+  - Edit movieclip, Break apart;
+  - blending;
+  - "Delete movieclip".
+- **Editing a movieclip.** The header shows "‹ Rooftop fight", then the
+  clip's name with "Editing a movieclip" under it, then "Finish". The
+  timeline shows the clip's own rows. This matches the figure editor's
+  header.
+- **Sound page:**
+  - sound › (replace);
+  - volume;
+  - pan;
+  - pitch;
+  - fade in, fade out;
+  - loop;
+  - copy and paste sound;
+  - "Delete sound".
+  - The selected clip gets grips.
+- **Several selected** (selection box). The page title says "3 figures",
+  with the hint "Changes here apply to all three". Mixed values follow D18.
+  Then: Group, Make movieclip, Copy poses, Paste poses.
+- **Group:**
+  - a folder row with a disclosure arrow; children indented 20 px;
+  - its timeline row is a thin summary bar with a tick at every child pose;
+  - page: name and Rename, Effects for the whole group, opacity,
+    "Draw order: free" (D9), Ungroup, Make movieclip, "Delete group".
+- **View options** (a card under "View"):
+  - Onion skin: on, frames before and after, behind or in front;
+  - Handles: only main joints, static joints, draw order numbers;
+    highlight polyfills, connectors or locks;
+  - While editing: effects None, No blur or All (the FX toggle switches
+    between None and this choice); Preview row; Motion path;
+  - Playback: quality Full, Half or Fast;
+  - Helpers: fit stage, nudge arrows, magnifier;
+  - Running slow?: ms per picture, memory and advice.
+  - The figure editor's View adds tracing.
+- **Animation settings** (a popover from "12 fps"):
+  - frames per second;
+  - extra smoothness (the old tweened frames, D2);
+  - loop back to the start;
+  - fullscreen when playing.
+- **Edge states** (one board):
+  - a missing plugin row, orange, with settings and keys kept;
+  - the backups list with Restore;
+  - an empty animation: "Nothing here yet. Tap + to add a stick figure",
+    with a yellow "Start here" by "+";
+  - toasts (dark for errors, light with Undo for joins and let-gos).
+- **Tablet:** Properties docked (D20), the camera row, the Hero row expanded
+  with its keyed property.
+
+## 9. Where today's controls went
+
+| Today | Redesign |
+|---|---|
+| App Tools: New project, Open, Settings | Projects screen; Settings screen |
+| Project Tools: Save, Save as, Export, watermark, make vertical, rotate cameras | Projects (auto-save and the unsaved dot), the "Save your work?" sheet, the Export sheet |
+| Animation Tools: FPS, tweening on, looping, tweened frames, show filters while playing, fullscreen | the Animation popover ("12 fps"); View › While editing; the FX toggle |
+| Library Tools: types, paste, import, create sprite, create movieclip | the "+" menu and its choosers |
+| Frame Tools (all) | the Frame page |
+| Stickfigure Tools (all) | the Stickfigure page; pose copy and paste on the Pose page; ◀ ▶ replaced by rows |
+| Stickfigure Filters | Stickfigure page › Effects (the effects browser) |
+| Segment Tools (all, including the extras for each shape) | the Segment page (section 4) |
+| Camera Tools and camera effects | Camera mode and the Camera page |
+| Textfield Tools | the Text page |
+| Movieclip Tools | the Movieclip page; editing a movieclip |
+| Sounds (per frame) | Sound rows and the Sound page |
+| View options | the View card |
+| Settings dialog | the Settings screen |
+| Export dialog | the Export sheet |
