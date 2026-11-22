@@ -3571,7 +3571,7 @@ fn random_frame_editing_keeps_every_pose_with_its_frame() {
 #[test]
 fn random_editing_with_undo_and_redo_walks_the_history_exactly() {
     let mut failures = Vec::new();
-    for seed in 1..=16u64 {
+    for seed in 1..=24u64 {
         let mut rng = seed.wrapping_mul(2685821657736338717).wrapping_add(11);
         let mut next = move |n: usize| -> usize {
             rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
@@ -3588,7 +3588,16 @@ fn random_editing_with_undo_and_redo_walks_the_history_exactly() {
             let f = next(frames as usize) as i64;
             s.command(&json!({"op": "frame", "i": f}));
             s.command(&json!({"op": "select", "layer": "L2", "node": (["armR1", "armR2", "legL1", "head"][next(4)])}));
-            let c: Value = match next(45) {
+            let c: Value = match next(54) {
+                45 => json!({"op": "add_segment", "len": 20 + next(60) as i64}),
+                46 => json!({"op": "delete_segment"}),
+                47 => json!({"op": "split", "n": 2 + next(3) as i64}),
+                48 => json!({"op": "duplicate_branch"}),
+                49 => json!({"op": "flip_branch", "h": next(2) == 0}),
+                50 => json!({"op": "reorder", "branch": next(2) == 0, "to": ([-2, -1, 1, 2][next(4)])}),
+                51 => json!({"op": "copy_branch", "branch": next(2) == 0}),
+                52 => json!({"op": "paste_branch"}),
+                53 => json!({"op": "delete_joint"}),
                 41 | 42 => json!({"op": "@drag"}),
                 43 => json!({"op": "@drag_cancelled"}),
                 38 | 39 => json!({"op": "@join"}),
@@ -3706,6 +3715,34 @@ fn random_editing_with_undo_and_redo_walks_the_history_exactly() {
                     why = format!("{} steps to undo, the history says {}", s.doc.undo_depth() - base.min(s.doc.undo_depth()), at);
                 } else if s.doc.redo_depth() != history.len() - 1 - at {
                     why = format!("{} steps to redo, the history says {}", s.doc.redo_depth(), history.len() - 1 - at);
+                } else if let Some(msg) = {
+                    // every figure is one tree of joints: one root, parents present, no cycles
+                    s.project().root().unwrap().layers.iter().find_map(|l| {
+                        let f = l.as_figure()?;
+                        let nodes = f.nodes();
+                        let roots = nodes.iter().filter(|n| n.parent.is_none()).count();
+                        if roots != 1 {
+                            return Some(format!("figure {} has {roots} main nodes", l.id));
+                        }
+                        for n in nodes {
+                            let mut cur = n;
+                            for _ in 0..=nodes.len() {
+                                match &cur.parent {
+                                    None => break,
+                                    Some(pid) => match f.node(pid) {
+                                        None => return Some(format!("figure {}: joint {} hangs off {pid}, which is gone", l.id, cur.id)),
+                                        Some(par) => cur = par,
+                                    },
+                                }
+                            }
+                            if cur.parent.is_some() {
+                                return Some(format!("figure {}: joint {} is its own ancestor", l.id, n.id));
+                            }
+                        }
+                        None
+                    })
+                } {
+                    why = msg;
                 } else if let Some(msg) = {
                     // every layer's parent exists, and no layer is its own ancestor
                     let layers = &s.project().root().unwrap().layers;
