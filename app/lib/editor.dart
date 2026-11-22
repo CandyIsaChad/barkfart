@@ -3498,6 +3498,22 @@ class _MagPainter extends CustomPainter {
   bool shouldRepaint(_MagPainter o) => o.img != img || o.handles != handles || o.x0 != x0 || o.y1 != y1 || o.k != k;
 }
 
+ui.Image? _checkerTile;
+
+/// The offstage checkerboard as a repeating shader (one 16 x 16 tile, made once).
+Shader _checker() {
+  if (_checkerTile == null) {
+    final rec = ui.PictureRecorder();
+    final c = Canvas(rec);
+    const a = Color(0xE66C6F74), b = Color(0xE6606368);
+    c.drawRect(const Rect.fromLTWH(0, 0, 16, 16), Paint()..color = a);
+    c.drawRect(const Rect.fromLTWH(0, 0, 8, 8), Paint()..color = b);
+    c.drawRect(const Rect.fromLTWH(8, 8, 8, 8), Paint()..color = b);
+    _checkerTile = rec.endRecording().toImageSync(16, 16);
+  }
+  return ImageShader(_checkerTile!, TileMode.repeated, TileMode.repeated, Matrix4.identity().storage);
+}
+
 class _Overlay extends CustomPainter {
   final Map<String, dynamic> st;
   final StageView v;
@@ -3524,9 +3540,10 @@ class _Overlay extends CustomPainter {
         frame.lineTo(p.dx, p.dy);
       }
       frame.close();
-      // the surround outside the export frame is dimmed
+      // offstage is the checkerboard (REDESIGN §3); slightly see-through so
+      // figures standing offstage still show
       final outside = Path.combine(PathOperation.difference, Path()..addRect(Offset.zero & size), frame);
-      canvas.drawPath(outside, Paint()..color = const Color(0x8C17191C));
+      canvas.drawPath(outside, Paint()..shader = _checker());
       canvas.drawPath(frame, Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1

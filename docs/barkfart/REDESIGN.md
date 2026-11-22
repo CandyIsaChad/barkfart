@@ -412,7 +412,7 @@ and tests are never weakened.
 - [x] B6. The Settings screen.
 
 ### C. The editor shell (frames are still snapshots)
-- [ ] C1. Checkerboard offstage.
+- [x] C1. Checkerboard offstage.
 - [ ] C2. Top bar: Projects, View and Export words, the project name, the
   unsaved dot.
 - [ ] C3. Left rail: the mode pictograms.
