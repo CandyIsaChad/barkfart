@@ -3230,12 +3230,43 @@ fn random_frame_editing_keeps_every_figure_on_exactly_its_frames() {
         let mut model: BTreeMap<String, Vec<bool>> = BTreeMap::new();
         model.insert("L2".into(), vec![true; n0]);
         let mut clip: Option<BTreeMap<String, bool>> = None;
+        let mut fig_clip: Option<String> = None;
         let mut log: Vec<String> = Vec::new();
         for step in 0..30 {
             let n = model.values().next().map(|v| v.len()).unwrap_or(1).max(s.state()["frames"].as_i64().unwrap() as usize);
             let f = next(n);
             s.command(&json!({"op": "frame", "i": f as i64}));
-            match next(9) {
+            match next(11) {
+                9 => {
+                    // copy a figure that is on this frame
+                    let ids: Vec<String> = model.iter().filter(|(k, v)| v[f] && s.project().root().and_then(|r| r.layer(k)).is_some_and(|l| l.as_figure().is_some())).map(|(k, _)| k.clone()).collect();
+                    if !ids.is_empty() {
+                        let id = ids[next(ids.len())].clone();
+                        log.push(format!("copy {id} on {f}"));
+                        s.command(&json!({"op": "select", "layer": id.clone()}));
+                        s.command(&json!({"op": "copy_figure"}));
+                        fig_clip = Some(id);
+                    }
+                }
+                10 => {
+                    // paste it here: the same figure where it is not, a new one where it is
+                    if let Some(cid) = fig_clip.clone() {
+                        log.push(format!("paste {cid} on {f}"));
+                        let before: std::collections::HashSet<String> = s.project().root().unwrap().layers.iter().map(|l| l.id.clone()).collect();
+                        s.command(&json!({"op": "paste_figure"}));
+                        match model.get_mut(&cid) {
+                            Some(v) if !v[f] => v[f] = true,
+                            _ => {
+                                let made: Vec<String> = s.project().root().unwrap().layers.iter().map(|l| l.id.clone()).filter(|id| !before.contains(id)).collect();
+                                for id in made {
+                                    let mut v = vec![false; n];
+                                    v[f] = true;
+                                    model.insert(id, v);
+                                }
+                            }
+                        }
+                    }
+                }
                 8 => {
                     // a textfield is on its frame only, like a figure
                     log.push(format!("add a textfield on {f}"));
@@ -4022,4 +4053,169 @@ fn editing_a_movieclips_frames_leaves_the_main_animation_alone() {
     let (a, b): (Vec<&str>, Vec<&str>) = (main_saved.lines().collect(), after.lines().collect());
     assert!(a.len() != b.len() || a != b, "the clip's edits are in the project");
     assert_eq!(s.project().root_symbol, s.saved_project().root_symbol, "the main root is the project's again");
+}
+
+/// Every command and the keys its handler reads (generated from session.rs; refresh when ops change).
+const FUZZ_OPS: &[(&str, &[&str])] = &[
+    ("add_camera", &[]),
+    ("add_figure", &["kind"]),
+    ("add_segment", &["len"]),
+    ("add_textfield", &[]),
+    ("animation", &["loop", "tweened", "tweening"]),
+    ("auto_camera", &["back", "ease", "end", "n", "on", "seconds", "times", "tween", "widescreen", "wobbleRot", "wobbleSpeed", "wobbleXY", "wobbleZoom"]),
+    ("branch_edit", &["addLength", "addThickness", "gradientColor", "ignoreZero", "ownColor", "replaceFrom", "replaceTo"]),
+    ("break_apart", &["layer"]),
+    ("build", &["layer"]),
+    ("build_done", &[]),
+    ("camera", &["center", "rotation", "zoom"]),
+    ("camera_fx", &["back", "ease", "end", "n", "on", "seconds", "times", "tween", "widescreen", "wobbleRot", "wobbleSpeed", "wobbleXY", "wobbleZoom"]),
+    ("camera_lock", &["layer", "on"]),
+    ("camera_lock_set", &["layer", "parallax", "rotate"]),
+    ("clear_filters", &[]),
+    ("clear_frame", &[]),
+    ("connect_cancel", &[]),
+    ("connect_start", &[]),
+    ("connector_set", &["percent", "reversed"]),
+    ("copy_branch", &["branch"]),
+    ("copy_figure", &["joined"]),
+    ("copy_filters", &[]),
+    ("copy_frame", &["n"]),
+    ("copy_pose", &[]),
+    ("copy_props", &[]),
+    ("copy_sound", &[]),
+    ("copy_textfield", &[]),
+    ("cycle_figure", &["dir"]),
+    ("cycle_joint", &["dir"]),
+    ("delete_everywhere", &[]),
+    ("delete_figure", &[]),
+    ("delete_frame", &[]),
+    ("delete_here", &["joined"]),
+    ("delete_joint", &[]),
+    ("delete_segment", &[]),
+    ("delete_textfield", &[]),
+    ("draw_tool", &["shape"]),
+    ("duplicate_branch", &[]),
+    ("duplicate_figure", &[]),
+    ("easing", &["v"]),
+    ("edit_movieclip", &[]),
+    ("editor_bg", &["color"]),
+    ("figure", &["angle", "center", "color", "keepInTween", "locked", "onion", "scale", "turn", "tweenColors"]),
+    ("filter", &["blur", "glow", "glowAmount", "glowIntensity", "hue", "invert", "motion", "motionAngle", "motionDistance", "opacity", "outline", "outlineAmount", "outlineThickness", "pixelate", "saturation", "shadow", "shadowAngle", "shadowBlur", "shadowDistance", "shadowOpacity", "tint", "tintAmount"]),
+    ("flip_branch", &["h"]),
+    ("flip_figure", &["h"]),
+    ("fps", &["v"]),
+    ("frame", &["i"]),
+    ("frame_bg", &[]),
+    ("frame_delay", &["back", "ease", "end", "n", "on", "seconds", "times", "tween", "widescreen", "wobbleRot", "wobbleSpeed", "wobbleXY", "wobbleZoom"]),
+    ("frame_repeat", &["back", "ease", "end", "n", "on", "seconds", "times", "tween", "widescreen", "wobbleRot", "wobbleSpeed", "wobbleXY", "wobbleZoom"]),
+    ("frame_silence", &["back", "ease", "end", "n", "on", "seconds", "times", "tween", "widescreen", "wobbleRot", "wobbleSpeed", "wobbleXY", "wobbleZoom"]),
+    ("frame_slow", &["back", "ease", "end", "n", "on", "seconds", "times", "tween", "widescreen", "wobbleRot", "wobbleSpeed", "wobbleXY", "wobbleZoom"]),
+    ("frame_sound", &["asset", "pan", "pitch", "volume"]),
+    ("insert_frame", &["copy"]),
+    ("join", &[]),
+    ("join_cancel", &[]),
+    ("layer_order", &["forward"]),
+    ("library_delete", &["layer"]),
+    ("mode", &["v"]),
+    ("movieclip", &["loop", "offset", "speed"]),
+    ("movieclip_done", &[]),
+    ("new_movieclip", &[]),
+    ("no_tween", &["on"]),
+    ("node", &["angle", "dragLock", "length", "stretchy"]),
+    ("nudge", &["dx", "dy"]),
+    ("paste_branch", &[]),
+    ("paste_figure", &["layering"]),
+    ("paste_filters", &["color", "expand", "gradient", "useGradient"]),
+    ("paste_frame", &[]),
+    ("paste_pose", &[]),
+    ("paste_props", &["color", "filters", "layering", "nodes", "position", "rotation", "scale"]),
+    ("paste_sound", &[]),
+    ("paste_textfield", &[]),
+    ("pin", &["v"]),
+    ("polyfill_color", &["color", "own"]),
+    ("polyfill_delete", &["color", "own"]),
+    ("polyfill_edit", &["id"]),
+    ("polyfill_new", &[]),
+    ("polyfill_undo", &["color", "own"]),
+    ("rename", &["layer", "name"]),
+    ("reorder", &["branch", "to"]),
+    ("reset_camera", &[]),
+    ("rotate_cameras", &[]),
+    ("rotate_figure", &["deg"]),
+    ("segment", &["angleLock", "branch", "color", "curve", "gradient", "gradientColor", "gradientReverse", "gradientSideways", "halfArc", "hollow", "outline", "outlineColor", "ownColor", "rightTriangle", "scaleLength", "segScale", "shape", "sides", "smart", "static", "stretchy", "thickness", "trapRatio", "trapRoundEnd", "trapRoundStart", "upsideDown"]),
+    ("select", &["layer", "node"]),
+    ("set", &["k", "v"]),
+    ("split", &["n"]),
+    ("textfield", &["align", "color", "font", "locked", "scale", "text"]),
+    ("to_movieclip", &[]),
+    ("trace", &["frame", "layer"]),
+    ("tween", &["on"]),
+    ("tween_add", &["at", "n"]),
+    ("unjoin", &[]),
+    ("watermark", &["color", "on", "text"]),
+];
+
+/// Odd inputs: every command with huge, negative, empty and wrongly typed
+/// values on the keys it reads. Nothing may panic, and what is left must still
+/// save and read back, and still draw (at the first frame and in between).
+#[test]
+fn odd_inputs_never_panic_and_leave_a_project_that_saves_and_draws() {
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    let pool: Vec<Value> = vec![
+        json!(0), json!(1), json!(-1), json!(2), json!(7), json!(100), json!(1000000), json!(-1000000), json!(0.5), json!(-0.25), json!(1e-9),
+        json!(true), json!(false), Value::Null, json!("x"), json!("circle"), json!("Bangers"), json!([]), json!([0.5]), json!({}), json!(4294967295u64), json!(0xff0000ffu32),
+    ];
+    let mut failures: Vec<String> = Vec::new();
+    for seed in 1..=30u64 {
+        let mut rng = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let mut next = move |n: usize| -> usize {
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((rng >> 33) as usize) % n
+        };
+        let mut s = two_poses();
+        s.command(&json!({"op": "add_camera"}));
+        s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+        let mut log: Vec<String> = Vec::new();
+        for step in 0..50 {
+            let (op, keys) = FUZZ_OPS[next(FUZZ_OPS.len())];
+            let mut c = serde_json::Map::new();
+            c.insert("op".into(), json!(op));
+            for k in keys {
+                if next(10) < 6 {
+                    c.insert((*k).into(), pool[next(pool.len())].clone());
+                }
+            }
+            let c = Value::Object(c);
+            log.push(c.to_string());
+            if catch_unwind(AssertUnwindSafe(|| {
+                s.command(&c);
+            }))
+            .is_err()
+            {
+                failures.push(format!("seed {seed}, step {step}: {c} panicked\n    after: {}", log.iter().rev().take(6).rev().cloned().collect::<Vec<_>>().join(", ")));
+                break;
+            }
+            let ok = catch_unwind(AssertUnwindSafe(|| {
+                let p = s.project();
+                let back = codec::decode(&codec::encode(p));
+                let fps = (p.settings.fps as f64).max(1.0);
+                for t in [0.0, 0.5 / fps, 1.0 / fps] {
+                    let _ = barkfart_core::tess::layered(&barkfart_core::eval::evaluate(p, &p.root_symbol, t), None);
+                }
+                back.is_ok()
+            }));
+            match ok {
+                Err(_) => {
+                    failures.push(format!("seed {seed}, step {step}: after {c} the project can't be drawn or saved (panic)\n    after: {}", log.iter().rev().take(6).rev().cloned().collect::<Vec<_>>().join(", ")));
+                    break;
+                }
+                Ok(false) => {
+                    failures.push(format!("seed {seed}, step {step}: after {c} the saved project does not read back\n    after: {}", log.iter().rev().take(6).rev().cloned().collect::<Vec<_>>().join(", ")));
+                    break;
+                }
+                Ok(true) => {}
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} runs went wrong:\n{}", failures.len(), failures.iter().take(6).cloned().collect::<Vec<_>>().join("\n"));
 }
