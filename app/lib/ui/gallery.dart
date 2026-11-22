@@ -8,11 +8,15 @@ import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
+import 'kit.dart';
 import 'pictograms.dart';
+import 'tokens.dart';
 
 class Gallery extends StatefulWidget {
-  const Gallery({super.key, required this.sections});
+  const Gallery({super.key, required this.sections, this.shotKey, this.onReady});
   final List<(String, Widget)> sections;
+  final GlobalKey? shotKey;
+  final void Function(BuildContext)? onReady;
   @override
   State<Gallery> createState() => _GalleryState();
 }
@@ -24,9 +28,10 @@ class _GalleryState extends State<Gallery> {
   void initState() {
     super.initState();
     final shot = Platform.environment['BARKFART_GALLERY_SHOT'];
+    if (widget.onReady != null) WidgetsBinding.instance.addPostFrameCallback((_) => widget.onReady!(context));
     if (shot != null) {
       Timer(const Duration(milliseconds: 1200), () async {
-        final b = _key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+        final b = (widget.shotKey ?? _key).currentContext!.findRenderObject()! as RenderRepaintBoundary;
         final img = await b.toImage(pixelRatio: 2);
         final data = await img.toByteData(format: ui.ImageByteFormat.png);
         await File(shot).writeAsBytes(data!.buffer.asUint8List());
@@ -72,4 +77,70 @@ Widget pictogramSheet() {
         ]),
       ),
   ]);
+}
+
+/// The kit, as it looks inside a panel.
+Widget kitSheet() {
+  final panel = PanelCard(
+    width: 340,
+    child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Segmented(const ['Stickfigure', 'Segment', 'Pose'], 1, onSelect: (_) {}),
+      const SectionTitle('Segment Tools'),
+      ButtonPair('Flip sideways', () {}, 'Flip over', () {}),
+      StepRow('Thickness', '28', onMinus: () {}, onPlus: () {}, changed: true),
+      StepRow('Length', '95', onMinus: () {}, onPlus: () {}),
+      TickRow('Show motion path', true, onChanged: (_) {}),
+      TickRow('Is stretchy', false, onChanged: (_) {}),
+      TickRow('Locked', null, onChanged: (_) {}),
+      const SectionTitle('Colour', onAdd: _noop),
+      PropRow('Own colour', trailing: SwatchRow(const [Color(0xFF9B1C2E), Color(0xFF2160A8), Color(0xFF2A2B30), Color(0xFFEDB98A), Color(0xFF1E9E55)], const Color(0xFFEDB98A), onPick: (_) {}, onMore: () {})),
+      SliderRow('Opacity', '80%', 0.8, onChanged: (_) {}),
+      LinkRow('Blend', 'Normal', onTap: () {}),
+      const Hint('Quiet explanatory text, in our own words.'),
+      WordButton('Reset this segment', onTap: () {}, filled: true, danger: true, expand: true, height: 38),
+    ]),
+  );
+  final rail = Container(
+    width: 64,
+    color: cPanel,
+    padding: const EdgeInsets.symmetric(vertical: 6),
+    child: Column(children: [
+      RailButton('pose', label: 'Pose', onTap: () {}, active: true),
+      RailButton('all', label: 'Move everything', onTap: () {}),
+      RailButton('camera', label: 'Camera', onTap: () {}),
+      RailButton('props', label: 'Properties', onTap: () {}, pressed: true),
+      const RailButton('bin', label: 'Delete'),
+    ]),
+  );
+  final words = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Row(children: [WordButton('Projects', onTap: () {}), WordButton('View', onTap: () {}), WordButton('Export', onTap: () {})]),
+    Row(children: [
+      IconTool('stepBack', label: 'Back', onTap: () {}),
+      IconTool('onion', label: 'Onion', onTap: () {}, on: true),
+      IconTool('loop', label: 'Loop', onTap: () {}),
+      IconTool('play', label: 'Play', onTap: () {}, size: 22),
+    ]),
+    const SizedBox(height: 8),
+    const HintBubble('One red dot per frame.\nA held pose has none.', width: 190),
+    const SizedBox(height: 8),
+    SizedBox(width: 200, height: 60, child: CustomPaint(painter: const CheckerPainter())),
+  ]);
+  return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [rail, const SizedBox(width: 16), panel, const SizedBox(width: 16), words]);
+}
+
+void _noop() {}
+
+/// Opens a sheet and a toast over the gallery (for the screenshot).
+void openSheetAndToast(BuildContext context) {
+  showSheet<void>(context, title: 'Save your work?', width: 420, children: (c) => [
+        const Hint('Rooftop fight has changes you haven’t saved.'),
+        Row(children: [
+          Expanded(child: WordButton('Later', onTap: () {}, filled: true, expand: true, height: 38)),
+          const SizedBox(width: 8),
+          Expanded(child: WordButton('Save as…', onTap: () {}, filled: true, expand: true, height: 38)),
+          const SizedBox(width: 8),
+          Expanded(child: WordButton('Save', onTap: () {}, primary: true, expand: true, height: 38)),
+        ]),
+      ]);
+  showToast(context, 'Hat lets go of Rival at frame 12', action: 'Undo', onAction: () {}, light: true, icon: 'broken', duration: const Duration(seconds: 30));
 }

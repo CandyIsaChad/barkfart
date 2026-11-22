@@ -16,22 +16,9 @@ import 'package:share_plus/share_plus.dart';
 
 import 'engine.dart';
 import 'files.dart';
+import 'ui/tokens.dart';
 
-// Colours: REDESIGN.md §3 (light: Stick Nodes' look, made crisp).
-const cPanel = Color(0xFFF3F4F6); // rails, panels behind controls
-const cControl = Color(0xFFEEF0F3); // word buttons and fields
-const cPressed = Color(0xFFE2E5EA);
-const cSelected = Color(0xFFE6F0FB); // a selected row or tile
-const cSurround = Color(0xFF6C6F74); // offstage (the checkerboard's darker square: 0xFF606368)
-const cText = Color(0xFF222428); // ink
-const cSecondary = Color(0xFF6B7078); // secondary ink
-const cAccent = Color(0xFF1577D6); // blue: words, active states
-const cDanger = Color(0xFFD91A3A); // red: destructive words, the selected handle
-const cRoot = Color(0xFFFF9F0A);
-const cTitle = Color(0xFFCC1736); // red, centred section titles
-const cLine = Color(0xFFDADDE2); // dividers
-const cCard = Color(0xFFFFFFFF); // panels, sheets, tiles
-const cHint = Color(0xFFFFD98C); // hint bubbles
+export 'ui/tokens.dart';
 
 /// Wraps the whole app (dialogs included) for scripted screenshots.
 final GlobalKey appShot = GlobalKey();

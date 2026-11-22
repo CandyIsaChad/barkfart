@@ -393,7 +393,7 @@ and tests are never weakened.
   its files are ever added.
 - [x] A3. Pictograms. A small SVG-path reader plus the mockups' icon set (one
   stroke weight).
-- [ ] A4. Kit components: word button, rail button, tick box, segmented,
+- [x] A4. Kit components: word button, rail button, tick box, segmented,
   stepper, swatches, slider, red section title, panel card, sheet, popover,
   toast, hint bubble.
 - [ ] A5. Row descriptors and one renderer (D15).
