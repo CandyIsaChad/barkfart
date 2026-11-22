@@ -388,7 +388,7 @@ and tests are never weakened.
 ### A. The look (no behaviour change)
 - [x] A1. Light colour tokens. The colour constants in editor.dart become
   REDESIGN §3's values.
-- [ ] A2. The font. Noto Sans is bundled: it's Open Sans's sibling, OFL, and
+- [x] A2. The font. Noto Sans is bundled: it's Open Sans's sibling, OFL, and
   copied from the system fonts so nothing is downloaded. Swap to Open Sans if
   its files are ever added.
 - [ ] A3. Pictograms. A small SVG-path reader plus the mockups' icon set (one

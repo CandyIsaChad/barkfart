@@ -41,3 +41,11 @@ Font License 1.1; the full licence is in assets/fonts/Inter-LICENSE.txt.
 LibGDX's FreeType extension (Apache 2.0, same project as LibGDX) renders the
 TTF fonts at the device's pixel density. Added because LibGDX's bundled
 bitmap font blurs when scaled on high-density screens.
+
+## Noto Sans (Flutter app)
+
+app/assets/fonts/NotoSans-Regular.ttf and NotoSans-Bold.ttf are Noto Sans by
+Google, used under the SIL Open Font License 1.1; the full licence is in
+app/assets/fonts/NotoSans-LICENSE.txt. Noto Sans is a sibling of Open Sans,
+the face the redesign mockups use (REDESIGN.md A2). The files were copied
+from the system's fonts-noto-core package.

@@ -27,3 +27,9 @@ flutter:
     - assets/sound-demo.bark
     - assets/stock/figures/
     - assets/stock/effects/
+  fonts:
+    - family: NotoSans
+      fonts:
+        - asset: assets/fonts/NotoSans-Regular.ttf
+        - asset: assets/fonts/NotoSans-Bold.ttf
+          weight: 700
