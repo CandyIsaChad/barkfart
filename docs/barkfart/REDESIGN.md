@@ -421,6 +421,10 @@ and tests are never weakened.
   It replaces the sidebar and the tab strip.
 - [ ] C6. The "+" menu (absorbs Library Tools) and the stick figure chooser.
   **Built right after C7**, because "+" lives in the timeline's bottom bar.
+  - [x] C6a. The "+" menu in the bottom bar. Library Tools and App Tools
+    leave the Properties card.
+  - [ ] C6b. The figure chooser as the board's sheet: Stock or Yours, search,
+    tiles, "New figure" first.
 - [x] C7. The folded timeline: control toolbar, fps ruler (D16), tiled
   Preview row. It replaces the frame strip and the top-right grid.
   - [x] C7a. The control toolbar (steps, onion skin, transport, fps) and the

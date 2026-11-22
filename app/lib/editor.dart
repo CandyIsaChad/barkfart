@@ -17,6 +17,7 @@ import 'package:share_plus/share_plus.dart';
 import 'engine.dart';
 import 'files.dart';
 import 'ui/kit.dart' as kit;
+import 'ui/pictograms.dart';
 import 'ui/rows.dart' as rw;
 import 'ui/tokens.dart';
 
@@ -815,6 +816,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           unawaited(_projectsMenu());
         case 'animation':
           unawaited(_animationPopover());
+        case 'add':
+          unawaited(_addMenu());
         case 'savesheet':
           unawaited(_saveSheet('Rooftop fight hasn\u2019t been saved for 10 minutes. The reminder can be changed or turned off in Settings.'));
         case 'savebutton':
@@ -1071,8 +1074,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (_st['movieclip'] != null) return const ['Movieclip Tools'];
     final sel = _sel;
     if (sel != null) return const ['Stickfigure Tools', 'Stickfigure Filters', 'Segment Tools'];
-    if (_st['editingClip'] != null) return const ['Movieclip editor', 'Library Tools', 'Textfield Tools'];
-    return const ['App Tools', 'Project Tools', 'Library Tools', 'Textfield Tools'];
+    if (_st['editingClip'] != null) return const ['Movieclip editor', 'Textfield Tools'];
+    return const ['Project Tools', 'Textfield Tools'];
   }
 
   List<Widget> _sectionBody(String name) {
@@ -1607,13 +1610,81 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     return f == f.roundToDouble() ? f.round().toString() : f.toStringAsFixed(1);
   }
 
-  /// The timeline's bottom bar: frame words on the right (one grammar).
+  final GlobalKey _addKey = GlobalKey();
+
+  /// The "+" menu (REDESIGN §4): everything that can be added, in one place.
+  /// It replaces Library Tools.
+  Future<void> _addMenu() async {
+    final box = _addKey.currentContext?.findRenderObject() as RenderBox?;
+    final screen = MediaQuery.sizeOf(context);
+    final at = box == null ? Offset(8, screen.height - 48) : box.localToGlobal(Offset.zero);
+    final editing = _st['editingClip'] != null;
+    final items = <(String, String, VoidCallback?)>[
+      ('figure', 'Stick figure', () {
+        setState(() => _libType = 0);
+        _figurePicker();
+      }),
+      ('picture', 'Picture', _importImages),
+      ('text', 'Text', () => _cmd({'op': 'add_textfield'})),
+      ('sound', 'Sound', _importSounds),
+      ('clip', 'Movieclip', () {
+        setState(() => _libType = 1);
+        _figurePicker();
+      }),
+      ('plus', 'New movieclip', editing ? null : () => _cmd({'op': 'new_movieclip'})),
+      ('folder', 'Import from Files…', _importFromFiles),
+      ('figure', 'Paste stick figure', _st['figureCopied'] == true ? _pasteFigure : null),
+      ('parts', 'This project\u2019s library…', _libraryDialog),
+    ];
+    final pick = await showGeneralDialog<int>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Add',
+      barrierColor: const Color(0x00000000),
+      transitionDuration: Duration.zero,
+      pageBuilder: (c, a1, a2) => Stack(children: [
+        Positioned(
+          left: at.dx,
+          bottom: screen.height - at.dy + 6,
+          child: kit.PanelCard(
+            width: 250,
+            padding: const EdgeInsets.all(6),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              for (var i = 0; i < items.length; i++) ...[
+                if (i == 5) Container(height: 1, margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), color: const Color(0xFFE6E8EB)),
+                kit.Tap(
+                  onTap: items[i].$3 == null ? null : () => Navigator.pop(c, i),
+                  minSize: 0,
+                  child: Opacity(
+                    opacity: items[i].$3 == null ? 0.4 : 1,
+                    child: Container(
+                      height: 40,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      child: Row(children: [
+                        Pictogram(items[i].$1, size: 22, color: cAccent),
+                        const SizedBox(width: 12),
+                        Text(items[i].$2, style: const TextStyle(color: cText, fontSize: 15)),
+                      ]),
+                    ),
+                  ),
+                ),
+              ],
+            ]),
+          ),
+        ),
+      ]),
+    );
+    if (pick != null) items[pick].$3?.call();
+  }
+
+  /// The timeline's bottom bar: "+" alone on the left, frame words on the right.
   Widget _framesBar() {
     return Container(
       height: 40,
       color: cCard,
       padding: const EdgeInsets.symmetric(horizontal: 6),
       child: Row(children: [
+        kit.IconTool('plus', key: _addKey, label: 'Add', color: cAccent, onTap: _playing ? null : _addMenu),
         const Spacer(),
         kit.WordButton('Add frame', size: 14, onTap: _playing ? null : () => _cmd({'op': 'insert_frame'})),
         kit.WordButton('Copy frame', size: 14, onTap: _playing ? null : () => _cmd({'op': 'copy_frame'})),
