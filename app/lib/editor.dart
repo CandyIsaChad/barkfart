@@ -123,6 +123,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   Future<void> _start() async {
     final e = _engine;
     if (e == null) return;
+    var firstRun = false;
     final open = Platform.environment['BARKFART_OPEN'];
     if (open != null && open.isNotEmpty) {
       final err = e.load(File(open).readAsBytesSync());
@@ -139,6 +140,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _file = last;
       } else {
         await _freshProject();
+        firstRun = true;
       }
     }
     await AppSettings.load();
@@ -149,7 +151,56 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _reminder = Timer.periodic(const Duration(seconds: 30), (_) => _remindToSave());
     final script = Platform.environment['BARKFART_SCRIPT'];
     if (script != null) Timer(const Duration(milliseconds: 1500), () => _runScript(script));
+    // nothing saved yet: say hello first (REDESIGN §8, E1)
+    if (firstRun && script == null && mounted) unawaited(_firstRun());
   }
+
+  /// The first run (REDESIGN §8): no animations yet.
+  Future<void> _firstRun() => Navigator.of(context).push(PageRouteBuilder<void>(
+        transitionDuration: const Duration(milliseconds: 120),
+        pageBuilder: (c, a1, a2) => Scaffold(
+          backgroundColor: cPanel,
+          body: SafeArea(
+            child: Column(children: [
+              Container(
+                height: 44,
+                width: double.infinity,
+                decoration: const BoxDecoration(color: cCard, border: Border(bottom: BorderSide(color: cLine))),
+                child: Stack(alignment: Alignment.center, children: [
+                  const Text('Your animations', style: TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w700)),
+                  Positioned(
+                    right: 8,
+                    child: Row(children: [
+                      kit.WordButton('Open a file…', onTap: () {
+                        Navigator.pop(c);
+                        _openDialog();
+                      }),
+                      kit.WordButton('Settings', onTap: _settingsDialog),
+                    ]),
+                  ),
+                ]),
+              ),
+              Expanded(
+                child: Center(
+                  child: SingleChildScrollView(
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      const SizedBox(width: 140, height: 200, child: CustomPaint(painter: _WavePainter())),
+                      const SizedBox(height: 10),
+                      const Text('No animations yet', style: TextStyle(color: cText, fontSize: 20, fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 4),
+                      const Text('Start one, then pose your first stick figure.', style: TextStyle(color: cSecondary, fontSize: 14)),
+                      const SizedBox(height: 14),
+                      kit.WordButton('Make an animation', primary: true, height: 44, size: 16, onTap: () => Navigator.pop(c)),
+                      const SizedBox(height: 18),
+                      const kit.HintBubble('Stick Nodes projects, figures and movieclips (.stknds, .nodes, .nodemc) open here too: use "Open a file…".', width: 420),
+                    ]),
+                  ),
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ));
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState s) {
@@ -818,6 +869,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           unawaited(_animationPopover());
         case 'add':
           unawaited(_addMenu());
+        case 'firstrun':
+          unawaited(_firstRun());
         case 'savesheet':
           unawaited(_saveSheet('Rooftop fight hasn\u2019t been saved for 10 minutes. The reminder can be changed or turned off in Settings.'));
         case 'savebutton':
@@ -3661,6 +3714,35 @@ Shader _checker() {
     _checkerTile = rec.endRecording().toImageSync(16, 16);
   }
   return ImageShader(_checkerTile!, TileMode.repeated, TileMode.repeated, Matrix4.identity().storage);
+}
+
+/// A waving stick figure for the first run, in the stock colours.
+class _WavePainter extends CustomPainter {
+  const _WavePainter();
+  @override
+  void paint(Canvas canvas, Size size) {
+    final k = size.height / 330;
+    canvas.scale(k);
+    Paint pen(Color c, double w) => Paint()
+      ..color = c
+      ..strokeWidth = w
+      ..strokeCap = StrokeCap.round;
+    const skin = Color(0xFFEDB98A), shirt = Color(0xFF9B1C2E), pants = Color(0xFF2A2B30);
+    void bar(double x1, double y1, double x2, double y2, Color c, double w) => canvas.drawLine(Offset(x1, y1), Offset(x2, y2), pen(c, w));
+    bar(70, 175, 52, 245, pants, 15);
+    bar(52, 245, 46, 318, skin, 13);
+    bar(70, 175, 88, 245, pants, 15);
+    bar(88, 245, 94, 318, skin, 13);
+    bar(70, 95, 70, 175, shirt, 18);
+    bar(70, 100, 40, 140, shirt, 13);
+    bar(40, 140, 32, 182, skin, 12);
+    bar(70, 100, 104, 72, shirt, 13);
+    bar(104, 72, 118, 28, skin, 12);
+    canvas.drawCircle(const Offset(70, 62), 28, Paint()..color = skin);
+  }
+
+  @override
+  bool shouldRepaint(_WavePainter old) => false;
 }
 
 class _Overlay extends CustomPainter {

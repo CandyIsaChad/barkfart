@@ -453,7 +453,7 @@ and tests are never weakened.
     for every value, and the pinned "Reset this segment" button.
 
 ### E. Home
-- [ ] E1. First run.
+- [x] E1. First run.
 - [ ] E2. The Projects screen: saved projects with thumbnails.
 - [ ] E3. The backups list.
 

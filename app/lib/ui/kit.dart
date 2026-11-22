@@ -79,7 +79,7 @@ class WordButton extends StatelessWidget {
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10)),
       child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: ink(size, strong || filled || primary ? FontWeight.w700 : FontWeight.w600, fg)),
     );
-    return Tap(onTap: onTap, minSize: expand ? 0 : 44, child: expand ? SizedBox(width: double.infinity, child: box) : box);
+    return Tap(onTap: onTap, minSize: expand ? 0 : 44, child: expand ? SizedBox(width: double.infinity, child: box) : Row(mainAxisSize: MainAxisSize.min, children: [box]));
   }
 }
 
