@@ -2003,3 +2003,60 @@ fn toggling_a_control_on_and_off_changes_nothing() {
         }
     }
 }
+
+/// Every editing command undoes exactly (the project is as it was) and
+/// redoes exactly (as it was after the command).
+#[test]
+fn every_command_undoes_and_redoes_exactly() {
+    let cmds: Vec<serde_json::Value> = vec![
+        json!({"op": "insert_frame"}), json!({"op": "delete_frame"}), json!({"op": "animation", "tweening": true, "tweened": 3, "loop": true}),
+        json!({"op": "tween_add", "at": [0.5]}), json!({"op": "no_tween", "on": true}), json!({"op": "easing", "v": "in"}),
+        json!({"op": "delete_here"}), json!({"op": "fps", "v": 24}), json!({"op": "nudge", "dx": 5, "dy": -3}), json!({"op": "clear_frame"}),
+        json!({"op": "add_figure"}), json!({"op": "add_textfield"}), json!({"op": "duplicate_figure"}), json!({"op": "flip_figure", "h": true}),
+        json!({"op": "rotate_figure", "deg": 30}), json!({"op": "layer_order", "forward": true}), json!({"op": "add_segment"}),
+        json!({"op": "delete_joint"}), json!({"op": "delete_segment"}), json!({"op": "split", "n": 2}), json!({"op": "duplicate_branch"}),
+        json!({"op": "flip_branch", "h": true}), json!({"op": "pin", "on": true}), json!({"op": "segment", "thickness": 10, "color": 0xff00ffffu32}),
+        json!({"op": "segment", "branch": true, "scaleLength": 1.3}), json!({"op": "branch_edit", "addThickness": 4, "replaceFrom": 0x000000ffu32, "replaceTo": 0xffffffffu32}),
+        json!({"op": "figure", "color": 0x00ff00ffu32, "scale": 1.4, "locked": true}), json!({"op": "node", "stretchy": true, "length": 60}),
+        json!({"op": "camera", "zoom": 1.5, "rotation": 15}), json!({"op": "unjoin"}), json!({"op": "camera_lock", "on": true}),
+        json!({"op": "to_movieclip"}), json!({"op": "new_movieclip"}), json!({"op": "library_delete", "layer": "L2"}), json!({"op": "rename", "name": "Bob"}),
+        json!({"op": "add_camera"}), json!({"op": "watermark", "on": true, "text": "hi"}), json!({"op": "rotate_cameras"}), json!({"op": "reset_camera"}),
+        json!({"op": "frame_delay", "seconds": 0.4}), json!({"op": "frame_repeat", "back": 1, "times": 2, "tween": true}), json!({"op": "frame_silence", "on": true}),
+        json!({"op": "frame_slow", "n": 4}), json!({"op": "camera_fx", "widescreen": true, "wobbleXY": 9}), json!({"op": "auto_camera", "end": 1, "ease": 23}),
+        json!({"op": "frame_bg", "color": 0x336699ffu32, "useGradient": true, "expand": true}), json!({"op": "filter", "blur": 6, "invert": true}),
+        json!({"op": "clear_filters"}), json!({"op": "segment", "trapRatio": 0.4, "trapRoundEnd": true, "shape": "trapezoid"}), json!({"op": "segment", "ownColor": false}),
+    ];
+    let text = |s: &Session| codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
+    let mut failures = Vec::new();
+    let mut skipped = Vec::new();
+    for c in &cmds {
+        let mut s = two_poses();
+        // camera commands need a camera; tweened frames and auto-camera a next frame
+        let early = ["camera", "reset_camera", "auto_camera", "tween_add"].contains(&c["op"].as_str().unwrap_or(""));
+        if early {
+            s.command(&json!({"op": "add_camera"}));
+        }
+        s.command(&json!({"op": "frame", "i": if early { 0 } else { 1 }}));
+        s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+        let before = text(&s);
+        let undo0 = s.state()["undo"].clone();
+        let st = s.command(c);
+        if st["undo"] == undo0 && text(&s) == before {
+            skipped.push(c["op"].to_string()); // not applicable here: nothing changed
+            continue;
+        }
+        let after = text(&s);
+        s.command(&json!({"op": "undo"}));
+        if text(&s) != before {
+            failures.push(format!("{}: undo differs", c["op"]));
+            continue;
+        }
+        s.command(&json!({"op": "redo"}));
+        if text(&s) != after {
+            failures.push(format!("{}: redo differs", c["op"]));
+        }
+    }
+    eprintln!("not applicable: {skipped:?}");
+    assert!(skipped.len() <= 1, "commands that did nothing: {skipped:?}");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
