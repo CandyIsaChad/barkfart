@@ -1845,6 +1845,35 @@ impl Session {
                     }
                 }
             }
+            "new_movieclip" => {
+                // Create new movieclip: an empty one-frame movieclip on this frame,
+                // opened in the movieclip editor
+                if self.project().root_symbol == self.main_root {
+                    let fr_now = self.frame;
+                    let made = self.step("New movieclip", |s| {
+                        let fps = st_fps(&s.project);
+                        let n = s.project.library.values().filter(|x| x.id != s.project.root_symbol).count() + 1;
+                        let sid = s.project.new_id("S");
+                        let name = format!("Movieclip {n}");
+                        s.project.add_symbol(Symbol::new(&sid, Some(&name), 1.0 / fps));
+                        let lid = s.project.new_id("L");
+                        let mut inst = Layer::symbol(&lid, Some(&name), &sid);
+                        if let LayerKind::Symbol(x) = &mut inst.kind {
+                            x.loop_mode = SymbolLoop::Loop;
+                        }
+                        let at = s.project.root().map(|r| r.layers.len()).unwrap_or(0);
+                        structure::add_layer(s, &sym, inst, at)?;
+                        only_on_frame(s, &sym, &lid, fr_now);
+                        s.project.root_symbol = sid;
+                        Ok(())
+                    });
+                    if made.is_some() {
+                        self.selected = None;
+                        self.frame = 0;
+                        self.validate();
+                    }
+                }
+            }
             "movieclip_done" => {
                 if self.project().root_symbol != self.main_root {
                     let main = self.main_root.clone();

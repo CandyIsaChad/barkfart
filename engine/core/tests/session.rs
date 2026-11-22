@@ -1830,3 +1830,20 @@ fn movieclip_editor_edits_its_own_frames() {
     assert_eq!(s.project().root_symbol, main);
     assert!((s.project().symbol(&clip).unwrap().duration * s.project().settings.fps as f64 - 3.0).abs() < 1e-6, "the clip is three frames now");
 }
+
+/// Library Tools "Create new movieclip": an empty movieclip on this frame,
+/// opened in the editor; figures added there belong to it.
+#[test]
+fn create_new_movieclip() {
+    let mut s = two_poses();
+    let st = s.command(&json!({"op": "new_movieclip"}));
+    assert_eq!(st["undo"], "New movieclip");
+    assert!(st["editingClip"].is_string());
+    assert_eq!(st["frames"], 1);
+    s.command(&json!({"op": "add_figure"}));
+    assert_eq!(s.state()["library"].as_array().unwrap().len(), 1, "only the clip's own figure");
+    let st = s.command(&json!({"op": "movieclip_done"}));
+    let lib = st["library"].as_array().unwrap();
+    assert!(lib.iter().any(|m| m["kind"] == "movieclip" && m["frames"] == 1), "{lib:?}");
+    assert_eq!(st["frames"], 2, "back on the animation");
+}

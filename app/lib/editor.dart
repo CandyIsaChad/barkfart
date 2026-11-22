@@ -1730,6 +1730,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         SizedBox(width: 44, child: _Btn('', icon: Icons.edit, onTap: _libraryDialog)),
       ]),
       _hint(_libType == 2 ? 'Put pictures in the Barkfart Images folder; each becomes a sprite on this frame.' : 'The pencil lists the ${type.toLowerCase()}s in this project: rename them, or delete one from every frame.'),
+      if (_libType == 1 && _st['editingClip'] == null) ...[
+        _gap,
+        _Btn('Create new movieclip ›', onTap: () => _cmd({'op': 'new_movieclip'})),
+      ],
     ];
   }
 
