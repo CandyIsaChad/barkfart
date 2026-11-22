@@ -4332,3 +4332,64 @@ fn a_kept_own_colour_does_not_disturb_a_saved_nodes_figure() {
     assert_eq!(got.len(), before.len(), "the same joints");
     assert_eq!(got, before, "the same colours");
 }
+
+/// A project opened from a .bark file (the app's Open and New go through
+/// Session::new(Document::with_assets(..))) also drops edits that change nothing.
+#[test]
+fn a_reopened_project_also_drops_edits_that_change_nothing() {
+    let s = two_poses();
+    let bytes = s.save_copy().unwrap();
+    let file = codec::read_bark(&bytes).unwrap();
+    let assets = file.assets.into_iter().map(|(k, v)| (k, std::sync::Arc::new(v))).collect();
+    let mut again = Session::new(Document::with_assets(file.project, assets));
+    again.command(&json!({"op": "fps", "v": 12}));
+    again.command(&json!({"op": "fps", "v": 12}));
+    again.command(&json!({"op": "fps", "v": 12}));
+    assert_eq!(again.doc.undo_depth(), 1, "one step for the three identical edits");
+    again.command(&json!({"op": "undo"}));
+    assert!(again.state()["undo"].is_null(), "and one undo leaves nothing to undo");
+    assert!(!again.doc.dirty(), "back to the saved state");
+}
+
+/// "Unsaved changes" follows the saved state, not a counter: undoing back to it
+/// (or redoing to it) is clean, an edit is dirty, and a new edit made from before
+/// the saved state makes it unreachable (dirty until the next save).
+#[test]
+fn the_unsaved_marker_follows_the_saved_state() {
+    let mut s = two_poses();
+    s.doc.mark_saved();
+    assert!(!s.doc.dirty());
+    s.command(&json!({"op": "fps", "v": 12}));
+    assert!(s.doc.dirty(), "an edit after saving");
+    s.command(&json!({"op": "undo"}));
+    assert!(!s.doc.dirty(), "undone back to the saved state");
+    s.command(&json!({"op": "redo"}));
+    assert!(s.doc.dirty(), "redone away from it");
+    s.command(&json!({"op": "undo"}));
+    assert!(!s.doc.dirty());
+    // two edits, saved after them, then undo and a different edit: the saved state is gone
+    s.command(&json!({"op": "fps", "v": 15}));
+    s.command(&json!({"op": "fps", "v": 20}));
+    s.doc.mark_saved();
+    s.command(&json!({"op": "undo"}));
+    assert!(s.doc.dirty(), "one step before the saved state");
+    s.command(&json!({"op": "fps", "v": 25}));
+    assert!(s.doc.dirty());
+    s.command(&json!({"op": "undo"}));
+    assert!(s.doc.dirty(), "a different history: the saved state cannot be reached any more");
+    s.doc.mark_saved();
+    assert!(!s.doc.dirty());
+    // a restored recovery copy is unsaved until saved
+    s.doc.mark_unsaved();
+    assert!(s.doc.dirty());
+    s.command(&json!({"op": "fps", "v": 30}));
+    s.command(&json!({"op": "undo"}));
+    assert!(s.doc.dirty(), "a recovery copy never becomes clean by undoing");
+    // a cancelled drag leaves the saved state clean
+    s.doc.mark_saved();
+    let h = s.tools.handles(s.project(), s.time()).into_iter().find(|h| h.layer == "L2" && h.node == "armR2").unwrap();
+    s.command(&json!({"op": "down", "x": h.x, "y": h.y, "r": 20}));
+    s.command(&json!({"op": "move", "x": h.x + 40.0, "y": h.y}));
+    s.command(&json!({"op": "cancel"}));
+    assert!(!s.doc.dirty(), "a cancelled drag changes nothing");
+}

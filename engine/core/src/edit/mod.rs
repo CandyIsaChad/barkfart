@@ -83,6 +83,10 @@ pub struct Document {
     limit: usize,
     revision: u64,
     saved: u64,
+    /// Where the saved state sits in the undo stack (its depth), and whether it can still be
+    /// reached by undoing and redoing (a new edit made before it makes it unreachable).
+    saved_depth: usize,
+    saved_valid: bool,
     /// An edit that ends with the same content leaves no history entry, even if it
     /// touched the project mutably on the way (the editor session switches this on;
     /// the Java reference's comparisons keep the pointer rule).
@@ -97,7 +101,7 @@ impl Document {
     }
 
     pub fn with_assets(project: Project, assets: IndexMap<String, Arc<Vec<u8>>>) -> Document {
-        Document { state: State { project, assets }, undo: Vec::new(), redo: Vec::new(), open: None, limit: DEFAULT_HISTORY, revision: 0, saved: 0, exact: false }
+        Document { state: State { project, assets }, undo: Vec::new(), redo: Vec::new(), open: None, limit: DEFAULT_HISTORY, revision: 0, saved: 0, saved_depth: 0, saved_valid: true, exact: false }
     }
 
     pub fn project(&self) -> &Project {
@@ -134,9 +138,17 @@ impl Document {
         if before.same(&self.state) || (self.exact && before.same_content(&self.state) && crate::codec::encode(&before.project) == crate::codec::encode(&self.state.project)) {
             return;
         }
+        // a new edit made from a point before the saved state: that state can no longer be reached
+        if self.undo.len() < self.saved_depth {
+            self.saved_valid = false;
+        }
         self.undo.push((label, before));
         if self.undo.len() > self.limit {
             self.undo.remove(0);
+            match self.saved_depth.checked_sub(1) {
+                Some(d) => self.saved_depth = d,
+                None => self.saved_valid = false,
+            }
         }
         self.redo.clear();
         self.revision += 1;
@@ -230,16 +242,20 @@ impl Document {
     /// Marks the current state as saved.
     pub fn mark_saved(&mut self) {
         self.saved = self.revision;
+        self.saved_depth = self.undo.len();
+        self.saved_valid = true;
     }
 
     /// Marks the document as having unsaved changes (restored from a recovery copy).
     pub fn mark_unsaved(&mut self) {
         self.saved = u64::MAX;
+        self.saved_valid = false;
     }
 
     /// True when there are changes since the last save.
     pub fn dirty(&self) -> bool {
-        self.saved != self.revision
+        // undoing (or redoing) back to the saved state is clean again
+        self.saved != self.revision && !(self.saved_valid && self.undo.len() == self.saved_depth)
     }
 }
 
