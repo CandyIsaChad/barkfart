@@ -870,6 +870,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           setState(() => _fullscreen = true);
         case 'exportdone':
           unawaited(_exportDone(w.sublist(1).join(' '), scripted: true));
+        case 'importfont':
+          // scripted: a font file onto the selected textfield
+          final f = File(w.sublist(1).join(' '));
+          _refresh(_engine?.importFile(f.path.split(Platform.pathSeparator).last, await f.readAsBytes()));
         case 'modifybranch':
           unawaited(_modifyBranchDialog());
         case 'viewoptions':
@@ -1823,6 +1827,47 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     ];
   }
 
+  /// Fonts that ship with Barkfart (the engine's BUNDLED list, same names).
+  static const _bundledFonts = ['Bangers', 'Permanent Marker', 'Press Start 2P', 'Lobster'];
+
+  /// Textfield Tools: the font (default, bundled or imported into the
+  /// project) and Import font... (.ttf / .otf from Files).
+  List<Widget> _fontChoice(Map<String, dynamic> tf) {
+    final cur = tf['font'] as String?;
+    final project = ((_st['projectFonts'] as List?) ?? const []).cast<Map>();
+    return [
+      _label('Font'),
+      Wrap(spacing: 4, runSpacing: 4, children: [
+        _Chip('Default', cur == null, () => _cmd({'op': 'textfield', 'font': null})),
+        for (final f in _bundledFonts) _Chip(f, cur == f, () => _cmd({'op': 'textfield', 'font': f})),
+        for (final f in project) _Chip('${f['name']}', cur == f['key'], () => _cmd({'op': 'textfield', 'font': f['key']})),
+      ]),
+      const SizedBox(height: 6),
+      _Btn('Import font…', small: true, onTap: _importFont),
+      _hint('A .ttf or .otf font from Files; it is kept in this project.'),
+    ];
+  }
+
+  Future<void> _importFont() async {
+    final e = _engine;
+    if (e == null) return;
+    List<PlatformFile> picked;
+    try {
+      picked = await FilePicker.pickFiles(dialogTitle: 'Import a font', type: FileType.custom, allowedExtensions: const ['ttf', 'otf']);
+    } catch (err) {
+      _say('Could not open the file picker: $err');
+      return;
+    }
+    for (final f in picked.take(1)) {
+      final st = e.importFile(f.name, await f.readAsBytes());
+      if (st == null) {
+        _say('${f.name}: ${e.lastError}');
+      } else {
+        _refresh(st);
+      }
+    }
+  }
+
   /// The system file picker (on iOS the Files browser): every file it gives
   /// goes through the same import as files from Barkfart's folders.
   Future<void> _importFromFiles() async {
@@ -2336,6 +2381,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _Btn('Copy text', small: true, onTap: () => setState(() => _textClip = tf['text'] as String? ?? '')),
         _Btn('Paste text', small: true, enabled: _textClip != null, onTap: () => _cmd({'op': 'textfield', 'text': _textClip})),
       ),
+      _gap,
+      ..._fontChoice(tf),
       _gap,
       _label('Alignment'),
       _Segmented(const ['Left', 'Center', 'Right'], align, (i) => _cmd({'op': 'textfield', 'align': i})),

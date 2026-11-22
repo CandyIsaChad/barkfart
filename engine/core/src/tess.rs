@@ -14,6 +14,14 @@ pub trait GlyphSource {
     fn base_px(&self) -> f32;
     fn line_height(&self) -> f32;
     fn glyph(&self, c: char) -> Option<Glyph>;
+    /// In a textfield's font (a bundled font's name or a font asset id);
+    /// sources with one font ignore it.
+    fn line_height_in(&self, _font: Option<&str>) -> f32 {
+        self.line_height()
+    }
+    fn glyph_in(&self, _font: Option<&str>, c: char) -> Option<Glyph> {
+        self.glyph(c)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -311,9 +319,9 @@ fn walk(g: &Group, opacity: f32, blend: Blend, fx: Option<&str>, out: &mut DrawL
 }
 
 fn emit(s: &Shape, op: f32, b: Blend, effects: Option<&str>, out: &mut DrawList, glyphs: Option<&dyn GlyphSource>) {
-    if let ShapeKind::Text { text: t, size, xf, corner, align, .. } = &s.kind {
+    if let ShapeKind::Text { text: t, font, size, xf, corner, align } = &s.kind {
         if let Some(gs) = glyphs {
-            text(gs, t, *size, xf, *corner, *align, &s.color, op, b, effects, out);
+            text(gs, font.as_deref(), t, *size, xf, *corner, *align, &s.color, op, b, effects, out);
         }
         return;
     }
@@ -507,7 +515,7 @@ fn fan(cx: f32, cy: f32, r: f32, start: f32, span: f32, c: u32, b: usize, out: &
 }
 
 #[allow(clippy::too_many_arguments)]
-fn text(gs: &dyn GlyphSource, t: &str, size: f32, xf: &Affine, corner: i32, align: i32, c: &Color, op: f32, b: Blend, effects: Option<&str>, out: &mut DrawList) {
+fn text(gs: &dyn GlyphSource, font: Option<&str>, t: &str, size: f32, xf: &Affine, corner: i32, align: i32, c: &Color, op: f32, b: Blend, effects: Option<&str>, out: &mut DrawList) {
     if !(gs.base_px() > 0.0) {
         return;
     }
@@ -515,7 +523,7 @@ fn text(gs: &dyn GlyphSource, t: &str, size: f32, xf: &Affine, corner: i32, alig
     if rgba & 0xff == 0 {
         return;
     }
-    let (k, lh) = (size / gs.base_px(), gs.line_height());
+    let (k, lh) = (size / gs.base_px(), gs.line_height_in(font));
     let lines: Vec<&str> = t.split('\n').collect();
     let total = lines.len() as f32 * lh;
     let left = corner == 1 || corner == 3;
@@ -530,7 +538,7 @@ fn text(gs: &dyn GlyphSource, t: &str, size: f32, xf: &Affine, corner: i32, alig
     // A textfield's own alignment aligns each line inside the block.
     let widths: Vec<f32> = lines
         .iter()
-        .map(|line| line.chars().take(10000).map(|ch| gs.glyph(ch).map(|g| g.advance).unwrap_or(lh * 0.3)).sum())
+        .map(|line| line.chars().take(10000).map(|ch| gs.glyph_in(font, ch).map(|g| g.advance).unwrap_or(lh * 0.3)).sum())
         .collect();
     let block = widths.iter().fold(0f32, |m, w| m.max(*w));
     let block_left = if left {
@@ -561,7 +569,7 @@ fn text(gs: &dyn GlyphSource, t: &str, size: f32, xf: &Affine, corner: i32, alig
         };
         let base = top - (li as i32 + 1) as f32 * lh + lh * 0.25;
         for &ch in &chars {
-            let Some(g) = gs.glyph(ch) else {
+            let Some(g) = gs.glyph_in(font, ch) else {
                 pen += lh * 0.3;
                 continue;
             };

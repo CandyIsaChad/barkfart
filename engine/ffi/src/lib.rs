@@ -70,7 +70,59 @@ impl Engine {
         self.player.stop();
         self.plan_rev = 0;
         self.refresh_plan();
+        let _ = self.ensure_fonts();
         self.set_error("");
+    }
+
+    /// Loads the fonts the project's textfields use (bundled ones by name,
+    /// imported ones from the project's font assets) and uploads their pages.
+    /// True when something new was loaded (the state's textfield boxes change).
+    fn ensure_fonts(&mut self) -> bool {
+        let mut changed = false;
+        let Some(s) = self.session.as_ref() else { return false };
+        let mut used: Vec<String> = Vec::new();
+        let p = s.project();
+        let mut wanted: Vec<String> = Vec::new();
+        for sym in p.library.values() {
+            for l in &sym.layers {
+                if let barkfart_core::model::LayerKind::Text(t) = &l.kind {
+                    if let Some(f) = &t.font {
+                        if !self.glyphs.has_font(f) && !wanted.contains(f) {
+                            wanted.push(f.clone());
+                        }
+                        if !used.contains(f) {
+                            used.push(f.clone());
+                        }
+                    }
+                }
+            }
+        }
+        for key in wanted {
+            let page = match p.assets.get(&key) {
+                Some(a) if a.kind == barkfart_core::model::AssetKind::Font => s.asset_bytes(&a.path).and_then(|b| self.glyphs.add_font(&key, &b)),
+                _ => self.glyphs.add_bundled(&key),
+            };
+            if let Some(pg) = page {
+                self.renderer.set_texture(&pg.id, pg.width, pg.height, &pg.rgba);
+            }
+        }
+        // metrics for the textfield boxes
+        let Some(s) = self.session.as_mut() else { return changed };
+        if !s.fonts.contains_key("") {
+            if let Some(m) = self.glyphs.metrics(None) {
+                s.fonts.insert(String::new(), m);
+                changed = true;
+            }
+        }
+        for key in used {
+            if !s.fonts.contains_key(&key) {
+                if let Some(m) = self.glyphs.metrics(Some(&key)) {
+                    s.fonts.insert(key, m);
+                    changed = true;
+                }
+            }
+        }
+        changed
     }
 
     /// Rebuilds what the audio thread plays when the project changed.
@@ -629,6 +681,8 @@ pub extern "C" fn bf_cmd(e: *mut Engine, json: *const c_char) -> *const c_char {
         Ok(v) => v,
         Err(_) => serde_json::json!({"error": "internal error"}),
     };
+    // fonts a textfield now uses: loaded, and the state measured with them
+    let v = if engine.ensure_fonts() && v.get("error").is_none() { engine.session.as_ref().map(|s| s.state()).unwrap_or(v) } else { v };
     engine.answer = serde_json::to_vec(&v).unwrap_or_default();
     engine.answer.push(0);
     engine.answer.as_ptr() as *const c_char
@@ -912,6 +966,7 @@ pub extern "C" fn bf_import(e: *mut Engine, name: *const c_char, data: *const u8
     let Some(name) = cstr(name) else { return std::ptr::null() };
     let Some(s) = engine.session.as_mut() else { return std::ptr::null() };
     let v = catch_unwind(AssertUnwindSafe(|| s.import(&name, bytes))).unwrap_or_else(|_| serde_json::json!({"error": "internal error"}));
+    let v = if engine.ensure_fonts() && v.get("error").is_none() { engine.session.as_ref().map(|s| s.state()).unwrap_or(v) } else { v };
     engine.answer = serde_json::to_vec(&v).unwrap_or_default();
     engine.answer.push(0);
     engine.answer.as_ptr() as *const c_char

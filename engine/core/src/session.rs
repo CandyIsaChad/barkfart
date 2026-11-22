@@ -6,6 +6,7 @@
 //! Coordinates are stage units, y up (the camera is not applied while
 //! editing; its frame is reported so the app can draw it).
 
+use std::collections::HashMap;
 use crate::edit::canvas::{CanvasTools, Handle, KeyScope};
 use crate::edit::figure_ops::{self, BranchChange};
 use crate::edit::{frame_ops, layer_ops, structure, Document, EditResult};
@@ -67,6 +68,8 @@ pub struct Session {
     /// root symbol is the movieclip's, so every tool works on its frames;
     /// saving always writes the main one as the root.
     pub main_root: String,
+    /// Font metrics for textfield boxes, by font key ("" the default).
+    pub fonts: HashMap<String, FontMetrics>,
     /// Creation mode's draw tool (None: select and move).
     pub draw: Option<Shape>,
     gesture: Gesture,
@@ -136,7 +139,7 @@ impl Session {
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
         let main_root = doc.project().root_symbol.clone();
-        let mut s = Session { main_root, doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -219,7 +222,7 @@ impl Session {
             if !r.b(&l.shown, t) {
                 continue;
             }
-            if text_hit(tl, l, &mut r, t, x, y, radius) {
+            if text_hit(tl, l, &mut r, t, x, y, radius, &self.fonts) {
                 return Some(l.id.clone());
             }
         }
@@ -231,7 +234,7 @@ impl Session {
         let Some(l) = p.root().and_then(|s| s.layer(id)) else { return false };
         let LayerKind::Text(tl) = &l.kind else { return false };
         let mut r = Resolver::new(p);
-        r.b(&l.shown, t) && text_hit(tl, l, &mut r, t, x, y, radius)
+        r.b(&l.shown, t) && text_hit(tl, l, &mut r, t, x, y, radius, &self.fonts)
     }
 
     /// Runs one edit as an undo step and reports failures as the message.
@@ -1160,6 +1163,10 @@ impl Session {
                             }
                             if let Some(v) = c2["align"].as_i64() {
                                 tl.align = (v as i32).clamp(0, 2);
+                            }
+                            if c2.get("font").is_some() {
+                                // a bundled font's name, a font asset id, or null (default)
+                                tl.font = c2["font"].as_str().filter(|f| !f.is_empty()).map(str::to_string);
                             }
                             if let Some(v) = c2["locked"].as_bool() {
                                 layer.locked = v;
@@ -2275,6 +2282,10 @@ impl Session {
         if crate::files::kind_of(file_name) == crate::files::Kind::Sound {
             return self.import_sound(file_name, bytes);
         }
+        let lower = file_name.to_lowercase();
+        if lower.ends_with(".ttf") || lower.ends_with(".otf") {
+            return self.import_font(file_name, bytes);
+        }
         let fr_now = self.frame;
         let made = self.step("Import", |s| {
             let before: std::collections::HashSet<String> = s.project.root().map(|r| r.layers.iter().map(|l| l.id.clone()).collect()).unwrap_or_default();
@@ -2302,6 +2313,41 @@ impl Session {
 
     /// A sound joins the project's sound list (Frame Tools > Sounds); frames
     /// then pick it.
+    /// A font file: kept in the project (so the project carries it) and put
+    /// on the selected textfield.
+    fn import_font(&mut self, file_name: &str, bytes: &[u8]) -> J {
+        // a TrueType / OpenType file starts with one of these
+        let ok = bytes.len() > 12 && (bytes.starts_with(&[0, 1, 0, 0]) || bytes.starts_with(b"OTTO") || bytes.starts_with(b"true"));
+        if !ok {
+            self.message = format!("{file_name} is not a font Barkfart can read (use .ttf or .otf).");
+            self.rev += 1;
+            return self.state();
+        }
+        let lower = file_name.to_lowercase();
+        let ext = lower.rfind('.').map(|i| lower[i..].to_string()).unwrap_or_default();
+        let base = file_name.rsplit(['/', '\\']).next().unwrap_or(file_name);
+        let name = base.rsplit_once('.').map(|(n, _)| n).unwrap_or(base).to_string();
+        let data = std::sync::Arc::new(bytes.to_vec());
+        let sym = self.project().root_symbol.clone();
+        let text = self.selected_text.clone();
+        let made = self.step("Import font", move |s| {
+            let aid = s.project.new_id("A");
+            let path = format!("assets/{aid}{ext}");
+            s.project.assets.insert(aid.clone(), Asset { id: aid.clone(), kind: AssetKind::Font, path: path.clone(), name: Some(name.clone()) });
+            s.assets.insert(path, data);
+            if let Some(id) = &text {
+                if let Some(LayerKind::Text(tl)) = s.project.layer_mut(&sym, id).map(|l| &mut l.kind) {
+                    tl.font = Some(aid.clone());
+                }
+            }
+            Ok(name)
+        });
+        if let Some(name) = made {
+            self.message = format!("Imported font {name}.");
+        }
+        self.state()
+    }
+
     fn import_sound(&mut self, file_name: &str, bytes: &[u8]) -> J {
         let Some(pcm) = crate::audio::decode_sound(bytes) else {
             self.message = format!("Can't play {file_name}. Use mp3, m4a, ogg, flac or wav.");
@@ -2413,12 +2459,13 @@ impl Session {
             let mut r = Resolver::new(p);
             let (sx, sy) = (r.f(&layer.transform.scale_x, t).abs(), r.f(&layer.transform.scale_y, t).abs());
             let (cx, cy) = (r.f(&layer.transform.x, t), r.f(&layer.transform.y, t));
-            let (w, h) = text_size(tl);
+            let (w, h) = text_size(tl, &self.fonts);
             let (x0, y0, x1, y1) = text_rect(tl, cx, cy, w * sx, h * sy);
             Some(json!({
                 "layer": id, "name": layer.name.clone().unwrap_or_else(|| id.clone()),
                 "cameraLocked": layer.parent.as_ref().is_some_and(|pid| p.root().and_then(|r| r.layer(pid)).is_some_and(|x| matches!(x.kind, LayerKind::Camera(_)))),
                 "text": tl.text.clone().unwrap_or_default(),
+                "font": tl.font,
                 "color": color_of(&mut r, &tl.color, t),
                 "scale": round2(sy),
                 "align": align_name(tl.align, tl.corner),
@@ -2516,6 +2563,7 @@ impl Session {
             "watermark": p.settings.watermark.as_ref().map(|(t, c)| json!({"text": t, "color": c.to_rgba8888()})),
             "propsFrom": self.props_clip.as_ref().and_then(|c| p.root()?.layer(&c.source).map(|l| l.name.clone().unwrap_or_else(|| l.id.clone()))),
             "textfield": textfield, "textfieldCopied": self.textfield_clip.is_some(),
+            "projectFonts": p.assets.values().filter(|a| a.kind == AssetKind::Font).map(|a| json!({"key": a.id, "name": a.name.clone().unwrap_or_else(|| a.id.clone())})).collect::<Vec<_>>(),
             "filtersCopied": self.filter_clip.is_some(),
             "frameBg": bg, "camFx": cam_fx, "autoCam": auto_cam, "library": library, "cameraLocks": camera_locks,
             "drawTool": self.draw.map(shape_name).unwrap_or("none"), "drawLine": draw_line,
@@ -2861,21 +2909,34 @@ fn only_on_frame(st: &mut crate::edit::State, sym: &str, id: &str, frame: i32) {
 
 /// An estimate of a textfield's block size in stage units at scale 1 (the
 /// engine's glyph atlas is not available to the session).
-fn text_size(tl: &TextLayer) -> (f32, f32) {
+/// Character widths and line height of a font, per unit of text size
+/// (filled by the renderer, which has the fonts).
+#[derive(Clone, Debug, Default)]
+pub struct FontMetrics {
+    pub line: f32,
+    pub advance: HashMap<char, f32>,
+}
+
+fn text_size(tl: &TextLayer, fonts: &HashMap<String, FontMetrics>) -> (f32, f32) {
     let size = tl.size.max(0.0);
     let text = tl.text.as_deref().unwrap_or("");
     let lines: Vec<&str> = text.split('\n').collect();
+    // the textfield's font, else the default (key ""), else an estimate
+    let m = tl.font.as_ref().and_then(|f| fonts.get(f)).or_else(|| fonts.get(""));
+    let def = fonts.get("");
+    let adv = |c: char| m.and_then(|m| m.advance.get(&c)).or_else(|| def.and_then(|d| d.advance.get(&c))).copied().unwrap_or(0.55);
     let mut w = 0f32;
     for l in &lines {
-        w = w.max(l.chars().count() as f32 * size * 0.55);
+        w = w.max(l.chars().map(adv).sum::<f32>() * size);
     }
-    (w.max(size * 0.55), lines.len() as f32 * size * 1.2)
+    let line = m.map_or(1.2, |m| m.line);
+    (w.max(size * 0.55), lines.len() as f32 * size * line)
 }
 
-fn text_hit(tl: &TextLayer, l: &Layer, r: &mut Resolver, t: f64, x: f32, y: f32, radius: f32) -> bool {
+fn text_hit(tl: &TextLayer, l: &Layer, r: &mut Resolver, t: f64, x: f32, y: f32, radius: f32, fonts: &HashMap<String, FontMetrics>) -> bool {
     let (sx, sy) = (r.f(&l.transform.scale_x, t).abs(), r.f(&l.transform.scale_y, t).abs());
     let (cx, cy) = (r.f(&l.transform.x, t), r.f(&l.transform.y, t));
-    let (w, h) = text_size(tl);
+    let (w, h) = text_size(tl, fonts);
     let (x0, y0, x1, y1) = text_rect(tl, cx, cy, w * sx, h * sy);
     (x - x.clamp(x0, x1)).hypot(y - y.clamp(y0, y1)) <= radius
 }

@@ -2227,3 +2227,48 @@ fn deleting_an_auto_camera_end_frame_moves_the_end() {
     s.command(&json!({"op": "frame", "i": 0}));
     assert_eq!(s.state()["autoCam"]["end"], 2, "ends on the frame before the deleted one");
 }
+
+/// Textfield fonts: a bundled font by name, or a .ttf / .otf imported into
+/// the project (kept with it, put on the selected textfield); saved.
+#[test]
+fn textfield_fonts_bundled_and_imported() {
+    let mut s = Session::new(Document::new(barkfart_core::session::new_editor_project()));
+    let st = s.command(&json!({"op": "add_textfield"}));
+    assert!(st["textfield"]["font"].is_null());
+    let st = s.command(&json!({"op": "textfield", "font": "Bangers"}));
+    assert_eq!(st["textfield"]["font"], "Bangers");
+    let font = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/Lobster-Regular.ttf")).unwrap();
+    let st = s.import("My Lobster.ttf", &font);
+    assert_eq!(st["undo"], "Import font");
+    let key = st["projectFonts"][0]["key"].as_str().unwrap().to_string();
+    assert_eq!(st["projectFonts"][0]["name"], "My Lobster");
+    assert_eq!(st["textfield"]["font"], key.as_str(), "put on the selected textfield");
+    let bytes = s.save_copy().unwrap();
+    let back = codec::read_bark(&bytes).unwrap();
+    assert!(back.assets.keys().any(|k| k.ends_with(".ttf")), "the font travels with the project");
+    let st = s.command(&json!({"op": "textfield", "font": null}));
+    assert!(st["textfield"]["font"].is_null(), "back to the default font");
+    // not a font
+    let st = s.import("notes.ttf", b"hello this is not a font at all");
+    assert!(st["message"].as_str().unwrap().contains("not a font"));
+}
+
+/// Textfield boxes are measured with the font's own widths when the
+/// renderer has given them (wider font, wider box).
+#[test]
+fn textfield_box_follows_the_font() {
+    let mut s = Session::new(Document::new(barkfart_core::session::new_editor_project()));
+    let mut narrow = barkfart_core::session::FontMetrics { line: 1.2, ..Default::default() };
+    let mut wide = barkfart_core::session::FontMetrics { line: 1.0, ..Default::default() };
+    for c in (32u8..127).map(char::from) {
+        narrow.advance.insert(c, 0.5);
+        wide.advance.insert(c, 1.0);
+    }
+    s.fonts.insert(String::new(), narrow);
+    s.fonts.insert("Wide".into(), wide);
+    s.command(&json!({"op": "add_textfield"}));
+    let w = |st: &serde_json::Value| st["textfield"]["x1"].as_f64().unwrap() - st["textfield"]["x0"].as_f64().unwrap();
+    let a = w(&s.command(&json!({"op": "textfield", "text": "Hello"})));
+    let b = w(&s.command(&json!({"op": "textfield", "font": "Wide"})));
+    assert!((b / a - 2.0).abs() < 0.01, "twice as wide: {a} {b}");
+}

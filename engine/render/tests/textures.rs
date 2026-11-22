@@ -79,3 +79,22 @@ fn text_draws_through_the_glyph_atlas() {
     enc.set_depth(png::BitDepth::Eight);
     enc.write_header().unwrap().write_image_data(&img).unwrap();
 }
+
+/// Text in a bundled or imported font uses that font's glyph page; the
+/// default font stays on page 0, and characters a font lacks come from it.
+#[test]
+fn text_uses_the_textfields_font() {
+    use barkfart_core::GlyphSource;
+    let mut atlas = GlyphAtlas::new();
+    assert!(atlas.add_bundled("Bangers").is_some());
+    assert!(atlas.add_bundled("No Such Font").is_none());
+    let lobster = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/Lobster-Regular.ttf")).unwrap();
+    let page = atlas.add_font("A9", &lobster).expect("a usable font");
+    assert_eq!(page.id, "glyphs:A9");
+    assert!(atlas.add_font("A10", b"not a font").is_none());
+    assert_eq!(atlas.glyph_in(None, 'A').unwrap().texture, "glyphs:0");
+    assert_eq!(atlas.glyph_in(Some("Bangers"), 'A').unwrap().texture, "glyphs:Bangers");
+    assert_eq!(atlas.glyph_in(Some("A9"), 'A').unwrap().texture, "glyphs:A9");
+    assert_eq!(atlas.glyph_in(Some("unknown"), 'A').unwrap().texture, "glyphs:0", "unknown fonts fall back");
+    assert_ne!(atlas.glyph_in(Some("Bangers"), 'W').unwrap().advance, atlas.glyph_in(None, 'W').unwrap().advance);
+}
