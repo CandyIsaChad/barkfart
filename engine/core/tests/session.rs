@@ -2338,3 +2338,230 @@ fn textfield_box_follows_the_font() {
     let b = w(&s.command(&json!({"op": "textfield", "font": "Wide"})));
     assert!((b / a - 2.0).abs() < 0.01, "twice as wide: {a} {b}");
 }
+
+/// The picture at time t, rendered the way an export is (160 x 90, exact bytes).
+fn picture_bytes(p: &barkfart_core::model::Project, t: f64) -> Vec<u8> {
+    let list = barkfart_core::tess::layered(&barkfart_core::eval::evaluate(p, &p.root_symbol, t), None);
+    let mut im = barkfart_core::fx::Image::new(160, 90, -640.0, 360.0, 0.125);
+    for v in im.px.iter_mut() {
+        *v = 1.0;
+    }
+    barkfart_core::fx::render(&list, &mut im);
+    im.px.iter().map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8).collect()
+}
+
+/// The project as saved, without the id counter.
+fn saved_text(p: &barkfart_core::model::Project) -> String {
+    codec::encode(p).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n")
+}
+
+/// Goes to a frame and selects the man's upper right arm (the set-up most
+/// commands act on).
+fn pick_arm(s: &mut Session, frame: i64) {
+    s.command(&json!({"op": "frame", "i": frame}));
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+}
+
+fn joint_at(s: &Session, node: &str) -> (f32, f32) {
+    let h = s.tools.handles(s.project(), s.time()).into_iter().find(|h| h.layer == "L2" && h.node == node).expect("a joint");
+    (h.x, h.y)
+}
+
+/// The commands `every_command_undoes_and_redoes_exactly` leaves out: the
+/// deletes, every paste, polyfill delete, reorder, tween, break apart, join,
+/// frame sounds and the drags. Each runs after its own set-up and must
+///  1. undo to exactly the project before and redo to exactly the one after,
+///  2. undo to exactly the picture before and redo to the one after (frames
+///     1 and 2 both), and
+///  3. read back from the saved text as the very same project.
+/// A case that changes nothing is a failure too: fix its set-up.
+#[test]
+fn deletes_pastes_and_drags_undo_redo_and_save_exactly() {
+    use barkfart_core::audio::{encode_wav, tone};
+    type Case = (&'static str, Box<dyn Fn(&mut Session) -> Vec<Value>>);
+    let sound = |s: &mut Session| -> String {
+        let st = s.import("beep.wav", &encode_wav(&tone(440.0, 0.2, 8000, 0.5)));
+        st["soundList"][0]["id"].as_str().expect("the sound's id").to_string()
+    };
+    let cases: Vec<Case> = vec![
+        ("delete figure", Box::new(|s| { pick_arm(s, 1); vec![json!({"op": "delete_figure"})] })),
+        ("delete textfield", Box::new(|s| { pick_arm(s, 1); s.command(&json!({"op": "add_textfield"})); vec![json!({"op": "delete_textfield"})] })),
+        ("paste figure (a new one, same frame)", Box::new(|s| { pick_arm(s, 1); s.command(&json!({"op": "copy_figure"})); vec![json!({"op": "paste_figure"})] })),
+        ("paste figure (onto another frame)", Box::new(|s| {
+            pick_arm(s, 1);
+            s.command(&json!({"op": "copy_figure"}));
+            s.command(&json!({"op": "delete_here"}));
+            vec![json!({"op": "paste_figure"})]
+        })),
+        ("paste figure with layering", Box::new(|s| { pick_arm(s, 1); s.command(&json!({"op": "copy_figure"})); vec![json!({"op": "paste_figure", "layering": true})] })),
+        ("paste frame", Box::new(|s| { pick_arm(s, 1); s.command(&json!({"op": "copy_frame", "n": 0})); pick_arm(s, 0); vec![json!({"op": "paste_frame"})] })),
+        ("paste two frames", Box::new(|s| { pick_arm(s, 0); s.command(&json!({"op": "copy_frame", "n": 1})); vec![json!({"op": "paste_frame"})] })),
+        ("paste pose", Box::new(|s| { pick_arm(s, 1); s.command(&json!({"op": "copy_pose"})); pick_arm(s, 0); vec![json!({"op": "paste_pose"})] })),
+        ("paste properties", Box::new(|s| { pick_arm(s, 1); s.command(&json!({"op": "copy_props"})); pick_arm(s, 0); vec![json!({"op": "paste_props"})] })),
+        ("paste properties without the nodes", Box::new(|s| {
+            pick_arm(s, 1);
+            s.command(&json!({"op": "copy_props"}));
+            pick_arm(s, 0);
+            vec![json!({"op": "paste_props", "nodes": false, "color": false, "layering": false})]
+        })),
+        ("paste segment", Box::new(|s| { pick_arm(s, 1); s.command(&json!({"op": "copy_branch", "branch": false})); vec![json!({"op": "paste_branch"})] })),
+        ("paste branch", Box::new(|s| { pick_arm(s, 1); s.command(&json!({"op": "copy_branch", "branch": true})); vec![json!({"op": "paste_branch"})] })),
+        ("paste filters", Box::new(|s| {
+            pick_arm(s, 1);
+            s.command(&json!({"op": "filter", "invert": true, "blur": 3}));
+            s.command(&json!({"op": "copy_filters"}));
+            s.command(&json!({"op": "clear_filters"}));
+            vec![json!({"op": "paste_filters"})]
+        })),
+        ("paste textfield", Box::new(|s| {
+            pick_arm(s, 1);
+            s.command(&json!({"op": "add_textfield"}));
+            s.command(&json!({"op": "copy_textfield"}));
+            vec![json!({"op": "paste_textfield"})]
+        })),
+        ("delete polyfill", Box::new(|s| {
+            pick_arm(s, 1);
+            s.command(&json!({"op": "build", "layer": "L2"}));
+            s.command(&json!({"op": "polyfill_new"}));
+            vec![json!({"op": "polyfill_delete"})]
+        })),
+        ("send segment to the back", Box::new(|s| { pick_arm(s, 1); vec![json!({"op": "reorder", "to": -2})] })),
+        ("bring branch to the front", Box::new(|s| { pick_arm(s, 1); vec![json!({"op": "reorder", "branch": true, "to": 2})] })),
+        ("tween off on a frame", Box::new(|s| { pick_arm(s, 0); vec![json!({"op": "tween", "on": false})] })),
+        ("break apart a movieclip", Box::new(|s| {
+            pick_arm(s, 1);
+            s.command(&json!({"op": "to_movieclip"}));
+            let id = s.project().root().expect("root").layers.iter().find(|l| matches!(l.kind, barkfart_core::model::LayerKind::Symbol(_))).expect("a movieclip").id.clone();
+            vec![json!({"op": "break_apart", "layer": id})]
+        })),
+        ("join a figure to a joint", Box::new(|s| {
+            pick_arm(s, 0);
+            s.command(&json!({"op": "add_figure", "kind": "ball"}));
+            s.command(&json!({"op": "join"}));
+            let (x, y) = joint_at(s, "armR2");
+            vec![json!({"op": "down", "x": x, "y": y, "r": 20}), json!({"op": "up"})]
+        })),
+        ("set a frame's sound", Box::new(move |s| {
+            let id = sound(s);
+            pick_arm(s, 1);
+            vec![json!({"op": "frame_sound", "asset": id, "volume": 0.5, "pan": -0.5, "pitch": 2.0})]
+        })),
+        ("clear a frame's sound", Box::new(move |s| {
+            let id = sound(s);
+            pick_arm(s, 1);
+            s.command(&json!({"op": "frame_sound", "asset": id}));
+            vec![json!({"op": "frame_sound", "asset": null})]
+        })),
+        ("paste sound", Box::new(move |s| {
+            let id = sound(s);
+            pick_arm(s, 0);
+            s.command(&json!({"op": "frame_sound", "asset": id}));
+            s.command(&json!({"op": "copy_sound"}));
+            pick_arm(s, 1);
+            vec![json!({"op": "paste_sound"})]
+        })),
+        ("drag a joint", Box::new(|s| {
+            pick_arm(s, 1);
+            let (x, y) = joint_at(s, "armR2");
+            vec![json!({"op": "down", "x": x, "y": y, "r": 20}), json!({"op": "move", "x": x + 30.0, "y": y + 20.0}), json!({"op": "up"})]
+        })),
+        ("drag the main node", Box::new(|s| {
+            pick_arm(s, 1);
+            let h = s.tools.handles(s.project(), s.time()).into_iter().find(|h| h.layer == "L2" && h.root).expect("the main node");
+            vec![json!({"op": "down", "x": h.x, "y": h.y, "r": 20}), json!({"op": "move", "x": h.x + 40.0, "y": h.y - 25.0}), json!({"op": "up"})]
+        })),
+    ];
+    let times = |s: &Session| {
+        let fps = s.project().settings.fps as f64;
+        [0.0, 1.0 / fps]
+    };
+    let mut failures = Vec::new();
+    for (name, run) in &cases {
+        let mut s = two_poses();
+        let cmds = run(&mut s);
+        let (before, ts) = (saved_text(s.project()), times(&s));
+        let pics_before: Vec<Vec<u8>> = ts.iter().map(|t| picture_bytes(s.project(), *t)).collect();
+        for c in &cmds {
+            s.command(c);
+        }
+        let after = saved_text(s.project());
+        let pics_after: Vec<Vec<u8>> = ts.iter().map(|t| picture_bytes(s.project(), *t)).collect();
+        if after == before {
+            failures.push(format!("{name}: changed nothing"));
+            continue;
+        }
+        // saved and read back: the same project
+        let back = codec::decode(&codec::encode(s.project())).unwrap();
+        if saved_text(&back) != after {
+            failures.push(format!("{name}: the saved text reads back as another project"));
+        }
+        s.command(&json!({"op": "undo"}));
+        if saved_text(s.project()) != before {
+            failures.push(format!("{name}: undo differs"));
+            continue;
+        }
+        if ts.iter().zip(&pics_before).any(|(t, p)| picture_bytes(s.project(), *t) != *p) {
+            failures.push(format!("{name}: undo gives another picture"));
+        }
+        s.command(&json!({"op": "redo"}));
+        if saved_text(s.project()) != after {
+            failures.push(format!("{name}: redo differs"));
+            continue;
+        }
+        if ts.iter().zip(&pics_after).any(|(t, p)| picture_bytes(s.project(), *t) != *p) {
+            failures.push(format!("{name}: redo gives another picture"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Looking is not editing. Every command that only copies, selects, traces,
+/// switches a tool or a view must leave the saved text, the undo and redo
+/// steps and the "unsaved changes" marker exactly as they were (a Copy that
+/// asks "save changes?" afterwards is the same kind of bug as a hidden key).
+#[test]
+fn copying_and_looking_never_touch_the_project() {
+    use barkfart_core::audio::{encode_wav, tone};
+    let looks: Vec<Value> = vec![
+        json!({"op": "copy_figure"}), json!({"op": "copy_figure", "joined": true}), json!({"op": "copy_frame", "n": 1}),
+        json!({"op": "copy_pose"}), json!({"op": "copy_props"}), json!({"op": "copy_branch", "branch": true}), json!({"op": "copy_branch", "branch": false}),
+        json!({"op": "copy_filters"}), json!({"op": "copy_sound"}), json!({"op": "copy_textfield"}),
+        json!({"op": "trace", "frame": 0}), json!({"op": "trace", "layer": "L2"}), json!({"op": "trace"}), json!({"op": "editor_bg", "color": 0x336699ffu32}), json!({"op": "editor_bg"}),
+        json!({"op": "select", "layer": "L2"}), json!({"op": "select", "layer": "L2", "node": "armR2"}), json!({"op": "select"}),
+        json!({"op": "cycle_figure", "dir": 1}), json!({"op": "cycle_figure", "dir": -1}), json!({"op": "cycle_joint", "dir": 1}), json!({"op": "cycle_joint", "dir": -1}),
+        json!({"op": "mode", "v": "all"}), json!({"op": "mode", "v": "camera"}), json!({"op": "mode", "v": "figure"}),
+        json!({"op": "join"}), json!({"op": "join_cancel"}), json!({"op": "build", "layer": "L2"}), json!({"op": "connect_start"}), json!({"op": "connect_cancel"}),
+        json!({"op": "polyfill_edit", "id": "pf1"}), json!({"op": "polyfill_edit"}), json!({"op": "draw_tool", "shape": "circle"}), json!({"op": "draw_tool", "shape": "none"}),
+        json!({"op": "build_done"}), json!({"op": "frame", "i": 0}), json!({"op": "frame", "i": 1}),
+        json!({"op": "set", "k": "stretch", "v": true}), json!({"op": "set", "k": "scope", "v": "joint"}), json!({"op": "set", "k": "snap", "v": 15}),
+        json!({"op": "set", "k": "onion", "v": false}), json!({"op": "set", "k": "axis", "v": true}), json!({"op": "set", "k": "static", "v": true}),
+        json!({"op": "set", "k": "mainonly", "v": true}), json!({"op": "set", "k": "tween_new", "v": false}), json!({"op": "state"}),
+    ];
+    let mut failures = Vec::new();
+    for c in &looks {
+        let mut s = two_poses();
+        // something to copy of every kind: a textfield, filters, a sound on this frame
+        let st = s.import("beep.wav", &encode_wav(&tone(440.0, 0.2, 8000, 0.5)));
+        let id = st["soundList"][0]["id"].as_str().expect("the sound's id").to_string();
+        pick_arm(&mut s, 1);
+        s.command(&json!({"op": "frame_sound", "asset": id}));
+        s.command(&json!({"op": "filter", "invert": true}));
+        s.command(&json!({"op": "add_textfield"}));
+        pick_arm(&mut s, 1);
+        s.doc.mark_saved();
+        let key = |s: &Session| {
+            let st = s.state();
+            (saved_text(s.project()), st["undo"].clone(), st["redo"].clone(), st["canUndo"].clone(), st["canRedo"].clone(), st["dirty"].clone())
+        };
+        let before = key(&s);
+        s.command(c);
+        // a second one on top, as a button pressed twice
+        s.command(c);
+        let after = key(&s);
+        if after != before {
+            let what = if after.0 != before.0 { "the project" } else if after.5 != before.5 { "the unsaved marker" } else { "the undo steps" };
+            failures.push(format!("{c}: changed {what}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
