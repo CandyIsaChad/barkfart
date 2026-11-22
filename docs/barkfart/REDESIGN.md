@@ -2,8 +2,9 @@
 
 Status: agreed with the user on 2026-11-22/23 over nine rounds of mockups.
 This replaces UI-SPEC.md v2/v3 wherever they disagree. The mockups are on
-the claude.ai canvas "Barkfart Redesign"; their generators were session
-scratch files, so **this document is the source of truth, not the boards**.
+the claude.ai canvas "Barkfart Redesign", and docs/barkfart/mockups can
+rebuild them. Still, **this document is the source of truth, not the
+boards**.
 
 Read the "Do not" list and the decision log before changing any UI. Most
 entries record something the user corrected. Losing one has already cost a
