@@ -16,8 +16,10 @@ original's UI, control by control) before changing anything.
   Never rewrite history or force-push.
 - Never weaken or delete tests. Every edit must be undoable (go through
   `Session::step` / `Document::edit`).
-- Frames are snapshots: every figure is keyed on every frame
-  (`anchor_poses`). Do not reintroduce timeline-style behaviour.
+- **Superseded (2026-11-23):** the old rule "frames are snapshots, do not
+  reintroduce timeline-style behaviour" is replaced by the agreed redesign.
+  Read docs/barkfart/REDESIGN.md first and follow its build order (§7).
+  Until section F lands, frames stay snapshots (`anchor_poses`).
 - Write all UI text in your own words (CLEANROOM.md).
 - After each feature: `cd engine && cargo test -q --workspace` (all must
   pass), `cd app && ~/.local/flutter/bin/flutter analyze` (no issues),

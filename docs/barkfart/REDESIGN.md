@@ -363,44 +363,116 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
   - The stage grows and more layer rows show.
   - Below that, panels float as on phones.
 
-## 7. Build plan
+## 7. Build order (easiest to hardest, nested)
 
-Each pass ends with:
-- a Linux build;
-- screenshots compared side by side with the matching board;
-- fixes;
-- commits per feature.
+The user's instruction (2026-11-23): "From easiest to hardest. List out
+what's the easiest, then list out what's the easiest to the hardest in that
+easiest section, then repeat until you get to the hard part. Commit when you
+finish each one."
 
-Behaviour must not regress: every edit is undoable and tests are never
-weakened. Laptop first; iOS builds only near "good enough to ship".
+Sections run easiest first, and so do the items inside each section. Tick an
+item (`[x]`) in the same commit that finishes it.
 
-0. **Components.** Tokens, Open Sans, rails, word buttons, tick boxes,
-   segmented controls, red section titles, panel cards, swipe rows, the
-   swatch row, the stepper with a changed-dot, hint bubbles. Check each on a
-   gallery screen behind a debug flag.
-1. **Shell, on today's model.**
-   - Top bar, rails, checkerboard and stage.
-   - The Properties panel holding today's tool groups, mapped onto the new
-     pages.
-   - The "+" menu, absorbing Library Tools.
-   - The folded timeline: toolbar, ruler, and Preview as today's frame
-     strip.
-   - Same behaviour, new look. Visually 1:1 with the boards.
-2. **Engine: layer keys** (D2, D3).
-   - Whole-figure key rule, Hold or Tween per key, Add frame, New pose and
-     Hold longer as commands.
-   - The break-off command.
-   - Legacy import and play-through must match today's output (tests).
-3. **Expanded timeline.** Rows, quiet blocks, grips, the Pose page, the tiled
-   Preview, the pill playhead, gestures, swipe actions, the selection box.
-4. **Keyed properties and effects.** The keying toggle, property rows and
-   diamonds, the effects browser (built-ins), the FX toggle.
-5. **Joins over time** (D8). Engine, chain markers, the join popover.
-6. **Figure editor.**
-7. **Polish passes.** Repeat side-by-side comparisons until nothing stands
-   out. Then the screens still to design (section 8).
+**Every item:**
+- engine tests if the engine changed (`cd engine && cargo test -q
+  --workspace`);
+- `flutter analyze` clean;
+- `flutter build linux --release`;
+- a scripted run with a screenshot compared against its board;
+- commit, push.
 
-Later: groups, the plugin runtime and Script layers, emitters.
+Don't trigger the iOS workflow per item. The user: build iOS only when it's
+good enough to ship. Behaviour must not regress: every edit stays undoable
+and tests are never weakened.
+
+### A. The look (no behaviour change)
+- [ ] A1. Light colour tokens. The colour constants in editor.dart become
+  REDESIGN §3's values.
+- [ ] A2. The font. Noto Sans is bundled: it's Open Sans's sibling, OFL, and
+  copied from the system fonts so nothing is downloaded. Swap to Open Sans if
+  its files are ever added.
+- [ ] A3. Pictograms. A small SVG-path reader plus the mockups' icon set (one
+  stroke weight).
+- [ ] A4. Kit components: word button, rail button, tick box, segmented,
+  stepper, swatches, slider, red section title, panel card, sheet, popover,
+  toast, hint bubble.
+- [ ] A5. Row descriptors and one renderer (D15).
+- [ ] A6. Today's `_Btn`, `_Toggle`, `_Segmented` and `_stepper` draw with
+  the kit, so every existing page takes the new look at once.
+
+### B. Small surfaces that already have behaviour
+- [ ] B1. The "Save your work?" sheet.
+- [ ] B2. Toasts replace the status line.
+- [ ] B3. The Animation popover: FPS, smoothness (tweened frames),
+  looping, fullscreen.
+- [ ] B4. The View card (today's View options).
+- [ ] B5. The Export sheet.
+- [ ] B6. The Settings screen.
+
+### C. The editor shell (frames are still snapshots)
+- [ ] C1. Checkerboard offstage.
+- [ ] C2. Top bar: Projects, View and Export words, the project name, the
+  unsaved dot.
+- [ ] C3. Left rail: the mode pictograms.
+- [ ] C4. Right rail: undo, redo, Properties, delete, hide panels.
+- [ ] C5. The Properties card holds today's sections, tabbed by selection.
+  It replaces the sidebar and the tab strip.
+- [ ] C6. The "+" menu (absorbs Library Tools) and the stick figure chooser.
+- [ ] C7. The folded timeline: control toolbar, fps ruler (D16), tiled
+  Preview row. It replaces the frame strip and the top-right grid.
+- [ ] C8. Big screens dock Properties (D20).
+
+### D. Properties pages as descriptors (D15)
+- [ ] D1. Sound.
+- [ ] D2. Movieclip.
+- [ ] D3. Text.
+- [ ] D4. Camera.
+- [ ] D5. Frame.
+- [ ] D6. Stickfigure.
+- [ ] D7. Segment, with changed-dots and swipe-to-reset. The engine
+  reports file defaults.
+
+### E. Home
+- [ ] E1. First run.
+- [ ] E2. The Projects screen: saved projects with thumbnails.
+- [ ] E3. The backups list.
+
+### F. Engine: layers keep their own keys (D2, D3)
+- [ ] F1. The break-off-and-join command.
+- [ ] F2. Hold or Tween per key, read by the evaluator. Tweened frames
+  become "smoothness".
+- [ ] F3. The whole-figure key rule replaces anchor_poses. Legacy imports
+  must play exactly as they do today.
+- [ ] F4. Commands: Add frame, New pose, Hold longer, moving and extending
+  blocks.
+
+### G. The expanded timeline
+- [ ] G1. Layer rows, the names column, eyes (read-only).
+- [ ] G2. Quiet blocks, with selection opening the Pose page.
+- [ ] G3. Grips to extend, long-press to move, pinch to zoom.
+- [ ] G4. Swipe actions, and right-click on Linux.
+- [ ] G5. Selection box, lasso, the multi-select page.
+
+### H. Keyed properties and effects
+- [ ] H1. The FX toggle.
+- [ ] H2. The effects browser: built-ins with previews.
+- [ ] H3. The keying toggle, property rows, diamonds.
+
+### I. Joins over time (D8)
+- [ ] I1. Engine: the parent becomes a value over time, with offsets stored.
+- [ ] I2. Chain markers, the join popover, toasts with Undo.
+
+### J. The figure editor
+- [ ] J1. Header and the save-as-new sheet (D12).
+- [ ] J2. The shape shelf.
+- [ ] J3. The Parts list.
+- [ ] J4. Shape-coded handles, the size reference.
+- [ ] J5. Ghost and readout while drawing; the Mirror toggle.
+- [ ] J6. Polyfills in either winding direction.
+
+### K. Hardest, later
+Groups; the Luau plugin runtime (it needs the `mlua` crate, so it waits
+until a dependency fetch is approved); Script layers; emitters.
 
 ## 8. Designed in round 10 (2026-11-23)
 
