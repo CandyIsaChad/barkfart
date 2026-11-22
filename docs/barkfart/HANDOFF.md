@@ -37,7 +37,9 @@ Tick items there as they finish.
 - Done: A1–A6, B1–B6, C1–C8, D1–D6, D7a, E1–E3. D2 (the Movieclip page) is written but not yet seen on screen.
 - Home script commands: `firstrun`, `projectsscreen`, `backups`, `makeprojects N` (copies the open save N times). Saving writes a picture to `.thumbs/<name>.png`.
 
-**D7b plan (engine).** Figures don't remember their source file today: only
+**If the tree is dirty with D7b engine changes, that work was cut off unfinished.** Run `cd engine && cargo test -q --workspace` before keeping any of it.
+
+**D7b plan (engine).** Decided 2026-11-23: the base sits on `Figure` (`base: Option<Arc<IndexMap<node id, NodeBase>>>`), filled only by the entry ops (library add, importFile, paste). Native files save it when present; files without it load with `None`, and the page then falls back to D7a's defaults. No equality tricks. Figures don't remember their source file today: only
 `Node::rest_length` keeps the made-with length.
 
 1. When a figure enters a project (added from the library or a file,
