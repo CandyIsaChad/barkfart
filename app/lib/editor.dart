@@ -1148,18 +1148,22 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     return Container(
       height: 30,
       color: cSurround,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Row(children: [
-        for (final n in names)
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => _jumpTo(n),
-            child: Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: Center(child: Text(n, style: const TextStyle(color: cAccent, fontSize: 12, fontWeight: FontWeight.w600))),
+      // scrolls sideways when the tabs are wider than the screen (phones)
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Row(children: [
+          for (final n in names)
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _jumpTo(n),
+              child: Padding(
+                padding: const EdgeInsets.only(right: 16),
+                child: Center(child: Text(n, style: const TextStyle(color: cAccent, fontSize: 12, fontWeight: FontWeight.w600))),
+              ),
             ),
-          ),
-      ]),
+        ]),
+      ),
     );
   }
 
@@ -1231,13 +1235,16 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   Widget _buildBar() {
     final building = _st['building'] as Map<String, dynamic>;
     final tool = _st['drawTool'] as String? ?? 'none';
+    // phones: a narrower title without the hint, so the tools keep room
+    return LayoutBuilder(builder: (context, box) {
+    final narrow = box.maxWidth < 560;
     return Row(children: [
-      const SizedBox(width: 12),
+      SizedBox(width: narrow ? 8 : 12),
       SizedBox(
-        width: 170,
+        width: narrow ? 84 : 170,
         child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Editing ${building['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w600)),
-          _hint('Changes apply on every frame. Pick a draw tool, then drag from a joint.'),
+          Text(narrow ? '${building['name']}' : 'Editing ${building['name']}', maxLines: narrow ? 2 : 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: cText, fontSize: narrow ? 12 : 15, fontWeight: FontWeight.w600)),
+          if (!narrow) _hint('Changes apply on every frame. Pick a draw tool, then drag from a joint.'),
         ]),
       ),
       const SizedBox(width: 8),
@@ -1271,9 +1278,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           ]),
         ),
       ),
-      SizedBox(width: 96, child: _Btn('Done', accent: true, onTap: () => _cmd({'op': 'build_done'}))),
+      SizedBox(width: narrow ? 60 : 96, child: _Btn('Done', accent: true, onTap: () => _cmd({'op': 'build_done'}))),
       const SizedBox(width: 8),
     ]);
+    });
   }
 
   // ---------------------------------------------------------------- filmstrip and grid
