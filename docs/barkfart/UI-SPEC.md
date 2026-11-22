@@ -145,10 +145,13 @@ Deliberate differences: the pencil edits the figure itself on every frame
 (the original makes a new library figure); Open and the figure picker are
 windows with a filter (the picker shows pictures); playback quality and the
 frame cache are ours.
-Not yet: movieclip editor, join, loop tween; in Frame Tools "Expand
-gradient", "Silence all sounds", slow-motion tweening and "use frame
-tweening properties during repeat"; the figure editor's polyfill tool,
-connectors and tracing.
+Not yet: "use frame tweening properties during repeat" (Frame Tools),
+filter quality, fonts, MP4 export. Done since (2026-11-22): movieclip
+editor, convert / break apart, Movieclip Tools, loop tween, expand
+gradient, silence, slow-motion tweening, the figure editor's polyfill
+tool, connectors, tracing, background image and colour, Library Tools,
+camera locks, auto-camera, widescreen and wobble, composition guides
+(docs/barkfart/GAPS.md has the full list).
 Done since (2026-11-21): textfields, Stickfigure Filters, frame background
 colour and gradient, frame delay and repeat (one wall-time schedule in
 engine/core/src/timing.rs that playback, sound and exports follow), sounds
