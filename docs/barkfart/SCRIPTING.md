@@ -19,7 +19,8 @@ memory, and Luau's interpreter is fast enough without it.
   values and the frame being drawn, so playing, scrubbing backwards and
   exporting all show the same thing. No state is carried from one frame to the
   next. That is why there is no `on_play(delta)`: scrubbing and export jump
-  around in time.
+  around in time. Script layers are the one exception, and they keep the
+  promise another way (see below).
 - **Undoable.** Every change a plugin makes to the project goes through the
   same commands the editor uses, so it is one undo step.
 - **Missing plugins don't break projects.** If a project uses a plugin that
@@ -33,9 +34,11 @@ memory, and Luau's interpreter is fast enough without it.
    halftones and anything else from shader sites.
 2. **Modifiers:** a function that drives any keyable value, such as a custom
    wiggle. They sit next to the built-in Wiggle, Swing, Loop, Follow and Link.
-3. **Tools:** run on demand and change the project through editor commands,
+3. **Script layers:** code that moves figures over time, such as physics. See
+   "Script layers" below.
+4. **Tools:** run on demand and change the project through editor commands,
    for example "mirror this walk cycle".
-4. **Panels:** a plugin describes controls (sliders, tick boxes, buttons,
+5. **Panels:** a plugin describes controls (sliders, tick boxes, buttons,
    lists, colours, text) and the app draws them in its own style. Plugins don't
    draw raw pixels in panels at first, which keeps the look consistent and the
    sandbox simple.
@@ -135,6 +138,57 @@ return bf.tool {
 	end,
 }
 ```
+
+## Script layers
+
+A Script is a kind of layer, a row in the timeline like a figure or a sound.
+It runs code that moves other layers. Typical uses:
+- simple deterministic physics: a swinging cape, a bouncing ball, a ragdoll fall;
+- procedural motion: breathing, a crowd idling;
+- anything that is easier to describe than to key.
+
+- **Targets, not names.** A script declares what it moves, and the user picks
+  the figures in Properties, so a script never hard-codes layer names.
+- **Additive by default.** A script's output (rotation and position offsets) is
+  added on top of the keyed poses. Two scripts on the same figure add up
+  instead of fighting from frame to frame, and the hand-made animation
+  underneath stays intact. A "Replace" toggle on the script switches to
+  overriding, for whole simulations such as a ragdoll.
+- **Mix and range.** A script's block on its row is when it runs. Its keyable
+  Mix (0 to 100%) fades it in and out.
+- **State, kept deterministic.** Physics needs the previous frame. So a script
+  runs forward from its first frame, and the app caches every frame's result:
+  - scrubbing reads the cache;
+  - editing anything the script reads clears the cache from that frame on;
+  - export uses the same cache;
+  - randomness comes from a seeded `t.random`, so a re-run gives the same
+    result.
+- **Bake to keys.** One tap turns a script's output into ordinary pose keys,
+  to hand-tweak it, or to save to Stick Nodes formats, which can't run
+  scripts.
+
+```lua
+return bf.script {
+	id = "yeah.cape", name = "Cape sway", version = "1.0.0",
+	targets = { cape = bf.figure() },
+	props = { stiffness = bf.number { default = 0.4, min = 0, max = 1 } },
+
+	start = function(s)                 -- the state at the script's first frame
+		s.swing, s.speed = 0, 0
+	end,
+
+	step = function(s, p, t, scene)     -- once per frame, in order
+		local push = -scene.cape.velocity.x * 0.002
+		s.speed = (s.speed + push - s.swing * p.stiffness) * 0.9
+		s.swing += s.speed
+		return { cape = { rotate = { root = s.swing } } }  -- added on top of the keys
+	end,
+}
+```
+
+In the engine, the built-in modifiers (wiggle, sine, loop, follow and link)
+are the stateless version of this. A script layer becomes a new `LayerKind`.
+Its offsets apply after keys and modifiers, before joins are resolved.
 
 ## How it fits the engine
 
