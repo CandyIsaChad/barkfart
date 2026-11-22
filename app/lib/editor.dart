@@ -461,16 +461,25 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   // ---------------------------------------------------------------- actions
 
+  /// Animation Tools "Fullscreen": the next playback shows the stage only
+  /// (a tap stops it); one-shot, like the original.
+  bool _fullscreen = false, _fsNow = false;
+
   void _togglePlay() {
     final e = _engine;
     if (e == null) return;
     setState(() {
       if (_playing) {
         _playing = false;
+        if (_fsNow) {
+          _fsNow = false;
+          _fullscreen = false;
+        }
         e.stop();
         _clock.stop();
       } else {
         _playing = true;
+        _fsNow = _fullscreen;
         final start = e.frameWall(_frame);
         // "Loop to": back to frame 1 or to the start frame; stop after the end frame
         _loopStartWall = _loopToStart ? start : 0;
@@ -834,6 +843,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             _editorImage = ok;
             _drawn = '';
           });
+        case 'fullscreen':
+          setState(() => _fullscreen = true);
         case 'modifybranch':
           unawaited(_modifyBranchDialog());
         case 'viewoptions':
@@ -1093,7 +1104,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       body: RepaintBoundary(
         key: _shot,
         child: Row(textDirection: leftHand ? TextDirection.rtl : TextDirection.ltr, children: [
-          // the tool panel: left, or right in left-hand mode
+          // the tool panel: left, or right in left-hand mode (hidden in fullscreen playback)
+          if (!_fsNow)
           Container(
             width: (big ? 220 : 180) + (leftHand ? pad.right : pad.left),
             color: cPanel,
@@ -1102,6 +1114,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           ),
           Expanded(
             child: Column(children: [
+              if (!_fsNow)
               Container(
                 height: stripH + pad.top,
                 color: cPanel,
@@ -1721,6 +1734,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           })),
       _hint('Playback only; exports always have them. Turning filters (and tweening) off helps when playback lags.'),
       _gap,
+      _Toggle('Fullscreen', _fullscreen, (v) => setState(() => _fullscreen = v)),
+      _hint('The next playback shows only the stage; tap it to stop. Then this turns off again.'),
       _Toggle('Tweening on', tween, (v) => _cmd({'op': 'animation', 'tweening': v})),
       Opacity(
         opacity: tween ? 1 : 0.4,
