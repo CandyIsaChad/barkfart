@@ -1135,7 +1135,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         Expanded(child: Row(textDirection: leftHand ? TextDirection.rtl : TextDirection.ltr, children: [
           if (!_fsNow) _leftRail(pad, leftHand),
           // the tool panel: left, or right in left-hand mode (hidden in fullscreen playback)
-          if (!_fsNow)
+          if (!_fsNow && _panelOpen && !_hidePanels)
           Container(
             width: big ? 220 : 180,
             color: cPanel,
@@ -1144,7 +1144,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           ),
           Expanded(
             child: Column(children: [
-              if (!_fsNow)
+              if (!_fsNow && !_hidePanels)
               Container(
                 height: stripH,
                 color: cPanel,
@@ -1165,6 +1165,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               ),
             ]),
           ),
+          if (!_fsNow) _rightRail(pad, leftHand),
         ])),
         ]),
       ),
@@ -1641,6 +1642,41 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     );
   }
 
+  /// What the rail's Delete removes: the selected text, figure, or frame.
+  VoidCallback? get _deleteSelection {
+    if (_playing) return null;
+    if (_st['textfield'] != null) return () => _cmd({'op': 'delete_textfield'});
+    if (_sel != null && _st['building'] == null) return () => _cmd({'op': 'delete_here'});
+    if (_frameSelected && _frames > 1) return () => _cmd({'op': 'delete_frame'});
+    return null;
+  }
+
+  bool _panelOpen = true, _hidePanels = false;
+
+  /// The right rail (REDESIGN §4): undo, redo, Properties, delete; hide the
+  /// panels at the bottom.
+  Widget _rightRail(EdgeInsets pad, bool leftHand) {
+    return Container(
+      width: 64 + (leftHand ? pad.left : pad.right),
+      padding: EdgeInsets.only(right: leftHand ? 0 : pad.right, left: leftHand ? pad.left : 0, top: 6, bottom: 6 + pad.bottom),
+      decoration: BoxDecoration(color: cPanel, border: Border(left: leftHand ? BorderSide.none : const BorderSide(color: cLine), right: leftHand ? const BorderSide(color: cLine) : BorderSide.none)),
+      child: Column(children: [
+        kit.RailButton('undo', label: 'Undo', onTap: !_playing && _st['canUndo'] == true ? () => _cmd({'op': 'undo'}) : null),
+        const SizedBox(height: 4),
+        kit.RailButton('redo', label: 'Redo', onTap: !_playing && _st['canRedo'] == true ? () => _cmd({'op': 'redo'}) : null),
+        const SizedBox(height: 10),
+        kit.RailButton('props', label: 'Properties', pressed: _panelOpen && !_hidePanels, onTap: () => setState(() {
+              _hidePanels = false;
+              _panelOpen = !_panelOpen;
+            })),
+        const SizedBox(height: 4),
+        kit.RailButton('bin', label: 'Delete', onTap: _deleteSelection),
+        const Spacer(),
+        kit.RailButton('full', label: _hidePanels ? 'Show the panels' : 'Hide the panels', pressed: _hidePanels, onTap: () => setState(() => _hidePanels = !_hidePanels)),
+      ]),
+    );
+  }
+
   Widget _sidebar() {
     final mode = _st['mode'] as String? ?? 'figure';
     final fit = _fitScale();
@@ -1648,14 +1684,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final modeName = _playing ? 'Playing…' : {'figure': 'Normal', 'all': 'Panning', 'camera': 'Camera'}[mode] ?? 'Normal';
     final names = _sections();
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 4),
-        child: _pair(
-          _Btn('Undo', enabled: !_playing && _st['canUndo'] == true, onTap: () => _cmd({'op': 'undo'})),
-          _Btn('Redo', enabled: !_playing && _st['canRedo'] == true, onTap: () => _cmd({'op': 'redo'})),
-        ),
-      ),
-      Center(child: Text(_playing ? modeName : 'Mode: $modeName ($zoom%)', style: const TextStyle(color: cSecondary, fontSize: 12))),
+      Padding(padding: const EdgeInsets.only(top: 8), child: Center(child: Text(_playing ? modeName : 'Mode: $modeName ($zoom%)', style: const TextStyle(color: cSecondary, fontSize: 12)))),
       const SizedBox(height: 6),
       Expanded(
         child: _playing

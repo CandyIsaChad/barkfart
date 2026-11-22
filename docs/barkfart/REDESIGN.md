@@ -416,7 +416,7 @@ and tests are never weakened.
 - [x] C2. Top bar: Projects, View and Export words, the project name, the
   unsaved dot.
 - [x] C3. Left rail: the mode pictograms.
-- [ ] C4. Right rail: undo, redo, Properties, delete, hide panels.
+- [x] C4. Right rail: undo, redo, Properties, delete, hide panels.
 - [ ] C5. The Properties card holds today's sections, tabbed by selection.
   It replaces the sidebar and the tab strip.
 - [ ] C6. The "+" menu (absorbs Library Tools) and the stick figure chooser.
