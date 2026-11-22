@@ -33,7 +33,27 @@ Tick items there as they finish.
 - Scripted editor runs as before. The new script command is `savesheet`.
 - The window is capped at the screen size (about 1300x700).
 
-**Next:** C7 (the folded timeline: control toolbar, fps ruler, tiled Preview row, replacing the top frame strip and grid), then B3 (Animation popover from the toolbar's fps button) and C6 (the + menu in the bottom bar). C8 (docking, `BARKFART_DOCK=1`) is done. C5 (the Properties card floats on the right; sections are its tabs; the zoom readout moved to the View card) is done. Known wart: "Flip ↔" text arrows fall back to an emoji font; D7 renames them "Flip sideways" and "Flip over". C4 (right rail: undo, redo, Properties toggles the panel, Delete for the selection, hide panels) is done. C3 (left rail of mode pictograms) is done. C2 (top bar: Projects menu, View, Export, name and unsaved dot; script `projects`) is done. B3 waits until after C7. B5 (the Export sheet) is done; watermark and "Make vertical" move into it in C5. Then the rest of §7 in order. B4 (the View card) is done: script command `view` opens it. The script command `toast <text>` shows a toast.
+**Next:** C7, the folded timeline: control toolbar, fps ruler (D16), and the
+tiled Preview row. It replaces the top frame strip and the top-right grid.
+Then B3 (the Animation popover from the toolbar's fps button) and C6 (the
+"+" menu in the bottom bar). Then D1 onwards.
+
+**Done so far:** A1–A6, B1, B2, B4, B5, B6, C1–C5, C8.
+
+**Script commands added:** `savesheet`, `toast <text>`, `view`, `projects`.
+
+**Debug flags:** `BARKFART_GALLERY=1|sheet|page` (with
+`BARKFART_GALLERY_SHOT=<png>`), and `BARKFART_DOCK=1` to force the docked
+Properties card.
+
+**Still old, on purpose:**
+- the top frame strip with its button grid, until C7;
+- the App, Project, Library and Animation sections in the Properties card
+  when nothing is selected, until C6, C7 and the D pages;
+- watermark and "Make vertical", still in Project Tools until they join
+  the Export sheet;
+- the stage area's right padding still adds the screen inset, until C7
+  tidies the layout.
 
 Usage at this note: the 5-hour window was at about 72% and the weekly at 84%.
 

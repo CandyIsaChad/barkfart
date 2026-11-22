@@ -2412,7 +2412,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ]),
       const Padding(padding: EdgeInsets.only(top: 3), child: Text('Removes it from this frame. Hold: with the figures joined to it. ✎ edits its segments.', style: TextStyle(color: cSecondary, fontSize: 11))),
       _gap,
-      _pair(_Btn('◀', onTap: () => _cmd({'op': 'cycle_figure', 'dir': -1})), _Btn('▶', onTap: () => _cmd({'op': 'cycle_figure', 'dir': 1}))),
+      _pair(_Btn('Previous', onTap: () => _cmd({'op': 'cycle_figure', 'dir': -1})), _Btn('Next', onTap: () => _cmd({'op': 'cycle_figure', 'dir': 1}))),
       _gap,
       _label('Stickfigure'),
       _pair(_Btn('Copy', onTap: () => _cmd({'op': 'copy_figure', 'joined': true})), GestureDetector(onLongPress: _pasteLayeringPopup, child: _Btn('Paste', enabled: _st['figureCopied'] == true, onTap: _pasteFigure))),
@@ -2423,7 +2423,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _label('Pose'),
       _pair(_Btn('Copy', onTap: () => _cmd({'op': 'copy_pose'})), _Btn('Paste', enabled: _st['pose'] == true, onTap: () => _cmd({'op': 'paste_pose'}))),
       _gap,
-      _pair(_Btn('Flip ↔', onTap: () => _cmd({'op': 'flip_figure', 'h': true})), _Btn('Flip ↕', onTap: () => _cmd({'op': 'flip_figure', 'h': false}))),
+      _pair(_Btn('Flip sideways', onTap: () => _cmd({'op': 'flip_figure', 'h': true})), _Btn('Flip over', onTap: () => _cmd({'op': 'flip_figure', 'h': false}))),
       _gap,
       Row(children: [
         Expanded(child: _Btn('Layer down', onTap: () => _cmd({'op': 'layer_order', 'forward': false}))),
@@ -2663,7 +2663,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     // the length the segment was made with
     final rest = (sel['restLength'] as num?)?.toDouble() ?? 0;
     return [
-      _pair(_Btn('Flip ↔', onTap: () => _cmd({'op': 'flip_branch', 'h': true})), _Btn('Flip ↕', onTap: () => _cmd({'op': 'flip_branch', 'h': false}))),
+      _pair(_Btn('Flip sideways', onTap: () => _cmd({'op': 'flip_branch', 'h': true})), _Btn('Flip over', onTap: () => _cmd({'op': 'flip_branch', 'h': false}))),
       _gap,
       _Toggle('Use segment colour', sel['ownColor'] == true, (v) => _cmd({'op': 'segment', 'ownColor': v})),
       _hint('On: this segment keeps its own colour. Off: it follows the stickfigure colour.'),
