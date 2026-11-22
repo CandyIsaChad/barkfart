@@ -291,6 +291,11 @@ struct SnapNode {
 
 pub fn snapshot(p: &Project, sym: &str, id: &str, t: f64) -> Option<Snapshot> {
     let l = p.symbol(sym)?.layer(id)?;
+    // a figure with no filters and a plain opacity needs no evaluation (and a Resolver
+    // indexes the whole project when it is made: this runs for every figure on a copy)
+    if !ORDER.iter().any(|x| l.effects.nodes.contains_key(*x)) && l.opacity.track.is_empty() && l.opacity.modifiers.is_empty() {
+        return Some(Snapshot { opacity: l.opacity.value.f(), nodes: Vec::new() });
+    }
     let mut r = Resolver::new(p);
     let mut nodes = Vec::new();
     for e in l.effects.nodes.values() {

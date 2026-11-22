@@ -4061,7 +4061,14 @@ fn edit_time_on_a_big_project() {
     let handles = time(&mut || {
         let _ = s.tools.handles(s.project(), s.time());
     });
-    eprintln!("TIMING figures={n} frames={}: edit {edit:.1} ms, state() {state:.1} ms, handles() {handles:.1} ms", s.state()["frames"]);
+    s.command(&json!({"op": "frame", "i": 3}));
+    let copy = time(&mut || {
+        s.command(&json!({"op": "copy_frame", "n": 0}));
+    });
+    let paste = time(&mut || {
+        s.command(&json!({"op": "paste_frame"}));
+    });
+    eprintln!("TIMING figures={n} frames={}: edit {edit:.1} ms, state() {state:.1} ms, handles() {handles:.1} ms, copy frame {copy:.1} ms, paste frame {paste:.1} ms", s.state()["frames"]);
 }
 
 /// A movieclip has its own frames: adding, deleting and pasting frames while
