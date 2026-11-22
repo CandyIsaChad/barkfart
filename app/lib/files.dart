@@ -228,6 +228,8 @@ class AppSettings {
     'nodeStyle': 1,
     'lineWidth': 2,
     'haptics': true,
+    'doubleTapMovieclip': false,
+    'doubleTapNone': false,
     'zoomButtons': false,
     'guides': false,
     'stageBox': true,

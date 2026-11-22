@@ -402,15 +402,38 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     }
   }
 
+  Object? _lastFigTap;
+  DateTime _lastFigTapAt = DateTime(0);
+
   void _up(PointerEvent ev) {
     if (!_pointers.containsKey(ev.pointer)) return;
     _pointers.remove(ev.pointer);
     if (_pointers.isEmpty) {
-      if (_oneFinger == 1) _cmd({'op': ev is PointerCancelEvent ? 'cancel' : 'up'});
+      if (_oneFinger == 1) {
+        _cmd({'op': ev is PointerCancelEvent ? 'cancel' : 'up'});
+        // Settings: double-tapping a figure offers to make it a movieclip
+        final now = DateTime.now(), layer = _sel?['layer'];
+        if (!_moved && layer != null && _st['building'] == null && AppSettings.flag('doubleTapMovieclip')) {
+          if (layer == _lastFigTap && now.difference(_lastFigTapAt).inMilliseconds < 350) {
+            _lastFigTap = null;
+            unawaited(_ask('Convert to movieclip?', 'This figure and the figures joined to it become a movieclip that plays their animation in a loop.', ['Cancel', 'Convert']).then((a) {
+              if (a == 'Convert') _cmd({'op': 'to_movieclip'});
+            }));
+          } else {
+            _lastFigTap = layer;
+            _lastFigTapAt = now;
+          }
+        }
+      }
       if (_oneFinger == 2 && !_moved) {
         final now = DateTime.now();
         if (now.difference(_lastTapUp).inMilliseconds < 300) {
-          setState(_fit);
+          // Settings: in the figure editor a stage double-tap picks the None tool
+          if (_st['building'] != null && AppSettings.flag('doubleTapNone')) {
+            _cmd({'op': 'draw_tool', 'shape': 'none'});
+          } else {
+            setState(_fit);
+          }
           _lastTapUp = DateTime(0);
         } else {
           _lastTapUp = now;
@@ -1643,6 +1666,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               number('lineWidth', 'Width', 1, 5, 1),
               const SizedBox(height: 8),
               toggle('haptics', 'Haptic feedback', 'A light tick when you grab a joint (devices that support it).'),
+              toggle('doubleTapMovieclip', 'Double-tapping a figure offers to make it a movieclip', 'Two quick taps on a joint ask whether to convert the figure.'),
+              toggle('doubleTapNone', 'Double-tapping the stage picks the None tool in the figure editor', 'Instead of fitting the view, while editing a figure.'),
             ]),
           ),
           actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Done'))],
