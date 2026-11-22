@@ -1669,12 +1669,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (pick == 2) await _saveAs();
   }
 
-  /// App Tools > Settings: changes apply at once and are kept for next time.
+  /// The Settings screen (REDESIGN §8): two cards of rows. Changes apply at
+  /// once and are kept for next time.
   Future<void> _settingsDialog() async {
     final e = _engine;
-    await showDialog<void>(
-      context: context,
-      builder: (c) => StatefulBuilder(builder: (c, set) {
+    await Navigator.of(context).push(PageRouteBuilder<void>(
+      transitionDuration: const Duration(milliseconds: 120),
+      pageBuilder: (c, a1, a2) => StatefulBuilder(builder: (c, set) {
         void put(String k, Object v) {
           set(() => AppSettings.values[k] = v);
           setState(() {});
@@ -1682,53 +1683,86 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           if (k == 'axisLock') _cmd({'op': 'set', 'k': 'axis', 'v': v});
         }
 
-        Widget toggle(String k, String label, String help) => Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                _Toggle(label, AppSettings.flag(k), (v) => put(k, v)),
-                if (!AppSettings.flag('nerd')) Text(help, style: const TextStyle(color: cSecondary, fontSize: 11)),
-              ]),
+        final nerd = AppSettings.flag('nerd');
+        List<rw.Desc> toggle(String k, String label, String help) => [
+              rw.DTick(label, AppSettings.flag(k), onChanged: (v) => put(k, v)),
+              if (!nerd) rw.DHint(help),
+            ];
+        rw.Desc number(String k, String label, int min, int max, int step) => rw.DStep(label, '${AppSettings.number(k)}',
+            onMinus: AppSettings.number(k) > min ? () => put(k, math.max(min, AppSettings.number(k) - step)) : null,
+            onPlus: AppSettings.number(k) < max ? () => put(k, math.min(max, AppSettings.number(k) + step)) : null);
+        Widget card(List<rw.Desc> rows) => Container(
+              decoration: BoxDecoration(color: cCard, borderRadius: BorderRadius.circular(16), boxShadow: const [BoxShadow(color: Color(0x0F000000), spreadRadius: 1), BoxShadow(color: Color(0x1410141A), blurRadius: 8, offset: Offset(0, 2))]),
+              padding: const EdgeInsets.fromLTRB(18, 4, 18, 12),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [for (final d in rows) rw.renderDesc(d)]),
             );
-        Widget number(String k, String label, int min, int max, int step) => _stepper(label, '${AppSettings.number(k)}', () => put(k, math.max(min, AppSettings.number(k) - step)), () => put(k, math.min(max, AppSettings.number(k) + step)));
-        return AlertDialog(
+        final left = card([
+          const rw.DTitle('Screen'),
+          number('padLeft', 'Padding on the left', 0, 120, 4),
+          number('padRight', 'Padding on the right', 0, 120, 4),
+          if (!nerd) const rw.DHint('Padding keeps controls clear of notches and rounded corners.'),
+          ...toggle('leftHand', 'Left-hand mode', 'The tools move to the other side of the screen.'),
+          const rw.DTitle('Joints'),
+          rw.DSeg(const ['Legacy', 'Modern', 'Solid'], AppSettings.number('nodeStyle').clamp(0, 2), label: 'Joint style', onSelect: (i) => put('nodeStyle', i)),
+          number('lineWidth', 'Line width', 1, 5, 1),
+          const rw.DTitle('Saving'),
+          number('saveReminder', 'Save reminder (minutes, 0: off)', 0, 120, 1),
+        ]);
+        final middle = card([
+          const rw.DTitle('Editing'),
+          ...toggle('axisLock', 'Axis locking', 'Drags of a figure or the camera keep to a straight line when they nearly follow one.'),
+          ...toggle('keepSelection', 'Keep the selection when changing frames', 'Picking another frame leaves the selected figure selected.'),
+          ...toggle('stylus', 'Precise touches (stylus)', 'Joints have to be touched more exactly: for a stylus rather than a finger.'),
+          ...toggle('haptics', 'Haptic feedback', 'A light tick when you grab a joint, on devices that have it.'),
+          ...toggle('doubleTapMovieclip', 'Double-tap a figure to make a movieclip', 'Two quick taps on a joint ask whether to convert the figure.'),
+          ...toggle('doubleTapNone', 'Double-tap the stage for Select (figure editor)', 'Instead of fitting the view, while editing a figure.'),
+          ...toggle('nerd', 'Fewer explanations', 'Hides most help text once you know your way around.'),
+        ]);
+        final right = card([
+          const rw.DTitle('This device'),
+          rw.DInfo('Graphics', e?.adapter ?? '?'),
+          rw.DInfo('Sound', e?.audioDevice ?? '?'),
+          const rw.DTitle('About'),
+          const rw.DInfo('Version', '0.1.0'),
+          const rw.DHint('Barkfart makes no network requests: no ads, no tracking, nothing sent anywhere.'),
+        ]);
+        final wide = MediaQuery.sizeOf(c).width > 900;
+        return Scaffold(
           backgroundColor: cPanel,
-          title: const Text('Settings', style: TextStyle(color: cText, fontSize: 17)),
-          content: SizedBox(
-            width: 420,
-            child: ListView(shrinkWrap: true, children: [
-              Text('Graphics: ${e?.adapter ?? '?'}\nSound: ${e?.audioDevice ?? '?'}', style: const TextStyle(color: cSecondary, fontSize: 11)),
-              const SizedBox(height: 12),
-              toggle('axisLock', 'Axis locking', 'Drags of a figure or the camera keep to a straight line when they nearly follow one.'),
-              toggle('leftHand', 'Left-hand mode', 'The tool panel moves to the right side of the screen.'),
-              toggle('keepSelection', 'Keep the selection when changing frames', 'Picking another frame leaves the selected figure selected.'),
-              toggle('stylus', 'Precise touches (stylus)', 'Joints have to be touched more exactly; for a stylus rather than a finger.'),
-              toggle('nerd', 'Fewer explanations', 'Hides most help text in the panels once you know your way around.'),
-              const SizedBox(height: 6),
-              _label('Screen padding (for notches and rounded corners)'),
-              number('padLeft', 'Left', 0, 120, 4),
-              number('padRight', 'Right', 0, 120, 4),
-              const SizedBox(height: 6),
-              _label('Save reminder in minutes (0: off)'),
-              number('saveReminder', 'Minutes', 0, 120, 1),
-              const SizedBox(height: 12),
-              _label('Node style'),
-              _Segmented(const ['Legacy', 'Modern', 'Solid'], AppSettings.number('nodeStyle').clamp(0, 2), (i) => put('nodeStyle', i)),
-              const SizedBox(height: 8),
-              _label('Line width (see joints and lines easier)'),
-              number('lineWidth', 'Width', 1, 5, 1),
-              const SizedBox(height: 8),
-              toggle('haptics', 'Haptic feedback', 'A light tick when you grab a joint (devices that support it).'),
-              toggle('doubleTapMovieclip', 'Double-tapping a figure offers to make it a movieclip', 'Two quick taps on a joint ask whether to convert the figure.'),
-              toggle('doubleTapNone', 'Double-tapping the stage picks the None tool in the figure editor', 'Instead of fitting the view, while editing a figure.'),
+          body: SafeArea(
+            child: Column(children: [
+              Container(
+                height: 44,
+                width: double.infinity,
+                decoration: const BoxDecoration(color: cCard, border: Border(bottom: BorderSide(color: cLine))),
+                child: Stack(alignment: Alignment.center, children: [
+                  const Text('Settings', style: TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w700)),
+                  Positioned(left: 4, child: kit.WordButton('‹ Back', onTap: () => Navigator.pop(c))),
+                ]),
+              ),
+              Expanded(
+                child: ListView(padding: const EdgeInsets.all(20), children: [
+                  if (wide)
+                    Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Expanded(child: left),
+                      const SizedBox(width: 16),
+                      Expanded(child: middle),
+                      const SizedBox(width: 16),
+                      Expanded(child: right),
+                    ])
+                  else ...[
+                    Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Expanded(child: left), const SizedBox(width: 16), Expanded(child: right)]),
+                    const SizedBox(height: 16),
+                    middle,
+                  ],
+                ]),
+              ),
             ]),
           ),
-          actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Done'))],
         );
       }),
-    );
+    ));
   }
-
-
 
   List<Widget> _projectTools() => [
         Text(_file?.name ?? '(Not saved yet)', style: const TextStyle(color: cSecondary, fontSize: 12)),

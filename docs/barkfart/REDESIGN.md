@@ -409,7 +409,7 @@ and tests are never weakened.
 - [x] B4. The View card (today's View options).
 - [x] B5. The Export sheet. Watermark and "Make vertical" join it when C5
   removes Project Tools.
-- [ ] B6. The Settings screen.
+- [x] B6. The Settings screen.
 
 ### C. The editor shell (frames are still snapshots)
 - [ ] C1. Checkerboard offstage.
