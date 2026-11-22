@@ -99,6 +99,8 @@ pub struct Session {
     frame_clip: Option<(crate::edit::editor::KeyClip, i32)>,
     /// The background look of each copied frame (a frame with no key of its own has the default one)
     frame_looks: Vec<J>,
+    /// And each figure's filters on each copied frame
+    frame_filters: Vec<Vec<(String, crate::edit::filters::Snapshot)>>,
     /// Bumped on every change the app should redraw for (drags included).
     rev: u64,
     pub message: String,
@@ -149,7 +151,7 @@ impl Session {
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
         let main_root = doc.project().root_symbol.clone();
-        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, frame_looks: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -666,12 +668,19 @@ impl Session {
                 }
                 self.frame_clip = Some((self.tools.editor.copy(self.project(), &sel), n + 1));
                 self.frame_looks = (0..=n).map(|k| frame_look(self.project(), self.frame + k)).collect();
+                let filters: Vec<Vec<(String, crate::edit::filters::Snapshot)>> = {
+                    let (p, sym) = (self.project(), self.sym());
+                    let figures: Vec<String> = p.root().map(|r| r.layers.iter().filter(|l| l.as_figure().is_some()).map(|l| l.id.clone()).collect()).unwrap_or_default();
+                    (0..=n).map(|k| figures.iter().filter_map(|id| crate::edit::filters::snapshot(p, &sym, id, t + k as f64 / fps).map(|sn| (id.clone(), sn))).collect()).collect()
+                };
+                self.frame_filters = filters;
                 self.message = if n == 0 { "Frame copied.".into() } else { format!("{} frames copied.", n + 1) };
                 self.rev += 1;
             }
             "paste_frame" => {
                 if let Some((clip, count)) = self.frame_clip.clone() {
                     let looks = self.frame_looks.clone();
+                    let filters = self.frame_filters.clone();
                     let fr = self.frame;
                     let made = self.step("Paste frame", |s| {
                         for k in 0..count {
@@ -697,6 +706,19 @@ impl Session {
                         // a copied frame with no background key had the default one: a pasted
                         // frame has the look of the frame it was copied from, not of the one
                         // it was inserted after
+                        // and so are the figures' filters: a filter set up since the copy is not on it
+                        for (k, list) in filters.iter().enumerate().take(count as usize) {
+                            let tk = frame_ops::time(s, fr + 1 + k as i32);
+                            for (lid, snap) in list {
+                                if s.project.root().and_then(|r| r.layer(lid)).is_none() {
+                                    continue;
+                                }
+                                if crate::edit::filters::snapshot(&s.project, &sym, lid, tk).as_ref() != Some(snap) {
+                                    crate::edit::filters::clear(s, &sym, lid, tk)?;
+                                    crate::edit::filters::restore(s, &sym, lid, snap, tk)?;
+                                }
+                            }
+                        }
                         let has_camera = s.project.root().is_some_and(|r| r.layers.iter().any(|l| matches!(l.kind, LayerKind::Camera(_))));
                         for (k, look) in looks.iter().enumerate().take(count as usize) {
                             if has_camera && frame_look(&s.project, fr + 1 + k as i32) != *look {

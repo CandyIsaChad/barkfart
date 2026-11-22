@@ -2014,6 +2014,16 @@ fn toggle_rows() -> Vec<(&'static str, Option<Value>, Value, Value)> {
         ("keep in tween", None, json!({"op": "figure", "keepInTween": false}), json!({"op": "figure", "keepInTween": true})),
         ("invert", None, json!({"op": "filter", "invert": true}), json!({"op": "filter", "invert": false})),
         ("motion blur", None, json!({"op": "filter", "motion": true}), json!({"op": "filter", "motion": false})),
+        // the other stickfigure filters (each is one effect node keyed on the frame)
+        ("blur", None, json!({"op": "filter", "blur": 6}), json!({"op": "filter", "blur": 0})),
+        ("pixelate", None, json!({"op": "filter", "pixelate": 8}), json!({"op": "filter", "pixelate": 1})),
+        ("hue shift", None, json!({"op": "filter", "hue": 90}), json!({"op": "filter", "hue": 0})),
+        ("saturation", None, json!({"op": "filter", "saturation": 0.4}), json!({"op": "filter", "saturation": 1})),
+        ("tint amount", Some(json!({"op": "filter", "tint": 0xff0000ffu32})), json!({"op": "filter", "tintAmount": 0.6}), json!({"op": "filter", "tintAmount": 0})),
+        ("glow amount", None, json!({"op": "filter", "glowAmount": 0.7}), json!({"op": "filter", "glowAmount": 0})),
+        ("shadow opacity", None, json!({"op": "filter", "shadowOpacity": 0.7}), json!({"op": "filter", "shadowOpacity": 0})),
+        ("outline amount", Some(json!({"op": "filter", "outline": 0x00ff00ffu32, "outlineThickness": 6})), json!({"op": "filter", "outlineAmount": 1}), json!({"op": "filter", "outlineAmount": 0})),
+        ("opacity", None, json!({"op": "filter", "opacity": 0.4}), json!({"op": "filter", "opacity": 1})),
         ("segment gradient", None, json!({"op": "segment", "gradient": true}), json!({"op": "segment", "gradient": false})),
         ("use segment colour", None, json!({"op": "segment", "ownColor": true}), json!({"op": "segment", "ownColor": false})),
         ("trapezoid rounded start", Some(json!({"op": "segment", "shape": "trapezoid"})), json!({"op": "segment", "trapRoundStart": true}), json!({"op": "segment", "trapRoundStart": false})),
@@ -2970,6 +2980,7 @@ fn a_per_frame_control_on_the_middle_frame_leaves_the_other_frames_alone() {
     let per_frame = [
         "use gradient", "expand gradient", "widescreen", "wobble", "wobble rotation", "do not tween", "pause", "slow motion", "invert", "motion blur",
         "nudge", "turn figure", "silence frame", "gradient colours kept while off", "pause kept while off", "motion blur distance kept while off",
+        "blur", "pixelate", "hue shift", "saturation", "tint amount", "glow amount", "shadow opacity", "outline amount", "opacity",
     ];
     let mut failures = Vec::new();
     let mut checked = 0;
@@ -3614,4 +3625,148 @@ fn random_editing_with_undo_and_redo_walks_the_history_exactly() {
         }
     }
     assert!(failures.is_empty(), "{} runs went wrong:\n{}", failures.len(), failures.iter().take(4).cloned().collect::<Vec<_>>().join("\n"));
+}
+
+/// Random editing against a model of three more per-frame values: the camera
+/// zoom, the invert filter and the blur filter of the man. Inserted frames
+/// copy them, pasted frames bring the copied frame's, deleted frames take
+/// theirs along, and a frame rate change leaves them on their frames.
+#[test]
+fn random_frame_editing_keeps_camera_and_filter_values_with_their_frames() {
+    let mut failures = Vec::new();
+    let zooms = [1.0f64, 1.5, 2.0];
+    for seed in 1..=20u64 {
+        let mut rng = seed.wrapping_mul(3935559000370003845).wrapping_add(2691343689449507681);
+        let mut next = move |n: usize| -> usize {
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((rng >> 33) as usize) % n
+        };
+        let mut s = two_poses();
+        s.command(&json!({"op": "add_camera"}));
+        let read = |s: &mut Session, i: usize| -> (f64, bool, f64) {
+            s.command(&json!({"op": "frame", "i": i as i64}));
+            s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+            let st = s.state();
+            (st["cam"]["zoom"].as_f64().unwrap(), st["selected"]["filters"]["invert"].as_bool().unwrap_or(false), st["selected"]["filters"]["blur"].as_f64().unwrap_or(0.0))
+        };
+        let n0 = s.state()["frames"].as_i64().unwrap() as usize;
+        let mut model: Vec<(f64, bool, f64)> = (0..n0).map(|i| read(&mut s, i)).collect();
+        let mut clip: Option<(f64, bool, f64)> = None;
+        let mut log: Vec<String> = Vec::new();
+        for step in 0..24 {
+            let n = model.len();
+            let f = next(n);
+            s.command(&json!({"op": "frame", "i": f as i64}));
+            s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+            match next(9) {
+                0 => {
+                    let z = zooms[next(3)];
+                    log.push(format!("zoom {z} on {f}"));
+                    s.command(&json!({"op": "camera", "zoom": z}));
+                    model[f].0 = z;
+                }
+                1 => {
+                    let on = next(2) == 0;
+                    log.push(format!("invert {on} on {f}"));
+                    s.command(&json!({"op": "filter", "invert": on}));
+                    model[f].1 = on;
+                }
+                2 => {
+                    let b = (next(4) * 2) as f64;
+                    log.push(format!("blur {b} on {f}"));
+                    s.command(&json!({"op": "filter", "blur": b}));
+                    model[f].2 = b;
+                }
+                3 | 4 => {
+                    log.push(format!("insert after {f}"));
+                    s.command(&json!({"op": "insert_frame"}));
+                    let v = model[f];
+                    model.insert(f + 1, v);
+                }
+                5 => {
+                    log.push(format!("delete {f}"));
+                    if n > 1 {
+                        s.command(&json!({"op": "delete_frame"}));
+                        model.remove(f);
+                    }
+                }
+                6 => {
+                    log.push(format!("copy {f}"));
+                    s.command(&json!({"op": "copy_frame", "n": 0}));
+                    clip = Some(model[f]);
+                }
+                7 => {
+                    if let Some(c) = clip {
+                        log.push(format!("paste after {f}"));
+                        s.command(&json!({"op": "paste_frame"}));
+                        model.insert(f + 1, c);
+                    }
+                }
+                _ => {
+                    let fps = [24, 7, 30, 12, 10, 25, 5][next(7)];
+                    log.push(format!("fps {fps}"));
+                    s.command(&json!({"op": "fps", "v": fps}));
+                }
+            }
+            let frames = s.state()["frames"].as_i64().unwrap() as usize;
+            let mut bad = Vec::new();
+            if frames != model.len() {
+                bad.push(format!("{frames} frames, the model has {}", model.len()));
+            } else {
+                for (i, want) in model.clone().iter().enumerate() {
+                    let got = read(&mut s, i);
+                    if (got.0 - want.0).abs() > 0.02 || got.1 != want.1 || (got.2 - want.2).abs() > 0.02 {
+                        bad.push(format!("frame {i}: want {want:?} got {got:?}"));
+                    }
+                }
+            }
+            if !stray_keys(s.project()).is_empty() {
+                bad.push(format!("keys a hair apart on {:?}", stray_keys(s.project()).iter().take(3).collect::<Vec<_>>()));
+            }
+            if !bad.is_empty() {
+                failures.push(format!("seed {seed}, step {step} ({}): {}\n    after: {}", log.last().cloned().unwrap_or_default(), bad.join("; "), log.join(", ")));
+                break;
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} runs went wrong:\n{}", failures.len(), failures.iter().take(5).cloned().collect::<Vec<_>>().join("\n"));
+}
+
+/// Stickfigure filters belong to a frame: clearing them, or pasting a copied
+/// set, on one frame leaves the other frames' filters as they were.
+#[test]
+fn clearing_or_pasting_filters_on_one_frame_leaves_the_other_frames_alone() {
+    let mut s = two_poses();
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "insert_frame"}));
+    let on = |s: &mut Session, frame: i64| -> (bool, f64) {
+        s.command(&json!({"op": "frame", "i": frame}));
+        s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+        let st = s.state();
+        (st["selected"]["filters"]["invert"].as_bool().unwrap(), st["selected"]["filters"]["blur"].as_f64().unwrap())
+    };
+    for f in 0..3 {
+        s.command(&json!({"op": "frame", "i": f}));
+        s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+        s.command(&json!({"op": "filter", "invert": true, "blur": 4.0 + f as f64}));
+    }
+    assert_eq!([on(&mut s, 0), on(&mut s, 1), on(&mut s, 2)], [(true, 4.0), (true, 5.0), (true, 6.0)]);
+    // clear them on the middle frame only
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    s.command(&json!({"op": "clear_filters"}));
+    assert_eq!([on(&mut s, 0), on(&mut s, 1), on(&mut s, 2)], [(true, 4.0), (false, 0.0), (true, 6.0)], "cleared on the middle frame only");
+    // copy the last frame's filters and paste them on the first
+    s.command(&json!({"op": "frame", "i": 2}));
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    s.command(&json!({"op": "copy_filters"}));
+    s.command(&json!({"op": "frame", "i": 0}));
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    s.command(&json!({"op": "clear_filters"}));
+    s.command(&json!({"op": "paste_filters"}));
+    assert_eq!([on(&mut s, 0), on(&mut s, 1), on(&mut s, 2)], [(true, 6.0), (false, 0.0), (true, 6.0)], "pasted on the first frame only");
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    s.command(&json!({"op": "paste_filters"}));
+    assert_eq!([on(&mut s, 0), on(&mut s, 1), on(&mut s, 2)], [(true, 6.0), (true, 6.0), (true, 6.0)], "pasted on the middle frame only");
 }

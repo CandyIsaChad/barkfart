@@ -214,15 +214,58 @@ pub fn apply(st: &mut State, sym: &str, id: &str, c: &J, t: f64) -> EditResult<(
     Ok(())
 }
 
-/// Clear all filters of the figure: the filter nodes go and opacity is 1.
+/// The panel's starting values of a filter's settings.
+fn default_param(node: &str, name: &str) -> Option<Value> {
+    let f = |v: f32| Some(Value::F(v));
+    let c = |v: u32| Some(Value::C(Color::rgba8888(v)));
+    match (node, name) {
+        (ADJUST_ID, "hue") => f(0.0),
+        (ADJUST_ID, "saturation") => f(1.0),
+        (PIXELATE_ID, "size") => f(1.0),
+        (TINT_ID, "color") => c(0xffffffff),
+        (TINT_ID, "amount") => f(0.0),
+        (OUTLINE_ID, "color") => c(0xff00ffff),
+        (OUTLINE_ID, "width") => f(4.0),
+        (BLUR_ID, "radius") => f(0.0),
+        (MOTION_ID, "distance") => f(30.0),
+        (MOTION_ID, "angle") => f(0.0),
+        (GLOW_ID, "color") => c(0x0a84ffff),
+        (GLOW_ID, "strength") => f(1.0),
+        (SHADOW_ID, "color") => c(0x000000ff),
+        (SHADOW_ID, "dx") => f(-7.07),
+        (SHADOW_ID, "dy") => f(7.07),
+        (SHADOW_ID, "radius") => f(6.0),
+        _ => None,
+    }
+}
+
+/// Clear all filters of the figure on this frame (filters belong to a frame, like
+/// every other setting of a snapshot): every filter goes silent here with its
+/// settings back to the defaults, and the opacity is 1. Other frames keep theirs.
+/// A filter that ends up silent on every frame goes altogether.
 pub fn clear(st: &mut State, sym: &str, id: &str, t: f64) -> EditResult<()> {
     let (n, fps) = (super::frame_ops::frame_count(st), fps_of(st));
-    let Some(l) = st.project.layer_mut(sym, id) else { return fail("no figure") };
-    if l.as_figure().is_none() {
-        return fail("not a figure");
+    {
+        let Some(l) = st.project.layer_mut(sym, id) else { return fail("no figure") };
+        if l.as_figure().is_none() {
+            return fail("not a figure");
+        }
+        let present: Vec<(String, Vec<String>)> = ORDER.iter().filter_map(|x| l.effects.nodes.get(*x).map(|e| ((*x).to_string(), e.params.keys().cloned().collect()))).collect();
+        for (x, params) in present {
+            set_mix(l, &x, t, 0.0);
+            for name in params {
+                if let Some(v) = default_param(&x, &name) {
+                    let ty = if matches!(v, Value::C(_)) { ValueType::Color } else { ValueType::Float };
+                    set_param(l, &x, &name, ty, t, v);
+                }
+            }
+        }
     }
-    let ids: Vec<String> = ORDER.iter().filter(|x| l.effects.nodes.keys().any(|k| k.as_str() == **x)).map(|x| (*x).to_string()).collect();
-    for x in ids {
+    let gone: Vec<String> = {
+        let Some(l) = st.project.root().and_then(|r| r.layer(id)) else { return fail("no figure") };
+        ORDER.iter().filter(|x| l.effects.nodes.get(**x).is_some_and(|e| e.mix.track.keys().iter().all(|k| matches!(k.value, Value::F(v) if v <= 0.0)))).map(|x| (*x).to_string()).collect()
+    };
+    for x in gone {
         super::structure::remove_effect(st, sym, id, &x)?;
     }
     let Some(l) = st.project.layer_mut(sym, id) else { return fail("no figure") };
@@ -232,13 +275,13 @@ pub fn clear(st: &mut State, sym: &str, id: &str, t: f64) -> EditResult<()> {
 }
 
 /// A copied filter set: the layer's opacity and its filter nodes at time t.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Snapshot {
     opacity: f32,
     nodes: Vec<SnapNode>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct SnapNode {
     id: String,
     ty: String,
@@ -303,6 +346,13 @@ pub fn state(p: &Project, sym: &str, id: &str, t: f64) -> J {
             .unwrap_or(d)
     };
     let mix = |r: &mut Resolver, e: Option<&EffectNode>, d: f32| e.map(|e| r.f(&e.mix, t)).unwrap_or(d);
+    // controls whose value is their own on / off (blur 0, pixelate 1, hue 0, saturation 1,
+    // tint amount 0): on a frame where the filter is silent the panel shows the off value,
+    // not what another frame set
+    let live = |r: &mut Resolver, e: Option<&EffectNode>, name: &str, on_default: f32, off: f32| {
+        let silent = e.is_some_and(|e| r.f(&e.mix, t) <= 0.0);
+        if silent { off } else { num(r, e, name, on_default) }
+    };
     let n = |x: &str| l.effects.nodes.get(x);
     let (invert, adjust, pixel, tint, outline, blur, motion, glow, shadow) =
         (n(INVERT_ID), n(ADJUST_ID), n(PIXELATE_ID), n(TINT_ID), n(OUTLINE_ID), n(BLUR_ID), n(MOTION_ID), n(GLOW_ID), n(SHADOW_ID));
@@ -311,15 +361,15 @@ pub fn state(p: &Project, sym: &str, id: &str, t: f64) -> J {
     serde_json::json!({
         "opacity": round2(r.f(&l.opacity, t)),
         "invert": mix(&mut r, invert, 0.0) > 0.5,
-        "hue": round2(num(&mut r, adjust, "hue", 0.0)),
-        "saturation": round2(num(&mut r, adjust, "saturation", 1.0)),
-        "pixelate": round2(num(&mut r, pixel, "size", 1.0)),
+        "hue": round2(live(&mut r, adjust, "hue", 0.0, 0.0)),
+        "saturation": round2(live(&mut r, adjust, "saturation", 1.0, 1.0)),
+        "pixelate": round2(live(&mut r, pixel, "size", 1.0, 1.0)),
         "tint": col(&mut r, tint, "color", 0xffffffff),
-        "tintAmount": round2(num(&mut r, tint, "amount", 0.0)),
+        "tintAmount": round2(live(&mut r, tint, "amount", 0.0, 0.0)),
         "outline": col(&mut r, outline, "color", 0xff00ffff),
         "outlineAmount": round2(mix(&mut r, outline, 1.0)),
         "outlineThickness": round2(num(&mut r, outline, "width", 4.0)),
-        "blur": round2(num(&mut r, blur, "radius", 0.0)),
+        "blur": round2(live(&mut r, blur, "radius", 0.0, 0.0)),
         "motion": mix(&mut r, motion, 0.0) > 0.5,
         "motionDistance": round2(num(&mut r, motion, "distance", 30.0)),
         "motionAngle": round2(num(&mut r, motion, "angle", 0.0)),
