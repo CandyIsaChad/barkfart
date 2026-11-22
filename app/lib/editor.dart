@@ -4095,6 +4095,7 @@ class _FigurePicker extends StatefulWidget {
 class _FigurePickerState extends State<_FigurePicker> {
   final List<String> _picked = [];
   String _filter = '';
+  int _tab = 0; // Stock, Yours, Effects
 
   Widget _tile(_PickEntry f) {
     final on = _picked.contains(f.id);
@@ -4102,21 +4103,17 @@ class _FigurePickerState extends State<_FigurePicker> {
     return GestureDetector(
       onTap: () => setState(() => on ? _picked.remove(f.id) : _picked.add(f.id)),
       onDoubleTap: () => Navigator.pop(context, [f.id]),
-      child: Container(
-        decoration: BoxDecoration(color: cControl, borderRadius: BorderRadius.circular(6), border: Border.all(color: on ? cAccent : const Color(0x00000000), width: 2)),
-        padding: const EdgeInsets.all(6),
-        child: Column(children: [
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(color: const Color(0xFFF2F2F2), borderRadius: BorderRadius.circular(4)),
-              padding: const EdgeInsets.all(4),
-              child: img == null ? const Center(child: Text('?', style: TextStyle(color: cSecondary))) : RawImage(image: img, fit: BoxFit.contain),
-            ),
+      child: Column(children: [
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(color: cCard, borderRadius: BorderRadius.circular(10), border: Border.all(color: on ? cAccent : cLine, width: on ? 2 : 1)),
+            padding: const EdgeInsets.all(6),
+            child: img == null ? const Center(child: Text('?', style: TextStyle(color: cSecondary))) : RawImage(image: img, fit: BoxFit.contain),
           ),
-          const SizedBox(height: 6),
-          Text(f.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: on ? cText : cSecondary, fontSize: 12)),
-        ]),
-      ),
+        ),
+        const SizedBox(height: 4),
+        Text(f.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: on ? cAccent : cText, fontSize: 12, fontWeight: on ? FontWeight.w700 : FontWeight.w400)),
+      ]),
     );
   }
 
@@ -4124,65 +4121,72 @@ class _FigurePickerState extends State<_FigurePicker> {
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     final match = widget.entries.where((f) => f.name.toLowerCase().contains(_filter.toLowerCase())).toList();
-    final mine = match.where((f) => f.mine).toList();
-    final figs = match.where((f) => !f.mine && !f.effect).toList(), effects = match.where((f) => f.effect).toList();
-    Widget grid(List<_PickEntry> list) => GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 132, mainAxisSpacing: 8, crossAxisSpacing: 8, childAspectRatio: 0.82),
-          itemCount: list.length,
-          itemBuilder: (c, i) => _tile(list[i]),
-        );
-    const head = TextStyle(color: cText, fontSize: 13, fontWeight: FontWeight.w600);
+    final lists = [match.where((f) => !f.mine && !f.effect).toList(), match.where((f) => f.mine).toList(), match.where((f) => f.effect).toList()];
+    final list = lists[_tab];
     return Dialog(
-      backgroundColor: cPanel,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      backgroundColor: cCard,
+      insetPadding: const EdgeInsets.all(12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       child: SizedBox(
-        width: math.min(720, size.width * 0.8),
-        height: math.min(560, size.height * 0.85),
+        width: math.min(760, size.width * 0.9),
+        height: math.min(560, size.height * 0.9),
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            const Text('Add a figure', style: TextStyle(color: cText, fontSize: 17, fontWeight: FontWeight.w600)),
+            const Text('Add a stick figure', textAlign: TextAlign.center, style: TextStyle(color: cTitle, fontSize: 17, fontWeight: FontWeight.w700)),
             const SizedBox(height: 10),
-            TextField(
-              style: const TextStyle(color: cText),
-              decoration: const InputDecoration(hintText: 'Filter', isDense: true, prefixIcon: Icon(Icons.search, size: 18)),
-              onChanged: (v) => setState(() => _filter = v),
-            ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: ListView(children: [
-                const Text('Your figures', style: head),
-                const SizedBox(height: 6),
-                if (mine.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: 8),
-                    child: Text('Put Stick Nodes figure files (.nodes, .nodemc, .stknds) in the "Barkfart Figures" folder (Files app) and they show up here.', style: TextStyle(color: cSecondary, fontSize: 12)),
-                  )
-                else
-                  grid(mine),
-                const SizedBox(height: 12),
-                const Text('Stick figures', style: head),
-                const SizedBox(height: 6),
-                grid(figs),
-                const SizedBox(height: 12),
-                const Text('Effects', style: head),
-                const SizedBox(height: 6),
-                grid(effects),
-              ]),
-            ),
-            const SizedBox(height: 12),
             Row(children: [
-              Text(_picked.isEmpty ? 'Tap figures to pick them.' : '${_picked.length} picked', style: const TextStyle(color: cSecondary, fontSize: 12)),
-              const Spacer(),
-              SizedBox(width: 110, child: _Btn('Cancel', onTap: () => Navigator.pop(context))),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 110,
-                child: _Btn(_picked.isEmpty ? 'Add' : 'Add (${_picked.length})', accent: true, enabled: _picked.isNotEmpty, onTap: () => Navigator.pop(context, List<String>.from(_picked))),
+              SizedBox(width: 300, child: kit.Segmented(const ['Stock', 'Yours', 'Effects'], _tab, onSelect: (i) => setState(() => _tab = i))),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: TextField(
+                    style: const TextStyle(color: cText, fontSize: 14),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      filled: true,
+                      fillColor: cControl,
+                      hintText: 'Search',
+                      prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF8A9099)),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                    ),
+                    onChanged: (v) => setState(() => _filter = v),
+                  ),
+                ),
               ),
             ]),
+            const SizedBox(height: 8),
+            Expanded(
+              child: list.isEmpty
+                  ? Center(
+                      child: Text(
+                        _tab == 1 ? 'Put figure files (.nodes, .nodemc, .stknds) in the "Barkfart Figures" folder (Files app) and they show up here.' : 'Nothing matches.',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: cSecondary, fontSize: 13),
+                      ),
+                    )
+                  : GridView.builder(
+                      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 140, mainAxisSpacing: 12, crossAxisSpacing: 10, childAspectRatio: 0.95),
+                      itemCount: list.length,
+                      itemBuilder: (c, i) => _tile(list[i]),
+                    ),
+            ),
+            Container(
+              padding: const EdgeInsets.only(top: 10),
+              decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFFE6E8EB)))),
+              child: Row(children: [
+                Text(_picked.isEmpty ? 'Tap figures to pick them; double-tap adds one.' : '${_picked.length} picked', style: const TextStyle(color: cSecondary, fontSize: 12)),
+                const Spacer(),
+                SizedBox(width: 110, child: kit.WordButton('Cancel', filled: true, expand: true, height: 38, onTap: () => Navigator.pop(context))),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 120,
+                  child: kit.WordButton(_picked.isEmpty ? 'Add' : 'Add (${_picked.length})', primary: true, expand: true, height: 38, onTap: _picked.isEmpty ? null : () => Navigator.pop(context, List<String>.from(_picked))),
+                ),
+              ]),
+            ),
           ]),
         ),
       ),

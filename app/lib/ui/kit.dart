@@ -71,7 +71,7 @@ class WordButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final enabled = onTap != null;
     final fg = !enabled ? cTag : primary ? cCard : danger ? cDanger : cAccent;
-    final bg = primary ? (enabled ? cAccent : cTag) : filled ? (danger ? const Color(0xFFFDECEE) : cControl) : null;
+    final bg = primary ? (enabled ? cAccent : cControl) : filled ? (danger ? const Color(0xFFFDECEE) : cControl) : null;
     final box = Container(
       height: height,
       alignment: Alignment.center,
