@@ -99,6 +99,18 @@ Done and verified (engine suite green: `cargo test -q --workspace`, 3.5 min;
     0.0 == -0.0, so a flip that made an angle -0.0 changed the saved project
     with no undo step (found at seed 19 of the widened walk). A step is now
     dropped only when the encodings are byte-identical too.
+  - The "unsaved changes" marker compared a revision counter that every undo
+    bumps, so undoing back to the saved project (or cancelling a drag) still
+    said "unsaved": `Document::dirty` now follows where the saved state sits in
+    the undo stack (`saved_depth` / `saved_valid`).
+  - Copy / paste frame cost: `filters::snapshot` has a fast path for figures
+    without filters (100 figures: copy 280 -> 140 ms).
+Judgement calls the user may want to reverse (each is a behaviour change, not
+just a fix): Clear / Paste filters act on one frame (the reference only says
+"resets all filters of the selected figure"); unticking Use segment colour keeps
+the own colour for when it is ticked again; Layer up / down step past the next
+layer that draws, not the camera; an edit that changes nothing leaves no undo
+step; a pasted frame gets the copied frame's background and filters.
 Known and left alone:
 - A hidden gradient colour of pure black is stored as transparent black, which
   reads as "no colour chosen" (default grey) after Use gradient off, on.
