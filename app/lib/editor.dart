@@ -709,12 +709,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final name = title.replaceAll(RegExp(r'[^A-Za-z0-9 _-]'), '').trim();
     final stamp = DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
     final base = '${dir.path}/${name.isEmpty ? 'Animation' : name} $stamp';
-    final job = e.export(format, format == 0 ? '$base.gif' : '$base.zip', w, h, start: start, count: count, transparent: transparent);
+    final job = e.export(format, format == 0 ? '$base.gif' : format == 2 ? '$base.mov' : '$base.zip', w, h, start: start, count: count, transparent: transparent);
     if (job == null) {
       _say('Export failed: ${e.lastError}');
       return;
     }
-    e.exportSoundtrack('$base.wav', start: start, count: count);
+    // a video carries its sound; GIF and PNG frames get it as a WAV beside them
+    if (format != 2) e.exportSoundtrack('$base.wav', start: start, count: count);
     _export = job;
     _say('Exporting…');
     Timer.periodic(const Duration(milliseconds: 16), (tm) {
@@ -790,7 +791,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           _refresh(_engine?.importFile(f.path.split(Platform.pathSeparator).last, await f.readAsBytes()));
           _thumbsChanged('import');
         case 'export':
-          // scripted: GIF (0) or PNG zip (1) at 320 wide, the whole animation
+          // scripted: GIF (0), PNG zip (1) or video (2) at 320 wide, the whole animation
           await _runExport(int.parse(w[1]), 320, (320 * (_st['h'] as num) / (_st['w'] as num)).round(), 0, 0, false, 'Script');
         case 'exportwindow':
           unawaited(_exportDialog());
@@ -4008,7 +4009,7 @@ class _ExportDialogState extends State<_ExportDialog> {
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             TextField(controller: _name, style: const TextStyle(color: cText), decoration: const InputDecoration(labelText: 'Name')),
             const SizedBox(height: 12),
-            _Segmented(const ['GIF', 'PNG frames'], _format, (i) => setState(() => _format = i)),
+            _Segmented(const ['GIF', 'PNG frames', 'Video'], _format, (i) => setState(() => _format = i)),
             const SizedBox(height: 10),
             _hint('Size'),
             const SizedBox(height: 4),
@@ -4033,7 +4034,9 @@ class _ExportDialogState extends State<_ExportDialog> {
               _Toggle('Transparent background', _transparent, (v) => setState(() => _transparent = v)),
             ],
             const SizedBox(height: 8),
-            _hint('Saved in the Barkfart Exports folder, with the soundtrack as a WAV when there is sound.'),
+            _hint(_format == 2
+                ? 'Saved in the Barkfart Exports folder as a video (H.264, with the sound) that Photos and video players open.'
+                : 'Saved in the Barkfart Exports folder, with the soundtrack as a WAV when there is sound.'),
           ]),
         ),
       ),
@@ -4049,7 +4052,7 @@ class _ExportDialogState extends State<_ExportDialog> {
             'transparent': _format == 1 && _transparent,
             'name': _name.text,
           }),
-          child: Text(_format == 0 ? 'Export GIF' : 'Export ${last - _start + 1} PNGs'),
+          child: Text(_format == 0 ? 'Export GIF' : _format == 2 ? 'Export video' : 'Export ${last - _start + 1} PNGs'),
         ),
       ],
     );

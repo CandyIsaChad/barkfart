@@ -417,6 +417,12 @@ pub fn mix(plan: &AudioPlan, t0: f64, frames: usize, rate: i32, out: &mut [f32])
 /// The plan mixed from `from`, `seconds` long, as a stereo 44.1 kHz WAV
 /// (an export's soundtrack); None when the plan is silent.
 pub fn bounce(plan: &AudioPlan, from: f64, seconds: f64) -> Option<Vec<u8>> {
+    let (rate, d) = bounce_pcm(plan, from, seconds)?;
+    Some(encode_wav(&Pcm::new(rate, 2, d)?))
+}
+
+/// The mix as interleaved 16-bit stereo samples and their rate (video export).
+pub fn bounce_pcm(plan: &AudioPlan, from: f64, seconds: f64) -> Option<(i32, Vec<i16>)> {
     if plan.entries.is_empty() || !(seconds > 0.0) {
         return None;
     }
@@ -433,7 +439,7 @@ pub fn bounce(plan: &AudioPlan, from: f64, seconds: f64) -> Option<Vec<u8>> {
         }
         at += 4096;
     }
-    Some(encode_wav(&Pcm::new(rate, 2, d)?))
+    Some((rate, d))
 }
 
 #[cfg(test)]

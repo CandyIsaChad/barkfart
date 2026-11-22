@@ -355,6 +355,8 @@ pub extern "C" fn bf_playback_time(e: *const Engine) -> f64 {
 enum Writer {
     Gif(barkfart_core::export::Gif<std::io::BufWriter<std::fs::File>>),
     Png(barkfart_core::export::PngZip<std::io::BufWriter<std::fs::File>>),
+    /// Video: H.264 with the soundtrack (rate, interleaved stereo samples).
+    Mov(barkfart_core::video::Mov<std::io::BufWriter<std::fs::File>>, Option<(i32, Vec<i16>)>),
 }
 
 /// An export in progress: bf_export_step renders and writes one frame.
@@ -390,9 +392,13 @@ pub extern "C" fn bf_export_begin(e: *mut Engine, format: i32, path: *const c_ch
     }
     // SAFETY: live handle
     let engine = unsafe { &mut *e };
+    // sounds imported since the plan was built (the video carries them)
+    engine.refresh_plan();
     let r = (|| -> Result<Export, String> {
         let p = engine.project().ok_or("no project")?;
         let path = std::path::PathBuf::from(cstr(path).ok_or("no file name")?);
+        // video needs even sizes
+        let (w, h) = if format == 2 { (w & !1, h & !1) } else { (w, h) };
         if w == 0 || h == 0 || w > 4096 || h > 4096 {
             return Err(format!("size {w}x{h} is not allowed"));
         }
@@ -412,6 +418,7 @@ pub extern "C" fn bf_export_begin(e: *mut Engine, format: i32, path: *const c_ch
             let n = if count == 0 { frames - first } else { (count as i32).clamp(1, frames - first) };
             Some(barkfart_core::export::pictures(&sch, first, n, rate, format == 1))
         };
+        let (start_frame, count_frames) = (start, count);
         let start = ((start as f64 * per).round() as u32).min(total - 1);
         let count = if count == 0 { total - start } else { ((count as f64 * per).round() as u32).max(1).min(total - start) };
         let count = pics.as_ref().map(|v| v.len() as u32).unwrap_or(count);
@@ -420,6 +427,21 @@ pub extern "C" fn bf_export_begin(e: *mut Engine, format: i32, path: *const c_ch
         let writer = match format {
             0 => Writer::Gif(barkfart_core::export::Gif::new(file, w as u16, h as u16, fps, true).map_err(|e| e.to_string())?),
             1 => Writer::Png(barkfart_core::export::PngZip::new(file, w, h, transparent != 0)),
+            2 => {
+                // the soundtrack of the same frames, following delays and repeats
+                let frames = barkfart_core::timing::frame_count(p);
+                let first = (start_frame as i32).clamp(0, frames - 1);
+                let n = if count_frames == 0 { frames - first } else { (count_frames as i32).clamp(1, frames - first) };
+                let sound = engine.plan.as_ref().and_then(|plan| {
+                    if sch.identity {
+                        barkfart_core::audio::bounce_pcm(plan, first as f64 / p.settings.fps.max(1.0) as f64, n as f64 / p.settings.fps.max(1.0) as f64)
+                    } else {
+                        let part = sch.subset(first, n);
+                        barkfart_core::audio::bounce_pcm(&part.retime(plan), 0.0, part.total)
+                    }
+                });
+                Writer::Mov(barkfart_core::video::Mov::new(file, w, h, fps).map_err(|e| e.to_string())?, sound)
+            }
             _ => return Err(format!("unknown export format {format}")),
         };
         Ok(Export { writer: Some(writer), path, w, h, start, count, next: 0, transparent: transparent != 0, error: vec![0], pics })
@@ -454,6 +476,9 @@ pub extern "C" fn bf_export_step(e: *const Engine, x: *mut Export) -> i32 {
                     use std::io::Write;
                     z.finish().map_err(|e| e.to_string())?.flush().map_err(|e| e.to_string())?;
                 }
+                Some(Writer::Mov(m, sound)) => {
+                    m.finish(sound.as_ref().map(|(r, s)| (s.as_slice(), *r as u32))).map_err(|e| e.to_string())?;
+                }
                 None => {}
             }
             return Ok(true);
@@ -480,6 +505,7 @@ pub extern "C" fn bf_export_step(e: *const Engine, x: *mut Export) -> i32 {
         match job.writer.as_mut() {
             Some(Writer::Gif(g)) => g.frame_held(&px, extra).map_err(|e| e.to_string())?,
             Some(Writer::Png(z)) => z.frame(&px).map_err(|e| e.to_string())?,
+            Some(Writer::Mov(m, _)) => m.frame(&px, 1.0 / p.settings.sample_rate() + extra).map_err(|e| e.to_string())?,
             None => return Err("export already finished".into()),
         }
         job.next += 1;

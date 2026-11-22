@@ -145,7 +145,7 @@ Deliberate differences: the pencil edits the figure itself on every frame
 (the original makes a new library figure); Open and the figure picker are
 windows with a filter (the picker shows pictures); playback quality and the
 frame cache are ours.
-Not yet: filter quality, fonts, MP4 export. Done since (2026-11-22): movieclip
+Not yet: filter quality, fonts. Done since (2026-11-22): movieclip
 editor, convert / break apart, Movieclip Tools, loop tween, expand
 gradient, silence, slow-motion tweening, the figure editor's polyfill
 tool, connectors, tracing, background image and colour, Library Tools,

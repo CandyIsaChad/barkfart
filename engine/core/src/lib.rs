@@ -23,5 +23,6 @@ pub mod model;
 pub mod session;
 pub mod tess;
 pub mod timing;
+pub mod video;
 
 pub use tess::{Batch, DrawList, Glyph, GlyphSource};

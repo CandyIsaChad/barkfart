@@ -40,7 +40,8 @@ committed). Plainest behaviour where the reference is unsure.
 ## Project and export (6)
 - [x] Make vertical, rotate cameras 90 degrees
 - [x] Watermark
-- [ ] MP4 export (iOS: AVAssetWriter)
+- [x] Video export (H.264 + sound in a QuickTime .mov, encoded by the engine on
+      every platform)
 - [x] Open: sort, delete, past saves (backups)
 
 ## Library Tools (11)

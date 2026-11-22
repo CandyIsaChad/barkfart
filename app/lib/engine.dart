@@ -285,7 +285,7 @@ class Engine {
     return Uint8List.fromList(p.asTypedList(n));
   }
 
-  /// Starts an export (0 = GIF, 1 = PNG frames in a ZIP); null with the reason in [lastError].
+  /// Starts an export (0 = GIF, 1 = PNG frames in a ZIP, 2 = video with sound); null with the reason in [lastError].
   ExportJob? export(int format, String path, int w, int h, {int start = 0, int count = 0, bool transparent = false}) {
     final p = path.toNativeUtf8();
     final j = _lib.lookupFunction<_ExBeginC, _ExBeginD>('bf_export_begin')(_handle, format, p, w, h, start, count, transparent ? 1 : 0);
