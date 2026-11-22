@@ -20,6 +20,9 @@ jobs:
         run: cargo test -p barkfart-core
       - name: Build the engine for iOS
         working-directory: engine
+        # one deployment target for Rust and the C++ video encoder (the app's)
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: '15.0'
         run: cargo build -p barkfart-ffi --release --target aarch64-apple-ios
       - uses: subosito/flutter-action@v2
         with:
