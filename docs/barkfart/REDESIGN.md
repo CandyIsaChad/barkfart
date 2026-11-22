@@ -362,6 +362,17 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
     with no float or shadow.
   - The stage grows and more layer rows show.
   - Below that, panels float as on phones.
+- **D21. The old Open dialog splits into Home (decided while building E3).**
+  - Opening is a card tap on the Projects screen. Deleting is a long-press
+    (right-click on Linux) on a card, with a confirm. The open animation can't
+    be deleted from there.
+  - The filter and the order (Newest, A–Z, Oldest) stay, but they only appear
+    once there are more than 6 animations.
+  - "Past saves" became the Backups sheet: grouped by animation, the open one
+    first, each row a time ("Today, 07:04:56") with Restore. Restore opens
+    the backup as an unsaved copy.
+  - "Open a file…" (first run and Projects) imports from disk, including
+    Stick Nodes files.
 
 ## 7. Build order (easiest to hardest, nested)
 
@@ -455,7 +466,7 @@ and tests are never weakened.
 ### E. Home
 - [x] E1. First run.
 - [x] E2. The Projects screen: saved projects with thumbnails.
-- [ ] E3. The backups list.
+- [x] E3. The backups list.
 
 ### F. Engine: layers keep their own keys (D2, D3)
 - [ ] F1. The break-off-and-join command.

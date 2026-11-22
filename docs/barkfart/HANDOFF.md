@@ -33,10 +33,9 @@ Tick items there as they finish.
 - Scripted editor runs as before. The new script command is `savesheet`.
 - The window is capped at the screen size (about 1300x700).
 
-**Next:** E3 (Backups as a sheet: "Backups" on the Projects screen still opens the old Open dialog), then D7b (engine file defaults). E1 (first run, script `firstrun`) and E2 (Projects screen, script `projectsscreen`; saving writes a picture to .thumbs/<name>.png) are done. D7a (Segment Tools as rows, with dots and swipes for thickness and length) is done. D6 (Stickfigure page) is done. D5 (Frame page) is done. D4 (Camera page) is done. D3 (Text page) is done. D2 (the Movieclip page) is written but not yet seen on screen. Section C is done; the figure chooser sheet is done too (script `picker`). (C6a, the "+" menu, is done: script `add`. B3, the Animation popover from "fps", is done: script `animation`. C7 is done: the toolbar, the frame-words bar, the fps ruler and the Preview row; hold a cell to copy frames). C7 was the folded timeline: control toolbar, fps ruler (D16), and the
-tiled Preview row. It replaces the top frame strip and the top-right grid.
-Then B3 (the Animation popover from the toolbar's fps button) and C6 (the
-"+" menu in the bottom bar). Then D1 onwards.
+**Next:** D7b (engine: a figure's base from its file, a `reset_segment` op, then dots and swipes for every Segment value and the pinned "Reset this segment"; plan below). Then Watermark and Make vertical into the Export sheet, then section F.
+- Done: A1–A6, B1–B6, C1–C8, D1–D6, D7a, E1–E3. D2 (the Movieclip page) is written but not yet seen on screen.
+- Home script commands: `firstrun`, `projectsscreen`, `backups`, `makeprojects N` (copies the open save N times). Saving writes a picture to `.thumbs/<name>.png`.
 
 **D7b plan (engine).** Figures don't remember their source file today: only
 `Node::rest_length` keeps the made-with length.

@@ -173,7 +173,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                     child: Row(children: [
                       kit.WordButton('Open a file…', onTap: () {
                         Navigator.pop(c);
-                        _openDialog();
+                        _importFromFiles();
                       }),
                       kit.WordButton('Settings', onTap: _settingsDialog),
                     ]),
@@ -677,8 +677,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           }
         }
 
-        Widget card(String name, String meta, Widget picture, VoidCallback onTap, {bool isNew = false, bool current = false}) => GestureDetector(
+        Widget card(String name, String meta, Widget picture, VoidCallback onTap, {bool isNew = false, bool current = false, VoidCallback? onLongPress}) => GestureDetector(
               onTap: onTap,
+              onLongPress: onLongPress,
+              onSecondaryTap: onLongPress, // right-click on Linux
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 AspectRatio(
                   aspectRatio: 16 / 9,
@@ -701,6 +703,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               ]),
             );
         final cols = MediaQuery.sizeOf(c).width > 1000 ? 4 : 3;
+        // a search and an order only once the list is long enough to need them
+        final many = files.length > 6;
+        var filter = '';
+        var order = 0; // Newest, A–Z, Oldest
         return Scaffold(
           backgroundColor: cPanel,
           body: SafeArea(
@@ -719,9 +725,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                         Navigator.pop(c);
                         _importFromFiles();
                       }),
-                      kit.WordButton('Backups', onTap: () {
-                        Navigator.pop(c);
-                        _openDialog();
+                      kit.WordButton('Backups', onTap: () async {
+                        final f = await _backupsSheet();
+                        if (f != null && c.mounted) await open(f);
                       }),
                       kit.WordButton('Settings', onTap: _settingsDialog),
                     ]),
@@ -729,30 +735,110 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 ]),
               ),
               Expanded(
-                child: GridView.count(
+                child: StatefulBuilder(builder: (c2, setList) {
+                  final shown = files.where((f) => f.name.toLowerCase().contains(filter.toLowerCase())).toList();
+                  if (order == 1) shown.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+                  if (order == 2) shown.setAll(0, shown.reversed.toList());
+                  return Column(children: [
+                    if (many)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+                        child: Row(children: [
+                          SizedBox(
+                            width: 260,
+                            child: TextField(
+                              style: const TextStyle(color: cText, fontSize: 14),
+                              decoration: InputDecoration(
+                                isDense: true,
+                                filled: true,
+                                fillColor: cControl,
+                                hintText: 'Search',
+                                prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF8A9099)),
+                                contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                              ),
+                              onChanged: (v) => setList(() => filter = v),
+                            ),
+                          ),
+                          const Spacer(),
+                          SizedBox(width: 240, child: kit.Segmented(const ['Newest', 'A–Z', 'Oldest'], order, onSelect: (i) => setList(() => order = i))),
+                        ]),
+                      ),
+                    Expanded(
+                      child: GridView.count(
                   crossAxisCount: cols,
                   padding: const EdgeInsets.all(24),
                   mainAxisSpacing: 18,
                   crossAxisSpacing: 20,
                   childAspectRatio: 1.35,
                   children: [
-                    card('New animation', '', const Center(child: Pictogram('plus', size: 30, color: cAccent, stroke: 2.2)), () => open(null), isNew: true),
-                    for (final f in files)
+                    if (filter.isEmpty) card('New animation', '', const Center(child: Pictogram('plus', size: 30, color: cAccent, stroke: 2.2)), () => open(null), isNew: true),
+                    for (final f in shown)
                       card(
                         f.name,
-                        'Edited ${f.when}',
+                        'Edited ${_friendlyTime(File(f.path).lastModifiedSync())}',
                         _thumbFile(f).existsSync() ? Image.file(_thumbFile(f), fit: BoxFit.cover) : const Center(child: Pictogram('figure', size: 34, color: cTag)),
                         () => f.path == _file?.path ? Navigator.pop(c) : open(f),
                         current: f.path == _file?.path,
+                        // hold a card to delete that animation (its backups stay)
+                        onLongPress: f.path == _file?.path
+                            ? null
+                            : () async {
+                                final ok = await _ask('Delete ${f.name}?', 'The animation is removed from this device. Its backups stay under Backups.', ['Cancel', 'Delete']);
+                                if (ok != 'Delete') return;
+                                try {
+                                  File(f.path).deleteSync();
+                                  if (_thumbFile(f).existsSync()) _thumbFile(f).deleteSync();
+                                } catch (_) {}
+                                if (c.mounted) Navigator.pop(c);
+                                await _projectsScreen();
+                              },
                       ),
                   ],
-                ),
+                      ),
+                    ),
+                  ]);
+                }),
               ),
             ]),
           ),
         );
       },
     ));
+  }
+
+  /// Backups (REDESIGN §8): the earlier saves kept beside each animation,
+  /// newest first; Restore opens one as an unsaved copy.
+  Future<ProjectFile?> _backupsSheet() async {
+    // a backup is named "<animation> (YYYY-MM-DD HH.MM.SS).bark": the time
+    // that version was saved, which is what the row shows
+    final re = RegExp(r'^(.*) \((\d{4})-(\d\d)-(\d\d) (\d\d)\.(\d\d)\.(\d\d)\)$');
+    final groups = <String, List<(DateTime, ProjectFile)>>{};
+    for (final f in await ProjectFile.pastSaves()) {
+      final m = re.firstMatch(f.name);
+      final t = m == null ? File(f.path).lastModifiedSync() : DateTime(int.parse(m[2]!), int.parse(m[3]!), int.parse(m[4]!), int.parse(m[5]!), int.parse(m[6]!), int.parse(m[7]!));
+      (groups[m?[1] ?? f.name] ??= []).add((t, f));
+    }
+    for (final g in groups.values) {
+      g.sort((a, b) => b.$1.compareTo(a.$1));
+    }
+    final names = groups.keys.toList()..sort((a, b) => groups[b]!.first.$1.compareTo(groups[a]!.first.$1));
+    // the open animation first
+    final cur = _file?.name;
+    if (cur != null && names.remove(cur)) names.insert(0, cur);
+    String label(DateTime t) => _friendlyTime(t, seconds: true);
+
+    if (!mounted) return null;
+    return kit.showSheet<ProjectFile>(context, title: 'Backups', width: 460, children: (c) => [
+          const kit.Hint('Saving over an animation keeps the version it replaces (the last 10 of each). Restore opens one as an unsaved copy.'),
+          if (names.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('No backups yet. They appear after you save an animation a second time.', textAlign: TextAlign.center, style: TextStyle(color: cSecondary))),
+          for (final n in names) ...[
+            Padding(padding: const EdgeInsets.only(top: 8, bottom: 2), child: Text(n, style: kit.ink(14, FontWeight.w700))),
+            for (final (t, f) in groups[n]!) kit.PropRow(label(t), height: 38, trailing: kit.WordButton('Restore', size: 13, onTap: () => Navigator.pop(c, f))),
+          ],
+          const SizedBox(height: 6),
+          kit.WordButton('Close', filled: true, expand: true, height: 38, onTap: () => Navigator.pop(c)),
+        ]);
   }
 
   /// The Save button: asks for a name the first time, confirms after that.
@@ -990,6 +1076,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           unawaited(_firstRun());
         case 'projectsscreen':
           unawaited(_projectsScreen());
+        case 'backups':
+          unawaited(_backupsSheet());
+        case 'makeprojects':
+          // test helper: n saved animations with distinct names
+          for (var i = 0; i < (w.length > 1 ? int.parse(w[1]) : 8); i++) {
+            final d = await projectsDir();
+            await File('${d.path}/Take ${String.fromCharCode(65 + i)}.bark').writeAsBytes((await File(_file!.path).readAsBytes()));
+          }
         case 'savesheet':
           unawaited(_saveSheet('Rooftop fight hasn\u2019t been saved for 10 minutes. The reminder can be changed or turned off in Settings.'));
         case 'savebutton':
@@ -1252,8 +1346,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   List<Widget> _sectionBody(String name) {
     switch (name) {
-      case 'App Tools':
-        return _appTools();
       case 'Project Tools':
         return _projectTools();
       case 'Library Tools':
@@ -2000,12 +2092,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _hint('The animation settings are under "fps" in the timeline, once playback stops. Playback in the editor can stutter on big animations; exports never do.'),
     ];
   }
-
-  List<Widget> _appTools() => [
-        _pair(_Btn('New project…', onTap: _newProject), _Btn('Open…', onTap: _openDialog)),
-        _gap,
-        _Btn('Settings…', onTap: _settingsDialog),
-      ];
 
   Timer? _reminder;
   DateTime _savedAt = DateTime.now();
@@ -3292,16 +3378,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     ]);
   }
 
-  /// Open: a window listing saved animations (filter, sort, open, delete).
-  Future<void> _openDialog() async {
-    if (!await _leaveUnsaved()) return;
-    final files = await ProjectFile.all();
-    final past = await ProjectFile.pastSaves();
-    if (!mounted) return;
-    final chosen = await showDialog<ProjectFile>(context: context, builder: (c) => _OpenDialog(files, _file?.path, _ask, past));
-    if (chosen != null) await _openFile(chosen);
-  }
-
   final Map<String, ui.Image> _previews = {};
 
 
@@ -4189,30 +4265,20 @@ class _Chip extends StatelessWidget {
   }
 }
 
-class _FileRow extends StatelessWidget {
-  final String name, when;
-  final bool current;
-  final VoidCallback onTap;
-  const _FileRow(this.name, this.when, this.current, this.onTap);
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: current ? cSelected : cControl,
-      borderRadius: BorderRadius.circular(4),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(4),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 13)),
-            Text(when, style: const TextStyle(color: cSecondary, fontSize: 11)),
-          ]),
-        ),
-      ),
-    );
-  }
+/// "Today, 07:04", "Yesterday, 18:30", "23 Nov, 09:12" or "23 Nov 2025, …".
+String _friendlyTime(DateTime t, {bool seconds = false}) {
+  final now = DateTime.now();
+  String two(int v) => v.toString().padLeft(2, '0');
+  final time = '${two(t.hour)}:${two(t.minute)}${seconds ? ':${two(t.second)}' : ''}';
+  final day = DateTime(t.year, t.month, t.day);
+  final today = DateTime(now.year, now.month, now.day);
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  final d = day == today
+      ? 'Today'
+      : day == today.subtract(const Duration(days: 1))
+          ? 'Yesterday'
+          : '${t.day} ${months[t.month - 1]}${t.year == now.year ? '' : ' ${t.year}'}';
+  return '$d, $time';
 }
 
 class _PickEntry {
@@ -4333,107 +4399,6 @@ class _FigurePickerState extends State<_FigurePicker> {
 }
 
 /// Open: saved animations with a filter and sort, Open / Delete / Cancel.
-class _OpenDialog extends StatefulWidget {
-  final List<ProjectFile> files;
-  final String? current;
-  final Future<String?> Function(String, String, List<String>) ask;
-  final List<ProjectFile> past;
-  const _OpenDialog(this.files, this.current, this.ask, this.past);
-
-  @override
-  State<_OpenDialog> createState() => _OpenDialogState();
-}
-
-class _OpenDialogState extends State<_OpenDialog> {
-  late List<ProjectFile> _files = List.of(widget.files);
-  bool _past = false;
-  String _filter = '';
-  int _sort = 0;
-  ProjectFile? _picked;
-
-  @override
-  Widget build(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    final list = _files.where((f) => f.name.toLowerCase().contains(_filter.toLowerCase())).toList();
-    if (_sort == 0) {
-      list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    } else {
-      list.sort((a, b) => File(b.path).lastModifiedSync().compareTo(File(a.path).lastModifiedSync()) * (_sort == 1 ? 1 : -1));
-    }
-    return Dialog(
-      backgroundColor: cPanel,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      child: SizedBox(
-        width: math.min(560, size.width * 0.8),
-        height: math.min(520, size.height * 0.85),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Row(children: [
-              Expanded(child: Text(_past ? 'Past saves' : 'Open an animation', style: const TextStyle(color: cText, fontSize: 17, fontWeight: FontWeight.w600))),
-              // every save keeps the version it replaced
-              SizedBox(
-                width: 150,
-                child: _Btn(_past ? '‹ Animations' : 'Past saves ›', onTap: () => setState(() {
-                      _past = !_past;
-                      _files = List.of(_past ? widget.past : widget.files);
-                      _picked = null;
-                    })),
-              ),
-            ]),
-            if (_past) _hint('Earlier versions, kept each time an animation was saved over. One opens as an unsaved copy.'),
-            const SizedBox(height: 10),
-            Row(children: [
-              Expanded(
-                child: TextField(
-                  style: const TextStyle(color: cText),
-                  decoration: const InputDecoration(hintText: 'Filter', isDense: true, prefixIcon: Icon(Icons.search, size: 18)),
-                  onChanged: (v) => setState(() => _filter = v),
-                ),
-              ),
-              const SizedBox(width: 10),
-              SizedBox(width: 210, child: _Segmented(const ['A–Z', 'Newest', 'Oldest'], _sort, (i) => setState(() => _sort = i))),
-            ]),
-            const SizedBox(height: 10),
-            Expanded(
-              child: list.isEmpty
-                  ? Center(child: Text(_past ? 'No past saves yet.' : 'Nothing saved yet.', style: const TextStyle(color: cSecondary)))
-                  : ListView(children: [
-                      for (final f in list)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 6),
-                          child: _FileRow(f.name, f.when + (f.path == widget.current ? '  ·  open now' : ''), identical(f, _picked), () => setState(() => _picked = f)),
-                        ),
-                    ]),
-            ),
-            const SizedBox(height: 10),
-            Row(children: [
-              SizedBox(
-                width: 150,
-                child: _Btn('Delete from device', danger: true, enabled: _picked != null, onTap: () async {
-                  final f = _picked!;
-                  final ok = await widget.ask('Delete "${f.name}"?', 'The file is removed from this device. This cannot be undone.', ['Cancel', 'Delete']);
-                  if (ok == 'Delete') {
-                    await File(f.path).delete();
-                    setState(() {
-                      _files.remove(f);
-                      _picked = null;
-                    });
-                  }
-                }),
-              ),
-              const Spacer(),
-              SizedBox(width: 100, child: _Btn('Cancel', onTap: () => Navigator.pop(context))),
-              const SizedBox(width: 8),
-              SizedBox(width: 100, child: _Btn('Open', accent: true, enabled: _picked != null, onTap: () => Navigator.pop(context, _picked))),
-            ]),
-          ]),
-        ),
-      ),
-    );
-  }
-}
-
 class _ExportDialog extends StatefulWidget {
   final double w, h;
   final int frames;
