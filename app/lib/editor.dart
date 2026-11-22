@@ -813,6 +813,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           setState(() => _viewOptions = true);
         case 'projects':
           unawaited(_projectsMenu());
+        case 'animation':
+          unawaited(_animationPopover());
         case 'savesheet':
           unawaited(_saveSheet('Rooftop fight hasn\u2019t been saved for 10 minutes. The reminder can be changed or turned off in Settings.'));
         case 'savebutton':
@@ -1069,8 +1071,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (_st['movieclip'] != null) return const ['Movieclip Tools'];
     final sel = _sel;
     if (sel != null) return const ['Stickfigure Tools', 'Stickfigure Filters', 'Segment Tools'];
-    if (_st['editingClip'] != null) return const ['Movieclip editor', 'Animation Tools', 'Library Tools', 'Textfield Tools'];
-    return const ['App Tools', 'Project Tools', 'Animation Tools', 'Library Tools', 'Textfield Tools'];
+    if (_st['editingClip'] != null) return const ['Movieclip editor', 'Library Tools', 'Textfield Tools'];
+    return const ['App Tools', 'Project Tools', 'Library Tools', 'Textfield Tools'];
   }
 
   List<Widget> _sectionBody(String name) {
@@ -1079,8 +1081,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         return _appTools();
       case 'Project Tools':
         return _projectTools();
-      case 'Animation Tools':
-        return _animationTools();
       case 'Library Tools':
         return _libraryTools();
       case 'Movieclip Tools':
@@ -1588,7 +1588,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           const SizedBox(width: 20),
           kit.IconTool('onion', label: 'Onion skin', on: _opts['onion'] == true, onTap: _playing ? null : () => _cmd({'op': 'set', 'k': 'onion', 'v': _opts['onion'] != true})),
           const Spacer(),
-          kit.WordButton('$_fpsLabel fps', size: 13, onTap: () => _jumpTo('Animation Tools')),
+          kit.WordButton('$_fpsLabel fps', key: _fpsKey, size: 13, onTap: _playing ? null : _animationPopover),
         ]),
         Row(mainAxisSize: MainAxisSize.min, children: [
           kit.IconTool('toStart', label: 'Go to the first frame', onTap: () => _goFrame(0)),
@@ -1753,10 +1753,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   List<Widget> _playbackPanel() {
     return [
-      _title('Animation Tools'),
-      ..._animationTools(),
-      _gap,
-      _hint('Playback in the editor can stutter on big animations; exports never do.'),
+      _title('Playing'),
+      _hint('The animation settings are under "fps" in the timeline, once playback stops. Playback in the editor can stutter on big animations; exports never do.'),
     ];
   }
 
@@ -1918,36 +1916,61 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   bool _vertical = false;
 
-  List<Widget> _animationTools() {
-    final tween = _st['tweening'] == true;
-    final n = (_st['tweenedFrames'] as num?)?.toInt() ?? 5;
-    final rate = (_st['rate'] as num?)?.toDouble() ?? _fps;
-    return [
-      _stepper('FPS', _fps.round().toString(), () => _cmd({'op': 'fps', 'v': _fps - 1}), () => _cmd({'op': 'fps', 'v': _fps + 1})),
-      _gap,
-      _Toggle('Show filters while playing', AppSettings.flag('playFilters'), (v) => setState(() {
+  final GlobalKey _fpsKey = GlobalKey();
+
+  /// The Animation popover (REDESIGN §8), from the toolbar's "fps": every
+  /// setting of the old Animation Tools, as rows.
+  Future<void> _animationPopover() async {
+    final box = _fpsKey.currentContext?.findRenderObject() as RenderBox?;
+    final screen = MediaQuery.sizeOf(context);
+    final at = box == null ? Offset(screen.width - 12, screen.height - 90) : box.localToGlobal(Offset(box.size.width, 0));
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Animation',
+      barrierColor: const Color(0x00000000),
+      transitionDuration: Duration.zero,
+      pageBuilder: (c, a1, a2) => StatefulBuilder(builder: (c, set) {
+        void cmd(Map<String, Object?> m) {
+          _cmd(m);
+          set(() {});
+        }
+
+        final tween = _st['tweening'] == true;
+        final n = (_st['tweenedFrames'] as num?)?.toInt() ?? 5;
+        final rate = (_st['rate'] as num?)?.toDouble() ?? _fps;
+        final rows = <rw.Desc>[
+          const rw.DTitle('Animation'),
+          rw.DStep('Frames per second', _fpsLabel, onMinus: _fps > 1 ? () => cmd({'op': 'fps', 'v': _fps - 1}) : null, onPlus: () => cmd({'op': 'fps', 'v': _fps + 1})),
+          rw.DTick('Tweening', tween, onChanged: (v) => cmd({'op': 'animation', 'tweening': v})),
+          rw.DStep('Extra smoothness', '$n', onMinus: tween && n > 0 ? () => cmd({'op': 'animation', 'tweened': n - 1}) : null, onPlus: tween ? () => cmd({'op': 'animation', 'tweened': n + 1}) : null),
+          rw.DTick('Loop back to the start', _st['loopTween'] == true, onChanged: tween ? (v) => cmd({'op': 'animation', 'loop': v}) : null),
+          rw.DTick('Effects while playing', AppSettings.flag('playFilters'), onChanged: (v) {
             AppSettings.values['playFilters'] = v;
             unawaited(AppSettings.save());
-          })),
-      _hint('Playback only; exports always have them. Turning filters (and tweening) off helps when playback lags.'),
-      _gap,
-      _Toggle('Fullscreen', _fullscreen, (v) => setState(() => _fullscreen = v)),
-      _hint('The next playback shows only the stage; tap it to stop. Then this turns off again.'),
-      _Toggle('Tweening on', tween, (v) => _cmd({'op': 'animation', 'tweening': v})),
-      Opacity(
-        opacity: tween ? 1 : 0.4,
-        child: IgnorePointer(
-          ignoring: !tween,
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            _Toggle('Is looping animation', _st['loopTween'] == true, (v) => _cmd({'op': 'animation', 'loop': v})),
-            _hint('Tweens the last frame back into the first.'),
-            _stepper('Tweened frames', '$n', () => _cmd({'op': 'animation', 'tweened': n - 1}), () => _cmd({'op': 'animation', 'tweened': n + 1})),
-          ]),
-        ),
-      ),
-      _gap,
-      Text(tween ? 'Plays and exports $n in-between pictures per frame (${rate.round()} a second).' : 'Each frame shows for 1/${_fps.round()} s.', style: const TextStyle(color: cSecondary, fontSize: 11)),
-    ];
+            set(() {});
+            setState(() {});
+          }),
+          rw.DTick('Fullscreen when playing', _fullscreen, onChanged: (v) {
+            set(() {});
+            setState(() => _fullscreen = v);
+          }),
+          rw.DHint(tween
+              ? '$n in-between pictures per frame when playing and exporting (${rate.round()} a second). The last frame tweens into the first when looping. Turning effects off while playing helps when playback lags; exports always have them.'
+              : 'Each frame shows for 1/${_fps.round()} s. Turning effects off while playing helps when playback lags; exports always have them.'),
+        ];
+        return Stack(children: [
+          Positioned(
+            right: screen.width - at.dx,
+            bottom: screen.height - at.dy + 6,
+            child: kit.PanelCard(
+              width: 320,
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [for (final d in rows) rw.renderDesc(d)]),
+            ),
+          ),
+        ]);
+      }),
+    );
   }
 
   /// Library Tools type: 0 stickfigures, 1 movieclips, 2 sprites (the
