@@ -2837,23 +2837,21 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   /// Movieclip Tools: the selected movieclip's playback.
+  /// Movieclip Tools as rows (D15; REDESIGN §8 Movieclip page).
   List<Widget> _movieclipTools(Map mc) {
     final speed = (mc['speed'] as num?)?.toDouble() ?? 1, off = (mc['offset'] as num?)?.toDouble() ?? 0;
     const modes = ['once', 'loop', 'pingpong'];
-    return [
-      Text('${mc['name']}  ·  ${mc['frames']} frame${mc['frames'] == 1 ? '' : 's'}', style: const TextStyle(color: cText, fontSize: 13)),
-      _gap,
-      _label('Plays'),
-      _Segmented(const ['Once', 'Loop', 'Ping-pong'], modes.indexOf('${mc['loop']}').clamp(0, 2), (i) => _cmd({'op': 'movieclip', 'loop': modes[i]})),
-      _gap,
-      _stepper('Speed', speed.toStringAsFixed(2), () => _cmd({'op': 'movieclip', 'speed': math.max(0, speed - 0.1)}), () => _cmd({'op': 'movieclip', 'speed': speed + 0.1})),
-      _stepper('Start offset', '${off.toStringAsFixed(2)} s', () => _cmd({'op': 'movieclip', 'offset': off - 0.1}), () => _cmd({'op': 'movieclip', 'offset': off + 0.1})),
-      _hint('Drag the square on the stage to move it. Library Tools can break it apart into figures.'),
-      _gap,
-      _Btn('Edit movieclip ›', accent: true, onTap: () => _cmd({'op': 'edit_movieclip'})),
-      _gap,
-      _Btn('Break apart', onTap: () => _cmd({'op': 'break_apart', 'layer': mc['layer']})),
+    final frames = (mc['frames'] as num?)?.toInt() ?? 0;
+    final rows = <rw.Desc>[
+      rw.DName('${mc['name']}', link: 'Edit movieclip ›', onLink: () => _cmd({'op': 'edit_movieclip'})),
+      rw.DInfo('Length', '$frames frame${frames == 1 ? '' : 's'}'),
+      rw.DSeg(const ['Once', 'Loop', 'Ping-pong'], modes.indexOf('${mc['loop']}').clamp(0, 2), label: 'Plays', onSelect: (i) => _cmd({'op': 'movieclip', 'loop': modes[i]})),
+      rw.DStep('Speed', speed.toStringAsFixed(2), onMinus: speed > 0 ? () => _cmd({'op': 'movieclip', 'speed': math.max(0, speed - 0.1)}) : null, onPlus: () => _cmd({'op': 'movieclip', 'speed': speed + 0.1})),
+      rw.DStep('Start offset', '${off.toStringAsFixed(2)} s', onMinus: () => _cmd({'op': 'movieclip', 'offset': off - 0.1}), onPlus: () => _cmd({'op': 'movieclip', 'offset': off + 0.1})),
+      const rw.DHint('Drag the box on the stage to move it.'),
+      rw.DButtons('Edit movieclip', () => _cmd({'op': 'edit_movieclip'}), b: 'Break apart', onB: () => _cmd({'op': 'break_apart', 'layer': mc['layer']})),
     ];
+    return [for (final d in rows) rw.renderDesc(d)];
   }
 
   /// Copied wobble: XY, rotation, speed, scale with zoom.
