@@ -454,7 +454,7 @@ and tests are never weakened.
 
 ### E. Home
 - [x] E1. First run.
-- [ ] E2. The Projects screen: saved projects with thumbnails.
+- [x] E2. The Projects screen: saved projects with thumbnails.
 - [ ] E3. The backups list.
 
 ### F. Engine: layers keep their own keys (D2, D3)

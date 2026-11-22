@@ -630,12 +630,129 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       return false;
     }
     await f.write(bytes);
+    await _writeThumb(f);
     _savedAt = DateTime.now();
     _file = f;
     await Recovery.clear();
     _refresh(e.command({'op': 'state'}));
     if (!quiet) _say('Saved ${f.name}', light: true);
     return true;
+  }
+
+  static File _thumbFile(ProjectFile f) {
+    final sep = Platform.pathSeparator;
+    return File('${File(f.path).parent.path}$sep.thumbs$sep${f.name}.png');
+  }
+
+  /// A picture of the first frame beside the save, for the Projects screen.
+  Future<void> _writeThumb(ProjectFile f) async {
+    final img = _thumbs[0];
+    if (img == null) return;
+    try {
+      final data = await img.toByteData(format: ui.ImageByteFormat.png);
+      if (data == null) return;
+      final out = _thumbFile(f);
+      await out.parent.create(recursive: true);
+      await out.writeAsBytes(data.buffer.asUint8List());
+    } catch (_) {
+      // a missing picture only means a plain card
+    }
+  }
+
+  /// The Projects screen (REDESIGN §8): every saved animation as a card,
+  /// "New animation" first.
+  Future<void> _projectsScreen() async {
+    final files = await ProjectFile.all();
+    if (!mounted) return;
+    await Navigator.of(context).push(PageRouteBuilder<void>(
+      transitionDuration: const Duration(milliseconds: 120),
+      pageBuilder: (c, a1, a2) {
+        Future<void> open(ProjectFile? f) async {
+          if (!await _leaveUnsaved()) return;
+          if (c.mounted) Navigator.pop(c);
+          if (f == null) {
+            await _newProject();
+          } else {
+            await _openFile(f);
+          }
+        }
+
+        Widget card(String name, String meta, Widget picture, VoidCallback onTap, {bool isNew = false, bool current = false}) => GestureDetector(
+              onTap: onTap,
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: Container(
+                    clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(
+                      color: isNew ? const Color(0xFFFAFBFC) : cCard,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: current ? cAccent : isNew ? const Color(0xFFC9CED5) : cLine, width: current ? 2 : 1.5),
+                    ),
+                    child: picture,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(children: [
+                  Flexible(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: isNew ? cAccent : cText, fontSize: 15, fontWeight: FontWeight.w700))),
+                  if (current && _st['dirty'] == true) Container(width: 7, height: 7, margin: const EdgeInsets.only(left: 6), decoration: const BoxDecoration(color: Color(0xFFF2A93B), shape: BoxShape.circle)),
+                ]),
+                if (meta.isNotEmpty) Text(meta, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cSecondary, fontSize: 12)),
+              ]),
+            );
+        final cols = MediaQuery.sizeOf(c).width > 1000 ? 4 : 3;
+        return Scaffold(
+          backgroundColor: cPanel,
+          body: SafeArea(
+            child: Column(children: [
+              Container(
+                height: 44,
+                width: double.infinity,
+                decoration: const BoxDecoration(color: cCard, border: Border(bottom: BorderSide(color: cLine))),
+                child: Stack(alignment: Alignment.center, children: [
+                  const Text('Your animations', style: TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w700)),
+                  Positioned(left: 4, child: kit.WordButton('‹ Back', onTap: () => Navigator.pop(c))),
+                  Positioned(
+                    right: 8,
+                    child: Row(children: [
+                      kit.WordButton('Open a file…', onTap: () {
+                        Navigator.pop(c);
+                        _importFromFiles();
+                      }),
+                      kit.WordButton('Backups', onTap: () {
+                        Navigator.pop(c);
+                        _openDialog();
+                      }),
+                      kit.WordButton('Settings', onTap: _settingsDialog),
+                    ]),
+                  ),
+                ]),
+              ),
+              Expanded(
+                child: GridView.count(
+                  crossAxisCount: cols,
+                  padding: const EdgeInsets.all(24),
+                  mainAxisSpacing: 18,
+                  crossAxisSpacing: 20,
+                  childAspectRatio: 1.35,
+                  children: [
+                    card('New animation', '', const Center(child: Pictogram('plus', size: 30, color: cAccent, stroke: 2.2)), () => open(null), isNew: true),
+                    for (final f in files)
+                      card(
+                        f.name,
+                        'Edited ${f.when}',
+                        _thumbFile(f).existsSync() ? Image.file(_thumbFile(f), fit: BoxFit.cover) : const Center(child: Pictogram('figure', size: 34, color: cTag)),
+                        () => f.path == _file?.path ? Navigator.pop(c) : open(f),
+                        current: f.path == _file?.path,
+                      ),
+                  ],
+                ),
+              ),
+            ]),
+          ),
+        );
+      },
+    ));
   }
 
   /// The Save button: asks for a name the first time, confirms after that.
@@ -871,6 +988,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           unawaited(_addMenu());
         case 'firstrun':
           unawaited(_firstRun());
+        case 'projectsscreen':
+          unawaited(_projectsScreen());
         case 'savesheet':
           unawaited(_saveSheet('Rooftop fight hasn\u2019t been saved for 10 minutes. The reminder can be changed or turned off in Settings.'));
         case 'savebutton':
@@ -1280,7 +1399,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             width: 220,
             padding: const EdgeInsets.all(6),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-              for (final (i, label) in const [(0, 'New animation'), (1, 'Open…'), (2, 'Save'), (3, 'Save as…'), (4, 'Settings')])
+              for (final (i, label) in const [(0, 'New animation'), (1, 'Your animations…'), (2, 'Save'), (3, 'Save as…'), (4, 'Settings')])
                 kit.Tap(
                   onTap: () => Navigator.pop(c, i),
                   minSize: 0,
@@ -1295,7 +1414,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       case 0:
         await _newProject();
       case 1:
-        await _openDialog();
+        await _projectsScreen();
       case 2:
         await _save();
       case 3:
