@@ -1568,6 +1568,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                     if (_magnifier && !_playing) Positioned(left: _magAt.dx, top: _magAt.dy, child: _magnifierWindow()),
                     // floating over the stage; docked, it is a column beside it (below)
                     if (!_fsNow && _panelOpen && !_hidePanels && !dock) Positioned(top: 8, right: 8, bottom: 8, width: big ? 360 : 320, child: _propertiesCard()),
+                    if (_st['building'] != null && _partsOpen && !_viewOptions && !_hidePanels) Positioned(top: 8, left: 8, bottom: 8, width: 220, child: _partsPanel()),
                     if (_viewOptions) Positioned(top: 8, left: 8, bottom: 8, width: 330, child: _viewOptionsPanel()),
                   ]),
                 ),
@@ -1721,6 +1722,76 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         ),
       );
     });
+  }
+
+  /// The Parts list (J3, FigureEditor board): every part of the figure,
+  /// front at the top, flat (no tree). Tap one to select it; hold and drag a
+  /// segment to change what draws in front. A quiet node count at the foot.
+  Widget _partsPanel() {
+    final parts = (_st['parts'] as Map?) ?? const {};
+    final list = ((parts['list'] as List?) ?? const []).cast<Map>();
+    final selNode = _sel?['node'];
+    const words = {'line': 'Rounded', 'square': 'Segment', 'circle': 'Circle', 'ellipse': 'Ellipse', 'triangle': 'Triangle', 'trapezoid': 'Trapezoid', 'polygon': 'Polygon', 'none': 'Joint'};
+    const glyphs = {'line': 'rounded', 'square': 'segment', 'circle': 'circle', 'ellipse': 'ellipse', 'triangle': 'triangle', 'trapezoid': 'trapezoid', 'polygon': 'polygon', 'none': 'select'};
+    Color colour(Map p) {
+      final c = (p['color'] as num?)?.toInt() ?? 0xff;
+      return Color(((c & 0xff) << 24) | (c >> 8));
+    }
+
+    Widget row(int i, Map p) {
+      final kind = p['kind'] as String;
+      final on = p['id'] == selNode && kind != 'polyfill';
+      final label = kind == 'connector' ? 'Connector ${p['n']}' : kind == 'polyfill' ? 'Polyfill ${p['n']}' : '${words[p['shape']] ?? 'Segment'} ${p['n']}';
+      final glyph = kind == 'connector' ? 'connector' : kind == 'polyfill' ? 'polyfill' : glyphs[p['shape']] ?? 'segment';
+      final item = Container(
+        height: 29,
+        margin: const EdgeInsets.symmetric(horizontal: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(color: on ? cSelected : null, borderRadius: BorderRadius.circular(8)),
+        child: Row(children: [
+          CustomPaint(size: const Size(24, 16), painter: ShapeGlyph(glyph, kind == 'connector' ? const Color(0xFF1E9E8F) : colour(p))),
+          const SizedBox(width: 10),
+          Expanded(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: on ? cAccent : cText, fontSize: 14, fontWeight: on ? FontWeight.w600 : FontWeight.w400))),
+        ]),
+      );
+      return GestureDetector(
+        key: ValueKey('part-${p['id']}'),
+        onTap: kind == 'polyfill' ? null : () => _cmd({'op': 'select', 'layer': (_st['building'] as Map)['layer'], 'node': p['id']}),
+        // polyfills follow their joint; segments drag to a new place
+        child: kind == 'polyfill' ? item : ReorderableDelayedDragStartListener(index: i, child: item),
+      );
+    }
+
+    return kit.PanelCard(
+      padding: EdgeInsets.zero,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        const Padding(padding: EdgeInsets.only(top: 12), child: Text('Parts', textAlign: TextAlign.center, style: TextStyle(color: cTitle, fontSize: 15, fontWeight: FontWeight.w600))),
+        const Text('Front at the top', textAlign: TextAlign.center, style: TextStyle(color: cSecondary, fontSize: 12)),
+        const SizedBox(height: 6),
+        Expanded(
+          child: ReorderableListView.builder(
+            buildDefaultDragHandles: false,
+            itemCount: list.length,
+            itemBuilder: (c, i) => row(i, list[i]),
+            onReorderItem: (from, to) {
+              final moved = list[from];
+              if (moved['kind'] == 'polyfill' || from == to) return;
+              final order = [...list]..removeAt(from);
+              order.insert(to, moved);
+              final nodes = order.where((p) => p['kind'] != 'polyfill').map((p) => p['id']).toList();
+              final front = nodes.indexOf(moved['id']);
+              _cmd({'op': 'reorder_at', 'node': moved['id'], 'index': nodes.length - 1 - front});
+            },
+          ),
+        ),
+        Container(
+          height: 30,
+          alignment: Alignment.center,
+          decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFFE6E8EB)))),
+          child: Text('${parts['nodes'] ?? 0} nodes', style: const TextStyle(color: cSecondary, fontSize: 12)),
+        ),
+      ]),
+    );
   }
 
   /// The figure editor's shape shelf (J2, FigureEditor board): what a drag
@@ -2776,11 +2847,16 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       padding: EdgeInsets.only(left: leftHand ? 0 : pad.left, right: leftHand ? pad.right : 0, top: 6, bottom: _fsNow || _hidePanels ? pad.bottom : 0),
       decoration: BoxDecoration(color: cPanel, border: Border(right: leftHand ? BorderSide.none : const BorderSide(color: cLine), left: leftHand ? const BorderSide(color: cLine) : BorderSide.none)),
       child: Column(children: [
-        for (final (m, icon, label) in const [('figure', 'pose', 'Pose one figure'), ('all', 'all', 'Move everything'), ('camera', 'camera', 'Camera')])
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: kit.RailButton(icon, label: label, active: mode == m, onTap: _playing ? null : () => _setMode(m)),
-          ),
+        // the figure editor's rail (FigureEditor board): Parts and which handles show
+        if (_st['building'] != null) ...[
+          Padding(padding: const EdgeInsets.only(bottom: 4), child: kit.RailButton('parts', label: 'Parts', pressed: _partsOpen, onTap: () => setState(() => _partsOpen = !_partsOpen))),
+          kit.RailButton('handles', label: 'Which handles show', pressed: _viewOptions, onTap: () => setState(() => _viewOptions = !_viewOptions)),
+        ] else
+          for (final (m, icon, label) in const [('figure', 'pose', 'Pose one figure'), ('all', 'all', 'Move everything'), ('camera', 'camera', 'Camera')])
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: kit.RailButton(icon, label: label, active: mode == m, onTap: _playing ? null : () => _setMode(m)),
+            ),
       ]),
     );
   }
@@ -2795,6 +2871,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   bool _panelOpen = true, _hidePanels = false;
+  bool _partsOpen = true;
   bool _layersOpen = true, _rowActionsOpen = false;
   // the Sound page (a sound block tapped); any other pick leaves it
   bool _soundPage = false;

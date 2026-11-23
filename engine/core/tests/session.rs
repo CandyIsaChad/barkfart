@@ -5083,3 +5083,21 @@ fn editing_a_figure_edits_a_copy() {
     assert_eq!(st["undo"], undo, "and so is its history");
     assert_eq!(st["selected"]["layer"], "L2");
 }
+
+#[test]
+fn the_parts_list_is_front_first_and_reorders() {
+    // J3
+    let mut s = session();
+    let st = s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    assert!(st["selected"].is_object());
+    let st = s.command(&json!({"op": "edit_copy"}));
+    let parts = st["parts"]["list"].as_array().unwrap().clone();
+    assert!(parts.len() > 5);
+    assert!(parts.iter().all(|p| p["kind"] == "segment" || p["kind"] == "connector" || p["kind"] == "polyfill"));
+    let front = parts[0]["id"].as_str().unwrap().to_string();
+    let st = s.command(&json!({"op": "reorder_at", "node": front, "index": 0}));
+    assert_eq!(st["undo"], "Reorder segment");
+    let after = st["parts"]["list"].as_array().unwrap();
+    assert_eq!(after.last().unwrap()["id"], front.as_str(), "now at the back");
+    s.command(&json!({"op": "edit_copy_end"}));
+}

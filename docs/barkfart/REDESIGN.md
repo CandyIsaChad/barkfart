@@ -651,7 +651,7 @@ and tests are never weakened.
   `edit_copy_end` puts the document back exactly, history included. Save as
   new figure writes the copy to your figures first (chooser › Yours).
 - [x] J2. The shape shelf.
-- [ ] J3. The Parts list.
+- [x] J3. The Parts list.
 - [ ] J4. Shape-coded handles, the size reference.
 - [ ] J5. Ghost and readout while drawing; the Mirror toggle.
 - [ ] J6. Polyfills in either winding direction.

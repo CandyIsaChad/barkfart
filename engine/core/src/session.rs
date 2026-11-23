@@ -1575,6 +1575,13 @@ impl Session {
                     self.step(if branch { "Reorder branch" } else { "Reorder segment" }, |s| figure_ops::reorder(s, &sym, &l, &n, branch, to));
                 }
             }
+            "reorder_at" => {
+                // the Parts list's drag: this joint to place `index` (0: at the back)
+                if let (Some(l), Some(n)) = (self.building.clone().or_else(|| self.sel_layer()), c["node"].as_str().map(str::to_string)) {
+                    let index = c["index"].as_u64().unwrap_or(0) as usize;
+                    self.step("Reorder segment", |s| figure_ops::reorder_at(s, &sym, &l, &n, index));
+                }
+            }
             "copy_branch" => {
                 // the selected segment alone, or with everything hanging off it
                 if let Some((l, n)) = self.selected.clone() {
@@ -3210,6 +3217,26 @@ impl Session {
             "handles": handles, "selected": sel, "figures": figures, "rows": rows, "multi": multi,
             // H1: the FX toggle shows only when something has effects
             "hasEffects": p.root().is_some_and(|r| r.layers.iter().any(|l| crate::edit::filters::any_active(l))), "camera": cam, "movieclip": movieclip, "picture": picture, "motionPath": motion_path,
+            // J3: the Parts list while editing a figure: front first, each
+            // segment (shape, colour, its number) and each polyfill just behind
+            // its anchor; the main joint is the figure itself
+            "parts": self.building.as_ref().and_then(|b| p.root()?.layer(b)).and_then(|l| l.as_figure()).map(|f| {
+                let mut r = Resolver::new(p);
+                let seq = f.draw_sequence();
+                let mut out: Vec<J> = Vec::new();
+                for &i in seq.iter().rev() {
+                    let n = &f.nodes()[i];
+                    if n.parent.is_none() {
+                        continue;
+                    }
+                    let connector = n.legacy_extras.contains_key(crate::eval::pose::CONNECT_TO) || n.legacy_extras.get("connector").is_some_and(|v| v == "b:true");
+                    out.push(json!({"id": n.id, "kind": if connector { "connector" } else { "segment" }, "shape": shape_name(n.shape), "color": color_of(&mut r, &n.color, t), "n": i + 1}));
+                    for (k, pf) in f.polyfills.iter().enumerate().filter(|(_, pf)| pf.anchor == n.id) {
+                        out.push(json!({"id": pf.id, "kind": "polyfill", "color": color_of(&mut r, &pf.color, t), "n": f.nodes().len() + k + 1}));
+                    }
+                }
+                json!({"list": out, "nodes": f.nodes().len()})
+            }),
             // J1: the copy being edited, and the figure it came from
             "copyEdit": self.copy_edit.as_ref().and_then(|(_, l, _)| {
                 let copy = self.building.as_ref().and_then(|b| p.root()?.layer(b)).and_then(|x| x.name.clone());

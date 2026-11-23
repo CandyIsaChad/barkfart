@@ -247,6 +247,21 @@ pub fn reorder(st: &mut State, sym: &str, layer: &str, node: &str, branch: bool,
     Ok(())
 }
 
+/// The Parts list's drag (J3): `node` goes to place `index` in the drawing
+/// order (0 is drawn first, at the back), the others keeping theirs.
+pub fn reorder_at(st: &mut State, sym: &str, layer: &str, node: &str, index: usize) -> EditResult<()> {
+    let (f, _) = figure(st, sym, layer)?;
+    if f.node(node).is_none() {
+        return fail(format!("no node {node}"));
+    }
+    let mut seq: Vec<String> = f.draw_sequence().into_iter().map(|i| f.nodes()[i].id.clone()).filter(|x| x != node).collect();
+    seq.insert(index.min(seq.len()), node.to_string());
+    for (i, id) in seq.iter().enumerate() {
+        f.node_mut(id).expect("in figure").draw_order = i as i32;
+    }
+    Ok(())
+}
+
 /// Mirrors a branch about its parent's joint (horizontal: left-right).
 /// The parent's angle is read again before each key is written, in the
 /// same order as the Java version (it can depend on this joint through links).
