@@ -5273,3 +5273,42 @@ fn a_selected_picture_moves_and_scales_on_the_stage() {
     let st = s.command(&json!({"op": "down", "x": mx, "y": my, "r": 20}));
     assert_eq!(st["hit"], false);
 }
+
+#[test]
+fn several_figures_copy_and_paste_their_poses_and_become_one_movieclip() {
+    // M9 / the multi-select board: Copy poses, Paste poses, Make movieclip
+    let mut s = animated(); // 4 frames, L2 posed differently on the last
+    s.command(&json!({"op": "select", "layer": "L2"}));
+    let twin = s.command(&json!({"op": "duplicate_figure"}))["selected"]["layer"].as_str().unwrap().to_string();
+    let fps = s.project().settings.fps as f64;
+    // each figure's joints relative to its main joint, frame by frame
+    let shape = |s: &Session, l: &str, f: i32| -> Vec<(i64, i64)> {
+        let hs: Vec<_> = s.tools.handles(s.project(), f as f64 / fps).into_iter().filter(|h| h.layer == l).collect();
+        let root = hs.iter().find(|h| h.root).map(|h| (h.x, h.y)).unwrap();
+        hs.iter().map(|h| (((h.x - root.0) * 10.0).round() as i64, ((h.y - root.1) * 10.0).round() as i64)).collect()
+    };
+    assert_ne!(shape(&s, "L2", 0), shape(&s, "L2", 3), "posed differently on the last frame");
+    s.command(&json!({"op": "frame", "i": 0}));
+    let st = s.command(&json!({"op": "select_many", "layers": ["L2", twin]}));
+    assert_eq!(st["posesCopied"], 0);
+    let st = s.command(&json!({"op": "copy_poses"}));
+    assert_eq!(st["posesCopied"], 2);
+    assert_eq!(st["message"], "2 poses copied.");
+    s.command(&json!({"op": "frame", "i": 3}));
+    let st = s.command(&json!({"op": "paste_poses"}));
+    assert_eq!(st["undo"], "Paste poses", "{}", st["message"]);
+    for l in ["L2", twin.as_str()] {
+        assert_eq!(shape(&s, l, 3), shape(&s, l, 0), "{l} has its first pose on the last frame");
+    }
+    let st = s.command(&json!({"op": "undo"}));
+    assert_ne!(st["undo"], "Paste poses");
+    assert_ne!(shape(&s, "L2", 3), shape(&s, "L2", 0), "one undo takes both back");
+    // both become one movieclip
+    let figures = |s: &Session| s.project().root().unwrap().layers.iter().filter(|l| l.as_figure().is_some()).count();
+    let before = figures(&s);
+    s.command(&json!({"op": "select_many", "layers": ["L2", twin]}));
+    let st = s.command(&json!({"op": "to_movieclip"}));
+    assert_eq!(st["undo"], "Convert to movieclip");
+    assert_eq!(figures(&s), before - 2, "both went into the clip");
+    assert!(st["multi"].is_null());
+}

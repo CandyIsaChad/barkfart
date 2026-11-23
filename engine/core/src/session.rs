@@ -97,6 +97,9 @@ pub struct Session {
     /// The last tap (no drag): where, and which handle, for node digging.
     last_tap: Option<(f32, f32, String, String)>,
     pose_clip: Option<(IndexMap<String, f32>, IndexMap<String, f32>)>,
+    /// "Copy poses" with several figures selected: each figure's pose, by
+    /// layer; "Paste poses" puts each back on its own figure.
+    poses_clip: Vec<(String, IndexMap<String, f32>, IndexMap<String, f32>)>,
     /// G5: several figures selected at once (layer ids, the first also in
     /// `selected`); empty when one or none is.
     multi: Vec<String>,
@@ -191,7 +194,7 @@ impl Session {
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
         let main_root = doc.project().root_symbol.clone();
-        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, stock: None, size_ref: true, mirror: false, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, multi: Vec::new(), copy_edit: None, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, stock: None, size_ref: true, mirror: false, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, poses_clip: Vec::new(), multi: Vec::new(), copy_edit: None, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -2307,6 +2310,46 @@ impl Session {
                     self.rev += 1;
                 }
             }
+            "copy_poses" => {
+                // several figures (the multi-select board): each one's pose here
+                let list: Vec<String> = if self.multi.len() > 1 { self.multi.clone() } else { self.sel_layer().into_iter().collect() };
+                let p = self.project();
+                let mut r = Resolver::new(p);
+                self.poses_clip = list
+                    .iter()
+                    .filter_map(|l| {
+                        let fig = p.root()?.layer(l)?.as_figure()?;
+                        let rot = fig.nodes().iter().filter(|n| n.parent.is_some()).map(|n| (n.id.clone(), r.f(&n.rotation, t))).collect();
+                        let len = fig.nodes().iter().filter(|n| n.parent.is_some()).map(|n| (n.id.clone(), r.f(&n.length, t))).collect();
+                        Some((l.clone(), rot, len))
+                    })
+                    .collect();
+                self.message = match self.poses_clip.len() {
+                    0 => String::new(),
+                    1 => "Pose copied.".into(),
+                    n => format!("{n} poses copied."),
+                };
+                self.rev += 1;
+            }
+            "paste_poses" => {
+                // each copied pose back on its own figure, here, as one step
+                let clip = self.poses_clip.clone();
+                if !clip.is_empty() {
+                    let ed = self.tools.editor.clone();
+                    self.doc.begin("Paste poses");
+                    anchor_poses(&mut self.doc.state);
+                    for (l, rot, len) in &clip {
+                        if self.project().root().and_then(|r| r.layer(l)).is_none() {
+                            continue;
+                        }
+                        if let Err(e) = ed.pose(&mut self.doc, &sym, l, rot, len, t) {
+                            self.message = e.0;
+                        }
+                    }
+                    self.doc.commit();
+                    self.changed();
+                }
+            }
             "paste_pose" => {
                 if let (Some(l), Some((rot, len))) = (self.sel_layer(), self.pose_clip.clone()) {
                     let ed = self.tools.editor.clone();
@@ -2365,7 +2408,8 @@ impl Session {
                 // that plays their animation in a loop, in their place
                 if let Some(l) = self.sel_layer() {
                     let p = self.project();
-                    let mut set = vec![l.clone()];
+                    // several selected (the multi-select board): all of them
+                    let mut set = if self.multi.len() > 1 { self.multi.clone() } else { vec![l.clone()] };
                     let mut i = 0;
                     while i < set.len() {
                         let cur = set[i].clone();
@@ -2382,6 +2426,7 @@ impl Session {
                     let order: Vec<String> = p.root().map(|r| r.layers.iter().filter(|x| set.contains(&x.id)).map(|x| x.id.clone()).collect()).unwrap_or_default();
                     if self.step("Convert to movieclip", |s| crate::edit::symbol_ops::convert_to_symbol(s, &sym, &order, &format!("{name} clip")).map(|_| ())).is_some() {
                         self.selected = None;
+                        self.multi.clear();
                         self.validate();
                     } else if self.message.is_empty() {
                         self.message = "This figure is joined to one outside it; unjoin it first.".into();
@@ -3427,7 +3472,7 @@ impl Session {
                 "tweenNew": self.tools.editor.default_interp != Interp::Hold, "mainOnly": self.tools.main_nodes_only, "sizeRef": self.size_ref, "mirror": self.mirror,
                 "onionBefore": p.view.onion_before, "onionAfter": p.view.onion_after, "onionFront": p.view.onion_in_front,
             },
-            "pose": self.pose_clip.is_some(),
+            "pose": self.pose_clip.is_some(), "posesCopied": self.poses_clip.len(),
             "joining": self.joining.is_some(),
             "frameCopied": self.frame_clip.is_some(),
             "figureCopied": self.figure_clip.is_some(), "propsCopied": self.props_clip.is_some(),

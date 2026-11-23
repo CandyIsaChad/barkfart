@@ -3865,6 +3865,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       rw.DButtons('New pose here', () => each('New pose', {'op': 'new_pose'}), b: 'Hold longer', onB: () => each('Hold longer', {'op': 'hold_longer'})),
       rw.DButtons('Flip sideways', () => each('Flip figures', {'op': 'flip_figure', 'h': true}), b: 'Flip over', onB: () => each('Flip figures', {'op': 'flip_figure', 'h': false})),
       rw.DTick('Visible in onion skin', same('onion'), onChanged: (v) => each('Onion skin', {'op': 'figure', 'onion': v})),
+      rw.DButtons('Copy poses', () => _cmd({'op': 'copy_poses'}), b: 'Paste poses', onB: ((_st['posesCopied'] as num?) ?? 0) > 0 ? () => _cmd({'op': 'paste_poses'}) : null),
+      rw.DButtons('Make movieclip…', () async {
+        final ok = await _ask('Make a movieclip?', 'These ${n < words.length ? words[n] : n} figures and the figures joined to them become one movieclip that plays their animation in a loop, in their place. It can be broken apart again.', ['Cancel', 'Make movieclip']);
+        if (ok == 'Make movieclip') _cmd({'op': 'to_movieclip'});
+      }),
       rw.DButtons('Duplicate', () => each('Duplicate figures', {'op': 'duplicate_figure'}), b: 'Pick one', onB: () => _cmd({'op': 'select', 'layer': multi.first['id']})),
       rw.DDanger('Delete from this frame', () => each('Delete figures', {'op': 'delete_here'})),
       const rw.DHint('Double-tap the timeline and drag for a box; triple-tap and drag to draw a lasso.'),
