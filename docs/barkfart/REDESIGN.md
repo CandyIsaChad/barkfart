@@ -653,7 +653,14 @@ Render the boards (docs/barkfart/mockups: `mkdir -p project preview && node boar
 - [x] M6. Pose page: "Pose Tools", name and "frames 5 to 8", ease pictures, "Length in frames", pinned "Delete this pose".
 - [x] M7. Frame page: "Frame N" title and hint, Add time here / Remove this frame, background swatches, pinned "Clear frame"; the selected frame outlined in the strip.
 - [x] M8. The "+" menu: Stick figure, Picture, Text, Sound, Movieclip, then Group (planned); paste and import live in the choosers' footers.
-- [ ] M9. The rest, board by board: Animation popover, Export, View, Camera (the frame on the stage), Text, Picture, Movieclip, Sound, Group, Projects, First run, Settings, States, Tablet.
+- [x] M9. The rest, board by board (done: Animation popover, Export, View,
+  Camera, Text, Sound, Movieclip, multi-select, Projects, Settings' About,
+  States' empty animation and nothing-selected, Tablet docking). Still apart
+  from the boards, each waiting on a feature: the Picture page (pictures
+  can't be selected yet), Group and Make movieclip / Copy and Paste poses for
+  several figures (K and engine work), the settings' UI size slider, the
+  stage's motion path with frame numbers, "Edit as a new figure…" (J1), the
+  Missing-plugin card (K). Earlier list: Animation popover, Export, View, Camera (the frame on the stage), Text, Picture, Movieclip, Sound, Group, Projects, First run, Settings, States, Tablet.
 
 ### K. Hardest, later
 Groups; the Luau plugin runtime (it needs the `mlua` crate, so it waits

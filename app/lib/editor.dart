@@ -2742,7 +2742,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// The Properties card (REDESIGN §4): today's sections, tabbed by what is
   /// selected. It floats over the stage on the right.
   Widget _propertiesCard({bool docked = false}) {
-    if (_fxBrowser && _sel != null && !_playing) return kit.PanelCard(docked: docked, padding: EdgeInsets.zero, child: _effectsBrowser());
+    if (_fxBrowser && (_sel != null || _st['multi'] != null) && !_playing) return kit.PanelCard(docked: docked, padding: EdgeInsets.zero, child: _effectsBrowser());
     final names = _sections();
     if (names.length == 1 && names.first == 'Nothing selected' && !docked) {
       return Align(
@@ -2817,7 +2817,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         'Pose' => 'Pose Tools',
         'Frame Tools' => 'Frame ${_frame + 1}',
         'Textfield Tools' => 'Text Tools',
-        'Selection' => '',
+        'Selection' => '${((_st['multi'] as List?) ?? const []).length} figures',
         'Nothing selected' => '',
         _ => section,
       };
@@ -3538,19 +3538,40 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       return v.length == 1 ? v.first : null;
     }
 
+    const words = ['', 'one', 'both', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+    final n = multi.length;
     final colors = multi.map((m) => m['color']).toSet();
     final color = (colors.length == 1 ? colors.first as num? : null)?.toInt();
     final hold = same('hold');
+    // "Hero has Glow. Head and Rival have none."
+    String fxLine() {
+      String names(List<Map> ms) => ms.length == 1 ? '${ms.first['name']}' : '${ms.take(ms.length - 1).map((m) => m['name']).join(', ')} and ${ms.last['name']}';
+      const labels = {'blur': 'Blur', 'motion': 'Motion blur', 'glow': 'Glow', 'adjust': 'Colour', 'tint': 'Tint', 'invert': 'Invert', 'pixelate': 'Pixelate', 'outline': 'Outline', 'shadow': 'Shadow'};
+      final have = multi.where((m) => ((m['effects'] as List?) ?? const []).isNotEmpty).toList();
+      final none = multi.where((m) => ((m['effects'] as List?) ?? const []).isEmpty).toList();
+      if (have.isEmpty) return 'No effects yet.';
+      final parts = [
+        for (final m in have) '${m['name']} has ${((m['effects'] as List).map((e) => labels[e] ?? e)).join(', ')}.',
+        if (none.isNotEmpty) '${names(none)} ${none.length == 1 ? 'has' : 'have'} none.',
+      ];
+      return parts.join(' ');
+    }
+
+    final opacity = ((multi.first['opacity'] as num?) ?? 1).toDouble();
     final rows = <rw.Desc>[
-      rw.DInfo('${multi.length} figures', ''),
-      rw.DHint(multi.map((m) => '${m['name']}').join(', ')),
-      const rw.DTitle('Pose'),
-      rw.DSeg(const ['Hold', 'Tween into it'], hold == null ? -1 : (hold ? 0 : 1), label: 'Until the next pose', onSelect: (i) => each(i == 0 ? 'Hold' : 'Tween', {'op': 'easing', 'v': i == 0 ? 'hold' : 'linear', 'block': true})),
-      rw.DButtons('New pose here', () => each('New pose', {'op': 'new_pose'}), b: 'Hold longer', onB: () => each('Hold longer', {'op': 'hold_longer'})),
-      const rw.DTitle('Look'),
+      // the multi-select board, top to bottom
+      rw.DHint('Changes here apply to ${n < words.length ? (n == 2 ? 'both' : 'all ${words[n]}') : 'all $n'}.'),
       rw.DWidget(kit.PropRow('Colour', secondary: color == null ? 'Mixed' : null, trailing: _swatches(color ?? 0x808080ff, (c) => each('Colour figures', {'op': 'figure', 'color': c})))),
-      rw.DButtons('Flip sideways', () => each('Flip figures', {'op': 'flip_figure', 'h': true}), b: 'Flip over', onB: () => each('Flip figures', {'op': 'flip_figure', 'h': false})),
+      rw.DTitle('Effects', onAdd: _openFxBrowser, addLabel: 'Add an effect to ${n == 2 ? 'both' : 'all ${n < words.length ? words[n] : n}'}'),
+      rw.DHint(fxLine()),
+      const rw.DTitle('Blending'),
+      rw.DSlider('Opacity', '${(opacity * 100).round()}%', opacity, onChanged: (x) => each('Opacity', {'op': 'filter', 'opacity': (x * 100).round() / 100})),
       rw.DTick('Locked', same('locked'), onChanged: (v) => each(v ? 'Lock figures' : 'Unlock figures', {'op': 'figure', 'locked': v})),
+      // more than the board: their poses and the usual figure actions
+      const rw.DTitle('Poses'),
+      rw.DSeg(const ['Hold until the next pose', 'Tween into it'], hold == null ? -1 : (hold ? 0 : 1), onSelect: (i) => each(i == 0 ? 'Hold' : 'Tween', {'op': 'easing', 'v': i == 0 ? 'hold' : 'linear', 'block': true})),
+      rw.DButtons('New pose here', () => each('New pose', {'op': 'new_pose'}), b: 'Hold longer', onB: () => each('Hold longer', {'op': 'hold_longer'})),
+      rw.DButtons('Flip sideways', () => each('Flip figures', {'op': 'flip_figure', 'h': true}), b: 'Flip over', onB: () => each('Flip figures', {'op': 'flip_figure', 'h': false})),
       rw.DTick('Visible in onion skin', same('onion'), onChanged: (v) => each('Onion skin', {'op': 'figure', 'onion': v})),
       rw.DButtons('Duplicate', () => each('Duplicate figures', {'op': 'duplicate_figure'}), b: 'Pick one', onB: () => _cmd({'op': 'select', 'layer': multi.first['id']})),
       rw.DDanger('Delete from this frame', () => each('Delete figures', {'op': 'delete_here'})),
@@ -3740,7 +3761,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     bool match(String label) => q.isEmpty || label.toLowerCase().contains(q);
     void close() => setState(() => _fxBrowser = false);
     void pick(String k, Map<String, Object?> cmd) {
-      _cmd(cmd);
+      if (_st['multi'] != null) {
+        _cmd({'op': 'each', 'label': 'Add effect', 'cmd': cmd});
+      } else {
+        _cmd(cmd);
+      }
       setState(() {
         _fxBrowser = false;
         _fxOpen = k;

@@ -2932,6 +2932,9 @@ impl Session {
                         "id": id, "name": l.name.clone().unwrap_or_else(|| id.clone()),
                         "color": f.color.map(|c| c.to_rgba8888()), "locked": l.locked, "onion": l.onion,
                         "hold": hold, "here": block.is_some_and(|(st, _)| st == fr),
+                        // the multi-select page's "Hero has Glow" line and opacity
+                        "effects": crate::edit::filters::state(p, &p.root_symbol, id, t)["on"].as_object().map(|m| m.iter().filter(|(_, v)| v.as_bool() == Some(true)).map(|(k, _)| k.clone()).collect::<Vec<_>>()).unwrap_or_default(),
+                        "opacity": round2(Resolver::new(p).f(&l.opacity, t)),
                     }))
                 })
                 .collect()
