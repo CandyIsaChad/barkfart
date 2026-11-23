@@ -1145,7 +1145,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         case 'selectrow':
           // test helper: select the figure on timeline row N
           final rows = ((_st['rows'] as List?) ?? const []).cast<Map>();
-          _cmd({'op': 'select', 'layer': rows[int.parse(w[1])]['id']});
+          final r = rows[int.parse(w[1])];
+          _cmd({'op': 'select', 'layer': r['id'], if (r['kind'] == 'picture' || r['kind'] == 'movieclip') 'node': ''});
         case 'jointo':
           // test helper: the selected figure joins the figure on row N (its main joint)
           final rows = ((_st['rows'] as List?) ?? const []).cast<Map>();
@@ -1448,6 +1449,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (_frameSelected) return const ['Frame Tools'];
     if (_st['textfield'] != null) return const ['Textfield Tools'];
     if (_st['movieclip'] != null) return const ['Movieclip Tools'];
+    if (_st['picture'] != null) return const ['Picture Tools'];
     final sel = _sel;
     if (_st['multi'] != null) return const ['Selection'];
     if (sel != null) return const ['Stickfigure Tools', 'Segment Tools', 'Pose'];
@@ -1461,6 +1463,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     switch (name) {
       case 'Sound Tools':
         return _soundsBlock();
+      case 'Picture Tools':
+        return _pictureTools(_st['picture'] as Map);
       case 'Nothing selected':
         return [
           for (final d in <rw.Desc>[
@@ -2330,6 +2334,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           _setMode('camera');
           return;
         }
+        if (r['kind'] == 'picture' || r['kind'] == 'movieclip') {
+          _cmd({'op': 'select', 'layer': r['id'], 'node': ''});
+          setState(() => _panelOpen = true);
+          return;
+        }
         if (r['kind'] == 'figure') {
           _cmd({'op': 'select', 'layer': r['id']});
           setState(() => _panelOpen = true);
@@ -2854,6 +2863,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           },
           null
         );
+      case 'Picture Tools' when _st['picture'] != null:
+        return ('Delete picture', () => _cmd({'op': 'delete_here'}), null);
       case 'Sound Tools' when _st['frameSound'] != null:
         return ('Delete sound', () => _cmd({'op': 'frame_sound', 'asset': null}), null);
       case 'Textfield Tools' when _st['textfield'] != null:
@@ -3576,6 +3587,27 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       rw.DButtons('Duplicate', () => each('Duplicate figures', {'op': 'duplicate_figure'}), b: 'Pick one', onB: () => _cmd({'op': 'select', 'layer': multi.first['id']})),
       rw.DDanger('Delete from this frame', () => each('Delete figures', {'op': 'delete_here'})),
       const rw.DHint('Double-tap the timeline and drag for a box; triple-tap and drag to draw a lasso.'),
+    ];
+    return [for (final d in rows) rw.renderDesc(d)];
+  }
+
+  /// The Picture page (round 10 Picture board).
+  List<Widget> _pictureTools(Map pic) {
+    void set(Map<String, Object?> m) => _cmd({'op': 'picture', ...m});
+    final scale = ((pic['scale'] as num?) ?? 1).toDouble(), opacity = ((pic['opacity'] as num?) ?? 1).toDouble();
+    const blends = ['NORMAL', 'MULTIPLY', 'SCREEN', 'ADD'];
+    const blendNames = ['Normal', 'Multiply', 'Screen', 'Add'];
+    final blend = math.max(0, blends.indexOf('${pic['blend'] ?? 'NORMAL'}'));
+    final rows = <rw.Desc>[
+      rw.DInfo('Picture', '${pic['file'] ?? pic['name']}'),
+      rw.DStep('Scale', scale.toStringAsFixed(2), onMinus: scale > 0.05 ? () => set({'scale': math.max(0.05, scale - 0.05)}) : null, onPlus: () => set({'scale': scale + 0.05})),
+      rw.DButtons('Flip sideways', () => set({'flipH': true}), b: 'Flip over', onB: () => set({'flipV': true})),
+      const rw.DTitle('Blending'),
+      rw.DSlider('Opacity', '${(opacity * 100).round()}%', opacity, onChanged: (x) => set({'opacity': (x * 100).round() / 100})),
+      rw.DLink('Blend', blendNames[blend], onTap: () => _cmd({'op': 'blend', 'v': blends[(blend + 1) % blends.length]})),
+      rw.DTick('Locked', pic['locked'] == true, onChanged: (v) => set({'locked': v})),
+      rw.DTick('Locked to camera', pic['cameraLocked'] == true, onChanged: (v) => _cmd({'op': 'camera_lock', 'layer': pic['layer'], 'on': v})),
+      const rw.DHint('Move a picture with "Move everything" (the second mode on the left), or lock it to the camera for a backdrop.'),
     ];
     return [for (final d in rows) rw.renderDesc(d)];
   }

@@ -656,8 +656,8 @@ Render the boards (docs/barkfart/mockups: `mkdir -p project preview && node boar
 - [x] M9. The rest, board by board (done: Animation popover, Export, View,
   Camera, Text, Sound, Movieclip, multi-select, Projects, Settings' About,
   States' empty animation and nothing-selected, Tablet docking). Still apart
-  from the boards, each waiting on a feature: the Picture page (pictures
-  can't be selected yet), Group and Make movieclip / Copy and Paste poses for
+  from the boards, each waiting on a feature: dragging a picture on the
+  stage (the Picture page itself is done: tap its block), Group and Make movieclip / Copy and Paste poses for
   several figures (K and engine work), the settings' UI size slider, the
   stage's motion path with frame numbers, "Edit as a new figure…" (J1), the
   Missing-plugin card (K). Earlier list: Animation popover, Export, View, Camera (the frame on the stage), Text, Picture, Movieclip, Sound, Group, Projects, First run, Settings, States, Tablet.

@@ -4984,3 +4984,25 @@ fn keying_an_effect_setting_later_animates_it() {
     let names: Vec<String> = row["props"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap().to_string()).collect();
     assert!(names.contains(&"Glow strength".to_string()), "{names:?}");
 }
+
+#[test]
+fn a_picture_is_selected_and_changed_on_its_page() {
+    // the Picture board: scale, flips, opacity, lock, one step each
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata/legacy/synthetic/picture.png");
+    let mut s = two_poses();
+    let st = s.import("picture.png", &std::fs::read(path).unwrap());
+    let pic = st["rows"].as_array().unwrap().iter().find(|r| r["kind"] == "picture").expect("a picture row")["id"].as_str().unwrap().to_string();
+    let st = s.command(&json!({"op": "select", "layer": pic, "node": ""}));
+    assert_eq!(st["picture"]["layer"], pic.as_str());
+    assert_eq!(st["picture"]["scale"], 1.0);
+    let st = s.command(&json!({"op": "picture", "scale": 1.5}));
+    assert_eq!(st["undo"], "Picture");
+    assert_eq!(st["picture"]["scale"], 1.5);
+    let st = s.command(&json!({"op": "picture", "flipH": true}));
+    assert_eq!(st["picture"]["flipH"], true);
+    let st = s.command(&json!({"op": "picture", "opacity": 0.5, "locked": true}));
+    assert_eq!(st["picture"]["opacity"], 0.5);
+    assert_eq!(st["picture"]["locked"], true);
+    let st = s.command(&json!({"op": "undo"}));
+    assert_eq!(st["picture"]["opacity"], 1.0);
+}

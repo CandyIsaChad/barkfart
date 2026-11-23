@@ -2569,6 +2569,59 @@ impl Session {
                     });
                 }
             }
+            "picture" => {
+                // the Picture page: scale, flips, opacity, lock (pictures are
+                // selected as their layer with no joint)
+                if let Some(l) = self.sel_layer() {
+                    let c2 = c.clone();
+                    let (ed, keyed) = (self.tools.editor.clone(), self.keying);
+                    self.step("Picture", move |s| {
+                        let (sx, sy, op_id) = {
+                            let Some(x) = s.project.root().and_then(|r| r.layer(&l)) else { return crate::edit::fail("no picture") };
+                            if !matches!(x.kind, LayerKind::Sprite(_)) {
+                                return crate::edit::fail("not a picture");
+                            }
+                            let mut r = Resolver::new(&s.project);
+                            ((r.f(&x.transform.scale_x, t), x.transform.scale_x.id.clone()), (r.f(&x.transform.scale_y, t), x.transform.scale_y.id.clone()), x.opacity.id.clone())
+                        };
+                        let (mut nx, mut ny) = (sx.0, sy.0);
+                        if let Some(v) = c2["scale"].as_f64() {
+                            let v = v.clamp(0.01, 100.0) as f32;
+                            nx = v * nx.signum();
+                            ny = v * ny.signum();
+                        }
+                        if c2["flipH"].as_bool() == Some(true) {
+                            nx = -nx;
+                        }
+                        if c2["flipV"].as_bool() == Some(true) {
+                            ny = -ny;
+                        }
+                        if nx != sx.0 {
+                            ed.change_in(s, &sx.1, Value::F(nx), t)?;
+                        }
+                        if ny != sy.0 {
+                            ed.change_in(s, &sy.1, Value::F(ny), t)?;
+                        }
+                        if let Some(v) = c2["opacity"].as_f64() {
+                            let v = Value::F(v.clamp(0.0, 1.0) as f32);
+                            let Some(q) = s.project.property_mut(&op_id) else { return crate::edit::fail("no opacity") };
+                            // D5: static unless keying (or already animated)
+                            let animated = q.track.keys().windows(2).any(|w| w[0].value != w[1].value);
+                            if keyed || animated {
+                                q.track.put(Key::new(t, v, Interp::Linear));
+                            } else {
+                                set_static(q, v);
+                            }
+                        }
+                        if let Some(v) = c2["locked"].as_bool() {
+                            if let Some(x) = s.project.layer_mut(&sym, &l) {
+                                x.locked = v;
+                            }
+                        }
+                        Ok(())
+                    });
+                }
+            }
             "move_fx" => {
                 if let Some(l) = self.sel_layer() {
                     let label = match (c["kind"].as_str(), c["on"].as_bool()) {
@@ -2862,6 +2915,24 @@ impl Session {
             let mode = match sl.loop_mode { SymbolLoop::Once => "once", SymbolLoop::Loop => "loop", SymbolLoop::PingPong => "pingpong" };
             Some(json!({"layer": l, "name": layer.name.clone().unwrap_or_else(|| l.clone()), "loop": mode, "speed": round2(r.d(&sl.speed, t) as f32), "offset": round2(r.d(&sl.time_offset, t) as f32), "frames": p.symbol(&sl.symbol).map(|s| (s.duration * st_fps(p)).round() as i64).unwrap_or(0)}))
         });
+        // the Picture page: the selected picture
+        let picture = self.selected.as_ref().and_then(|(l, n)| {
+            if !n.is_empty() {
+                return None;
+            }
+            let layer = p.root()?.layer(l)?;
+            let LayerKind::Sprite(sp) = &layer.kind else { return None };
+            let mut r = Resolver::new(p);
+            let (sx, sy) = (r.f(&layer.transform.scale_x, t), r.f(&layer.transform.scale_y, t));
+            // the file's own name when it was kept, else the picture's name
+            let file = sp.asset.as_ref().and_then(|a| p.assets.get(a)).and_then(|a| a.name.clone());
+            Some(json!({
+                "layer": l, "name": layer.name.clone().unwrap_or_else(|| l.clone()), "file": file,
+                "scale": round2(sy.abs()), "flipH": sx < 0.0, "flipV": sy < 0.0, "opacity": round2(r.f(&layer.opacity, t)),
+                "blend": layer.blend.name(), "locked": layer.locked,
+                "cameraLocked": layer.parent.as_ref().and_then(|pid| p.root()?.layer(pid)).is_some_and(|x| matches!(x.kind, LayerKind::Camera(_))),
+            }))
+        });
         // Lock Figure To Camera: the locked ones (parallax in the original's units)
         let camera_locks: Vec<J> = p.root().map(|r| {
             r.layers.iter().filter(|l| l.parent.as_ref().is_some_and(|pid| r.layer(pid).is_some_and(|x| matches!(x.kind, LayerKind::Camera(_))))).map(|l| {
@@ -3040,7 +3111,7 @@ impl Session {
             "mode": match self.mode { Mode::Figure => "figure", Mode::All => "all", Mode::Camera => "camera" },
             "handles": handles, "selected": sel, "figures": figures, "rows": rows, "multi": multi,
             // H1: the FX toggle shows only when something has effects
-            "hasEffects": p.root().is_some_and(|r| r.layers.iter().any(|l| crate::edit::filters::any_active(l))), "camera": cam, "movieclip": movieclip, "editingClip": (p.root_symbol != self.main_root).then(|| p.root().and_then(|r| r.name.clone()).unwrap_or_else(|| "Movieclip".into())),
+            "hasEffects": p.root().is_some_and(|r| r.layers.iter().any(|l| crate::edit::filters::any_active(l))), "camera": cam, "movieclip": movieclip, "picture": picture, "editingClip": (p.root_symbol != self.main_root).then(|| p.root().and_then(|r| r.name.clone()).unwrap_or_else(|| "Movieclip".into())),
             "branchCopied": self.branch_clip.is_some(),
             "watermark": p.settings.watermark.as_ref().map(|(t, c)| json!({"text": t, "color": c.to_rgba8888()})),
             "propsFrom": self.props_clip.as_ref().and_then(|c| p.root()?.layer(&c.source).map(|l| l.name.clone().unwrap_or_else(|| l.id.clone()))),
