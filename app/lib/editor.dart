@@ -1099,6 +1099,17 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           unawaited(_projectsScreen());
         case 'layers':
           setState(() => _layersOpen = true);
+        case 'blockdrag':
+          // test helper: the selected figure's pose, its grip pulled (or held
+          // and slid, with "move") by dx
+          final pose = _sel?['pose'] as Map?;
+          if (pose != null) {
+            setState(() => _blockDrag = _BlockDrag('${_sel!['layer']}', (pose['start'] as num).toInt(), (pose['length'] as num).toInt(), _cellW, move: w.length > 2 && w[2] == 'move')..dx = double.parse(w[1]));
+          }
+        case 'blockdrop':
+          _endBlockDrag();
+        case 'zoomtimeline':
+          setState(() => _cellW = double.parse(w[1]).clamp(14.0, 112.0));
         case 'backups':
           unawaited(_backupsSheet());
         case 'exportfull':
@@ -1786,9 +1797,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// whole seconds bold); the current frame is a pale pill. Per-frame marks
   /// stay, small and quiet (D17); hold a cell to copy frames from it.
   Widget _previewRow() {
-    const cell = 56.0, rulerH = 22.0, thumbH = 32.0, rowH = 32.0;
+    const rulerH = 22.0, thumbH = 32.0, rowH = 32.0;
+    final cell = _cellW;
     final fps = _fps.round().clamp(1, 240);
-    final step = math.max(1, (fps / 4).round());
+    // D16: labels every quarter second; zoomed out, every half, whole, two seconds
+    final step = math.max(1, (cell >= 40 ? fps / 4 : cell >= 28 ? fps / 2 : cell >= 18 ? fps : fps * 2).round());
     final cur = _playing ? (_playT * _fps).floor() : _frame;
     Widget mark(String icon, Color c) => Padding(padding: const EdgeInsets.only(right: 1), child: Icon(_markIcons[icon], size: 10, color: c));
     // G1: the layer rows, when the timeline is unfolded
@@ -1868,7 +1881,23 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           );
         },
       );
-    if (rows.isEmpty) return Container(height: rulerH + thumbH + 10, color: cCard, child: strip);
+    // G3: pinch (or Ctrl + scroll wheel) to zoom the frames
+    void zoom(double k) => setState(() => _cellW = (_cellW * k).clamp(14.0, 112.0));
+    final zoomable = Listener(
+      onPointerSignal: (e) {
+        if (e is PointerScrollEvent && HardwareKeyboard.instance.isControlPressed) {
+          zoom(e.scrollDelta.dy > 0 ? 1 / 1.15 : 1.15);
+        }
+      },
+      child: GestureDetector(
+        onScaleStart: (_) => _pinchFrom = _cellW,
+        onScaleUpdate: (d) {
+          if (d.pointerCount >= 2) setState(() => _cellW = (_pinchFrom * d.horizontalScale).clamp(14.0, 112.0));
+        },
+        child: strip,
+      ),
+    );
+    if (rows.isEmpty) return Container(height: rulerH + thumbH + 10, color: cCard, child: zoomable);
     // the names column beside the rows: a blank cell by the ruler, "Preview",
     // then each layer with its icon, name and eye (read-only for now)
     Widget name(Map r) {
@@ -1904,7 +1933,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 for (final r in rows) name(r),
               ]),
             ),
-            Expanded(child: strip),
+            Expanded(child: zoomable),
           ]),
         ),
       ),
@@ -1913,35 +1942,87 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   /// One frame's slice of a layer row (G1, G2): quiet blocks, one per pose,
   /// no markers. The selected figure's pose under the playhead is a little
-  /// stronger. Tapping a block selects the figure there and opens its pose.
+  /// stronger, with a grip on its right end to lengthen or shorten it (G3);
+  /// holding any pose and sliding moves it. Tapping a block selects the
+  /// figure there and opens its pose.
   Widget _blockCell(Map r, int i, double cell, double rowH, bool selectedRow) {
     final on = (r['on'] as List?)?.elementAtOrNull(i) != false;
-    List? block;
-    for (final b in (r['blocks'] as List? ?? const [])) {
-      final st = (b[0] as num).toInt(), len = (b[1] as num).toInt();
-      if (i >= st && i < st + len) block = b as List;
+    final blocks = [for (final b in (r['blocks'] as List? ?? const [])) ((b[0] as num).toInt(), (b[1] as num).toInt())];
+    (int, int)? block;
+    for (final b in blocks) {
+      if (i >= b.$1 && i < b.$1 + b.$2) block = b;
+    }
+    // a drag in progress on this row draws where the pose will be
+    final drag = _blockDrag;
+    if (drag != null && drag.layer == r['id']) {
+      final (st, len) = drag.preview();
+      if (i >= st && i < st + len) {
+        return _blockShape(cell, rowH, i == st, i == st + len - 1, strong: true, ghost: true);
+      }
+      if (block != null && block.$1 == drag.start) return SizedBox(height: rowH, width: cell);
     }
     if (!on || block == null) return SizedBox(height: rowH, width: cell);
-    final st = (block[0] as num).toInt(), len = (block[1] as num).toInt();
+    final (st, len) = block;
     final first = i == st, last = i == st + len - 1;
     final strong = selectedRow && _frame >= st && _frame < st + len;
+    void select() {
+      _cmd({'op': 'frame', 'i': i});
+      if (r['kind'] == 'figure') {
+        _cmd({'op': 'select', 'layer': r['id']});
+        setState(() => _panelOpen = true);
+        _jumpTo('Pose');
+      }
+    }
+
+    final shape = _blockShape(cell, rowH, first, last, strong: strong);
+    if (_playing) return shape;
+    return GestureDetector(
+      onTap: select,
+      onLongPressStart: r['kind'] == 'figure' && st > 0
+          ? (_) {
+              select();
+              setState(() => _blockDrag = _BlockDrag('${r['id']}', st, len, cell, move: true));
+            }
+          : null,
+      onLongPressMoveUpdate: (d) {
+        if (_blockDrag != null) setState(() => _blockDrag!.dx = d.offsetFromOrigin.dx);
+      },
+      onLongPressEnd: (_) => _endBlockDrag(),
+      child: Stack(clipBehavior: Clip.none, children: [
+        shape,
+        // the grip: only on the selected pose, at its end
+        if (strong && last && r['kind'] == 'figure')
+          Positioned(
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: 16,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragStart: (_) => setState(() => _blockDrag = _BlockDrag('${r['id']}', st, len, cell)),
+              onHorizontalDragUpdate: (d) {
+                if (_blockDrag != null) setState(() => _blockDrag!.dx += d.delta.dx);
+              },
+              onHorizontalDragEnd: (_) => _endBlockDrag(),
+              child: MouseRegion(
+                cursor: SystemMouseCursors.resizeLeftRight,
+                child: Center(child: Container(width: 4, height: 14, decoration: BoxDecoration(color: cAccent, borderRadius: BorderRadius.circular(2)))),
+              ),
+            ),
+          ),
+      ]),
+    );
+  }
+
+  Widget _blockShape(double cell, double rowH, bool first, bool last, {bool strong = false, bool ghost = false}) {
     const side = BorderSide(color: Color(0xFFD5D9DF));
     final edge = strong ? const BorderSide(color: cAccent, width: 1.5) : side;
-    return GestureDetector(
-      onTap: _playing
-          ? null
-          : () {
-              _cmd({'op': 'frame', 'i': i});
-              if (r['kind'] == 'figure') {
-                _cmd({'op': 'select', 'layer': r['id']});
-                setState(() => _panelOpen = true);
-                _jumpTo('Pose');
-              }
-            },
-      child: Container(
-        height: rowH,
-        width: cell,
-        padding: EdgeInsets.only(top: 5, bottom: 5, left: first ? 2 : 0, right: last ? 2 : 0),
+    return Container(
+      height: rowH,
+      width: cell,
+      padding: EdgeInsets.only(top: 5, bottom: 5, left: first ? 2 : 0, right: last ? 2 : 0),
+      child: Opacity(
+        opacity: ghost ? 0.7 : 1,
         child: Container(
           decoration: BoxDecoration(
             color: strong ? const Color(0xFFDCEAF9) : const Color(0xFFEDEFF2),
@@ -1952,6 +2033,24 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ),
     );
   }
+
+  /// A grip or a held block let go: the new length, or the new start.
+  void _endBlockDrag() {
+    final d = _blockDrag;
+    if (d == null) return;
+    setState(() => _blockDrag = null);
+    final (st, len) = d.preview();
+    if (d.move) {
+      if (st != d.start) {
+        _cmd({'op': 'frame', 'i': d.start});
+        _cmd({'op': 'move_block', 'to': st});
+      }
+    } else if (len != d.length) {
+      _cmd({'op': 'frame', 'i': d.start});
+      _cmd({'op': 'block_length', 'frames': len});
+    }
+  }
+
 
   static const _markIcons = {
     'pause': Icons.timer_outlined,
@@ -2133,6 +2232,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   bool _panelOpen = true, _hidePanels = false;
   bool _layersOpen = false;
+  // G3: the timeline's zoom (a frame's width), a pinch's start, a block drag
+  double _cellW = 56, _pinchFrom = 56;
+  _BlockDrag? _blockDrag;
 
   /// The right rail (REDESIGN §4): undo, redo, Properties, delete; hide the
   /// panels at the bottom.
@@ -4435,6 +4537,22 @@ String _friendlyTime(DateTime t, {bool seconds = false}) {
           ? 'Yesterday'
           : '${t.day} ${months[t.month - 1]}${t.year == now.year ? '' : ' ${t.year}'}';
   return '$d, $time';
+}
+
+/// A block being lengthened by its grip or moved after a long press (G3).
+class _BlockDrag {
+  _BlockDrag(this.layer, this.start, this.length, this.cell, {this.move = false});
+  final String layer;
+  final int start, length;
+  final double cell;
+  final bool move;
+  double dx = 0;
+
+  /// Where the pose would be now: (first frame, length).
+  (int, int) preview() {
+    final by = (dx / cell).round();
+    return move ? (math.max(1, start + by), length) : (start, math.max(1, length + by));
+  }
 }
 
 class _PickEntry {

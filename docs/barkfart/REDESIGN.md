@@ -540,7 +540,7 @@ and tests are never weakened.
 ### G. The expanded timeline
 - [x] G1. Layer rows, the names column, eyes (read-only).
 - [x] G2. Quiet blocks, with selection opening the Pose page.
-- [ ] G3. Grips to extend, long-press to move, pinch to zoom.
+- [x] G3. Grips to extend, long-press to move, pinch to zoom.
 - [ ] G4. Swipe actions, and right-click on Linux.
 - [ ] G5. Selection box, lasso, the multi-select page.
 
