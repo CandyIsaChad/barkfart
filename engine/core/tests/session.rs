@@ -5178,3 +5178,47 @@ fn mirror_draws_the_segment_across_the_centre_line_too() {
     }
     s.command(&json!({"op": "cancel"}));
 }
+
+/// J6 / D13: a polyfill fills the same area whichever way round its joints
+/// were tapped (the original asked for clockwise; here either works), with
+/// a concave outline too.
+#[test]
+fn polyfills_fill_in_either_winding_direction() {
+    let area = |s: &Session| -> f64 {
+        let p = s.project();
+        let list = barkfart_core::tess::tessellate(&barkfart_core::eval::evaluate(p, &p.root_symbol, 0.0), None);
+        list.batches.iter().flat_map(|b| b.xy.chunks(6)).map(|t| ((t[2] - t[0]) as f64 * (t[5] - t[1]) as f64 - (t[4] - t[0]) as f64 * (t[3] - t[1]) as f64).abs() / 2.0).sum()
+    };
+    let fill = |order: &[&str]| -> f64 {
+        let mut s = session();
+        s.command(&json!({"op": "select", "layer": "L2", "node": "hip"}));
+        s.command(&json!({"op": "build", "layer": "L2"}));
+        let bare = area(&s);
+        s.command(&json!({"op": "polyfill_new"}));
+        let hs: Vec<_> = s.tools.handles(s.project(), 0.0).into_iter().filter(|h| h.layer == "L2").collect();
+        for id in order {
+            let h = hs.iter().find(|h| h.node == *id).expect("joint");
+            s.command(&json!({"op": "down", "x": h.x, "y": h.y, "r": 2}));
+            s.command(&json!({"op": "up"}));
+        }
+        assert_eq!(s.state()["polyfill"]["count"], order.len() as u64);
+        // the outline's own area (shoelace over the anchor, then the polynodes)
+        let ring: Vec<(f64, f64)> = std::iter::once("hip").chain(order.iter().copied()).map(|id| hs.iter().find(|h| h.node == id).map(|h| (h.x as f64, h.y as f64)).unwrap()).collect();
+        let shoelace = (0..ring.len()).map(|i| {
+            let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+            a.0 * b.1 - b.0 * a.1
+        }).sum::<f64>().abs() / 2.0;
+        let filled = area(&s) - bare;
+        assert!((filled - shoelace).abs() < 1e-2 * shoelace, "fills exactly its outline: {filled} vs {shoelace}");
+        filled
+    };
+    // anchored at the hip: hand, elbow, neck, other elbow, other hand (a "W", concave)
+    let one = fill(&["armR2", "armR1", "torso", "armL1", "armL2"]);
+    let other = fill(&["armL2", "armL1", "torso", "armR1", "armR2"]);
+    assert!(one > 100.0, "it fills: {one}");
+    assert!((one - other).abs() < 1e-3 * one, "the same either way round: {one} vs {other}");
+    // and a plain triangle
+    let a = fill(&["legR2", "legL2"]);
+    let b = fill(&["legL2", "legR2"]);
+    assert!(a > 100.0 && (a - b).abs() < 1e-3 * a, "{a} vs {b}");
+}

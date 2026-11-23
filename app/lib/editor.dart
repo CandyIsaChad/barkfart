@@ -5187,7 +5187,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final own = pf['own'] == true;
     return [
       _title('Polyfill Tools'),
-      _hint('Use polyfills to fill a large area by connecting joints. Tap joints of this figure one after another, clockwise, to add polynodes; the fill appears as you go. A polyfill is drawn right before its anchor joint: move that joint back or forward in the draw order to move the fill.'),
+      _hint('Use polyfills to fill a large area by connecting joints. Tap joints of this figure one after another, in either direction, to add polynodes; the fill appears as you go. A polyfill is drawn right before its anchor joint: move that joint back or forward in the draw order to move the fill.'),
       _gap,
       Text('Polynode count: ${pf['count']}', style: const TextStyle(color: cText, fontSize: 13)),
       _gap,
