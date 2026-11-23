@@ -2831,7 +2831,9 @@ impl Session {
             "canUndo": self.doc.can_undo(), "canRedo": self.doc.can_redo(),
             "undo": self.doc.undo_label(), "redo": self.doc.redo_label(), "dirty": self.doc.dirty(),
             "mode": match self.mode { Mode::Figure => "figure", Mode::All => "all", Mode::Camera => "camera" },
-            "handles": handles, "selected": sel, "figures": figures, "rows": rows, "multi": multi, "camera": cam, "movieclip": movieclip, "editingClip": (p.root_symbol != self.main_root).then(|| p.root().and_then(|r| r.name.clone()).unwrap_or_else(|| "Movieclip".into())),
+            "handles": handles, "selected": sel, "figures": figures, "rows": rows, "multi": multi,
+            // H1: the FX toggle shows only when something has effects
+            "hasEffects": p.root().is_some_and(|r| r.layers.iter().any(|l| crate::edit::filters::any_active(l))), "camera": cam, "movieclip": movieclip, "editingClip": (p.root_symbol != self.main_root).then(|| p.root().and_then(|r| r.name.clone()).unwrap_or_else(|| "Movieclip".into())),
             "branchCopied": self.branch_clip.is_some(),
             "watermark": p.settings.watermark.as_ref().map(|(t, c)| json!({"text": t, "color": c.to_rgba8888()})),
             "propsFrom": self.props_clip.as_ref().and_then(|c| p.root()?.layer(&c.source).map(|l| l.name.clone().unwrap_or_else(|| l.id.clone()))),

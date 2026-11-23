@@ -392,3 +392,30 @@ pub fn state(p: &Project, sym: &str, id: &str, t: f64) -> J {
 fn round2(v: f32) -> f64 {
     (v as f64 * 100.0).round() / 100.0
 }
+
+/// Whether any effect on the layer changes the picture on some frame (H1:
+/// the FX toggle shows only then). A filter turned on and off again leaves
+/// its node silent, which does not count. Read from the keys, not frame by
+/// frame, so it stays cheap.
+pub fn any_active(l: &Layer) -> bool {
+    let values = |q: &Property| -> Vec<f32> {
+        let mut v: Vec<f32> = q.track.keys().iter().map(|k| k.value.f()).collect();
+        if v.is_empty() {
+            v.push(q.value.f());
+        }
+        v
+    };
+    l.effects.nodes.values().any(|e| {
+        if !values(&e.mix).iter().any(|m| *m > 0.0) {
+            return false;
+        }
+        let param_off = |name: &str, off: f32| e.params.get(name).is_none_or(|q| values(q).iter().all(|v| (v - off).abs() < 1e-4));
+        match e.id.as_str() {
+            BLUR_ID => !param_off("radius", 0.0),
+            PIXELATE_ID => !param_off("size", 1.0),
+            ADJUST_ID => !(param_off("hue", 0.0) && param_off("saturation", 1.0)),
+            TINT_ID => !param_off("amount", 0.0),
+            _ => true,
+        }
+    })
+}

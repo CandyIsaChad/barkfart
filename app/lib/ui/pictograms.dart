@@ -184,6 +184,8 @@ const _strokeIcons = <String, List<_Shape>>{
   'chain': [_P(r'M10 13.5a3.5 3.5 0 0 0 5 0l3-3a3.5 3.5 0 0 0-5-5l-1 1', dashed: false), _P(r'M14 10.5a3.5 3.5 0 0 0-5 0l-3 3a3.5 3.5 0 0 0 5 5l1-1', dashed: false)],
   'chevron': [_P(r'm6 9 6 6 6-6', dashed: false)],
   'clip': [_R(3.5, 4.0, 17.0, 16.0, 2.0, dashed: false), _P(r'M7.5 4v16M16.5 4v16', dashed: false), _C(12.0, 8.4, 1.4, dashed: false), _P(r'M12 9.8v3.6M12 11l-1.7 1M12 11l1.7 1M12 13.4l-1.3 2.6M12 13.4l1.3 2.6', dashed: false)],
+  // effects: a small burst (the FX toggle)
+  'fx': [_P(r'M12 3.5v4M12 16.5v4M3.5 12h4M16.5 12h4M6 6l2.6 2.6M15.4 15.4 18 18M18 6l-2.6 2.6M8.6 15.4 6 18', dashed: false)],
   'eye': [_P(r'M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z', dashed: false), _C(12.0, 12.0, 2.8, dashed: false)],
   'figure': [_C(12.0, 4.6, 2.4, dashed: false), _P(r'M12 7v7.2M12 9.4l-4.4 3M12 9.4l4.4 3M12 14.2l-3.4 6.4M12 14.2l3.4 6.4', dashed: false)],
   'folder': [_P(r'M3.5 7.5A1.5 1.5 0 0 1 5 6h4l2 2h8a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z', dashed: false)],

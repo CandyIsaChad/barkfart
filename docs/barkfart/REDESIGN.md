@@ -443,6 +443,28 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
   no chosen segment, or "Mixed" (D18). The group ends when one figure is
   picked.
 
+- **D29. The timeline matched to the round 10 board (after G).** The first
+  build had drifted from the mockup; corrected:
+  - The Preview row is one strip, every layer merged, tiled at the
+    picture's shape (16:9 tiles that don't line up with frames), each tile
+    the moment under its middle; one rounded outline, no box per frame.
+  - The playhead is a pale line through the ruler, strip and rows, with the
+    pill on the ruler; the current frame gets no box.
+  - The names column shows even folded: a blank cell by the ruler and
+    "Preview" with an eye that hides the strip (View › While editing ›
+    Preview row brings it back).
+  - A block is one rounded bar per pose (not a bar per frame); the selected
+    pose is pale blue with a 2 pt blue edge and grips at both ends: the
+    right sets its length, the left where it starts.
+  - FX is the word "FX" in the toolbar, as on the board, and shows only when
+    an effect really changes the picture (a filter turned on and off again
+    leaves a silent node, which doesn't count).
+  - The bottom bar's words are Add frame, New pose, Hold longer (§4). Copy,
+    Paste, Add and Delete frame are on the Frame page (tap the ruler); the
+    right rail's Delete also deletes a selected frame.
+  - Not yet: pictures of the pose inside blocks (needs a per-layer render)
+    and the toolbar's Loop toggle.
+
 ## 7. Build order (easiest to hardest, nested)
 
 The user's instruction (2026-11-23): "From easiest to hardest. List out
@@ -556,7 +578,7 @@ and tests are never weakened.
 - [x] G5. Selection box, lasso, the multi-select page.
 
 ### H. Keyed properties and effects
-- [ ] H1. The FX toggle.
+- [x] H1. The FX toggle.
 - [ ] H2. The effects browser: built-ins with previews.
 - [ ] H3. The keying toggle, property rows, diamonds.
 
