@@ -256,6 +256,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   void _refresh(Map<String, dynamic>? st) {
     if (st == null) return;
+    if (_soundPage && (st['selected']?['layer'] != _st['selected']?['layer'] || st['frame'] != _st['frame'] || st['frameSound'] == null)) _soundPage = false;
     setState(() => _st = st);
     final m = st['message'] as String? ?? '';
     if (m.isNotEmpty) _say(m);
@@ -1173,9 +1174,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         case 'sounds':
           unawaited(_importSounds());
         case 'framesound':
-          // scripted: this frame plays the first imported sound
+          // scripted: this frame plays the first imported sound (and its page)
           final l = (_st['soundList'] as List?) ?? const [];
           if (l.isNotEmpty) _cmd({'op': 'frame_sound', 'asset': (l.first as Map)['id']});
+          setState(() => _soundPage = true);
         case 'frametools':
           setState(() => _frameSelected = true);
         case 'tab':
@@ -1413,6 +1415,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   List<String> _sections() {
     if (_st['building'] != null) return const ['Figure editor'];
     if (_st['mode'] == 'camera') return const ['Camera Tools'];
+    if (_soundPage && _st['frameSound'] != null) return const ['Sound Tools'];
     if (_frameSelected) return const ['Frame Tools'];
     if (_st['textfield'] != null) return const ['Textfield Tools'];
     if (_st['movieclip'] != null) return const ['Movieclip Tools'];
@@ -1427,6 +1430,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   List<Widget> _sectionBody(String name) {
     switch (name) {
+      case 'Sound Tools':
+        return _soundsBlock();
       case 'Nothing selected':
         return [
           for (final d in <rw.Desc>[
@@ -2245,7 +2250,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           left: x,
           top: y + (rowH - 26) / 2,
           child: GestureDetector(
-            onTap: _playing ? null : () => _cmd({'op': 'frame', 'i': (c[0] as num).floor()}),
+            onTap: _playing
+                ? null
+                : () {
+                    _cmd({'op': 'frame', 'i': (c[0] as num).floor()});
+                    setState(() {
+                      _soundPage = true;
+                      _panelOpen = true;
+                    });
+                  },
             child: Container(
               width: w,
               height: 26,
@@ -2658,6 +2671,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   bool _panelOpen = true, _hidePanels = false;
   bool _layersOpen = true, _rowActionsOpen = false;
+  // the Sound page (a sound block tapped); any other pick leaves it
+  bool _soundPage = false;
   final Set<String> _openRows = {};
   // G3: the timeline's zoom (a frame's width), a pinch's start, a block drag
   double _cellW = 46, _pinchFrom = 46;
@@ -2802,7 +2817,16 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       case 'Pose' when sel != null && ((sel['pose'] as Map?)?['start'] as num? ?? 0) > 0:
         return ('Delete this pose', () => _cmd({'op': 'delete_pose'}), null);
       case 'Frame Tools':
-        return ('Clear frame', () => _cmd({'op': 'clear_frame'}), null);
+        return (
+          'Clear frame',
+          () async {
+            final ok = await _ask('Clear this frame?', 'Every figure and textfield on this frame is taken off it. The frame itself stays. Undo brings them back.', ['Cancel', 'Clear frame']);
+            if (ok == 'Clear frame') _cmd({'op': 'clear_frame'});
+          },
+          null
+        );
+      case 'Sound Tools' when _st['frameSound'] != null:
+        return ('Delete sound', () => _cmd({'op': 'frame_sound', 'asset': null}), null);
       case 'Textfield Tools' when _st['textfield'] != null:
         return ('Delete text', () => _cmd({'op': 'delete_textfield'}), null);
       case 'Movieclip Tools' when _st['movieclip'] != null:
@@ -3303,13 +3327,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       rw.DTick('Silence all sounds', _st['frameSilence'] == true, onChanged: (v) => _cmd({'op': 'frame_silence', 'on': v})),
       const rw.DHint('Sounds still playing stop when this frame starts.'),
     ];
+    // a frame's sound has its own page (the Sound board): tap its block
+    final snd = _st['frameSound'] as Map?;
     return [
       for (final d in rows) rw.renderDesc(d),
-      ..._soundsBlock(),
-      rw.renderDesc(rw.DDanger('Clear frame', () async {
-        final ok = await _ask('Clear this frame?', 'Every figure and textfield on this frame is taken off it. The frame itself stays. Undo brings them back.', ['Cancel', 'Clear frame']);
-        if (ok == 'Clear frame') _cmd({'op': 'clear_frame'});
-      })),
+      rw.renderDesc(const rw.DTitle('Sound')),
+      rw.renderDesc(snd != null
+          ? rw.DLink('This frame plays', '${snd['name']}', onTap: () => setState(() => _soundPage = true))
+          : rw.DButtons('Add a sound here…', _importSounds)),
     ];
   }
 
@@ -3319,27 +3344,24 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   List<Widget> _soundsBlock() {
     final list = ((_st['soundList'] as List?) ?? const []).cast<Map<String, dynamic>>();
     final snd = _st['frameSound'] as Map<String, dynamic>?;
-    final has = snd != null;
-    double v(String k, double d) => (snd?[k] as num?)?.toDouble() ?? d;
+    if (snd == null) return const [];
+    double v(String k, double d) => (snd[k] as num?)?.toDouble() ?? d;
     void set(Map<String, Object?> m) => _cmd({'op': 'frame_sound', ...m});
-    VoidCallback? when(bool ok, VoidCallback f) => ok ? f : null;
-    final vol = v('volume', 1), pan = v('pan', 0), pitch = v('pitch', 1);
+    final vol = v('volume', 1), pan = v('pan', 0), pitch = v('pitch', 1), fin = v('fadeIn', 0), fout = v('fadeOut', 0);
+    // the Sound board, top to bottom
     final rows = <rw.Desc>[
-      const rw.DTitle('Sound Tools'),
-      rw.DLink('Sound', has ? snd['name'] as String : 'None', onTap: list.isEmpty ? null : () => _pickFrameSound(list, snd?['asset'] as String?)),
-      rw.DStep('Volume', '${(vol * 100).round()}%', onMinus: when(has && vol > 0, () => set({'volume': math.max(0, vol - 0.05)})), onPlus: when(has && vol < 1, () => set({'volume': math.min(1, vol + 0.05)}))),
-      rw.DStep('Pan', pan.abs() < 0.05 ? 'Centre' : pan < 0 ? 'L ${(-pan * 100).round()}' : 'R ${(pan * 100).round()}', onMinus: when(has && pan > -1, () => set({'pan': math.max(-1, pan - 0.1)})), onPlus: when(has && pan < 1, () => set({'pan': math.min(1, pan + 0.1)}))),
-      rw.DStep('Pitch', pitch.toStringAsFixed(2), onMinus: when(has && pitch > 0.25, () => set({'pitch': math.max(0.25, pitch - 0.05)})), onPlus: when(has && pitch < 4, () => set({'pitch': math.min(4, pitch + 0.05)}))),
-      rw.DButtons('Copy sound', when(has, () => _cmd({'op': 'copy_sound'})), b: 'Paste sound', onB: when(_st['soundCopied'] == true, () => _cmd({'op': 'paste_sound'}))),
+      rw.DLink('Sound', snd['name'] as String, onTap: () => _pickFrameSound(list, snd['asset'] as String?)),
+      rw.DSlider('Volume', '${(vol * 100).round()}%', vol, onChanged: (x) => set({'volume': (x * 100).round() / 100})),
+      rw.DSlider('Pan', pan.abs() < 0.05 ? 'Centre' : pan < 0 ? 'Left ${(-pan * 100).round()}' : 'Right ${(pan * 100).round()}', (pan + 1) / 2, onChanged: (x) => set({'pan': ((x * 2 - 1) * 20).round() / 20})),
+      rw.DStep('Pitch', pitch.toStringAsFixed(2), onMinus: pitch > 0.25 ? () => set({'pitch': math.max(0.25, pitch - 0.05)}) : null, onPlus: pitch < 4 ? () => set({'pitch': math.min(4, pitch + 0.05)}) : null),
+      rw.DStep('Fade in', '${fin.toStringAsFixed(1)} s', onMinus: fin > 0 ? () => set({'fadeIn': math.max(0, fin - 0.1)}) : null, onPlus: () => set({'fadeIn': fin + 0.1})),
+      rw.DStep('Fade out', '${fout.toStringAsFixed(1)} s', onMinus: fout > 0 ? () => set({'fadeOut': math.max(0, fout - 0.1)}) : null, onPlus: () => set({'fadeOut': fout + 0.1})),
+      rw.DTick('Loop', snd['loop'] == true, onChanged: (x) => set({'loop': x})),
+      rw.DButtons('Copy sound', () => _cmd({'op': 'copy_sound'}), b: 'Paste sound', onB: _st['soundCopied'] == true ? () => _cmd({'op': 'paste_sound'}) : null),
       rw.DButtons('Import a sound…', _importSounds),
-      if (has) rw.DDanger('Clear sound', () => set({'asset': null})),
     ];
-    return [
-      Container(key: _sectionKey('Sounds')),
-      for (final d in rows) rw.renderDesc(d),
-    ];
+    return [for (final d in rows) rw.renderDesc(d)];
   }
-
 
   Future<void> _pickFrameSound(List<Map<String, dynamic>> list, String? current) async {
     final picked = await showDialog<String>(
@@ -3405,6 +3427,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (ok != true) return;
     for (final path in chosen) {
       _refresh(e.importFile(path.split(Platform.pathSeparator).last, await File(path).readAsBytes()));
+    }
+    // a sound added from + plays from this frame: the newest one, and its page
+    final list = ((_st['soundList'] as List?) ?? const []).cast<Map>();
+    if (chosen.isNotEmpty && list.isNotEmpty && _st['frameSound'] == null) {
+      _cmd({'op': 'frame_sound', 'asset': list.last['id']});
+      setState(() {
+        _soundPage = true;
+        _panelOpen = true;
+      });
     }
   }
 

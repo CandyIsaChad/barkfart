@@ -2494,6 +2494,16 @@ impl Session {
                     if let Some(v) = c2["pitch"].as_f64() {
                         cl.pitch = v.clamp(0.25, 4.0);
                     }
+                    // the Sound board: fades and looping
+                    if let Some(v) = c2["fadeIn"].as_f64() {
+                        cl.fade_in = v.clamp(0.0, 60.0);
+                    }
+                    if let Some(v) = c2["fadeOut"].as_f64() {
+                        cl.fade_out = v.clamp(0.0, 60.0);
+                    }
+                    if let Some(v) = c2["loop"].as_bool() {
+                        cl.loop_ = v;
+                    }
                     Ok(())
                 });
             }
@@ -2885,7 +2895,8 @@ impl Session {
             let a = c.asset.clone().unwrap_or_default();
             let vol = if let Value::F(v) = c.volume.value { v } else { 1.0 };
             let pan = if let Value::F(v) = c.pan.value { v } else { 0.0 };
-            json!({"asset": a, "name": sound_name(p, &a), "volume": round2(vol), "pan": round2(pan), "pitch": (c.pitch * 100.0).round() / 100.0})
+            json!({"asset": a, "name": sound_name(p, &a), "volume": round2(vol), "pan": round2(pan), "pitch": (c.pitch * 100.0).round() / 100.0,
+                "fadeIn": (c.fade_in * 10.0).round() / 10.0, "fadeOut": (c.fade_out * 10.0).round() / 10.0, "loop": c.loop_})
         });
         let draw_line = match &self.gesture {
             Gesture::Draw { x0, y0, x, y, .. } => json!([x0, y0, x, y]),
