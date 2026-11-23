@@ -4527,3 +4527,105 @@ fn the_main_joint_cannot_break_off() {
     assert_eq!(st["undo"], undo);
     assert_eq!(st["figures"].as_array().unwrap().len(), 1);
 }
+
+/// Where a figure's main joint is on the stage at time t.
+fn figure_at(s: &Session, id: &str, t: f64) -> (f64, f64) {
+    let p = s.project();
+    let sym = p.root().unwrap();
+    let a = barkfart_core::eval::layer_stage(p, sym, sym.layer(id).unwrap(), t);
+    (a.tx, a.ty)
+}
+
+#[test]
+fn each_figure_holds_or_tweens_on_its_own() {
+    // F2: Hold or Tween belongs to one figure's key, not to the frame
+    let mut s = Session::new(Document::new(barkfart_core::session::new_editor_project()));
+    s.command(&json!({"op": "add_figure", "kind": "stickman"}));
+    s.command(&json!({"op": "insert_frame"}));
+    let st = s.command(&json!({"op": "state"}));
+    assert_eq!(st["frame"], 1);
+    let figs: Vec<String> = st["figures"].as_array().unwrap().iter().map(|f| f["id"].as_str().unwrap().to_string()).collect();
+    assert_eq!(figs.len(), 2);
+    // both figures move on the second frame
+    for (i, id) in figs.iter().enumerate() {
+        let at = &s.state()["figures"][i]["at"];
+        let (x, y) = (at[0].as_f64().unwrap() as f32, at[1].as_f64().unwrap() as f32);
+        s.command(&json!({"op": "down", "x": x, "y": y, "r": 10}));
+        s.command(&json!({"op": "move", "x": x + 100.0, "y": y}));
+        s.command(&json!({"op": "up"}));
+        assert!(figure_at(&s, id, 0.1).0 - figure_at(&s, id, 0.0).0 > 50.0, "{id} moved on frame 2");
+    }
+    s.command(&json!({"op": "animation", "tweening": true, "tweened": 1}));
+    // the first figure holds its first pose until the next one
+    s.command(&json!({"op": "frame", "i": 0}));
+    s.command(&json!({"op": "select", "layer": figs[0]}));
+    let st = s.command(&json!({"op": "easing", "v": "hold"}));
+    assert_eq!(st["undo"], "Easing");
+    let mid = 0.05;
+    let (a0, a1, am) = (figure_at(&s, &figs[0], 0.0), figure_at(&s, &figs[0], 0.1), figure_at(&s, &figs[0], mid));
+    assert!((am.0 - a0.0).abs() < 1e-3, "the held figure stays put between frames: {am:?} vs {a0:?} / {a1:?}");
+    let (b0, b1, bm) = (figure_at(&s, &figs[1], 0.0), figure_at(&s, &figs[1], 0.1), figure_at(&s, &figs[1], mid));
+    assert!((bm.0 - (b0.0 + b1.0) / 2.0).abs() < 1.0, "the other one tweens: {bm:?} between {b0:?} and {b1:?}");
+    // the frame tells the timeline which it is: not every figure holds
+    assert_eq!(st["noTweenFrames"][0], false);
+}
+
+/// The frames (at 30 fps here, 10 in editor projects) a property is keyed on.
+fn keyed_frames_of(q: &barkfart_core::model::Property, fps: f64) -> Vec<i64> {
+    q.track.keys().iter().map(|k| (k.time * fps).round() as i64).collect()
+}
+
+#[test]
+fn a_figure_keyed_on_some_frames_only_stays_that_way() {
+    // F3: the whole-figure key rule. Frames are no longer snapshots: a figure
+    // can hold or tween across frames where it has no key of its own.
+    let mut s = animated(); // 4 frames, figure L2 posed differently on frame 4
+    let fps = s.project().settings.fps as f64;
+    let mut p = s.project().clone();
+    let sym = p.root_symbol.clone();
+    {
+        let l = p.layer_mut(&sym, "L2").unwrap();
+        let tr = &mut l.transform;
+        let mut ps: Vec<&mut barkfart_core::model::Property> = vec![&mut tr.x, &mut tr.y, &mut tr.rotation, &mut tr.scale_x, &mut tr.scale_y];
+        let barkfart_core::model::LayerKind::Figure(f) = &mut l.kind else { panic!() };
+        for n in f.nodes_mut() {
+            ps.push(&mut n.rotation);
+            ps.push(&mut n.length);
+        }
+        for q in ps {
+            for fr in [1, 2] {
+                if let Ok(i) = q.track.index_of(fr as f64 / fps) {
+                    q.track.remove_at(i);
+                }
+            }
+        }
+    }
+    let mut s = Session::new(Document::new(p));
+    let rot = |s: &Session| {
+        let p = s.project();
+        let f = p.root().unwrap().layer("L2").unwrap().as_figure().unwrap();
+        keyed_frames_of(&f.nodes()[3].rotation, fps)
+    };
+    assert_eq!(rot(&s), vec![0, 3]);
+    // between its keys the figure tweens: frame 2 is a third of the way
+    let (a, b, m) = (figure_at(&s, "L2", 0.0), figure_at(&s, "L2", 3.0 / fps), figure_at(&s, "L2", 1.0 / fps));
+    assert!((m.0 - (a.0 + (b.0 - a.0) / 3.0)).abs() < 1e-3, "{m:?} between {a:?} and {b:?}");
+    // an edit elsewhere leaves it alone
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "camera", "zoom": 1.5}));
+    assert_eq!(rot(&s), vec![0, 3], "the camera edit did not key the figure");
+    // posing it on frame 2 keys all of it there, and nothing on frame 3
+    let st = s.command(&json!({"op": "state"}));
+    let (x, y) = handle(&st, 6);
+    s.command(&json!({"op": "down", "x": x, "y": y, "r": 20}));
+    s.command(&json!({"op": "move", "x": x + 30.0, "y": y}));
+    s.command(&json!({"op": "up"}));
+    let p = s.project();
+    let l = p.root().unwrap().layer("L2").unwrap();
+    let f = l.as_figure().unwrap();
+    for n in f.nodes() {
+        assert_eq!(keyed_frames_of(&n.rotation, fps), vec![0, 1, 3], "{}: keyed with the whole figure", n.id);
+        assert_eq!(keyed_frames_of(&n.length, fps), vec![0, 1, 3], "{}", n.id);
+    }
+    assert_eq!(keyed_frames_of(&l.transform.x, fps), vec![0, 1, 3]);
+}

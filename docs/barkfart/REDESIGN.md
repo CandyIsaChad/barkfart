@@ -388,6 +388,26 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
   then compares only thickness (32) and length, as in D7a. The pinned red
   button shows only on the Segment tab while something differs.
 
+- **D24. Hold or Tween belongs to each figure's key (F2).** The engine
+  already kept Hold, Linear or Bezier on every key, and the evaluator reads
+  it: one figure can hold on a frame while another tweens (tested). The
+  `easing` command sets it for the selected figure on the playhead; the Pose
+  page (G2) uses it. The global "Tweening" switch stays as the master switch
+  for in-between pictures, so old projects play as before, and "smoothness"
+  is the old tweened-frames count (Animation popover).
+- **D25. The whole-figure key rule (F3).** Around every edit, a figure's
+  pose (every joint's angle and length, and its transform) is keyed together
+  wherever any part of it is keyed, and on the first frame; no other figure
+  is touched. Between its own keys a figure holds or tweens.
+  - The camera stays frame by frame (keyed on every frame), as in Stick Nodes.
+  - Being shown stays keyed on every frame: it is a held value, so it changes
+    nothing on screen, and "delete on this frame only" relies on it.
+  - Frame tools that act on a whole frame ("Do not tween") first key every
+    figure on that frame. Add frame already keys every figure on the new
+    frame (F4's bridge).
+  - Old projects and imports are keyed on every frame already, so they play
+    exactly as before.
+
 ## 7. Build order (easiest to hardest, nested)
 
 The user's instruction (2026-11-23): "From easiest to hardest. List out
@@ -486,9 +506,9 @@ and tests are never weakened.
 
 ### F. Engine: layers keep their own keys (D2, D3)
 - [x] F1. The break-off-and-join command.
-- [ ] F2. Hold or Tween per key, read by the evaluator. Tweened frames
+- [x] F2. Hold or Tween per key, read by the evaluator. Tweened frames
   become "smoothness".
-- [ ] F3. The whole-figure key rule replaces anchor_poses. Legacy imports
+- [x] F3. The whole-figure key rule replaces anchor_poses. Legacy imports
   must play exactly as they do today.
 - [ ] F4. Commands: Add frame, New pose, Hold longer, moving and extending
   blocks.

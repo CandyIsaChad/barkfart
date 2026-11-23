@@ -33,7 +33,7 @@ Tick items there as they finish.
 - Scripted editor runs as before. The new script command is `savesheet`.
 - The window is capped at the screen size (about 1300x700).
 
-**Next:** F2 (Hold or Tween per key, read by the evaluator). F1 is done: `break_off` (Segment page › Break off as a figure).
+**Next:** F4 (Add frame, New pose, Hold longer, moving and extending blocks). F1–F3 are done: `break_off`; per-figure Hold or Tween (D24); the whole-figure key rule replaced snapshot keying (D25).
 - Done: A1–A6, B1–B6, C1–C8, D1–D7b, E1–E3. D2 (the Movieclip page) is written but not yet seen on screen. D7b: `reset_segment`, `selected.defaults` and `Figure::base` (FORMAT.md); the first-run figure is the engine's render of Stickfigure.nodes (D22).
 - Home script commands: `firstrun`, `projectsscreen`, `backups`, `makeprojects N` (copies the open save N times). Saving writes a picture to `.thumbs/<name>.png`.
 

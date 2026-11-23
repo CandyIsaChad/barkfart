@@ -667,8 +667,13 @@ impl Session {
                 }
             }
             "no_tween" => {
+                // a frame tool: every figure on the frame holds (or tweens), so
+                // each is keyed there first (F3: figures are keyed on their own)
                 let (fr, on, ed) = (self.frame, b("on"), self.tools.editor.clone());
-                self.step(if on { "Do not tween" } else { "Tween" }, |s| frame_ops::set_tween(&ed, s, fr, !on));
+                self.step(if on { "Do not tween" } else { "Tween" }, |s| {
+                    key_whole_frame(s, fr);
+                    frame_ops::set_tween(&ed, s, fr, !on)
+                });
             }
             "copy_frame" => {
                 // this frame plus n after it
@@ -2940,6 +2945,12 @@ fn st_fps(p: &Project) -> f64 {
 /// Frames are snapshots (like the original): every figure's pose and its
 /// visibility are keyed on every frame, so changing one frame can never
 /// change another (tweening only blends neighbouring frames).
+/// The whole-figure key rule (REDESIGN D2, F3), run around every edit: a key
+/// on a figure keys all of it (every joint's angle and length, and its
+/// transform) at the same moment, and the camera likewise; nothing else is
+/// keyed, so between its own keys a figure holds or tweens. Being shown stays
+/// keyed on every frame (a held value: it changes nothing on screen, and
+/// "delete on this frame only" relies on it).
 pub fn anchor_poses(st: &mut crate::edit::State) {
     let n = frame_ops::frame_count(st);
     let fps = st_fps(&st.project);
@@ -2948,25 +2959,73 @@ pub fn anchor_poses(st: &mut crate::edit::State) {
     for id in ids {
         let Some(l) = st.project.layer_mut(&sym, &id) else { continue };
         key_every_frame(&mut l.shown, n, fps);
-        let tr = &mut l.transform;
-        let mut ps: Vec<&mut Property> = vec![&mut tr.x, &mut tr.y, &mut tr.rotation, &mut tr.scale_x, &mut tr.scale_y];
-        match &mut l.kind {
-            LayerKind::Figure(f) => {
-                for nd in f.nodes_mut() {
-                    ps.push(&mut nd.rotation);
-                    ps.push(&mut nd.length);
-                }
+        let camera = matches!(l.kind, LayerKind::Camera(_));
+        let ps = pose_props(l);
+        if camera {
+            // the camera stays a frame-by-frame thing, as in Stick Nodes
+            for q in ps {
+                key_every_frame(q, n, fps);
             }
-            LayerKind::Camera(c) => {
-                ps.push(&mut c.x);
-                ps.push(&mut c.y);
-                ps.push(&mut c.zoom);
-                ps.push(&mut c.rotation);
-            }
-            _ => {}
+            continue;
         }
+        // every moment any of them is keyed (on the frame grid), and the first
+        // frame: a pose is never left unkeyed, so frame commands (which copy
+        // and move keys) always have keys to work with
+        let mut frames: Vec<i64> = ps.iter().flat_map(|q| q.track.keys().iter().map(|k| (k.time * fps).round() as i64)).collect();
+        frames.push(0);
+        frames.sort_unstable();
+        frames.dedup();
         for q in ps {
-            key_every_frame(q, n, fps);
+            key_at(q, &frames, fps);
+        }
+    }
+}
+
+/// A layer's pose: its transform, and every joint's angle and length (a
+/// figure) or the view (the camera). What the whole-figure rule keys together.
+fn pose_props(l: &mut Layer) -> Vec<&mut Property> {
+    let tr = &mut l.transform;
+    let mut ps: Vec<&mut Property> = vec![&mut tr.x, &mut tr.y, &mut tr.rotation, &mut tr.scale_x, &mut tr.scale_y];
+    match &mut l.kind {
+        LayerKind::Figure(f) => {
+            for nd in f.nodes_mut() {
+                ps.push(&mut nd.rotation);
+                ps.push(&mut nd.length);
+            }
+        }
+        LayerKind::Camera(c) => {
+            ps.push(&mut c.x);
+            ps.push(&mut c.y);
+            ps.push(&mut c.zoom);
+            ps.push(&mut c.rotation);
+        }
+        _ => {}
+    }
+    ps
+}
+
+/// Every layer's pose keyed on one frame (frame tools that act on the whole
+/// frame, like "Do not tween").
+pub fn key_whole_frame(st: &mut crate::edit::State, frame: i32) {
+    let fps = st_fps(&st.project);
+    let sym = st.project.root_symbol.clone();
+    let ids: Vec<String> = st.project.root().map(|s| s.layers.iter().map(|l| l.id.clone()).collect()).unwrap_or_default();
+    for id in ids {
+        let Some(l) = st.project.layer_mut(&sym, &id) else { continue };
+        for q in pose_props(l) {
+            key_at(q, &[frame as i64], fps);
+        }
+    }
+}
+
+/// Keys a property on the given frames where it has no key (its value there).
+fn key_at(q: &mut Property, frames: &[i64], fps: f64) {
+    for &i in frames {
+        let t = i as f64 / fps;
+        if q.track.index_of(t).is_err() {
+            let v = q.key_value(t);
+            let interp = crate::edit::editor::interp_at(q, t, Interp::Linear);
+            q.track.put(Key::new(t, v, interp));
         }
     }
 }
