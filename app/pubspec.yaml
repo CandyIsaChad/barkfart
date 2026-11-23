@@ -27,6 +27,7 @@ flutter:
     - assets/sound-demo.bark
     - assets/stock/figures/
     - assets/stock/effects/
+    - assets/fonts/NotoSans-LICENSE.txt
   fonts:
     - family: NotoSans
       fonts:

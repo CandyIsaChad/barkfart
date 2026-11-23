@@ -677,6 +677,33 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     return File('${File(f.path).parent.path}$sep.thumbs$sep${f.name}.png');
   }
 
+  /// A card's line on the Projects screen: "24 frames, 2 seconds. Edited today".
+  String _cardMeta(ProjectFile f) {
+    final when = File(f.path).lastModifiedSync();
+    final now = DateTime.now();
+    final days = DateTime(now.year, now.month, now.day).difference(DateTime(when.year, when.month, when.day)).inDays;
+    final edited = switch (days) {
+      <= 0 => 'today',
+      1 => 'yesterday',
+      < 7 => '$days days ago',
+      < 14 => 'last week',
+      < 31 => '${days ~/ 7} weeks ago',
+      < 62 => 'last month',
+      _ => _friendlyTime(when).split(',').first,
+    };
+    try {
+      final note = File('${_thumbFile(f).path.substring(0, _thumbFile(f).path.length - 4)}.json');
+      if (note.existsSync()) {
+        final m = jsonDecode(note.readAsStringSync()) as Map;
+        final n = (m['frames'] as num).toInt(), fps = (m['fps'] as num).toDouble();
+        final secs = n / (fps > 0 ? fps : 30);
+        final st = secs == secs.roundToDouble() ? '${secs.round()}' : secs.toStringAsFixed(1);
+        return '$n frame${n == 1 ? '' : 's'}${n > 1 ? ', $st second${st == '1' ? '' : 's'}' : ''}. Edited $edited';
+      }
+    } catch (_) {}
+    return 'Edited $edited';
+  }
+
   /// A picture of the first frame beside the save, for the Projects screen.
   Future<void> _writeThumb(ProjectFile f) async {
     final img = _thumbs[0];
@@ -687,6 +714,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       final out = _thumbFile(f);
       await out.parent.create(recursive: true);
       await out.writeAsBytes(data.buffer.asUint8List());
+      // the card's "24 frames, 2 seconds" (Projects board)
+      await File('${out.path.substring(0, out.path.length - 4)}.json').writeAsString(jsonEncode({'frames': _frames, 'fps': _fps}));
     } catch (_) {
       // a missing picture only means a plain card
     }
@@ -809,7 +838,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                     for (final f in shown)
                       card(
                         f.name,
-                        'Edited ${_friendlyTime(File(f.path).lastModifiedSync())}',
+                        _cardMeta(f),
                         _thumbFile(f).existsSync() ? Image.file(_thumbFile(f), fit: BoxFit.cover) : const Center(child: Pictogram('figure', size: 34, color: cTag)),
                         () => f.path == _file?.path ? Navigator.pop(c) : open(f),
                         current: f.path == _file?.path,
@@ -2938,6 +2967,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           const rw.DTitle('About'),
           const rw.DInfo('Version', '0.1.0'),
           const rw.DHint('Barkfart makes no network requests: no ads, no tracking, nothing sent anywhere.'),
+          rw.DLink('Licences', '', onTap: () => showLicensePage(context: c, applicationName: 'Barkfart')),
+          rw.DLink('Backups', '', onTap: () async {
+            final f = await _backupsSheet();
+            if (f != null && mounted) await _openFile(f);
+          }),
         ]);
         final wide = MediaQuery.sizeOf(c).width > 900;
         return Scaffold(

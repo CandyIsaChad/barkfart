@@ -1,5 +1,6 @@
 // Barkfart: Flutter interface over the Rust engine (engine/ffi).
 import 'package:material_ui/material_ui.dart';
+import 'package:flutter/foundation.dart' show LicenseRegistry, LicenseEntryWithLineBreaks;
 import 'package:flutter/services.dart';
 
 import 'dart:io';
@@ -9,6 +10,10 @@ import 'ui/gallery.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // Settings › Licences lists the bundled font with the packages
+  LicenseRegistry.addLicense(() async* {
+    yield LicenseEntryWithLineBreaks(const ['Noto Sans'], await rootBundle.loadString('assets/fonts/NotoSans-LICENSE.txt'));
+  });
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   runApp(const BarkfartApp());
 }
