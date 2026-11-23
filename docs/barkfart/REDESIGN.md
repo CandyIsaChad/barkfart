@@ -515,7 +515,7 @@ and tests are never weakened.
 - [x] D4. Camera.
 - [x] D5. Frame.
 - [x] D6. Stickfigure.
-- [ ] D7. Segment, with changed-dots and swipe-to-reset.
+- [x] D7. Segment, with changed-dots and swipe-to-reset.
   - [x] D7a. Segment Tools as rows, grouped Size, Colour and Movement.
     Thickness (default 32) and length (the rest length) get changed-dots and
     swipe-to-reset.
@@ -541,7 +541,7 @@ and tests are never weakened.
 - [x] G1. Layer rows, the names column, eyes (read-only).
 - [x] G2. Quiet blocks, with selection opening the Pose page.
 - [x] G3. Grips to extend, long-press to move, pinch to zoom.
-- [ ] G4. Swipe actions, and right-click on Linux.
+- [x] G4. Swipe actions, and right-click on Linux.
 - [ ] G5. Selection box, lasso, the multi-select page.
 
 ### H. Keyed properties and effects

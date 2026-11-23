@@ -1108,6 +1108,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           }
         case 'blockdrop':
           _endBlockDrag();
+        case 'rowactions':
+          // test helper: open the first row's swipe actions
+          setState(() => _rowActionsOpen = true);
         case 'zoomtimeline':
           setState(() => _cellW = double.parse(w[1]).clamp(14.0, 112.0));
         case 'backups':
@@ -1903,7 +1906,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     Widget name(Map r) {
       final on = r['visible'] != false, selected = r['id'] == selLayer;
       const icons = {'figure': 'figure', 'picture': 'picture', 'text': 'text', 'movieclip': 'clip'};
-      return Container(
+      final row = Container(
         height: rowH,
         padding: const EdgeInsets.symmetric(horizontal: 8),
         color: selected ? cSelected : null,
@@ -1913,6 +1916,26 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           Expanded(child: Text('${r['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: on ? cText : cSecondary, fontSize: 13, fontWeight: selected ? FontWeight.w700 : FontWeight.w400))),
           Pictogram('eye', size: 16, color: on ? const Color(0xFF9AA0A8) : const Color(0xFFD5D8DD)),
         ]),
+      );
+      if (r['kind'] != 'figure' || _playing) return row;
+      // G4: swipe a row (right-click on Linux) for Duplicate and Delete
+      void pick() => _cmd({'op': 'select', 'layer': r['id']});
+      return rw.SwipeActions(
+        key: ValueKey('row-${r['id']}-$_rowActionsOpen'),
+        initiallyOpen: _rowActionsOpen && r['id'] == selLayer,
+        actionWidth: 70,
+        actions: [
+          rw.SwipeAction('Duplicate', () {
+            pick();
+            _cmd({'op': 'duplicate_figure'});
+          }),
+          rw.SwipeAction('Delete', () {
+            pick();
+            _cmd({'op': 'delete_everywhere'});
+            kit.showToast(context, '${r['name']} is gone from every frame.', light: true, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
+          }, danger: true),
+        ],
+        child: GestureDetector(onTap: pick, child: row),
       );
     }
 
@@ -2231,7 +2254,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   bool _panelOpen = true, _hidePanels = false;
-  bool _layersOpen = false;
+  bool _layersOpen = false, _rowActionsOpen = false;
   // G3: the timeline's zoom (a frame's width), a pinch's start, a block drag
   double _cellW = 56, _pinchFrom = 56;
   _BlockDrag? _blockDrag;

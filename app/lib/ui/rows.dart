@@ -213,16 +213,18 @@ class SwipeAction {
 }
 
 class SwipeActions extends StatefulWidget {
-  const SwipeActions({super.key, required this.child, required this.actions, this.initiallyOpen = false});
+  const SwipeActions({super.key, required this.child, required this.actions, this.initiallyOpen = false, this.actionWidth = 112});
   final Widget child;
   final List<SwipeAction> actions;
   final bool initiallyOpen;
+  /// Each action's width (narrow places, like the timeline's names column).
+  final double actionWidth;
   @override
   State<SwipeActions> createState() => _SwipeActionsState();
 }
 
 class _SwipeActionsState extends State<SwipeActions> {
-  static const _w = 112.0;
+  double get _w => widget.actionWidth;
   late double _dx = widget.initiallyOpen ? -_w * widget.actions.length : 0;
 
   double get _max => _w * widget.actions.length;
@@ -248,7 +250,7 @@ class _SwipeActionsState extends State<SwipeActions> {
                     width: _w,
                     alignment: Alignment.center,
                     color: a.danger ? const Color(0xFFE5484D) : cControl,
-                    child: Text(a.label, style: ink(13, FontWeight.w700, a.danger ? cCard : cAccent)),
+                    child: Text(a.label, maxLines: 1, overflow: TextOverflow.fade, softWrap: false, style: ink(_w < 90 ? 12 : 13, FontWeight.w700, a.danger ? cCard : cAccent)),
                   ),
                 ),
             ]),
