@@ -220,6 +220,24 @@ impl CanvasTools {
         out
     }
 
+    /// A picture's four corners (BL, BR, TR, TL as x, y pairs) in the
+    /// handles' space: the Picture board's dashed box.
+    pub fn sprite_box(&self, p: &Project, layer: &str, t: f64) -> Option<[f32; 8]> {
+        let s = root_symbol(p);
+        let l = s.layer(layer)?;
+        let LayerKind::Sprite(sp) = &l.kind else { return None };
+        let mut r = Resolver::new(p);
+        let v = self.view_with(p, l, t, &mut r);
+        let (w, h) = (sp.width as f64, sp.height as f64);
+        let mut c = [0f32; 8];
+        for (i, (x, y)) in [(0.0, 0.0), (w, 0.0), (w, h), (0.0, h)].into_iter().enumerate() {
+            let (x, y) = (x + r.f(&sp.distort[i * 2], t) as f64, y + r.f(&sp.distort[i * 2 + 1], t) as f64);
+            c[i * 2] = v.map_x(x, y) as f32;
+            c[i * 2 + 1] = v.map_y(x, y) as f32;
+        }
+        Some(c)
+    }
+
     /// The motion path (round 10 boards): where one joint is on every frame,
     /// in the handles' space.
     pub fn joint_path(&self, p: &Project, layer: &str, node: &str, frames: i32, fps: f64) -> Vec<(f32, f32)> {

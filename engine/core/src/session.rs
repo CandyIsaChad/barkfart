@@ -41,6 +41,12 @@ enum Gesture {
     Textfield { layer: String, x: f32, y: f32, tx: f32, ty: f32, slop: f32, started: bool },
     /// Creation mode: a new segment is being drawn from a joint.
     Draw { layer: String, from: String, x0: f32, y0: f32, x: f32, y: f32, slop: f32 },
+    /// The selected picture is held inside its box: it moves (Picture board).
+    Picture { layer: String, x: f32, y: f32, tx: f32, ty: f32, slop: f32, started: bool },
+    /// A corner of the selected picture's box is held: the picture scales
+    /// about the opposite corner, which stays put. `o` is its origin, `c`
+    /// the fixed corner, `d0` the finger's first distance from it.
+    PictureScale { layer: String, o: (f32, f32), c: (f32, f32), d0: f32, tx: f32, ty: f32, sx: f32, sy: f32, started: bool },
     All { x: f32, y: f32 },
     Camera { xi: String, yi: String, x: f32, y: f32, cx: f32, cy: f32 },
 }
@@ -359,6 +365,49 @@ impl Session {
         r.b(&l.shown, t) && text_hit(tl, l, &mut r, t, x, y, radius, &self.fonts)
     }
 
+    /// A press on the selected picture (Picture board): near a corner of its
+    /// box, scaling about the opposite corner; inside the box, moving it.
+    /// Locked pictures stay put.
+    fn picture_press(&self, x: f32, y: f32, radius: f32, t: f64) -> Option<Gesture> {
+        if self.building.is_some() {
+            return None;
+        }
+        let (layer, node) = self.selected.as_ref()?;
+        if !node.is_empty() {
+            return None;
+        }
+        let p = self.project();
+        let l = p.root()?.layer(layer)?;
+        let mut r = Resolver::new(p);
+        if l.locked || !l.visible || !r.b(&l.shown, t) || !matches!(l.kind, LayerKind::Sprite(_)) {
+            return None;
+        }
+        let b = self.tools.sprite_box(p, layer, t)?;
+        let (tx, ty) = (r.f(&l.transform.x, t), r.f(&l.transform.y, t));
+        let corner = (0..4).map(|i| (i, (b[i * 2] - x).hypot(b[i * 2 + 1] - y))).filter(|(_, d)| *d <= radius).min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        if let Some((i, _)) = corner {
+            let j = (i + 2) % 4;
+            let c = (b[j * 2], b[j * 2 + 1]);
+            let d0 = (x - c.0).hypot(y - c.1);
+            if d0 > 1.0 {
+                // the point scaling turns about: the layer's anchor, found in the box
+                let LayerKind::Sprite(sp) = &l.kind else { return None };
+                let (u, v) = (r.f(&l.transform.anchor_x, t) / sp.width.max(1e-3), r.f(&l.transform.anchor_y, t) / sp.height.max(1e-3));
+                let o = (b[0] + (b[2] - b[0]) * u + (b[6] - b[0]) * v, b[1] + (b[3] - b[1]) * u + (b[7] - b[1]) * v);
+                let (sx, sy) = (r.f(&l.transform.scale_x, t), r.f(&l.transform.scale_y, t));
+                return Some(Gesture::PictureScale { layer: layer.clone(), o, c, d0, tx, ty, sx, sy, started: false });
+            }
+        }
+        // inside the box (a quad, maybe distorted): on the same side of every edge
+        let side = |i: usize| {
+            let (ax, ay, bx, by) = (b[i * 2], b[i * 2 + 1], b[(i + 1) % 4 * 2], b[(i + 1) % 4 * 2 + 1]);
+            (bx - ax) * (y - ay) - (by - ay) * (x - ax)
+        };
+        let s: Vec<f32> = (0..4).map(side).collect();
+        let inside = s.iter().all(|v| *v >= 0.0) || s.iter().all(|v| *v <= 0.0);
+        inside.then(|| Gesture::Picture { layer: layer.clone(), x, y, tx, ty, slop: radius * 0.25, started: false })
+    }
+
     /// Runs one edit as an undo step and reports failures as the message.
     fn step<T>(&mut self, label: &str, f: impl FnOnce(&mut crate::edit::State) -> EditResult<T>) -> Option<T> {
         let r = self.doc.edit(label, |s| {
@@ -510,6 +559,13 @@ impl Session {
                         true
                     }
                     None if self.building.is_some() => false,
+                    // the selected picture (Picture board), under any joint: a
+                    // corner scales it, inside its box moves it
+                    None if self.picture_press(x, y, radius, t).is_some() => {
+                        self.gesture = self.picture_press(x, y, radius, t).expect("just found");
+                        self.last_tap = None;
+                        true
+                    }
                     None => {
                         let changed = self.selected.take().is_some() | self.selected_text.take().is_some();
                         if changed {
@@ -594,6 +650,43 @@ impl Session {
                 self.gesture = Gesture::Draw { layer, from, x0, y0, x, y, slop };
                 self.rev += 1;
             }
+            Gesture::Picture { layer, x: x0, y: y0, tx, ty, slop, started } => {
+                if !started {
+                    if (x - x0).hypot(y - y0) < slop {
+                        return;
+                    }
+                    self.doc.begin("Move picture");
+                    anchor_poses(&mut self.doc.state);
+                    self.gesture = Gesture::Picture { layer: layer.clone(), x: x0, y: y0, tx, ty, slop, started: true };
+                }
+                let ed = self.tools.editor.clone();
+                let ids = self.project().root().and_then(|s| s.layer(&layer)).map(|l| (l.transform.x.id.clone(), l.transform.y.id.clone()));
+                if let Some((xi, yi)) = ids {
+                    let _ = ed.change_in(&mut self.doc.state, &xi, Value::F(tx + (x - x0)), t);
+                    let _ = ed.change_in(&mut self.doc.state, &yi, Value::F(ty + (y - y0)), t);
+                }
+                self.rev += 1;
+            }
+            Gesture::PictureScale { layer, o, c, d0, tx, ty, sx, sy, started } => {
+                if !started {
+                    self.doc.begin("Scale picture");
+                    anchor_poses(&mut self.doc.state);
+                    self.gesture = Gesture::PictureScale { layer: layer.clone(), o, c, d0, tx, ty, sx, sy, started: true };
+                }
+                // never smaller than a twentieth, never turned inside out
+                let k = ((x - c.0).hypot(y - c.1) / d0.max(1e-3)).max(0.05);
+                let ed = self.tools.editor.clone();
+                let ids = self.project().root().and_then(|s| s.layer(&layer)).map(|l| [l.transform.x.id.clone(), l.transform.y.id.clone(), l.transform.scale_x.id.clone(), l.transform.scale_y.id.clone()]);
+                if let Some([xi, yi, sxi, syi]) = ids {
+                    // the origin moves so the held-still corner stays where it was
+                    let (nx, ny) = (c.0 - (c.0 - o.0) * k, c.1 - (c.1 - o.1) * k);
+                    let _ = ed.change_in(&mut self.doc.state, &xi, Value::F(tx + (nx - o.0)), t);
+                    let _ = ed.change_in(&mut self.doc.state, &yi, Value::F(ty + (ny - o.1)), t);
+                    let _ = ed.change_in(&mut self.doc.state, &sxi, Value::F(sx * k), t);
+                    let _ = ed.change_in(&mut self.doc.state, &syi, Value::F(sy * k), t);
+                }
+                self.rev += 1;
+            }
             Gesture::All { x: x0, y: y0 } => {
                 let _ = self.tools.move_all(&mut self.doc, x - x0, y - y0, t);
                 self.gesture = Gesture::All { x, y };
@@ -653,6 +746,17 @@ impl Session {
                     }
                 }
                 self.rev += 1;
+            }
+            Gesture::Picture { started, .. } | Gesture::PictureScale { started, .. } => {
+                if started {
+                    if cancel {
+                        self.doc.cancel();
+                    } else {
+                        anchor_poses(&mut self.doc.state);
+                        snap_keys(&mut self.doc.state);
+                        self.doc.commit();
+                    }
+                }
             }
             Gesture::Textfield { started, .. } => {
                 if started {
@@ -3080,6 +3184,7 @@ impl Session {
                 "layer": l, "name": layer.name.clone().unwrap_or_else(|| l.clone()), "file": file,
                 "scale": round2(sy.abs()), "flipH": sx < 0.0, "flipV": sy < 0.0, "opacity": round2(r.f(&layer.opacity, t)),
                 "blend": layer.blend.name(), "locked": layer.locked,
+                "box": self.tools.sprite_box(p, l, t).map(|b| b.iter().map(|v| round2(*v)).collect::<Vec<_>>()),
                 "cameraLocked": layer.parent.as_ref().and_then(|pid| p.root()?.layer(pid)).is_some_and(|x| matches!(x.kind, LayerKind::Camera(_))),
             }))
         });

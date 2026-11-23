@@ -5222,3 +5222,54 @@ fn polyfills_fill_in_either_winding_direction() {
     let b = fill(&["legL2", "legR2"]);
     assert!(a > 100.0 && (a - b).abs() < 1e-3 * a, "{a} vs {b}");
 }
+
+#[test]
+fn a_selected_picture_moves_and_scales_on_the_stage() {
+    // M9 / the Picture board: inside its dashed box it moves, a corner scales
+    // it about the opposite corner; one step each; joints still come first
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata/legacy/synthetic/picture.png");
+    let mut s = two_poses();
+    let st = s.import("picture.png", &std::fs::read(path).unwrap());
+    let pic = st["rows"].as_array().unwrap().iter().find(|r| r["kind"] == "picture").expect("a picture row")["id"].as_str().unwrap().to_string();
+    s.command(&json!({"op": "select", "layer": pic, "node": ""}));
+    // the test picture is 12 by 9: make it big enough to hold
+    let st = s.command(&json!({"op": "picture", "scale": 30.0}));
+    let corners = |st: &Value| -> Vec<f64> { st["picture"]["box"].as_array().expect("a box").iter().map(|v| v.as_f64().unwrap()).collect() };
+    let b = corners(&st);
+    // a point inside, away from the corners and from every joint
+    let hs = st["handles"].as_array().unwrap().clone();
+    let free = |x: f64, y: f64| !hs.iter().any(|h| (h[0].as_f64().unwrap() - x).hypot(h[1].as_f64().unwrap() - y) < 25.0) && (0..4).all(|i| (b[i * 2] - x).hypot(b[i * 2 + 1] - y) > 25.0);
+    let (mx, my) = (1..20)
+        .flat_map(|u| (1..20).map(move |v| (u as f64 / 20.0, v as f64 / 20.0)))
+        .map(|(u, v)| (b[0] + (b[2] - b[0]) * u + (b[6] - b[0]) * v, b[1] + (b[3] - b[1]) * u + (b[7] - b[1]) * v))
+        .find(|(x, y)| free(*x, *y))
+        .expect("somewhere inside with no joint");
+    let st = s.command(&json!({"op": "down", "x": mx, "y": my, "r": 20}));
+    assert_eq!(st["hit"], true);
+    s.command(&json!({"op": "move", "x": mx + 40.0, "y": my - 10.0}));
+    let st = s.command(&json!({"op": "up"}));
+    assert_eq!(st["undo"], "Move picture");
+    let moved = corners(&st);
+    for i in 0..4 {
+        assert!((moved[i * 2] - b[i * 2] - 40.0).abs() < 0.05 && (moved[i * 2 + 1] - b[i * 2 + 1] + 10.0).abs() < 0.05, "{moved:?} vs {b:?}");
+    }
+    assert_eq!(st["picture"]["layer"], pic.as_str(), "still selected");
+    // drag the top right corner out: twice as far from the bottom left
+    let (cx, cy) = (moved[4], moved[5]);
+    let (fx, fy) = (moved[0], moved[1]);
+    s.command(&json!({"op": "down", "x": cx, "y": cy, "r": 20}));
+    s.command(&json!({"op": "move", "x": fx + (cx - fx) * 2.0, "y": fy + (cy - fy) * 2.0}));
+    let st = s.command(&json!({"op": "up"}));
+    assert_eq!(st["undo"], "Scale picture");
+    assert_eq!(st["picture"]["scale"], 60.0);
+    let big = corners(&st);
+    assert!((big[0] - fx).abs() < 0.05 && (big[1] - fy).abs() < 0.05, "the opposite corner stays: {big:?}");
+    assert!((big[4] - (fx + (cx - fx) * 2.0)).abs() < 0.05, "the held corner follows: {big:?}");
+    s.command(&json!({"op": "undo"}));
+    let st = s.command(&json!({"op": "undo"}));
+    assert_eq!(corners(&st), b, "two undos put it back");
+    // locked, it stays put (the press falls through to the stage)
+    s.command(&json!({"op": "picture", "locked": true}));
+    let st = s.command(&json!({"op": "down", "x": mx, "y": my, "r": 20}));
+    assert_eq!(st["hit"], false);
+}

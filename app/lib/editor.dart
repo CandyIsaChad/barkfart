@@ -3888,7 +3888,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       rw.DLink('Blend', blendNames[blend], onTap: () => _cmd({'op': 'blend', 'v': blends[(blend + 1) % blends.length]})),
       rw.DTick('Locked', pic['locked'] == true, onChanged: (v) => set({'locked': v})),
       rw.DTick('Locked to camera', pic['cameraLocked'] == true, onChanged: (v) => _cmd({'op': 'camera_lock', 'layer': pic['layer'], 'on': v})),
-      const rw.DHint('Move a picture with "Move everything" (the second mode on the left), or lock it to the camera for a backdrop.'),
+      const rw.DHint('Drag inside the dashed box to move the picture, or a corner to resize it. Lock it to the camera for a backdrop.'),
     ];
     return [for (final d in rows) rw.renderDesc(d)];
   }
@@ -5583,6 +5583,32 @@ class _Overlay extends CustomPainter {
       if (dl['mirror'] is List) ghost(dl['mirror'] as List);
       ghost(dl['line'] as List);
     }
+    // the selected picture (Picture board): a dashed box with a grip at each
+    // corner; drag inside to move it, a corner to scale it
+    final pbox = (st['picture'] as Map?)?['box'] as List?;
+    if (pbox != null && pbox.length == 8) {
+      final pts = [for (var i = 0; i < 4; i++) v.toScreen((pbox[i * 2] as num).toDouble(), (pbox[i * 2 + 1] as num).toDouble())];
+      final dash = Paint()
+        ..color = cAccent
+        ..strokeWidth = 1.5;
+      for (var i = 0; i < 4; i++) {
+        final a = pts[i], b = pts[(i + 1) % 4];
+        final len = (b - a).distance;
+        if (len < 1) continue;
+        final d = (b - a) / len;
+        for (var u = 0.0; u < len; u += 9) {
+          canvas.drawLine(a + d * u, a + d * math.min(len, u + 5), dash);
+        }
+      }
+      for (final c in pts) {
+        final r = Rect.fromCenter(center: c, width: 9, height: 9);
+        canvas.drawRect(r, Paint()..color = Colors.white);
+        canvas.drawRect(r, Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5
+          ..color = cAccent);
+      }
+    }
     // the figure editor's size reference: the engine draws the stock figure
     // faintly; its label goes under its feet
     final ref = st['sizeRef'] as List?;
@@ -5619,6 +5645,8 @@ class _Overlay extends CustomPainter {
       final l = h as List;
       final p = v.toScreen((l[0] as num).toDouble(), (l[1] as num).toDouble());
       final f = (l[2] as num).toInt();
+      // the selected picture's main handle: its box and grips stand in for it
+      if (pbox != null && f & 3 == 3) continue;
       final root = f & 1 != 0, sel = f & 2 != 0, nb = f & 8 != 0;
       final color = sel ? red : nb ? purple : (root ? cRootNode : blue);
       // Settings: node style (0 legacy squares, 1 modern rings, 2 solid dots)
