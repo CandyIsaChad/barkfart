@@ -296,11 +296,13 @@ class StepRow extends StatelessWidget {
 
 /// A row of colour swatches; the last one opens the full picker.
 class SwatchRow extends StatelessWidget {
-  const SwatchRow(this.colors, this.current, {super.key, this.onPick, this.onMore});
+  const SwatchRow(this.colors, this.current, {super.key, this.onPick, this.onMore, this.moreOn = false});
   final List<Color> colors;
   final Color? current;
   final ValueChanged<Color>? onPick;
   final VoidCallback? onMore;
+  /// The colour is none of the presets: the rainbow "more" is ringed.
+  final bool moreOn;
   @override
   Widget build(BuildContext context) => Wrap(spacing: 6, runSpacing: 6, children: [
         for (final c in colors)
@@ -324,7 +326,11 @@ class SwatchRow extends StatelessWidget {
             child: Container(
               width: 22,
               height: 22,
-              decoration: const BoxDecoration(shape: BoxShape.circle, gradient: SweepGradient(colors: [Color(0xFFE5484D), Color(0xFFF2A93B), Color(0xFFFFD54A), Color(0xFF1E9E55), Color(0xFF2D63E0), Color(0xFFA534D0), Color(0xFFE5484D)])),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const SweepGradient(colors: [Color(0xFFE5484D), Color(0xFFF2A93B), Color(0xFFFFD54A), Color(0xFF1E9E55), Color(0xFF2D63E0), Color(0xFFA534D0), Color(0xFFE5484D)]),
+                boxShadow: moreOn ? const [BoxShadow(color: cCard, spreadRadius: 2), BoxShadow(color: cAccent, spreadRadius: 4)] : null,
+              ),
             ),
           ),
       ]);
@@ -432,8 +438,9 @@ class ButtonPair extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(top: 2, bottom: 6),
         child: Row(children: [
-          Expanded(child: WordButton(a, onTap: onA, filled: true, expand: true, height: 38)),
-          if (b != null) ...[const SizedBox(width: 8), Expanded(child: WordButton(b!, onTap: onB, filled: !primaryB, primary: primaryB, expand: true, height: 38))],
+          // the boards' word buttons: 36 tall, 14 pt
+          Expanded(child: WordButton(a, onTap: onA, filled: true, expand: true, height: 36, size: 14)),
+          if (b != null) ...[const SizedBox(width: 8), Expanded(child: WordButton(b!, onTap: onB, filled: !primaryB, primary: primaryB, expand: true, height: 36, size: 14))],
         ]),
       );
 }

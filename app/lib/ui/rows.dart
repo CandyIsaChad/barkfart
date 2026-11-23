@@ -118,6 +118,25 @@ class DDanger extends Desc {
   final VoidCallback? onTap;
 }
 
+/// An effect the layer has (round 10 board): a pale card with its name, a
+/// small "animated" tag when part of it changes over time, and an eye.
+class DFx extends Desc {
+  const DFx(this.name, {this.tag, this.shown = true, this.open = false, this.onTap, this.onEye, this.onRemove});
+  final String name;
+  final String? tag;
+  final bool shown, open;
+  final VoidCallback? onTap, onEye, onRemove;
+}
+
+/// The Pose page's ease: four small curves, one chosen.
+class DEase extends Desc {
+  const DEase(this.selected, {this.onSelect, this.enabled = true});
+  final int selected;
+  final ValueChanged<int>? onSelect;
+  final bool enabled;
+  static const names = ['Even', 'Slow end', 'Slow both ends', 'Bounce'];
+}
+
 /// Any widget, for rows not (yet) described by data. It can carry a
 /// changed-dot and a swipe reset like the other rows.
 class DWidget extends Desc {
@@ -155,8 +174,75 @@ Widget renderDesc(Desc d) {
     DLink() => LinkRow(d.label, d.value, onTap: d.onTap),
     DHint() => Hint(d.text),
     DInfo() => PropRow(d.label, trailing: Text(d.value, style: ink(13, FontWeight.w400, cSecondary))),
-    DName() => PropRow(d.name, trailing: d.link == null ? null : WordButton(d.link!, onTap: d.onLink, size: 13)),
+    DName() => SizedBox(
+        height: 40,
+        child: Row(children: [
+          Expanded(child: Text(d.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: ink(15, FontWeight.w700))),
+          if (d.link != null) WordButton(d.link!, onTap: d.onLink, size: 13),
+        ]),
+      ),
     DDanger() => Padding(padding: const EdgeInsets.only(top: 8), child: WordButton(d.label, onTap: d.onTap, filled: true, danger: true, expand: true, height: 38)),
+    DFx() => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: SwipeActions(
+          actions: [if (d.onRemove != null) SwipeAction('Remove', d.onRemove!, danger: true)],
+          child: Container(
+            height: 40,
+            decoration: BoxDecoration(color: d.open ? cSelected : cControl, borderRadius: BorderRadius.circular(10)),
+            padding: const EdgeInsets.only(left: 12, right: 2),
+            child: Row(children: [
+              Expanded(
+                child: Tap(
+                  label: d.open ? 'Close ${d.name} settings' : '${d.name} settings',
+                  onTap: d.onTap,
+                  minSize: 0,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Row(children: [
+                      Text(d.name, style: ink(14, FontWeight.w600, d.shown ? cText : cSecondary)),
+                      if (d.tag != null) ...[
+                        const SizedBox(width: 10),
+                        Transform.rotate(angle: 0.785398, child: Container(width: 7, height: 7, decoration: BoxDecoration(border: Border.all(color: cAccent, width: 1.6), borderRadius: BorderRadius.circular(1)))),
+                        const SizedBox(width: 5),
+                        Flexible(child: Text(d.tag!, maxLines: 1, overflow: TextOverflow.ellipsis, style: ink(12, FontWeight.w400, cSecondary))),
+                      ],
+                    ]),
+                  ),
+                ),
+              ),
+              Tap(label: d.shown ? 'Hide ${d.name}' : 'Show ${d.name}', onTap: d.onEye, minSize: 34, child: _Eye(d.shown)),
+            ]),
+          ),
+        ),
+      ),
+    DEase() => SizedBox(
+        height: 46,
+        child: Row(children: [
+          Expanded(child: Text('Ease', style: ink(14))),
+          for (var i = 0; i < 4; i++)
+            Padding(
+              padding: const EdgeInsets.only(left: 6),
+              child: Tap(
+                label: DEase.names[i],
+                onTap: d.enabled && d.onSelect != null ? () => d.onSelect!(i) : null,
+                minSize: 0,
+                child: Opacity(
+                  opacity: d.enabled ? 1 : 0.4,
+                  child: Container(
+                    width: 38,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: i == d.selected ? cCard : cControl,
+                      borderRadius: BorderRadius.circular(9),
+                      border: i == d.selected ? Border.all(color: cAccent, width: 2) : null,
+                    ),
+                    child: CustomPaint(painter: _EasePainter(i, i == d.selected)),
+                  ),
+                ),
+              ),
+            ),
+        ]),
+      ),
     DWidget() => swipe(
         d.changed
             ? Row(children: [
@@ -265,4 +351,72 @@ class _SwipeActionsState extends State<SwipeActions> {
       ),
     );
   }
+}
+
+class _Eye extends StatelessWidget {
+  const _Eye(this.open);
+  final bool open;
+  @override
+  Widget build(BuildContext context) => CustomPaint(size: const Size(18, 18), painter: _EyePainter(open ? const Color(0xFF9AA0A8) : const Color(0xFFD5D8DD)));
+}
+
+class _EyePainter extends CustomPainter {
+  _EyePainter(this.c);
+  final Color c;
+  @override
+  void paint(Canvas canvas, Size size) {
+    final k = size.width / 24;
+    canvas.scale(k);
+    final pen = Paint()
+      ..color = c
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.8;
+    final p = Path()
+      ..moveTo(2.5, 12)
+      ..quadraticBezierTo(12, 2, 21.5, 12)
+      ..quadraticBezierTo(12, 22, 2.5, 12);
+    canvas.drawPath(p, pen);
+    canvas.drawCircle(const Offset(12, 12), 2.8, pen);
+  }
+
+  @override
+  bool shouldRepaint(_EyePainter o) => o.c != c;
+}
+
+/// The board's ease curves (viewBox 0 0 32 32, drawn at 24 in a 38 x 36 cell).
+class _EasePainter extends CustomPainter {
+  _EasePainter(this.i, this.on);
+  final int i;
+  final bool on;
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.translate((size.width - 24) / 2, (size.height - 24) / 2);
+    canvas.scale(24 / 32);
+    final p = Path()..moveTo(5, 27);
+    switch (i) {
+      case 0:
+        p.lineTo(27, 5);
+      case 1:
+        p.cubicTo(10, 12, 16, 5, 27, 5);
+      case 2:
+        p.cubicTo(17, 27, 15, 5, 27, 5);
+      default:
+        p
+          ..cubicTo(8, 14, 12, 6, 17, 5)
+          ..cubicTo(18.5, 9, 19.5, 9, 21, 5)
+          ..cubicTo(22, 7, 22.8, 7, 23.6, 5)
+          ..lineTo(27, 5);
+    }
+    canvas.drawPath(
+        p,
+        Paint()
+          ..color = on ? cAccent : cSecondary
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.2
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round);
+  }
+
+  @override
+  bool shouldRepaint(_EasePainter o) => o.i != i || o.on != on;
 }

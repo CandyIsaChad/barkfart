@@ -136,9 +136,11 @@ fn set_mix(l: &mut Layer, id: &str, t: f64, v: f32) {
 fn set_param(l: &mut Layer, id: &str, name: &str, ty: ValueType, t: f64, v: Value) {
     let owner = l.id.clone();
     let Some(e) = l.effects.nodes.get_mut(id) else { return };
+    // a setting changed for the first time starts from its default, so a key
+    // keeps what the other frames showed (it doesn't reach back)
     let p = match e.params.get_mut(name) {
         Some(p) => p,
-        None => e.param(&owner, name, ty, v.clone()),
+        None => e.param(&owner, name, ty, default_param(id, name).unwrap_or(v)),
     };
     key_at(p, t, v);
 }

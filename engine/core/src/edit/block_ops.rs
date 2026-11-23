@@ -189,3 +189,22 @@ pub fn move_block(st: &mut State, sym: &str, id: &str, frame: i32, to: i32) -> E
     retime(l, fps, |fr| if fr == start { to } else { fr });
     Ok(())
 }
+
+/// "Delete this pose": the figure's key under `frame` goes, so the pose
+/// before it lasts until the next. The first pose stays (delete the figure
+/// instead).
+pub fn delete_pose(st: &mut State, sym: &str, id: &str, frame: i32) -> EditResult<()> {
+    let fps = fps(st);
+    let l = layer(st, sym, id)?;
+    let Some((start, _)) = block_at(l, fps, frame) else { return fail("This figure has no pose here.") };
+    if start == 0 {
+        return fail("The first pose stays; delete the figure to take it away.");
+    }
+    let t = start as f64 / fps;
+    for q in pose_props(l) {
+        if let Ok(i) = q.track.index_of(t) {
+            q.track.remove_at(i);
+        }
+    }
+    Ok(())
+}

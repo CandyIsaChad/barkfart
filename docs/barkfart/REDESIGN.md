@@ -633,6 +633,28 @@ and tests are never weakened.
 - [ ] J5. Ghost and readout while drawing; the Mirror toggle.
 - [ ] J6. Polyfills in either winding direction.
 
+### M. Matching the round 10 boards (after the user, 2026-11-23: "the mockup is there for a reason")
+Render the boards (docs/barkfart/mockups: `mkdir -p project preview && node boards.mjs`) and compare each built screen with its board.
+- [x] M1. Layout: the timeline spans the full width under both rails; folded is toolbar, ruler and Preview only (no bottom bar); unfolded by default.
+- [x] M2. Timeline sizes and toolbar: frames 46 wide, names column about 210 (narrower on phones), the Loop toggle, "12 fps" in grey.
+- [x] M3. Stickfigure page as on the board: the name in bold with its link first, no repeated title; swatch rows (presets, the chosen one ringed, a rainbow "more") everywhere colours are picked; effects as pale cards with an "animated" tag.
+  Notes (M1–M3, M6, M7): tabs are pages again (one page per tab, as the
+  boards draw them; without tabs the pages stack). The figure editor link
+  stays "Edit segments ›" until editing makes a new figure (J1, D12); the
+  board's "Edit as a new figure…" arrives with it. Blend cycles Normal,
+  Multiply, Screen, Add (`blend`). The Pose page's eases are the board's
+  four, bounce included (D26's note is superseded); "Delete this pose"
+  (`delete_pose`) and "Add time here" (`add_time`) are new engine commands.
+  The Loop toggle plays once when off. Fixed on the way: an effect setting
+  changed for the first time was created with the new value, so the key
+  reached back to frame 1.
+- [ ] M4. Pose pictures inside blocks (one per frame for a tween, once for a hold), from a per-layer render.
+- [ ] M5. The Camera row, Sound rows, join chain markers on rows.
+- [x] M6. Pose page: "Pose Tools", name and "frames 5 to 8", ease pictures, "Length in frames", pinned "Delete this pose".
+- [x] M7. Frame page: "Frame N" title and hint, Add time here / Remove this frame, background swatches, pinned "Clear frame"; the selected frame outlined in the strip.
+- [ ] M8. The "+" menu: Stick figure, Picture, Text, Sound, Movieclip, then Group (planned); paste and import live in the choosers' footers.
+- [ ] M9. The rest, board by board: Animation popover, Export, View, Camera (the frame on the stage), Text, Picture, Movieclip, Sound, Group, Projects, First run, Settings, States, Tablet.
+
 ### K. Hardest, later
 Groups; the Luau plugin runtime (it needs the `mlua` crate, so it waits
 until a dependency fetch is approved); Script layers; emitters.

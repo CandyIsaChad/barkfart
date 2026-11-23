@@ -787,6 +787,8 @@ impl Session {
                     "smooth" => (Interp::Bezier, Ease::new(0.42, 0.0, 0.58, 1.0)),
                     "in" => (Interp::Bezier, Ease::new(0.42, 0.0, 1.0, 1.0)),
                     "out" => (Interp::Bezier, Ease::new(0.0, 0.0, 0.58, 1.0)),
+                    // the Pose page's fourth ease (round 10 board)
+                    "bounce" => (Interp::Bezier, Ease { kind: EaseKind::BounceOut, ..Ease::LINEAR }),
                     _ => (Interp::Linear, Ease::LINEAR),
                 };
                 // the Pose page names its pose's first frame; "block": the selected
@@ -1511,6 +1513,30 @@ impl Session {
             }
             // F4: blocks. A block is one figure's pose key, lasting until its
             // next one; these change the selected figure's row only.
+            "delete_pose" => {
+                // the Pose page's pinned button: the pose under the playhead goes,
+                // the one before it lasts until the next (one step)
+                if let Some(l) = self.sel_layer() {
+                    let fr = self.frame;
+                    self.step("Delete pose", |s| crate::edit::block_ops::delete_pose(s, &sym, &l, fr));
+                }
+            }
+            "add_time" => {
+                // the Frame page's "Add time here": a frame after this one with no
+                // keys of its own; every layer holds or tweens across it
+                let (fr, n) = (self.frame, c["n"].as_i64().unwrap_or(1).clamp(1, 100) as i32);
+                self.step("Add time", |s| frame_ops::insert_tweened(s, fr, n));
+            }
+            "blend" => {
+                if let Some(l) = self.sel_layer().or_else(|| self.selected_text.clone()) {
+                    let v = c["v"].as_str().and_then(Blend::from_name).unwrap_or(Blend::Normal);
+                    self.step("Blend", |s| {
+                        let Some(x) = s.project.layer_mut(&sym, &l) else { return crate::edit::fail("no layer") };
+                        x.blend = v;
+                        Ok(())
+                    });
+                }
+            }
             "new_pose" | "hold_longer" | "block_length" | "move_block" => {
                 let layer = c["layer"].as_str().map(str::to_string).or_else(|| self.sel_layer());
                 if let Some(l) = layer {
@@ -2676,6 +2702,7 @@ impl Session {
                             _ if k.ease == Ease::new(0.42, 0.0, 0.58, 1.0) => "smooth",
                             _ if k.ease == Ease::new(0.42, 0.0, 1.0, 1.0) => "in",
                             _ if k.ease == Ease::new(0.0, 0.0, 0.58, 1.0) => "out",
+                            _ if k.ease.kind == EaseKind::BounceOut => "bounce",
                             _ => "custom",
                         }),
                         "here": start == fr,
@@ -2709,6 +2736,7 @@ impl Session {
                 "scale": round2(r.f(&layer.transform.scale_y, t).abs()), "figAngle": round2(r.f(&layer.transform.rotation, t)),
                 "locked": layer.locked, "onion": layer.onion,
                 "joinedTo": layer.parent.as_ref().and_then(|pid| p.root()?.layer(pid)).map(|x| x.name.clone().unwrap_or_else(|| x.id.clone())),
+                "blend": layer.blend.name(),
                 "keepInTween": !layer.vanish_in_tween,
                 // F4: the pose (block) under the playhead
                 "pose": pose,

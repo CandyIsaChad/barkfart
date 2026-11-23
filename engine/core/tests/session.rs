@@ -2194,7 +2194,8 @@ fn every_command_undoes_and_redoes_exactly() {
         json!({"op": "reset_segment"}), json!({"op": "break_off"}), json!({"op": "new_pose"}), json!({"op": "hold_longer"}),
         json!({"op": "block_length", "frames": 3}), json!({"op": "move_block", "to": 1}),
         json!({"op": "each", "label": "Flip figures", "cmd": {"op": "flip_figure", "h": true}}), json!({"op": "easing", "v": "hold", "block": true}),
-        json!({"op": "move_fx", "kind": "wiggle", "on": true}), json!({"op": "stop_animating", "property": "L2/opacity"}), json!({"op": "move_fx", "kind": "swing", "on": true, "amount": 20}),
+        json!({"op": "move_fx", "kind": "wiggle", "on": true}), json!({"op": "stop_animating", "property": "L2/opacity"}),
+        json!({"op": "add_time"}), json!({"op": "blend", "v": "MULTIPLY"}), json!({"op": "delete_pose"}), json!({"op": "easing", "v": "bounce", "block": true}), json!({"op": "move_fx", "kind": "swing", "on": true, "amount": 20}),
     ];
     let text = |s: &Session| codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
     let mut failures = Vec::new();
@@ -2237,6 +2238,10 @@ fn every_command_undoes_and_redoes_exactly() {
             "new_pose" => {
                 s.command(&json!({"op": "frame", "i": 0}));
                 s.command(&json!({"op": "hold_longer"}));
+                s.command(&json!({"op": "frame", "i": 1}));
+            }
+            // a later pose to take away
+            "delete_pose" => {
                 s.command(&json!({"op": "frame", "i": 1}));
             }
             // a later pose with room before it
@@ -4938,4 +4943,44 @@ fn an_animated_effect_gets_a_row_and_can_stop_animating() {
     assert!(row["props"].as_array().unwrap().iter().all(|p| p["name"] != "Glow amount"));
     let st = s.command(&json!({"op": "frame", "i": 0}));
     assert_eq!(st["selected"]["filters"]["glowAmount"], 0.9, "the value it had there, everywhere");
+}
+
+#[test]
+fn delete_a_pose_add_time_and_bounce() {
+    // the Pose and Frame pages (round 10 boards)
+    let mut s = sparse(); // L2 keyed on frames 1 and 4
+    s.command(&json!({"op": "select", "layer": "L2"}));
+    s.command(&json!({"op": "frame", "i": 3}));
+    let st = s.command(&json!({"op": "delete_pose"}));
+    assert_eq!(st["undo"], "Delete pose");
+    assert_eq!(l2_frames(&s), vec![0]);
+    let st = s.command(&json!({"op": "delete_pose"}));
+    assert!(!st["message"].as_str().unwrap_or("").is_empty(), "the first pose stays");
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(l2_frames(&s), vec![0, 3]);
+    // Add time here: one more frame, no new keys, later keys move back
+    s.command(&json!({"op": "frame", "i": 1}));
+    let st = s.command(&json!({"op": "add_time"}));
+    assert_eq!(st["frames"], 5);
+    assert_eq!(l2_frames(&s), vec![0, 4]);
+    // the bounce ease, reported back
+    s.command(&json!({"op": "frame", "i": 0}));
+    let st = s.command(&json!({"op": "easing", "v": "bounce", "block": true}));
+    assert_eq!(st["selected"]["pose"]["ease"], "bounce");
+    let st = s.command(&json!({"op": "blend", "v": "SCREEN"}));
+    assert_eq!(st["selected"]["blend"], "SCREEN");
+}
+
+#[test]
+fn keying_an_effect_setting_later_animates_it() {
+    let mut s = two_poses();
+    let fig = s.state()["figures"][0]["id"].as_str().unwrap().to_string();
+    s.command(&json!({"op": "select", "layer": fig}));
+    s.command(&json!({"op": "set", "k": "keying", "v": true}));
+    s.command(&json!({"op": "filter", "glowAmount": 0.6}));
+    s.command(&json!({"op": "frame", "i": 1}));
+    let st = s.command(&json!({"op": "filter", "glowIntensity": 2}));
+    let row = st["rows"].as_array().unwrap().iter().find(|r| r["id"] == fig.as_str()).unwrap().clone();
+    let names: Vec<String> = row["props"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap().to_string()).collect();
+    assert!(names.contains(&"Glow strength".to_string()), "{names:?}");
 }

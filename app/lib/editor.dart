@@ -314,6 +314,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       var secs = _clockOffset + _clock.elapsedMicroseconds / 1e6;
       // past the loop end, round again from the loop start ("Loop to")
       final (ls, le) = (_loopStartWall, _loopEndWall > 0 ? _loopEndWall : dur);
+      // the toolbar's Loop off: play once and stop on the last frame
+      if (secs >= le && le > ls && AppSettings.values['loopPlay'] == false) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!_playing) return;
+          _togglePlay();
+          _cmd({'op': 'frame', 'i': _frames - 1});
+        });
+        return;
+      }
       if (secs >= le && le > ls) secs = ls + (secs - le) % (le - ls);
       // one picture per frame, or more with tweening on (Animation Tools)
       final rate = (_st['rate'] as num?)?.toDouble() ?? _fps;
@@ -1445,9 +1454,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   String _tab = '';
 
   void _jumpTo(String name) {
+    final changed = _tab != name;
     setState(() => _tab = name);
+    // a tab is its own page: it opens at the top
+    if (changed && _panelScroll.hasClients) _panelScroll.jumpTo(0);
     final c = _sectionKey(name).currentContext;
-    if (c != null) Scrollable.ensureVisible(c, duration: const Duration(milliseconds: 200), alignment: 0);
+    if (c != null && !_showTabs) Scrollable.ensureVisible(c, duration: const Duration(milliseconds: 200), alignment: 0);
   }
 
   @override
@@ -1483,7 +1495,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               ),
               Expanded(
                 child: Padding(
-                  padding: EdgeInsets.only(right: leftHand ? 0 : pad.right, left: leftHand ? pad.left : 0, bottom: pad.bottom),
+                  padding: EdgeInsets.only(right: leftHand ? 0 : pad.right, left: leftHand ? pad.left : 0),
                   child: Stack(textDirection: TextDirection.ltr, children: [
                     Positioned.fill(child: _stage()),
                     if (_arrows && !_playing) Positioned(left: _arrowsAt.dx, top: _arrowsAt.dy, child: _arrowsWindow()),
@@ -1497,13 +1509,21 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                   ]),
                 ),
               ),
-              if (!_fsNow && !_hidePanels) _controlBar(),
-              if (!_fsNow && !_hidePanels && _st['building'] == null) _previewRow(),
-              if (!_fsNow && !_hidePanels) _framesBar(),
             ]),
           ),
           if (!_fsNow) _rightRail(pad, leftHand),
         ])),
+        // the timeline spans the window under both rails (round 10 board);
+        // folded, it is the toolbar, the ruler and the Preview row only
+        if (!_fsNow && !_hidePanels)
+          Padding(
+            padding: EdgeInsets.only(left: pad.left, right: pad.right, bottom: pad.bottom),
+            child: Column(children: [
+              _controlBar(),
+              if (_st['building'] == null) _previewRow(),
+              if (_layersOpen || _st['building'] != null) _framesBar(),
+            ]),
+          ),
         ]),
       ),
     );
@@ -1904,6 +1924,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                   ]),
                 ),
               ),
+        // the Frame page is about this moment: its cell outlined in the strip
+        if (_frameSelected && showPreview && !_playing)
+          Positioned(
+            left: left + cur * cell - 1,
+            top: rulerH,
+            width: cell + 2,
+            height: stripH,
+            child: IgnorePointer(child: Container(decoration: BoxDecoration(border: Border.all(color: cAccent, width: 2), borderRadius: BorderRadius.circular(5)))),
+          ),
         // the rows' blocks: one per pose
         for (var k = 0; k < rows.length; k++) ..._rowBlocks(rows[k], ys[k], rowH, cell, left, rows[k]['id'] == selLayer),
         // grey diamonds where an animated value changes
@@ -2011,10 +2040,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           else
             const SizedBox(width: 14),
           const SizedBox(width: 4),
-          Pictogram(icons[r['kind']] ?? 'figure', size: 16, color: selected ? cAccent : cSecondary),
+          Pictogram(icons[r['kind']] ?? 'figure', size: 20, color: selected ? cAccent : cInk2b),
           const SizedBox(width: 6),
-          Expanded(child: Text('${r['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: on ? cText : cSecondary, fontSize: 13, fontWeight: selected ? FontWeight.w700 : FontWeight.w400))),
-          Pictogram('eye', size: 16, color: on ? const Color(0xFF9AA0A8) : const Color(0xFFD5D8DD)),
+          const SizedBox(width: 4),
+          Expanded(child: Text('${r['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: selected ? cAccent : on ? cText : cSecondary, fontSize: 15, fontWeight: selected ? FontWeight.w700 : FontWeight.w400))),
+          Pictogram('eye', size: 18, color: on ? const Color(0xFF9AA0A8) : const Color(0xFFD5D8DD)),
         ]),
       );
       if (r['kind'] != 'figure' || _playing) return row;
@@ -2040,7 +2070,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     }
 
     final names = Container(
-      width: 140,
+      width: MediaQuery.sizeOf(context).width >= 900 ? 210 : 140,
       decoration: const BoxDecoration(border: Border(right: BorderSide(color: Color(0xFFE6E8EB)))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         const SizedBox(height: rulerH),
@@ -2048,7 +2078,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           SizedBox(
             height: stripH + gap,
             child: Padding(
-              padding: const EdgeInsets.only(left: 8, right: 4),
+              padding: const EdgeInsets.only(left: 36, right: 4),
               child: Row(children: [
                 const Expanded(child: Text('Preview', style: TextStyle(color: cSecondary, fontSize: 12))),
                 kit.Tap(
@@ -2280,6 +2310,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           kit.IconTool('stepFwd', label: 'Forward one frame', onTap: _frame < _frames - 1 ? () => _goFrame(_frame + 1) : null),
           const SizedBox(width: 20),
           kit.IconTool('onion', label: 'Onion skin', on: _opts['onion'] == true, onTap: _playing ? null : () => _cmd({'op': 'set', 'k': 'onion', 'v': _opts['onion'] != true})),
+          // the board's Loop: playback goes round (on) or stops at the end
+          kit.IconTool('loop', label: AppSettings.values['loopPlay'] == false ? 'Play once' : 'Play in a loop', on: AppSettings.values['loopPlay'] != false, onTap: () => setState(() {
+                AppSettings.values['loopPlay'] = AppSettings.values['loopPlay'] == false;
+                unawaited(AppSettings.save());
+              })),
           // H1 (D6): effects while editing, only when something has them
           if (_st['hasEffects'] == true)
             kit.Tap(
@@ -2295,7 +2330,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               ),
             ),
           const Spacer(),
-          kit.WordButton('$_fpsLabel fps', key: _fpsKey, size: 13, onTap: _playing ? null : _animationPopover),
+          kit.Tap(
+            key: _fpsKey,
+            label: 'Animation: $_fpsLabel frames per second',
+            onTap: _playing ? null : _animationPopover,
+            radius: 8,
+            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Text('$_fpsLabel fps', style: const TextStyle(color: cSecondary, fontSize: 13))),
+          ),
           // G1: unfold the layer rows (folded: the ruler and Preview row only)
           Transform.rotate(
             angle: _layersOpen ? 0 : math.pi,
@@ -2438,7 +2479,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final mode = _st['mode'] as String? ?? 'figure';
     return Container(
       width: 64 + (leftHand ? pad.right : pad.left),
-      padding: EdgeInsets.only(left: leftHand ? 0 : pad.left, right: leftHand ? pad.right : 0, top: 6, bottom: pad.bottom),
+      padding: EdgeInsets.only(left: leftHand ? 0 : pad.left, right: leftHand ? pad.right : 0, top: 6, bottom: _fsNow || _hidePanels ? pad.bottom : 0),
       decoration: BoxDecoration(color: cPanel, border: Border(right: leftHand ? BorderSide.none : const BorderSide(color: cLine), left: leftHand ? const BorderSide(color: cLine) : BorderSide.none)),
       child: Column(children: [
         for (final (m, icon, label) in const [('figure', 'pose', 'Pose one figure'), ('all', 'all', 'Move everything'), ('camera', 'camera', 'Camera')])
@@ -2460,10 +2501,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   bool _panelOpen = true, _hidePanels = false;
-  bool _layersOpen = false, _rowActionsOpen = false;
+  bool _layersOpen = true, _rowActionsOpen = false;
   final Set<String> _openRows = {};
   // G3: the timeline's zoom (a frame's width), a pinch's start, a block drag
-  double _cellW = 56, _pinchFrom = 56;
+  double _cellW = 46, _pinchFrom = 46;
   _BlockDrag? _blockDrag;
   // G5: quick taps counted for the box (2) and lasso (3); the shape being drawn
   int _taps = 0;
@@ -2477,7 +2518,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   Widget _rightRail(EdgeInsets pad, bool leftHand) {
     return Container(
       width: 64 + (leftHand ? pad.left : pad.right),
-      padding: EdgeInsets.only(right: leftHand ? 0 : pad.right, left: leftHand ? pad.left : 0, top: 6, bottom: 6 + pad.bottom),
+      padding: EdgeInsets.only(right: leftHand ? 0 : pad.right, left: leftHand ? pad.left : 0, top: 6, bottom: 6 + (_fsNow || _hidePanels ? pad.bottom : 0)),
       decoration: BoxDecoration(color: cPanel, border: Border(left: leftHand ? BorderSide.none : const BorderSide(color: cLine), right: leftHand ? const BorderSide(color: cLine) : BorderSide.none)),
       child: Column(children: [
         kit.RailButton('undo', label: 'Undo', onTap: !_playing && _st['canUndo'] == true ? () => _cmd({'op': 'undo'}) : null),
@@ -2532,29 +2573,25 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                   controller: _panelScroll,
                   padding: const EdgeInsets.fromLTRB(14, 4, 14, 40),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    for (final n in names) ...[
-                      Container(key: _sectionKey(n), width: double.infinity, padding: const EdgeInsets.only(top: 10, bottom: 4), child: Text(n, textAlign: TextAlign.center, style: const TextStyle(color: cTitle, fontSize: 15, fontWeight: FontWeight.w700))),
+                    // one page per tab (round 10 boards); without tabs, the pages stack
+                    for (final n in (_showTabs && names.length > 1 ? [names[current]] : names)) ...[
+                      if (_pageTitle(n).isNotEmpty)
+                        Container(key: _sectionKey(n), width: double.infinity, padding: const EdgeInsets.only(top: 10, bottom: 4), child: Text(_pageTitle(n), textAlign: TextAlign.center, style: const TextStyle(color: cTitle, fontSize: 15, fontWeight: FontWeight.w600)))
+                      else
+                        SizedBox(key: _sectionKey(n), height: 6),
                       ..._sectionBody(n),
                       const SizedBox(height: 10),
                     ],
                   ]),
                 ),
         ),
-        // D7b: the loud reset, pinned while the Segment page is in front and
-        // the segment differs from how its figure came
-        if (!_playing && names[current] == 'Segment Tools' && _sel != null && _segAnyChanged(_sel!))
+        // the page's pinned button (round 10 boards): Delete stickfigure,
+        // Reset this segment, Delete this pose, Clear frame, ...
+        if (_pageFoot(_playing ? '' : names[current]) case (final String label, final VoidCallback onTap, final VoidCallback? onHold))
           Container(
             decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFFE6E8EB)))),
             padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
-            child: kit.WordButton(_sel!['defaults'] is Map ? 'Reset this segment' : 'Reset thickness and length', onTap: () {
-              if (_sel!['defaults'] is Map) {
-                _cmd({'op': 'reset_segment'});
-              } else {
-                final d = _segDefaults(_sel!);
-                _cmd({'op': 'segment', 'thickness': d['thickness']});
-                if (d['length'] != null) _cmd({'op': 'node', 'length': d['length']});
-              }
-            }, filled: true, danger: true, expand: true, height: 38),
+            child: GestureDetector(onLongPress: onHold, child: kit.WordButton(label, onTap: onTap, filled: true, danger: true, expand: true, height: 36)),
           ),
         // export progress (until the Export sheet shows it, B5)
         if (_status.isNotEmpty)
@@ -2565,6 +2602,45 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           ),
       ]),
     );
+  }
+
+  /// A page's red title in the Properties card (round 10 boards). The
+  /// Stickfigure page opens with the figure's name instead.
+  String _pageTitle(String section) => switch (section) {
+        'Stickfigure Tools' => '',
+        'Pose' => 'Pose Tools',
+        'Frame Tools' => 'Frame ${_frame + 1}',
+        'Selection' => '',
+        _ => section,
+      };
+
+  /// A page's pinned button: (label, tap, hold).
+  (String, VoidCallback, VoidCallback?)? _pageFoot(String section) {
+    final sel = _sel;
+    switch (section) {
+      case 'Stickfigure Tools' when sel != null:
+        // hold: with the figures joined to it
+        return ('Delete stickfigure', () => _cmd({'op': 'delete_here'}), () => _cmd({'op': 'delete_here', 'joined': true}));
+      case 'Segment Tools' when sel != null && _segAnyChanged(sel):
+        return (
+          sel['defaults'] is Map ? 'Reset this segment' : 'Reset thickness and length',
+          () {
+            if (sel['defaults'] is Map) {
+              _cmd({'op': 'reset_segment'});
+            } else {
+              final d = _segDefaults(sel);
+              _cmd({'op': 'segment', 'thickness': d['thickness']});
+              if (d['length'] != null) _cmd({'op': 'node', 'length': d['length']});
+            }
+          },
+          null
+        );
+      case 'Pose' when sel != null && ((sel['pose'] as Map?)?['start'] as num? ?? 0) > 0:
+        return ('Delete this pose', () => _cmd({'op': 'delete_pose'}), null);
+      case 'Frame Tools':
+        return ('Clear frame', () => _cmd({'op': 'clear_frame'}), null);
+    }
+    return null;
   }
 
   double _fitScale() {
@@ -3014,10 +3090,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     VoidCallback? when(bool ok, VoidCallback f) => ok ? f : null;
     final tweening = _st['tweening'] == true;
     final rows = <rw.Desc>[
-      rw.DInfo('Frame ${_frame + 1} of $_frames', '${_st['nodeCount'] ?? 0} nodes'),
-      const rw.DHint('Changes here apply to every layer at this moment.'),
+      rw.DHint('Changes here apply to every layer at this moment. (Frame ${_frame + 1} of $_frames, ${_st['nodeCount'] ?? 0} nodes.)'),
       rw.DButtons('Copy frame', () => _cmd({'op': 'copy_frame'}), b: 'Paste frame', onB: when(_st['frameCopied'] == true, () => _cmd({'op': 'paste_frame'}))),
-      rw.DButtons('Add frame', () => _cmd({'op': 'insert_frame'}), b: 'Delete frame', onB: when(_frames > 1, () => _cmd({'op': 'delete_frame'}))),
+      rw.DButtons('Add time here', () => _cmd({'op': 'add_time'}), b: 'Remove this frame', onB: when(_frames > 1, () => _cmd({'op': 'delete_frame'}))),
       rw.DSeg(const ['Halfway', 'A third in', 'A tenth in'], ['50', '33/67', '10/90'].indexOf(_tweenAt), label: 'Add an in-between', onSelect: (i) => setState(() {
             final v = ['50', '33/67', '10/90'][i];
             // tapping the chosen pair again: both, then the first, then the second
@@ -3026,16 +3101,17 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           })),
       rw.DWidget(GestureDetector(
         onLongPress: last ? null : _tweenCountPopup,
-        child: rw.renderDesc(rw.DButtons('Add tweened frame ($label)', when(!last, () => _cmd({'op': 'tween_add', 'at': at})), b: 'How it works', onB: _tweenHelp)),
+        child: rw.renderDesc(rw.DButtons(at.length == 1 && _tweenAt == '50' ? 'Add an in-between frame' : 'Add in-between frames ($label)', when(!last, () => _cmd({'op': 'tween_add', 'at': at})))),
       )),
+      rw.DWidget(Align(alignment: Alignment.centerRight, child: kit.WordButton('How in-betweens work', size: 12, onTap: _tweenHelp))),
       rw.DHint(last
           ? 'Tweened frames go between two frames.'
           : '${_tweenAt != '50' ? 'Tap ${_tweenAt.replaceAll('/', ' / ')} again to add only one of the two frames. ' : ''}Hold the button to add several evenly spaced frames.'),
       const rw.DTitle('Background'),
-      rw.DWidget(kit.PropRow('Colour', trailing: SizedBox(width: 180, child: _swatches(bgColor, (c) => _cmd({'op': 'frame_bg', 'color': c}))))),
+      rw.DWidget(kit.PropRow('Colour', trailing: _swatches(bgColor, (c) => _cmd({'op': 'frame_bg', 'color': c})))),
       rw.DTick('Use gradient', bgGradient, onChanged: (v) => _cmd({'op': 'frame_bg', 'useGradient': v})),
       if (bgGradient) ...[
-        rw.DWidget(kit.PropRow('Top colour', trailing: SizedBox(width: 180, child: _swatches(bgTop, (c) => _cmd({'op': 'frame_bg', 'gradient': c}))))),
+        rw.DWidget(kit.PropRow('Top colour', trailing: _swatches(bgTop, (c) => _cmd({'op': 'frame_bg', 'gradient': c})))),
         rw.DTick('Expand gradient', (_st['frameBg'] as Map?)?['expand'] == true, onChanged: (v) => _cmd({'op': 'frame_bg', 'expand': v})),
         const rw.DHint('Stretches the gradient taller: most of the stage is the gradient colour.'),
       ],
@@ -3259,25 +3335,25 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (pose == null) return [rw.renderDesc(const rw.DHint('This figure has no pose yet.'))];
     final start = (pose['start'] as num).toInt();
     final len = (pose['length'] as num).toInt();
-    final here = pose['here'] == true, last = pose['last'] == true;
+    final last = pose['last'] == true;
     final ease = pose['ease'] as String? ?? 'linear';
     final hold = ease == 'hold';
     void easing(String v) => _cmd({'op': 'easing', 'v': v, 'frame': start});
-    const eases = ['linear', 'in', 'out', 'smooth'];
+    // the board's four: even, slow end, slow both ends, bounce ("in": slow
+    // start, from older files, shows as even)
+    const eases = ['linear', 'out', 'smooth', 'bounce'];
     final rows = <rw.Desc>[
-      rw.DInfo(here ? 'Starts on this frame' : 'Started on frame ${start + 1}', last ? 'Lasts to the end' : '$len frame${len == 1 ? '' : 's'}'),
-      rw.DSeg(const ['Hold', 'Tween into it'], hold ? 0 : 1, label: 'Until the next pose', onSelect: (i) => easing(i == 0 ? 'hold' : 'linear')),
-      if (!hold) rw.DSeg(const ['Even', 'Slow start', 'Slow end', 'Slow both'], math.max(0, eases.indexOf(ease)), label: 'Ease', onSelect: (i) => easing(eases[i])),
-      rw.DStep('Length', '$len',
+      rw.DInfo(sel['name'] as String? ?? 'Figure', len == 1 ? 'frame ${start + 1}' : last ? 'frame ${start + 1} to the end' : 'frames ${start + 1} to ${start + len}'),
+      rw.DSeg(const ['Hold until the next pose', 'Tween into it'], hold ? 0 : 1, onSelect: (i) => easing(i == 0 ? 'hold' : 'linear')),
+      rw.DEase(math.max(0, eases.indexOf(ease)), enabled: !hold, onSelect: (i) => easing(eases[i])),
+      rw.DStep('Length in frames', '$len',
           onMinus: !last && len > 1 ? () => _cmd({'op': 'block_length', 'frames': len - 1}) : null,
           onPlus: () => _cmd({'op': 'block_length', 'frames': len + 1})),
-      if (last) const rw.DHint('The last pose lasts to the end of the animation; lengthening it makes the animation longer.'),
-      rw.DButtons('New pose here', here ? null : () => _cmd({'op': 'new_pose'}), b: 'Hold longer', onB: () => _cmd({'op': 'hold_longer'})),
-      const rw.DHint('A pose is this figure alone: the others keep theirs.'),
       rw.DButtons('Copy pose', () => _cmd({'op': 'copy_pose'}), b: 'Paste pose', onB: _st['pose'] == true ? () => _cmd({'op': 'paste_pose'}) : null),
     ];
     return [for (final d in rows) rw.renderDesc(d)];
   }
+
 
 
   // ---------------------------------------------------------------- effects
@@ -3392,36 +3468,17 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       };
     }
 
-    Widget row(String k, String label, bool shown, Map<String, Object?> remove) {
-      final open = _fxOpen == k;
-      final r = Container(
-        height: 40,
-        color: cCard,
-        child: Row(children: [
-          Expanded(
-            child: kit.Tap(
-              label: open ? 'Close $label settings' : '$label settings',
-              minSize: 0,
-              onTap: () => setState(() => _fxOpen = open ? null : k),
-              child: Align(alignment: Alignment.centerLeft, child: Text(label, style: TextStyle(color: shown ? cText : cSecondary, fontSize: 14, fontWeight: open ? FontWeight.w700 : FontWeight.w400))),
-            ),
-          ),
-          kit.Tap(
-            label: shown ? 'Hide $label' : 'Show $label',
-            minSize: 36,
-            onTap: () => k == 'wiggle' || k == 'swing' ? _cmd({'op': 'move_fx', 'kind': k, 'shown': !shown}) : _cmd({'op': 'filter', 'shown': {k: !shown}}),
-            child: Pictogram('eye', size: 18, color: shown ? const Color(0xFF9AA0A8) : const Color(0xFFD5D8DD)),
-          ),
-        ]),
-      );
-      return rw.SwipeActions(key: ValueKey('fx-$k'), actions: [rw.SwipeAction('Remove', () => _cmd(remove), danger: true)], child: r);
-    }
-
     return [
       rw.DTitle('Effects', onAdd: _openFxBrowser, addLabel: 'Add an effect'),
       if (list.isEmpty) const rw.DHint('No effects yet. They show while playing and in exports; FX in the timeline shows them while editing.'),
       for (final (k, label, shown, remove) in list) ...[
-        rw.DWidget(row(k, label, shown, remove)),
+        rw.DFx(label,
+            tag: _fxAnimated(sel, label),
+            shown: shown,
+            open: _fxOpen == k,
+            onTap: () => setState(() => _fxOpen = _fxOpen == k ? null : k),
+            onEye: () => k == 'wiggle' || k == 'swing' ? _cmd({'op': 'move_fx', 'kind': k, 'shown': !shown}) : _cmd({'op': 'filter', 'shown': {k: !shown}}),
+            onRemove: () => _cmd(remove)),
         if (_fxOpen == k) ...settings(k),
       ],
       if (list.isNotEmpty) rw.DButtons('Copy effects', () => _cmd({'op': 'copy_filters'}), b: 'Paste effects', onB: _st['filtersCopied'] == true ? () => _cmd({'op': 'paste_filters'}) : null),
@@ -3429,6 +3486,17 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       const rw.DTitle('Blending'),
       rw.DSlider('Opacity', '${(v('opacity', 1) * 100).round()}%', v('opacity', 1), onChanged: (x) => filter({'opacity': (x * 100).round() / 100})),
     ];
+  }
+
+  /// "strength animated": what of an effect changes over time (the selected
+  /// figure's row in the timeline lists its animated values).
+  String? _fxAnimated(Map<String, dynamic> sel, String label) {
+    final row = ((_st['rows'] as List?) ?? const []).cast<Map>().where((r) => r['id'] == sel['layer']).firstOrNull;
+    final parts = [
+      for (final p in ((row?['props'] as List?) ?? const []).cast<Map>())
+        if ('${p['name']}'.startsWith('$label ')) '${p['name']}'.substring(label.length + 1),
+    ];
+    return parts.isEmpty ? null : '${parts.join(', ')} animated';
   }
 
   /// The effects browser (REDESIGN §4): inside Properties, "‹ Properties"
@@ -3522,27 +3590,32 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   List<Widget> _stickfigureTools(Map<String, dynamic> sel) {
     final scale = (sel['scale'] as num?)?.toDouble() ?? 1;
     final angle = (sel['figAngle'] as num?)?.toDouble() ?? 0;
-    final pos = sel['layerPos'], count = sel['figureCount'];
     final stretch = _opts['stretch'] == true;
     final joining = _st['joining'] == true;
+    const blends = ['NORMAL', 'MULTIPLY', 'SCREEN', 'ADD'];
+    const blendNames = ['Normal', 'Multiply', 'Screen', 'Add'];
+    final blend = math.max(0, blends.indexOf('${sel['blend'] ?? 'NORMAL'}'));
     final rows = <rw.Desc>[
+      // the round 10 board, top to bottom (the figure editor link stays "Edit
+      // segments" until editing makes a new figure, J1 / D12)
       rw.DName(sel['name'] as String? ?? 'Figure', link: 'Edit segments ›', onLink: () => _cmd({'op': 'build'})),
-      rw.DWidget(kit.PropRow('Colour', trailing: SizedBox(width: 180, child: _swatches((sel['figColor'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'figure', 'color': c}))))),
+      rw.DWidget(kit.PropRow('Colour', trailing: _swatches((sel['figColor'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'figure', 'color': c})))),
       ..._effectRows(sel),
+      rw.DLink('Blend', blendNames[blend], onTap: () => _cmd({'op': 'blend', 'v': blends[(blend + 1) % blends.length]})),
       const rw.DTitle('Stickfigure Tools'),
-      rw.DButtons('Previous figure', () => _cmd({'op': 'cycle_figure', 'dir': -1}), b: 'Next figure', onB: () => _cmd({'op': 'cycle_figure', 'dir': 1})),
       rw.DButtons('Flip sideways', () => _cmd({'op': 'flip_figure', 'h': true}), b: 'Flip over', onB: () => _cmd({'op': 'flip_figure', 'h': false})),
       rw.DButtons('Send back', () => _cmd({'op': 'layer_order', 'forward': false}), b: 'Bring forward', onB: () => _cmd({'op': 'layer_order', 'forward': true})),
-      rw.DInfo('Place in the stack', '$pos of $count'),
       rw.DStep('Scale', scale.toStringAsFixed(2), onMinus: scale > 0.05 ? () => _cmd({'op': 'figure', 'scale': math.max(0.05, scale - 0.05)}) : null, onPlus: () => _cmd({'op': 'figure', 'scale': scale + 0.05})),
-      rw.DWidget(kit.PropRow('Angle', secondary: '${angle.round()}°', trailing: kit.WordButton('Turn 45°', size: 13, onTap: () => _cmd({'op': 'figure', 'turn': 45})))),
-      rw.DButtons('Center on stage', () => _cmd({'op': 'figure', 'center': true})),
+      rw.DButtons(angle.round() == 0 ? 'Turn 45°' : 'Turn 45° (now ${angle.round()}°)', () => _cmd({'op': 'figure', 'turn': 45}), b: 'Center on stage', onB: () => _cmd({'op': 'figure', 'center': true})),
       rw.DSeg(const ['Rotates', 'Stretches'], stretch ? 1 : 0, label: 'Dragging a joint', onSelect: (i) => _cmd({'op': 'set', 'k': 'stretch', 'v': i == 1})),
       if (joining) ...[
         const rw.DHint('Tap a joint on another figure to join this one to it.'),
         rw.DButtons('Cancel joining', () => _cmd({'op': 'join_cancel'})),
       ] else if (sel['joinedTo'] != null)
-        rw.DWidget(kit.PropRow('Joined to ${sel['joinedTo']}', trailing: kit.WordButton('Let go', size: 13, onTap: () => _cmd({'op': 'unjoin'}))))
+        rw.DWidget(kit.PropRow('Joined to', trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text('${sel['joinedTo']}', style: const TextStyle(color: cText, fontSize: 14, fontWeight: FontWeight.w600)),
+          kit.WordButton('Let go', size: 13, onTap: () => _cmd({'op': 'unjoin'})),
+        ])))
       else
         rw.DLink('Joined to', 'Nothing', onTap: () => _cmd({'op': 'join'})),
       rw.DTick('Locked', sel['locked'] == true, onChanged: (v) => _cmd({'op': 'figure', 'locked': v})),
@@ -3550,7 +3623,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       const rw.DTitle('Tweening'),
       rw.DTick('Stay on stage between poses', sel['keepInTween'] != false, onChanged: (v) => _cmd({'op': 'figure', 'keepInTween': v})),
       rw.DTick('Blend colours between poses', sel['tweenColors'] != false, onChanged: (v) => _cmd({'op': 'figure', 'tweenColors': v})),
-      const rw.DHint('These apply when the animation tweens. Stay: the figure stays during the in-betweens before a frame it is not on. Blend: colours change gradually instead of at the next frame.'),
       const rw.DTitle('Copy and paste'),
       rw.DWidget(GestureDetector(
         onLongPress: _pasteLayeringPopup,
@@ -3561,8 +3633,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         final ok = await _ask('Convert to movieclip?', 'This figure and the figures joined to it become a movieclip that plays their animation in a loop, in their place. It can be broken apart again.', ['Cancel', 'Convert']);
         if (ok == 'Convert') _cmd({'op': 'to_movieclip'});
       }),
-      rw.DWidget(GestureDetector(onLongPress: () => _cmd({'op': 'delete_here', 'joined': true}), child: rw.renderDesc(rw.DDanger('Delete stickfigure', () => _cmd({'op': 'delete_here'}))))),
-      const rw.DHint('Removes it from this frame. Hold: with the figures joined to it.'),
+      const rw.DHint('Delete stickfigure (below) removes it from this frame; hold it to take the figures joined to it too.'),
     ];
     return [for (final d in rows) rw.renderDesc(d)];
   }
@@ -3979,21 +4050,22 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       );
 
   /// A colour control: the current colour; a tap opens the colour picker.
+  /// A colour choice as on the round 10 boards: seven presets (the current
+  /// one ringed) and a rainbow "more" for the full picker (ringed when the
+  /// colour is none of the presets). The alpha of the current colour is kept.
+  static const _presets = [0x9B1C2E, 0x2160A8, 0x2A2B30, 0xEDB98A, 0x1E9E55, 0xF2A93B, 0xFFFFFF];
   Widget _swatches(int current, void Function(int) pick) {
-    final hex = '#${(current >> 8).toRadixString(16).padLeft(6, '0').toUpperCase()}';
-    return GestureDetector(
-      onTap: () => _colorPicker(current, pick),
-      child: Row(children: [
-        Container(
-          width: 56,
-          height: 28,
-          decoration: BoxDecoration(color: _rgba(current), borderRadius: BorderRadius.circular(4), border: Border.all(color: cSelected)),
-        ),
-        const SizedBox(width: 8),
-        Text(hex, style: const TextStyle(color: cSecondary, fontSize: 12, fontFeatures: [ui.FontFeature.tabularFigures()])),
-        const Spacer(),
-        const Icon(Icons.palette_outlined, size: 18, color: cSecondary),
-      ]),
+    final rgb = current >> 8, alpha = current & 0xff == 0 ? 0xff : current & 0xff;
+    final preset = _presets.contains(rgb);
+    return Align(
+      alignment: Alignment.centerRight,
+      child: kit.SwatchRow(
+        [for (final c in _presets) Color(0xFF000000 | c)],
+        preset ? Color(0xFF000000 | rgb) : null,
+        moreOn: !preset,
+        onPick: (c) => pick(((c.toARGB32() & 0xffffff) << 8) | alpha),
+        onMore: () => _colorPicker(current, pick),
+      ),
     );
   }
 
