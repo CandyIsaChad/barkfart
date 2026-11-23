@@ -1548,7 +1548,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final dock = (screen.width >= 1200 && screen.height >= 900) || Platform.environment['BARKFART_DOCK'] == '1';
     // screen padding from the settings (notches, rounded corners)
     final pad = MediaQuery.paddingOf(context) + EdgeInsets.only(left: AppSettings.number('padLeft').toDouble(), right: AppSettings.number('padRight').toDouble());
-    final stripH = big ? 112.0 : 92.0;
     final leftHand = AppSettings.flag('leftHand');
     return Scaffold(
       backgroundColor: cSurround,
@@ -1560,13 +1559,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           if (!_fsNow) _leftRail(pad, leftHand),
           Expanded(
             child: Column(children: [
-              if (!_fsNow && !_hidePanels && _st['building'] != null)
-              Container(
-                height: stripH,
-                color: cPanel,
-                padding: EdgeInsets.only(right: leftHand ? 0 : pad.right, left: leftHand ? pad.left : 0),
-                child: _buildBar(),
-              ),
               Expanded(
                 child: Padding(
                   padding: EdgeInsets.only(right: leftHand ? 0 : pad.right, left: leftHand ? pad.left : 0),
@@ -1592,11 +1584,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         if (!_fsNow && !_hidePanels)
           Padding(
             padding: EdgeInsets.only(left: pad.left, right: pad.right, bottom: pad.bottom),
-            child: Column(children: [
-              _controlBar(),
-              if (_st['building'] == null) _previewRow(),
-              if (_layersOpen || _st['building'] != null) _framesBar(),
-            ]),
+            // the figure editor puts its shape shelf where the timeline is (J2)
+            child: _st['building'] != null
+                ? _shapeShelf()
+                : Column(children: [
+                    _controlBar(),
+                    _previewRow(),
+                    if (_layersOpen) _framesBar(),
+                  ]),
           ),
         ]),
       ),
@@ -1728,69 +1723,58 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     });
   }
 
-  static const _drawTools = [
-    ('none', 'None', Icons.near_me_outlined),
-    ('square', 'Segment', Icons.horizontal_rule),
-    ('line', 'Rounded', Icons.remove),
-    ('circle', 'Circle', Icons.circle_outlined),
-    ('ellipse', 'Ellipse', Icons.egg_outlined),
-    ('triangle', 'Triangle', Icons.change_history),
-    ('trapezoid', 'Trapezoid', Icons.filter_list),
-    ('polygon', 'Polygon', Icons.pentagon_outlined),
-    ('polyfill', 'Polyfill', Icons.format_shapes),
-  ];
-
-  Widget _buildBar() {
-    final building = _st['building'] as Map<String, dynamic>;
+  /// The figure editor's shape shelf (J2, FigureEditor board): what a drag
+  /// from a joint draws, one picked at a time; Select draws nothing.
+  Widget _shapeShelf() {
     final tool = _st['drawTool'] as String? ?? 'none';
-    // phones: a narrower title without the hint, so the tools keep room
-    return LayoutBuilder(builder: (context, box) {
-    final narrow = box.maxWidth < 560;
-    return Row(children: [
-      SizedBox(width: narrow ? 8 : 12),
-      SizedBox(
-        width: narrow ? 84 : 170,
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(narrow ? '${building['name']}' : 'Editing ${building['name']}', maxLines: narrow ? 2 : 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: cText, fontSize: narrow ? 12 : 15, fontWeight: FontWeight.w600)),
-          if (!narrow) _hint('Changes apply on every frame. Pick a draw tool, then drag from a joint.'),
-        ]),
-      ),
-      const SizedBox(width: 8),
-      // Draw Tools: one at a time; a tool stays picked for the next drag
-      Expanded(
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(children: [
-            for (final (id, label, icon) in _drawTools)
-              Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: Material(
-                  color: (id == 'polyfill' ? _st['polyfill'] != null : tool == id && _st['polyfill'] == null) ? cAccent : cControl,
-                  borderRadius: BorderRadius.circular(4),
-                  child: InkWell(
-                    // Polyfill: a new polyfill anchored at the selected joint (Polyfill Tools)
-                    onTap: () => id == 'polyfill'
-                        ? (_sel == null ? _say('Tap a joint first: the polyfill is drawn right before it.') : _cmd({'op': 'polyfill_new'}))
-                        : _cmd({'op': 'draw_tool', 'shape': id}),
-                    child: SizedBox(
-                      width: 62,
-                      height: 52,
-                      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                        Icon(icon, size: 20, color: cText),
-                        Text(label, style: const TextStyle(color: cText, fontSize: 10)),
-                      ]),
-                    ),
-                  ),
-                ),
-              ),
+    const tools = [
+      ('none', 'Select', 'select'),
+      ('square', 'Segment', 'segment'),
+      ('line', 'Rounded', 'rounded'),
+      ('circle', 'Circle', 'circle'),
+      ('ellipse', 'Ellipse', 'ellipse'),
+      ('triangle', 'Triangle', 'triangle'),
+      ('trapezoid', 'Trapezoid', 'trapezoid'),
+      ('polygon', 'Polygon', 'polygon'),
+      ('polyfill', 'Polyfill', 'polyfill'),
+    ];
+    Widget tile(String id, String label, String glyph) {
+      final on = id == 'polyfill' ? _st['polyfill'] != null : tool == id && _st['polyfill'] == null;
+      return kit.Tap(
+        label: label,
+        minSize: 0,
+        onTap: () => id == 'polyfill'
+            ? (_sel == null ? _say('Tap a joint first: the polyfill is drawn right before it.') : _cmd({'op': 'polyfill_new'}))
+            : _cmd({'op': 'draw_tool', 'shape': id}),
+        child: Container(
+          width: 74,
+          height: 64,
+          decoration: BoxDecoration(color: on ? const Color(0xFFE8F0FA) : null, borderRadius: BorderRadius.circular(12)),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            CustomPaint(size: const Size(40, 26), painter: ShapeGlyph(glyph, on ? cAccent : cInk2b)),
+            const SizedBox(height: 4),
+            Text(label, style: TextStyle(color: on ? cAccent : cSecondary, fontSize: 12, fontWeight: on ? FontWeight.w600 : FontWeight.w400)),
           ]),
         ),
-      ),
-      // editing a copy ends with the header's Cancel or Save as new figure (D12)
-      if (_st['copyEdit'] == null) SizedBox(width: narrow ? 60 : 96, child: _Btn('Done', accent: true, onTap: () => _cmd({'op': 'build_done'}))),
-      const SizedBox(width: 8),
-    ]);
-    });
+      );
+    }
+
+    return Container(
+      height: 76,
+      decoration: const BoxDecoration(color: cCard, border: Border(top: BorderSide(color: cLine))),
+      child: Row(children: [
+        Expanded(
+          child: Center(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [for (final (id, label, glyph) in tools) Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: tile(id, label, glyph))]),
+            ),
+          ),
+        ),
+        // editing in place (scripts and tests) ends with Done; a copy ends in the header
+        if (_st['copyEdit'] == null) Padding(padding: const EdgeInsets.only(right: 10), child: kit.WordButton('Done', strong: true, onTap: () => _cmd({'op': 'build_done'}))),
+      ]),
+    );
   }
 
   // ---------------------------------------------------------------- filmstrip and grid
@@ -5678,6 +5662,92 @@ class _NubLeft extends CustomPainter {
   void paint(Canvas canvas, Size size) => canvas.drawPath(Path()..moveTo(size.width, 0)..lineTo(0, size.height / 2)..lineTo(size.width, size.height)..close(), Paint()..color = cHint);
   @override
   bool shouldRepaint(_NubLeft o) => false;
+}
+
+/// The figure editor's shape glyphs (FigureEditor board): on the shelf, in
+/// the Parts list and on the Shape page. Drawn in a 40 x 26 box.
+class ShapeGlyph extends CustomPainter {
+  ShapeGlyph(this.kind, this.color);
+  final String kind;
+  final Color color;
+  @override
+  void paint(Canvas canvas, Size size) {
+    final (w, h) = (size.width, size.height);
+    final cy = h / 2, x0 = w * 0.18, x1 = w * 0.82, t = h * 0.36;
+    final fill = Paint()..color = color;
+    switch (kind) {
+      case 'select':
+        canvas.drawPath(
+            Path()
+              ..moveTo(w / 2 - 6, cy - 10)
+              ..relativeLineTo(12, 9)
+              ..relativeLineTo(-5.2, 1.2)
+              ..relativeLineTo(3, 6)
+              ..relativeLineTo(-2.6, 1.2)
+              ..relativeLineTo(-3, -6)
+              ..relativeLineTo(-4.2, 3.4)
+              ..close(),
+            fill);
+      case 'segment':
+        canvas.drawRect(Rect.fromLTWH(x0, cy - t / 2, x1 - x0, t), fill);
+      case 'rounded':
+        canvas.drawLine(Offset(x0 + t / 2, cy), Offset(x1 - t / 2, cy), Paint()
+          ..color = color
+          ..strokeWidth = t
+          ..strokeCap = StrokeCap.round);
+      case 'circle':
+        canvas.drawCircle(Offset(w / 2, cy), h * 0.36, fill);
+      case 'ellipse':
+        canvas.drawOval(Rect.fromCenter(center: Offset(w / 2, cy), width: w * 0.6, height: h * 0.52), fill);
+      case 'triangle':
+        canvas.drawPath(Path()..moveTo(w / 2, cy - h * 0.34)..lineTo(w / 2 + h * 0.4, cy + h * 0.3)..lineTo(w / 2 - h * 0.4, cy + h * 0.3)..close(), fill);
+      case 'trapezoid':
+        canvas.drawPath(Path()..moveTo(x0, cy - t * 0.7)..lineTo(x1, cy - t * 0.3)..lineTo(x1, cy + t * 0.3)..lineTo(x0, cy + t * 0.7)..close(), fill);
+      case 'polygon':
+        final p = Path();
+        for (var i = 0; i < 5; i++) {
+          final a = -math.pi / 2 + i * 2 * math.pi / 5;
+          final q = Offset(w / 2 + math.cos(a) * h * 0.38, cy + math.sin(a) * h * 0.38);
+          i == 0 ? p.moveTo(q.dx, q.dy) : p.lineTo(q.dx, q.dy);
+        }
+        canvas.drawPath(p..close(), fill);
+      case 'polyfill':
+        canvas.drawPath(
+            Path()
+              ..moveTo(w * 0.22, cy + h * 0.28)
+              ..quadraticBezierTo(w * 0.3, cy - h * 0.4, w * 0.55, cy - h * 0.3)
+              ..quadraticBezierTo(w * 0.8, cy - h * 0.2, w * 0.8, cy + h * 0.2)
+              ..close(),
+            Paint()..color = color.withValues(alpha: 0.85));
+        for (final o in [Offset(w * 0.22, cy + h * 0.28), Offset(w * 0.8, cy + h * 0.2)]) {
+          canvas.drawCircle(o, 2, Paint()..color = cCard);
+          canvas.drawCircle(o, 2, Paint()
+            ..color = color
+            ..style = PaintingStyle.stroke);
+        }
+      case 'connector':
+        canvas.drawPath(Path()..moveTo(w / 2, cy - 6)..lineTo(w / 2 + 6, cy)..lineTo(w / 2, cy + 6)..lineTo(w / 2 - 6, cy)..close(), Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2);
+      case 'mirror':
+        final dash = Paint()
+          ..color = color
+          ..strokeWidth = 1.6;
+        for (var y = cy - h * 0.42; y < cy + h * 0.42; y += 5) {
+          canvas.drawLine(Offset(w / 2, y), Offset(w / 2, math.min(y + 2.5, cy + h * 0.42)), dash);
+        }
+        final arm = Paint()
+          ..color = color
+          ..strokeWidth = t * 0.7
+          ..strokeCap = StrokeCap.round;
+        canvas.drawLine(Offset(w / 2 - 4, cy - 7), Offset(w / 2 - 14, cy + 6), arm);
+        canvas.drawLine(Offset(w / 2 + 4, cy - 7), Offset(w / 2 + 14, cy + 6), arm);
+    }
+  }
+
+  @override
+  bool shouldRepaint(ShapeGlyph o) => o.kind != kind || o.color != color;
 }
 
 /// A sound clip's waveform (M5): rounded bars, as on the round 10 board.
