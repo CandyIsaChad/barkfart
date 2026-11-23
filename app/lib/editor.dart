@@ -3947,6 +3947,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         if (n != null && n.trim().isNotEmpty) _cmd({'op': 'group_set', 'group': gid, 'name': n.trim()});
       }),
       const rw.DHint('A group keeps layers together in the list. Moving it moves everything in it.'),
+      ..._effectRows({'filters': g['filters'], 'layer': gid}, group: true),
       const rw.DTitle('Blending'),
       rw.DSlider('Opacity', '${(opacity * 100).round()}%', opacity, onChanged: (x) => _cmd({'op': 'group_set', 'group': gid, 'opacity': (x * 100).round() / 100})),
       const rw.DTitle('Group'),
@@ -4073,7 +4074,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// The Effects section of the Stickfigure page (D10): each effect the
   /// figure has, with an eye; tapping one opens its settings under it, a
   /// swipe removes it. Then Blending (opacity).
-  List<rw.Desc> _effectRows(Map<String, dynamic> sel) {
+  List<rw.Desc> _effectRows(Map<String, dynamic> sel, {bool group = false}) {
     final f = (sel['filters'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
     final on = (f['on'] as Map?) ?? const {};
     final hidden = ((f['hidden'] as List?) ?? const []).toSet();
@@ -4084,7 +4085,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       for (final (k, label, _, off) in [..._fxLook, ..._fxEdges])
         if (on[k] == true) (k, label, !hidden.contains(k), {'op': 'filter', ...off}),
       for (final k in const ['wiggle', 'swing'])
-        if (f[k] is Map) (k, k == 'wiggle' ? 'Wiggle' : 'Swing', (f[k] as Map)['shown'] != false, {'op': 'move_fx', 'kind': k, 'on': false}),
+        if (!group && f[k] is Map) (k, k == 'wiggle' ? 'Wiggle' : 'Swing', (f[k] as Map)['shown'] != false, {'op': 'move_fx', 'kind': k, 'on': false}),
     ];
     List<rw.Desc> settings(String k) {
       Map m(String key) => (f[key] as Map?) ?? const {};
@@ -4129,7 +4130,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
     return [
       rw.DTitle('Effects', onAdd: _openFxBrowser, addLabel: 'Add an effect'),
-      if (list.isEmpty) const rw.DHint('No effects yet. They show while playing and in exports; FX in the timeline shows them while editing.'),
+      if (list.isEmpty) rw.DHint(group ? 'No effects yet. An effect here works on everything in the group, drawn together.' : 'No effects yet. They show while playing and in exports; FX in the timeline shows them while editing.'),
       for (final (k, label, shown, remove) in list) ...[
         rw.DFx(label,
             tag: _fxAnimated(sel, label),
@@ -4140,10 +4141,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             onRemove: () => _cmd(remove)),
         if (_fxOpen == k) ...settings(k),
       ],
-      if (list.isNotEmpty) rw.DButtons('Copy effects', () => _cmd({'op': 'copy_filters'}), b: 'Paste effects', onB: _st['filtersCopied'] == true ? () => _cmd({'op': 'paste_filters'}) : null),
-      if (list.isEmpty && _st['filtersCopied'] == true) rw.DButtons('Paste effects', () => _cmd({'op': 'paste_filters'})),
-      const rw.DTitle('Blending'),
-      rw.DSlider('Opacity', '${(v('opacity', 1) * 100).round()}%', v('opacity', 1), onChanged: (x) => filter({'opacity': (x * 100).round() / 100})),
+      if (!group) ...[
+        if (list.isNotEmpty) rw.DButtons('Copy effects', () => _cmd({'op': 'copy_filters'}), b: 'Paste effects', onB: _st['filtersCopied'] == true ? () => _cmd({'op': 'paste_filters'}) : null),
+        if (list.isEmpty && _st['filtersCopied'] == true) rw.DButtons('Paste effects', () => _cmd({'op': 'paste_filters'})),
+        const rw.DTitle('Blending'),
+        rw.DSlider('Opacity', '${(v('opacity', 1) * 100).round()}%', v('opacity', 1), onChanged: (x) => filter({'opacity': (x * 100).round() / 100})),
+      ],
     ];
   }
 
@@ -4177,7 +4180,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _fxOpen = k;
         _fxSearch = '';
       });
-      _jumpTo('Stickfigure Tools');
+      _jumpTo(_st['group'] != null ? 'Group Tools' : 'Stickfigure Tools');
     }
 
     Widget tile(String label, Widget picture, VoidCallback? onTap) => Opacity(
@@ -4213,7 +4216,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final moves = [
       for (final (k, l, icon) in _fxMovement)
         if (match(l))
-          tile(l, Center(child: Pictogram(icon, size: 30, color: cAccent, stroke: 1.8)), k == 'wiggle' || k == 'swing' ? () => pick(k, {'op': 'move_fx', 'kind': k, 'on': true}) : null),
+          // movement moves a figure's joints: not for a group
+          tile(l, Center(child: Pictogram(icon, size: 30, color: cAccent, stroke: 1.8)), (k == 'wiggle' || k == 'swing') && _st['group'] == null ? () => pick(k, {'op': 'move_fx', 'kind': k, 'on': true}) : null),
     ];
     Widget title(String t) => Padding(padding: const EdgeInsets.only(top: 12, bottom: 6), child: Text(t, textAlign: TextAlign.center, style: const TextStyle(color: cTitle, fontSize: 15, fontWeight: FontWeight.w700)));
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [

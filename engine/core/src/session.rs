@@ -2855,6 +2855,12 @@ impl Session {
                 let c2 = c.clone();
                 self.step("Background colour", move |s| set_frame_bg(s, &sym, t, &c2));
             }
+            "filter" if self.selected_group.is_some() && self.sel_layer().is_none() => {
+                // K / D33: the selected group's effects (static values)
+                let gid = self.selected_group.clone().expect("a group");
+                let c2 = c.clone();
+                self.step("Group effects", move |s| crate::edit::filters::apply_group(s, &sym, &gid, &c2));
+            }
             "filter" => {
                 if let Some(l) = self.sel_layer() {
                     let c2 = c.clone();
@@ -3515,7 +3521,7 @@ impl Session {
             "mode": match self.mode { Mode::Figure => "figure", Mode::All => "all", Mode::Camera => "camera" },
             "handles": handles, "selected": sel, "figures": figures, "rows": rows, "multi": multi,
             // H1: the FX toggle shows only when something has effects
-            "hasEffects": p.root().is_some_and(|r| r.layers.iter().any(|l| crate::edit::filters::any_active(l))), "camera": cam, "movieclip": movieclip, "picture": picture, "motionPath": motion_path,
+            "hasEffects": p.root().is_some_and(|r| r.layers.iter().any(|l| crate::edit::filters::any_active(l)) || r.groups.iter().any(|g| crate::edit::filters::stack_active(&g.effects))), "camera": cam, "movieclip": movieclip, "picture": picture, "motionPath": motion_path,
             // J3: the Parts list while editing a figure: front first, each
             // segment (shape, colour, its number) and each polyfill just behind
             // its anchor; the main joint is the figure itself
@@ -3567,6 +3573,7 @@ impl Session {
                 let members: Vec<&std::sync::Arc<Layer>> = r.layers.iter().rev().filter(|l| l.group.as_deref() == Some(gid.as_str())).collect();
                 Some(json!({"id": g.id, "name": g.name, "opacity": round2(g.opacity), "open": g.open,
                     "effects": g.effects.chain().into_iter().map(|e| e.ty.clone()).collect::<Vec<_>>(),
+                    "filters": crate::edit::filters::group_state(p, &p.root_symbol, gid),
                     "members": members.iter().map(|l| json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone())})).collect::<Vec<_>>()}))
             }),
             "groups": p.root().map(|r| r.groups.iter().map(|g| json!({

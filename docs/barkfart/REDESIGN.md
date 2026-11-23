@@ -710,8 +710,11 @@ until a dependency fetch is approved); Script layers; emitters.
   with its chevron and the members 20 in, the summary bar with a tick at
   every member pose, the Group page (name and Rename, opacity, Send back /
   Bring forward, Ungroup, Make movieclip, "Delete group" pinned) and Group
-  on the several-selected page. Not yet: group effects in the browser,
-  dragging rows in and out of a group.
+  on the several-selected page. Group effects: the effects browser aims at
+  the selected group (`filter` with a group selected, static values; no
+  Movement, which moves joints), the FX toggle counts them. Membership
+  changes through Group and Ungroup (the timeline's rows don't drag; only
+  the figure editor's Parts list does).
 
 ## 8. Designed in round 10 (2026-11-23)
 

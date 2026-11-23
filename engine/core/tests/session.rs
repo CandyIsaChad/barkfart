@@ -5461,3 +5461,42 @@ fn a_group_has_a_folder_row_a_page_and_moves_as_one() {
     let rows = st["rows"].as_array().unwrap();
     assert_eq!(rows.iter().find(|r| r["id"] == gid.as_str()).unwrap()["open"], false);
 }
+
+#[test]
+fn a_group_takes_effects_with_static_values() {
+    // D33: the effects browser aimed at the selected group; one step; no keys
+    let mut s = animated();
+    s.command(&json!({"op": "add_figure", "kind": "ball"}));
+    let ids: Vec<String> = s.project().root().unwrap().layers.iter().filter(|l| l.as_figure().is_some()).map(|l| l.id.clone()).collect();
+    let st = s.command(&json!({"op": "group", "layers": ids}));
+    let gid = st["groups"][0]["id"].as_str().unwrap().to_string();
+    s.command(&json!({"op": "select", "group": gid}));
+    s.command(&json!({"op": "frame", "i": 2}));
+    let st = s.command(&json!({"op": "filter", "glow": 0xffc83dffu32, "glowAmount": 1.0}));
+    assert_eq!(st["undo"], "Group effects");
+    assert_eq!(st["group"]["filters"]["on"]["glow"], true, "{}", st["group"]["filters"]);
+    assert_eq!(st["hasEffects"], true, "the FX toggle shows for a group's effects");
+    let r = s.project().root().unwrap();
+    let g = r.groups.iter().find(|g| g.id == gid).unwrap();
+    assert!(!g.effects.is_empty());
+    for e in g.effects.chain() {
+        assert!(e.mix.track.is_empty() && e.params.values().all(|q| q.track.is_empty()), "static values only");
+    }
+    assert!(r.layers.iter().all(|l| l.effects.is_empty()), "the members' own effects are untouched");
+    // the group is drawn as one layer with the glow, on every frame
+    for f in [0, 3] {
+        let p = s.project();
+        let list = barkfart_core::tess::layered(&barkfart_core::eval::evaluate(p, &p.root_symbol, f as f64 / p.settings.fps as f64), None);
+        assert!(format!("{list:?}").contains(&format!("S1/{gid}")), "frame {f}");
+    }
+    // saved and read back
+    let text = codec::encode(s.project());
+    assert_eq!(codec::encode(&codec::decode(&text).unwrap()), text);
+    // off again, and undo
+    let st = s.command(&json!({"op": "filter", "glowAmount": 0.0}));
+    assert_ne!(st["group"]["filters"]["on"]["glow"], true);
+    s.command(&json!({"op": "undo"}));
+    let st = s.command(&json!({"op": "undo"}));
+    assert_ne!(st["group"]["filters"]["on"]["glow"], true);
+    assert!(s.project().root().unwrap().groups[0].effects.is_empty(), "two undos: as before");
+}

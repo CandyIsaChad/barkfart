@@ -161,6 +161,40 @@ pub fn apply(st: &mut State, sym: &str, id: &str, c: &J, t: f64) -> EditResult<(
     if l.as_figure().is_none() {
         return fail("not a figure");
     }
+    apply_to(l, n, fps, c, t)
+}
+
+/// K / D33: the same controls on a group's effect stack. Group effects hold
+/// static values (keying is off whatever the toggle says); "opacity" is the
+/// group's own and goes through `group_ops::set`.
+pub fn apply_group(st: &mut State, sym: &str, gid: &str, c: &J) -> EditResult<()> {
+    let (n, fps) = (super::frame_ops::frame_count(st), fps_of(st));
+    let Some(s) = st.project.symbol_mut(sym) else { return fail("no symbol") };
+    let Some(g) = s.groups.iter_mut().find(|g| g.id == gid) else { return fail("There is no such group.") };
+    let mut scratch = Layer::adjustment(gid, None);
+    scratch.effects = std::mem::take(&mut g.effects);
+    let mut c = c.clone();
+    if let Some(m) = c.as_object_mut() {
+        m.remove("opacity");
+    }
+    STATIC.with(|x| x.set(true));
+    let r = apply_to(&mut scratch, n, fps, &c, 0.0);
+    STATIC.with(|x| x.set(false));
+    g.effects = scratch.effects;
+    r
+}
+
+/// K / D33: a group's effects as the Effects list reads them.
+pub fn group_state(p: &Project, sym: &str, gid: &str) -> J {
+    let Some(g) = p.symbol(sym).and_then(|s| s.groups.iter().find(|g| g.id == gid)) else {
+        return serde_json::json!({});
+    };
+    let mut scratch = Layer::adjustment(gid, None);
+    scratch.effects = g.effects.clone();
+    state_of(p, &scratch, 0.0)
+}
+
+fn apply_to(l: &mut Layer, n: i32, fps: f64, c: &J, t: f64) -> EditResult<()> {
     // H2: the Effects list's eye: hidden keeps the settings and keys
     if let Some(m) = c["shown"].as_object() {
         for (kind, v) in m {
@@ -392,6 +426,10 @@ pub fn state(p: &Project, sym: &str, id: &str, t: f64) -> J {
     let Some(l) = p.symbol(sym).and_then(|s| s.layer(id)) else {
         return serde_json::json!({});
     };
+    state_of(p, l, t)
+}
+
+fn state_of(p: &Project, l: &Layer, t: f64) -> J {
     let mut r = Resolver::new(p);
     let num = |r: &mut Resolver, e: Option<&EffectNode>, name: &str, d: f32| e.and_then(|e| e.params.get(name)).map(|q| r.f(q, t)).unwrap_or(d);
     let col = |r: &mut Resolver, e: Option<&EffectNode>, name: &str, d: u32| {
@@ -472,6 +510,11 @@ fn round2(v: f32) -> f64 {
 /// its node silent, which does not count. Read from the keys, not frame by
 /// frame, so it stays cheap.
 pub fn any_active(l: &Layer) -> bool {
+    stack_active(&l.effects)
+}
+
+/// The same for any effect stack (a group's, D33).
+pub fn stack_active(effects: &EffectStack) -> bool {
     let values = |q: &Property| -> Vec<f32> {
         let mut v: Vec<f32> = q.track.keys().iter().map(|k| k.value.f()).collect();
         if v.is_empty() {
@@ -479,7 +522,7 @@ pub fn any_active(l: &Layer) -> bool {
         }
         v
     };
-    l.effects.nodes.values().any(|e| {
+    effects.nodes.values().any(|e| {
         if !values(&e.mix).iter().any(|m| *m > 0.0) {
             return false;
         }
