@@ -2193,6 +2193,7 @@ fn every_command_undoes_and_redoes_exactly() {
         json!({"op": "reset_segment"}), json!({"op": "break_off"}), json!({"op": "new_pose"}), json!({"op": "hold_longer"}),
         json!({"op": "block_length", "frames": 3}), json!({"op": "move_block", "to": 1}),
         json!({"op": "each", "label": "Flip figures", "cmd": {"op": "flip_figure", "h": true}}), json!({"op": "easing", "v": "hold", "block": true}),
+        json!({"op": "move_fx", "kind": "wiggle", "on": true}), json!({"op": "move_fx", "kind": "swing", "on": true, "amount": 20}),
     ];
     let text = |s: &Session| codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
     let mut failures = Vec::new();
@@ -4806,4 +4807,43 @@ fn several_figures_change_together_in_one_step() {
     // picking one figure ends the group
     let st = s.command(&json!({"op": "select", "layer": "L2"}));
     assert!(st["multi"].is_null());
+}
+
+#[test]
+fn wiggle_and_swing_move_a_figure_on_top_of_its_poses() {
+    // H2 Movement: one step each; the eye hides without losing the settings
+    let mut s = two_poses();
+    let st = s.command(&json!({"op": "select", "layer": "L2"}));
+    let fig = st["selected"]["layer"].as_str().unwrap().to_string();
+    let still = (figure_at(&s, &fig, 0.03), figure_at(&s, &fig, 0.07));
+    let st = s.command(&json!({"op": "move_fx", "kind": "wiggle", "on": true}));
+    assert_eq!(st["undo"], "Add wiggle");
+    assert_eq!(st["selected"]["filters"]["wiggle"]["amount"], 8.0);
+    let moved = (figure_at(&s, &fig, 0.03), figure_at(&s, &fig, 0.07));
+    assert_ne!(moved, still, "the figure wiggles");
+    s.command(&json!({"op": "move_fx", "kind": "wiggle", "shown": false}));
+    assert_eq!((figure_at(&s, &fig, 0.03), figure_at(&s, &fig, 0.07)), still, "hidden: as before");
+    let st = s.command(&json!({"op": "move_fx", "kind": "wiggle", "on": false}));
+    assert!(st["selected"]["filters"]["wiggle"].is_null());
+    // the filter eye
+    s.command(&json!({"op": "filter", "blur": 5}));
+    let st = s.command(&json!({"op": "filter", "shown": {"blur": false}}));
+    assert_eq!(st["selected"]["filters"]["hidden"], json!(["blur"]));
+    assert_eq!(st["selected"]["filters"]["on"]["blur"], true, "still set up, only hidden");
+}
+
+#[test]
+fn wiggle_moves_the_figure_not_its_joints() {
+    let mut s = Session::new(Document::new(barkfart_core::session::new_editor_project()));
+    let st = s.command(&json!({"op": "state"}));
+    let fig = st["figures"][0]["id"].as_str().unwrap().to_string();
+    s.command(&json!({"op": "select", "layer": fig}));
+    let angles = |s: &Session| {
+        let p = s.project();
+        let f = p.root().unwrap().layer(&fig).unwrap().as_figure().unwrap();
+        barkfart_core::eval::FigurePose::compute(f, 0.0, &mut barkfart_core::eval::Resolver::new(p)).angle
+    };
+    let before = angles(&s);
+    s.command(&json!({"op": "move_fx", "kind": "wiggle", "on": true}));
+    assert_eq!(angles(&s), before, "the joints keep their angles");
 }

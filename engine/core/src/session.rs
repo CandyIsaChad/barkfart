@@ -179,6 +179,30 @@ impl Session {
         self.rev
     }
 
+    /// H2: the selected figure alone, as on this frame, with a filter command
+    /// applied to a copy (the effects browser's tile previews). None without
+    /// a selected figure. The copy is never part of the project or its history.
+    pub fn effect_preview(&self, filter: &J) -> Option<(Project, f64)> {
+        let (l, _) = self.selected.clone()?;
+        let t = self.time();
+        let mut p = self.project().clone();
+        let sym = p.root_symbol.clone();
+        {
+            let root = p.root_mut()?;
+            let keep = root.layers.iter().find(|x| x.id == l)?.clone();
+            let mut layer = (*keep).clone();
+            // placed by its own transform (a joined figure is fitted anyway)
+            layer.parent = None;
+            layer.parent_node = None;
+            root.layers = vec![std::sync::Arc::new(layer)];
+        }
+        let mut st = crate::edit::State { project: p, assets: Default::default() };
+        if filter.is_object() {
+            crate::edit::filters::apply(&mut st, &sym, &l, filter, t).ok()?;
+        }
+        Some((st.project, t))
+    }
+
     fn sym(&self) -> String {
         self.project().root_symbol.clone()
     }
@@ -2427,6 +2451,17 @@ impl Session {
                         self.message = "Filters copied.".into();
                         self.rev += 1;
                     }
+                }
+            }
+            "move_fx" => {
+                if let Some(l) = self.sel_layer() {
+                    let label = match (c["kind"].as_str(), c["on"].as_bool()) {
+                        (Some("wiggle"), Some(true)) => "Add wiggle",
+                        (Some("swing"), Some(true)) => "Add swing",
+                        (_, Some(false)) => "Remove effect",
+                        _ => "Change effect",
+                    };
+                    self.step(label, |s| crate::edit::filters::movement(s, &sym, &l, c));
                 }
             }
             "paste_filters" => {

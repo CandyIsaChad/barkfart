@@ -17,6 +17,13 @@ pub const MOTION_ID: &str = "filter.motion";
 pub const GLOW_ID: &str = "filter.glow";
 pub const SHADOW_ID: &str = "filter.shadow";
 
+/// The Effects list's names for the filter nodes.
+pub const KINDS: [(&str, &str); 9] = [("invert", INVERT_ID), ("adjust", ADJUST_ID), ("pixelate", PIXELATE_ID), ("tint", TINT_ID), ("outline", OUTLINE_ID), ("blur", BLUR_ID), ("motion", MOTION_ID), ("glow", GLOW_ID), ("shadow", SHADOW_ID)];
+
+fn kind_id(kind: &str) -> Option<&'static str> {
+    KINDS.iter().find(|(k, _)| *k == kind).map(|(_, id)| *id)
+}
+
 /// The panel's order (top to bottom).
 const ORDER: [&str; 9] = [INVERT_ID, ADJUST_ID, PIXELATE_ID, TINT_ID, OUTLINE_ID, BLUR_ID, MOTION_ID, GLOW_ID, SHADOW_ID];
 
@@ -117,6 +124,16 @@ pub fn apply(st: &mut State, sym: &str, id: &str, c: &J, t: f64) -> EditResult<(
     let Some(l) = st.project.layer_mut(sym, id) else { return fail("no figure") };
     if l.as_figure().is_none() {
         return fail("not a figure");
+    }
+    // H2: the Effects list's eye: hidden keeps the settings and keys
+    if let Some(m) = c["shown"].as_object() {
+        for (kind, v) in m {
+            if let (Some(id), Some(on)) = (kind_id(kind), v.as_bool()) {
+                if let Some(e) = l.effects.nodes.get_mut(id) {
+                    e.enabled = on;
+                }
+            }
+        }
     }
     if let Some(v) = c["opacity"].as_f64() {
         key_every_frame(&mut l.opacity, n, fps);
@@ -363,7 +380,29 @@ pub fn state(p: &Project, sym: &str, id: &str, t: f64) -> J {
         (n(INVERT_ID), n(ADJUST_ID), n(PIXELATE_ID), n(TINT_ID), n(OUTLINE_ID), n(BLUR_ID), n(MOTION_ID), n(GLOW_ID), n(SHADOW_ID));
     let (dx, dy) = (num(&mut r, shadow, "dx", -7.07), num(&mut r, shadow, "dy", 7.07));
     let distance = (dx * dx + dy * dy).sqrt();
+    // H2: which effects are on here (the Effects list on the Stickfigure page)
+    let audible = |r: &mut Resolver, e: Option<&EffectNode>| e.is_some_and(|e| r.f(&e.mix, t) > 0.0);
+    let on = serde_json::json!({
+        "invert": audible(&mut r, invert),
+        "adjust": audible(&mut r, adjust) && (live(&mut r, adjust, "hue", 0.0, 0.0).abs() > 1e-3 || (live(&mut r, adjust, "saturation", 1.0, 1.0) - 1.0).abs() > 1e-3),
+        "pixelate": audible(&mut r, pixel) && live(&mut r, pixel, "size", 1.0, 1.0) > 1.0,
+        "tint": audible(&mut r, tint) && live(&mut r, tint, "amount", 0.0, 0.0) > 0.0,
+        "outline": audible(&mut r, outline),
+        "blur": audible(&mut r, blur) && live(&mut r, blur, "radius", 0.0, 0.0) > 0.0,
+        "motion": audible(&mut r, motion),
+        "glow": audible(&mut r, glow),
+        "shadow": audible(&mut r, shadow),
+    });
+    let hidden: Vec<&str> = KINDS.iter().filter(|(_, id)| l.effects.nodes.get(*id).is_some_and(|e| !e.enabled)).map(|(k, _)| *k).collect();
+    // Wiggle and Swing (H2 Movement): modifiers on the figure's position / angle
+    let tr = &l.transform;
+    let wiggle = tr.x.modifiers.iter().find_map(|m| if let ModifierKind::Wiggle { frequency, amplitude, .. } = m.kind { Some(serde_json::json!({"amount": round2(amplitude), "speed": round2(frequency), "shown": m.enabled})) } else { None });
+    let swing = tr.rotation.modifiers.iter().find_map(|m| if let ModifierKind::Sine { frequency, amplitude, .. } = m.kind { Some(serde_json::json!({"amount": round2(amplitude), "speed": round2(frequency), "shown": m.enabled})) } else { None });
     serde_json::json!({
+        "on": on,
+        "hidden": hidden,
+        "wiggle": wiggle,
+        "swing": swing,
         "opacity": round2(r.f(&l.opacity, t)),
         "invert": mix(&mut r, invert, 0.0) > 0.5,
         "hue": round2(live(&mut r, adjust, "hue", 0.0, 0.0)),
@@ -418,4 +457,52 @@ pub fn any_active(l: &Layer) -> bool {
             _ => true,
         }
     })
+}
+
+
+/// Wiggle and Swing (H2, the effects browser's Movement group) on a figure:
+/// wiggle is noise on its position, swing a sine on its angle, both on top
+/// of its poses. {"kind", "on"?, "amount"?, "speed"?, "shown"?}; one step.
+pub fn movement(st: &mut State, sym: &str, id: &str, c: &J) -> EditResult<()> {
+    let Some(l) = st.project.layer_mut(sym, id) else { return fail("no figure") };
+    if l.as_figure().is_none() {
+        return fail("not a figure");
+    }
+    let wiggle = match c["kind"].as_str() {
+        Some("wiggle") => true,
+        Some("swing") => false,
+        _ => return fail("wiggle or swing"),
+    };
+    let seed = id.bytes().fold(7i32, |a, b| a.wrapping_mul(31).wrapping_add(b as i32)) & 0xffff;
+    let tr = &mut l.transform;
+    let props: Vec<&mut Property> = if wiggle { vec![&mut tr.x, &mut tr.y] } else { vec![&mut tr.rotation] };
+    let mine = |m: &Modifier| matches!((wiggle, &m.kind), (true, ModifierKind::Wiggle { .. }) | (false, ModifierKind::Sine { .. }));
+    for (i, q) in props.into_iter().enumerate() {
+        match c["on"].as_bool() {
+            Some(false) => q.modifiers.retain(|m| !mine(m)),
+            Some(true) if !q.modifiers.iter().any(mine) => q.modifiers.push(Modifier::new(if wiggle {
+                ModifierKind::Wiggle { frequency: 2.0, amplitude: 8.0, seed: seed + i as i32, octaves: 2 }
+            } else {
+                ModifierKind::Sine { frequency: 0.5, amplitude: 10.0, phase: 0.0 }
+            })),
+            _ => {}
+        }
+        for m in q.modifiers.iter_mut().filter(|m| mine(m)) {
+            if let Some(v) = c["shown"].as_bool() {
+                m.enabled = v;
+            }
+            match &mut m.kind {
+                ModifierKind::Wiggle { frequency, amplitude, .. } | ModifierKind::Sine { frequency, amplitude, .. } => {
+                    if let Some(v) = c["amount"].as_f64() {
+                        *amplitude = v.clamp(0.0, 1000.0) as f32;
+                    }
+                    if let Some(v) = c["speed"].as_f64() {
+                        *frequency = v.clamp(0.05, 30.0) as f32;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
 }

@@ -228,6 +228,18 @@ class Engine {
     return px;
   }
 
+  /// H2: the selected figure alone with a filter command applied to a copy
+  /// (`json`, or "{}"), fitted into w x h; null without a selected figure.
+  Uint8List? renderEffectPreview(String json, int w, int h) {
+    final out = calloc<Uint8>(w * h * 4);
+    final k = json.toNativeUtf8();
+    final r = _lib.lookupFunction<_FigC, _FigD>('bf_render_effect_preview')(_handle, k, w, h, out);
+    calloc.free(k);
+    final px = r == 0 ? Uint8List.fromList(out.asTypedList(w * h * 4)) : null;
+    calloc.free(out);
+    return px;
+  }
+
   /// What a Stick Nodes file holds, drawn into w x h (null when unreadable).
   Uint8List? renderFile(String name, Uint8List bytes, int w, int h) {
     final out = calloc<Uint8>(w * h * 4);

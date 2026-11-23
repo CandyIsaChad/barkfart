@@ -33,7 +33,7 @@ Tick items there as they finish.
 - Scripted editor runs as before. The new script command is `savesheet`.
 - The window is capped at the screen size (about 1300x700).
 
-**Next:** H2 (the effects browser with previews), then H3 (keying toggle, property rows, diamonds). H1 and the timeline correction are done (D29: merged Preview strip, pale playhead, one bar per pose, FX word; scripts `fx`, `layers`, `blockdrag dx [move|start]`). Sections F and G are done (D24–D28).
+**Next:** H3 (the keying toggle, property rows, diamonds). H2 is done (D30: Effects section and browser; scripts `effects`, `fxopen <kind>`; engine `move_fx`, filter `shown`, `bf_render_effect_preview`). H1 and the timeline correction (D29), sections F and G (D24–D28) are done.
 - Done: A1–A6, B1–B6, C1–C8, D1–D7b, E1–E3. D2 (the Movieclip page) is written but not yet seen on screen. D7b: `reset_segment`, `selected.defaults` and `Figure::base` (FORMAT.md); the first-run figure is the engine's render of Stickfigure.nodes (D22).
 - Home script commands: `firstrun`, `projectsscreen`, `backups`, `makeprojects N` (copies the open save N times). Saving writes a picture to `.thumbs/<name>.png`.
 

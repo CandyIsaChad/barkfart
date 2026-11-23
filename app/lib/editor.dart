@@ -2,6 +2,7 @@
 // (docs/barkfart/UI-SPEC.md). All editing happens in the Rust session; this
 // file draws its state and turns touches into commands.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -1099,6 +1100,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           unawaited(_projectsScreen());
         case 'layers':
           setState(() => _layersOpen = true);
+        case 'effects':
+          await _openFxBrowser();
+        case 'fxopen':
+          setState(() => _fxOpen = w[1]);
         case 'fx':
           _toggleFx();
         case 'blockdrag':
@@ -1393,7 +1398,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (_st['movieclip'] != null) return const ['Movieclip Tools'];
     final sel = _sel;
     if (_st['multi'] != null) return const ['Selection'];
-    if (sel != null) return const ['Stickfigure Tools', 'Pose', 'Stickfigure Filters', 'Segment Tools'];
+    if (sel != null) return const ['Stickfigure Tools', 'Segment Tools', 'Pose'];
     if (_st['editingClip'] != null) return const ['Movieclip editor', 'Textfield Tools'];
     return const ['Project Tools', 'Textfield Tools'];
   }
@@ -2437,6 +2442,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// The Properties card (REDESIGN §4): today's sections, tabbed by what is
   /// selected. It floats over the stage on the right.
   Widget _propertiesCard({bool docked = false}) {
+    if (_fxBrowser && _sel != null && !_playing) return kit.PanelCard(docked: docked, padding: EdgeInsets.zero, child: _effectsBrowser());
     final names = _sections();
     final current = names.contains(_tab) ? names.indexOf(_tab) : 0;
     return kit.PanelCard(
@@ -2446,7 +2452,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         if (!_playing && _showTabs && names.length > 1)
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 10, 10, 0),
-            child: names.length <= 4
+            child: names.length <= 3
                 ? kit.Segmented([for (final n in names) _tabLabel(n)], current, onSelect: (i) => _jumpTo(names[i]))
                 : SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
@@ -3215,6 +3221,243 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
 
+  // ---------------------------------------------------------------- effects
+
+  /// The effects a figure can have (REDESIGN §4 Effects browser, H2): the
+  /// filter each is, the command that turns it on with a useful start, and the
+  /// one that turns it off. Movement effects are modifiers (`move_fx`).
+  static const _fxLook = [
+    ('blur', 'Blur', {'blur': 6.0}, {'blur': 0.0}),
+    ('motion', 'Motion blur', {'motion': true, 'motionDistance': 30.0}, {'motion': false}),
+    ('glow', 'Glow', {'glowAmount': 0.7, 'glowIntensity': 1.2}, {'glowAmount': 0.0}),
+    ('adjust', 'Colour', {'saturation': 0.2}, {'hue': 0.0, 'saturation': 1.0}),
+    ('tint', 'Tint', {'tint': 0xC0392BFF, 'tintAmount': 0.5}, {'tintAmount': 0.0}),
+    ('invert', 'Invert', {'invert': true}, {'invert': false}),
+    ('pixelate', 'Pixelate', {'pixelate': 8.0}, {'pixelate': 1.0}),
+  ];
+  static const _fxEdges = [
+    ('outline', 'Outline', {'outline': 0x222428FF, 'outlineAmount': 1.0, 'outlineThickness': 6.0}, {'outlineAmount': 0.0}),
+    ('shadow', 'Shadow', {'shadowOpacity': 0.5}, {'shadowOpacity': 0.0}),
+  ];
+  static const _fxMovement = [('wiggle', 'Wiggle', 'wiggle'), ('swing', 'Swing', 'swing'), ('loop', 'Loop', 'loopmod'), ('follow', 'Follow', 'follow'), ('link', 'Link', 'link')];
+
+  bool _fxBrowser = false;
+  String? _fxOpen;
+  String _fxSearch = '';
+  final Map<String, ui.Image> _fxPreviews = {};
+
+  /// Opens the browser: the tiles' pictures are the selected figure, on this
+  /// frame, with each effect (drawn by the engine on a copy).
+  Future<void> _openFxBrowser() async {
+    final e = _engine;
+    if (e == null) return;
+    for (final img in _fxPreviews.values) {
+      img.dispose();
+    }
+    _fxPreviews.clear();
+    final w = (106 * math.min(_dpr, 2.0)).round(), h = (58 * math.min(_dpr, 2.0)).round();
+    // effects are sized in stage units and a tile shows the figure about a
+    // quarter size, so the pictures use stronger settings than a new effect
+    const strong = {
+      'blur': {'blur': 26.0},
+      'motion': {'motion': true, 'motionDistance': 160.0},
+      'glow': {'glow': 0xFFC83DFF, 'glowAmount': 1.0, 'glowIntensity': 2.5},
+      'pixelate': {'pixelate': 30.0},
+      'outline': {'outline': 0x222428FF, 'outlineAmount': 1.0, 'outlineThickness': 22.0},
+      'shadow': {'shadowOpacity': 0.6, 'shadowDistance': 40.0, 'shadowAngle': 135.0, 'shadowBlur': 12.0},
+    };
+    for (final (k, _, on, _) in [..._fxLook, ..._fxEdges]) {
+      final px = e.renderEffectPreview(jsonEncode(strong[k] ?? on), w, h);
+      if (px == null) continue;
+      final c = Completer<ui.Image>();
+      ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, c.complete);
+      _fxPreviews[k] = await c.future;
+    }
+    if (mounted) setState(() => _fxBrowser = true);
+  }
+
+  /// The Effects section of the Stickfigure page (D10): each effect the
+  /// figure has, with an eye; tapping one opens its settings under it, a
+  /// swipe removes it. Then Blending (opacity).
+  List<rw.Desc> _effectRows(Map<String, dynamic> sel) {
+    final f = (sel['filters'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+    final on = (f['on'] as Map?) ?? const {};
+    final hidden = ((f['hidden'] as List?) ?? const []).toSet();
+    double v(String k, double d) => (f[k] as num?)?.toDouble() ?? d;
+    int col(String k, int d) => (f[k] as num?)?.toInt() ?? d;
+    void filter(Map<String, Object?> m) => _cmd({'op': 'filter', ...m});
+    final list = <(String, String, bool, Map<String, Object?>)>[
+      for (final (k, label, _, off) in [..._fxLook, ..._fxEdges])
+        if (on[k] == true) (k, label, !hidden.contains(k), {'op': 'filter', ...off}),
+      for (final k in const ['wiggle', 'swing'])
+        if (f[k] is Map) (k, k == 'wiggle' ? 'Wiggle' : 'Swing', (f[k] as Map)['shown'] != false, {'op': 'move_fx', 'kind': k, 'on': false}),
+    ];
+    List<rw.Desc> settings(String k) {
+      Map m(String key) => (f[key] as Map?) ?? const {};
+      return switch (k) {
+        'blur' => [rw.DStep('Radius', v('blur', 0).toStringAsFixed(1), onMinus: () => filter({'blur': math.max(0.5, v('blur', 0) - 0.5)}), onPlus: () => filter({'blur': v('blur', 0) + 0.5}))],
+        'motion' => [rw.DStep('Distance', v('motionDistance', 30).round().toString(), onMinus: () => filter({'motionDistance': math.max(0, v('motionDistance', 30) - 2)}), onPlus: () => filter({'motionDistance': v('motionDistance', 30) + 2}))],
+        'glow' => [
+            rw.DWidget(_swatches(col('glow', 0x0a84ffff), (c) => filter({'glow': c}))),
+            rw.DStep('Amount', v('glowAmount', 0).toStringAsFixed(2), onMinus: () => filter({'glowAmount': math.max(0.05, v('glowAmount', 0) - 0.05)}), onPlus: () => filter({'glowAmount': math.min(1, v('glowAmount', 0) + 0.05)})),
+            rw.DStep('Strength', v('glowIntensity', 1).toStringAsFixed(2), onMinus: () => filter({'glowIntensity': math.max(0, v('glowIntensity', 1) - 0.1)}), onPlus: () => filter({'glowIntensity': v('glowIntensity', 1) + 0.1})),
+          ],
+        'adjust' => [
+            rw.DStep('Hue shift', v('hue', 0).round().toString(), onMinus: () => filter({'hue': v('hue', 0) - 5}), onPlus: () => filter({'hue': v('hue', 0) + 5})),
+            rw.DStep('Saturation', v('saturation', 1).toStringAsFixed(2), onMinus: () => filter({'saturation': math.max(0, v('saturation', 1) - 0.05)}), onPlus: () => filter({'saturation': math.min(4, v('saturation', 1) + 0.05)})),
+          ],
+        'tint' => [
+            rw.DWidget(_swatches(col('tint', 0xffffffff), (c) => filter({'tint': c}))),
+            rw.DStep('Amount', v('tintAmount', 0).toStringAsFixed(2), onMinus: () => filter({'tintAmount': math.max(0.05, v('tintAmount', 0) - 0.05)}), onPlus: () => filter({'tintAmount': math.min(1, v('tintAmount', 0) + 0.05)})),
+          ],
+        'pixelate' => [rw.DStep('Size', v('pixelate', 1).round().toString(), onMinus: () => filter({'pixelate': math.max(2, v('pixelate', 1) - 1)}), onPlus: () => filter({'pixelate': v('pixelate', 1) + 1}))],
+        'outline' => [
+            rw.DWidget(_swatches(col('outline', 0xff00ffff), (c) => filter({'outline': c}))),
+            rw.DStep('Thickness', v('outlineThickness', 4).round().toString(), onMinus: () => filter({'outlineThickness': math.max(0, v('outlineThickness', 4) - 1)}), onPlus: () => filter({'outlineThickness': v('outlineThickness', 4) + 1})),
+            rw.DStep('Amount', v('outlineAmount', 1).toStringAsFixed(2), onMinus: () => filter({'outlineAmount': math.max(0.05, v('outlineAmount', 1) - 0.05)}), onPlus: () => filter({'outlineAmount': math.min(1, v('outlineAmount', 1) + 0.05)})),
+          ],
+        'shadow' => [
+            rw.DWidget(_swatches(col('shadow', 0x000000ff), (c) => filter({'shadow': c}))),
+            rw.DStep('Opacity', v('shadowOpacity', 0).toStringAsFixed(2), onMinus: () => filter({'shadowOpacity': math.max(0.05, v('shadowOpacity', 0) - 0.05)}), onPlus: () => filter({'shadowOpacity': math.min(1, v('shadowOpacity', 0) + 0.05)})),
+            rw.DStep('Distance', v('shadowDistance', 10).round().toString(), onMinus: () => filter({'shadowDistance': math.max(0, v('shadowDistance', 10) - 1), 'shadowAngle': v('shadowAngle', 135)}), onPlus: () => filter({'shadowDistance': v('shadowDistance', 10) + 1, 'shadowAngle': v('shadowAngle', 135)})),
+            rw.DStep('Angle', '${v('shadowAngle', 135).round()}°', onMinus: () => filter({'shadowDistance': v('shadowDistance', 10), 'shadowAngle': v('shadowAngle', 135) - 5}), onPlus: () => filter({'shadowDistance': v('shadowDistance', 10), 'shadowAngle': v('shadowAngle', 135) + 5})),
+            rw.DStep('Blur', v('shadowBlur', 6).toStringAsFixed(1), onMinus: () => filter({'shadowBlur': math.max(0, v('shadowBlur', 6) - 0.5)}), onPlus: () => filter({'shadowBlur': v('shadowBlur', 6) + 0.5})),
+          ],
+        'wiggle' || 'swing' => [
+            rw.DStep(k == 'wiggle' ? 'Distance' : 'Angle', '${((m(k)['amount'] as num?) ?? 0).round()}${k == 'swing' ? '°' : ''}',
+                onMinus: () => _cmd({'op': 'move_fx', 'kind': k, 'amount': math.max(0, ((m(k)['amount'] as num?) ?? 0) - 2)}), onPlus: () => _cmd({'op': 'move_fx', 'kind': k, 'amount': ((m(k)['amount'] as num?) ?? 0) + 2})),
+            rw.DStep('Speed', ((m(k)['speed'] as num?) ?? 1).toStringAsFixed(2),
+                onMinus: () => _cmd({'op': 'move_fx', 'kind': k, 'speed': math.max(0.05, ((m(k)['speed'] as num?) ?? 1) - 0.25)}), onPlus: () => _cmd({'op': 'move_fx', 'kind': k, 'speed': ((m(k)['speed'] as num?) ?? 1) + 0.25})),
+          ],
+        _ => const [],
+      };
+    }
+
+    Widget row(String k, String label, bool shown, Map<String, Object?> remove) {
+      final open = _fxOpen == k;
+      final r = Container(
+        height: 40,
+        color: cCard,
+        child: Row(children: [
+          Expanded(
+            child: kit.Tap(
+              label: open ? 'Close $label settings' : '$label settings',
+              minSize: 0,
+              onTap: () => setState(() => _fxOpen = open ? null : k),
+              child: Align(alignment: Alignment.centerLeft, child: Text(label, style: TextStyle(color: shown ? cText : cSecondary, fontSize: 14, fontWeight: open ? FontWeight.w700 : FontWeight.w400))),
+            ),
+          ),
+          kit.Tap(
+            label: shown ? 'Hide $label' : 'Show $label',
+            minSize: 36,
+            onTap: () => k == 'wiggle' || k == 'swing' ? _cmd({'op': 'move_fx', 'kind': k, 'shown': !shown}) : _cmd({'op': 'filter', 'shown': {k: !shown}}),
+            child: Pictogram('eye', size: 18, color: shown ? const Color(0xFF9AA0A8) : const Color(0xFFD5D8DD)),
+          ),
+        ]),
+      );
+      return rw.SwipeActions(key: ValueKey('fx-$k'), actions: [rw.SwipeAction('Remove', () => _cmd(remove), danger: true)], child: r);
+    }
+
+    return [
+      rw.DTitle('Effects', onAdd: _openFxBrowser, addLabel: 'Add an effect'),
+      if (list.isEmpty) const rw.DHint('No effects yet. They show while playing and in exports; FX in the timeline shows them while editing.'),
+      for (final (k, label, shown, remove) in list) ...[
+        rw.DWidget(row(k, label, shown, remove)),
+        if (_fxOpen == k) ...settings(k),
+      ],
+      if (list.isNotEmpty) rw.DButtons('Copy effects', () => _cmd({'op': 'copy_filters'}), b: 'Paste effects', onB: _st['filtersCopied'] == true ? () => _cmd({'op': 'paste_filters'}) : null),
+      if (list.isEmpty && _st['filtersCopied'] == true) rw.DButtons('Paste effects', () => _cmd({'op': 'paste_filters'})),
+      const rw.DTitle('Blending'),
+      rw.DSlider('Opacity', '${(v('opacity', 1) * 100).round()}%', v('opacity', 1), onChanged: (x) => filter({'opacity': (x * 100).round() / 100})),
+    ];
+  }
+
+  /// The effects browser (REDESIGN §4): inside Properties, "‹ Properties"
+  /// back, a search, then the groups in tiles of three. Look and Edges tiles
+  /// show the selected figure with the effect; picking one adds it (one
+  /// step) and opens its settings.
+  Widget _effectsBrowser() {
+    final q = _fxSearch.toLowerCase();
+    bool match(String label) => q.isEmpty || label.toLowerCase().contains(q);
+    void close() => setState(() => _fxBrowser = false);
+    void pick(String k, Map<String, Object?> cmd) {
+      _cmd(cmd);
+      setState(() {
+        _fxBrowser = false;
+        _fxOpen = k;
+        _fxSearch = '';
+      });
+      _jumpTo('Stickfigure Tools');
+    }
+
+    Widget tile(String label, Widget picture, VoidCallback? onTap) => Opacity(
+          opacity: onTap == null ? 0.4 : 1,
+          child: kit.Tap(
+            label: label,
+            minSize: 0,
+            onTap: onTap,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                height: 58,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(color: cCard, borderRadius: BorderRadius.circular(8), border: Border.all(color: cLine)),
+                child: picture,
+              ),
+              const SizedBox(height: 3),
+              Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 12)),
+            ]),
+          ),
+        );
+    Widget grid(List<Widget> tiles) => GridView.count(
+          crossAxisCount: 3,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 8,
+          childAspectRatio: 1.25,
+          children: tiles,
+        );
+    Widget pic(String k) => _fxPreviews[k] == null ? const SizedBox.expand() : RawImage(image: _fxPreviews[k], fit: BoxFit.contain);
+    final look = [for (final (k, l, on, _) in _fxLook) if (match(l)) tile(l, pic(k), () => pick(k, {'op': 'filter', ...on}))];
+    final edges = [for (final (k, l, on, _) in _fxEdges) if (match(l)) tile(l, pic(k), () => pick(k, {'op': 'filter', ...on}))];
+    final moves = [
+      for (final (k, l, icon) in _fxMovement)
+        if (match(l))
+          tile(l, Center(child: Pictogram(icon, size: 30, color: cAccent, stroke: 1.8)), k == 'wiggle' || k == 'swing' ? () => pick(k, {'op': 'move_fx', 'kind': k, 'on': true}) : null),
+    ];
+    Widget title(String t) => Padding(padding: const EdgeInsets.only(top: 12, bottom: 6), child: Text(t, textAlign: TextAlign.center, style: const TextStyle(color: cTitle, fontSize: 15, fontWeight: FontWeight.w700)));
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(6, 8, 10, 0),
+        child: Row(children: [kit.WordButton('‹ Properties', onTap: close), const Spacer()]),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
+        child: TextField(
+          style: const TextStyle(color: cText, fontSize: 14),
+          decoration: InputDecoration(
+            isDense: true,
+            filled: true,
+            fillColor: cControl,
+            hintText: 'Search effects',
+            prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF8A9099)),
+            contentPadding: const EdgeInsets.symmetric(vertical: 10),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+          ),
+          onChanged: (v) => setState(() => _fxSearch = v),
+        ),
+      ),
+      Expanded(
+        child: ListView(padding: const EdgeInsets.fromLTRB(14, 0, 14, 16), children: [
+          if (look.isNotEmpty) ...[title('Look'), grid(look)],
+          if (moves.isNotEmpty) ...[title('Movement'), grid(moves), if (q.isEmpty) const kit.Hint('Loop, Follow and Link come later.')],
+          if (edges.isNotEmpty) ...[title('Edges'), grid(edges)],
+          if (look.isEmpty && moves.isEmpty && edges.isEmpty) const Padding(padding: EdgeInsets.only(top: 24), child: Text('No effect by that name.', textAlign: TextAlign.center, style: TextStyle(color: cSecondary))),
+        ]),
+      ),
+    ]);
+  }
+
   /// Stickfigure Tools as rows (D15; REDESIGN §8 Stickfigure page). Every old
   /// control is kept; the pencil is "Edit segments" (the figure editor).
   List<Widget> _stickfigureTools(Map<String, dynamic> sel) {
@@ -3226,6 +3469,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final rows = <rw.Desc>[
       rw.DName(sel['name'] as String? ?? 'Figure', link: 'Edit segments ›', onLink: () => _cmd({'op': 'build'})),
       rw.DWidget(kit.PropRow('Colour', trailing: SizedBox(width: 180, child: _swatches((sel['figColor'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'figure', 'color': c}))))),
+      ..._effectRows(sel),
+      const rw.DTitle('Stickfigure Tools'),
       rw.DButtons('Previous figure', () => _cmd({'op': 'cycle_figure', 'dir': -1}), b: 'Next figure', onB: () => _cmd({'op': 'cycle_figure', 'dir': 1})),
       rw.DButtons('Flip sideways', () => _cmd({'op': 'flip_figure', 'h': true}), b: 'Flip over', onB: () => _cmd({'op': 'flip_figure', 'h': false})),
       rw.DButtons('Send back', () => _cmd({'op': 'layer_order', 'forward': false}), b: 'Bring forward', onB: () => _cmd({'op': 'layer_order', 'forward': true})),

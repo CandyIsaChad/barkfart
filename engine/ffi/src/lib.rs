@@ -891,7 +891,11 @@ pub extern "C" fn bf_save_copy(e: *mut Engine, len: *mut usize) -> *const u8 {
 
 /// Draws a project's first frame fitted into w x h, transparent around it.
 fn render_fitted(engine: &Engine, p: &Project, w: u32, h: u32) -> Option<Vec<u8>> {
-    let scene = eval::evaluate_with(p, &p.root_symbol, 0.0, false, false);
+    render_fitted_at(engine, p, 0.0, w, h)
+}
+
+fn render_fitted_at(engine: &Engine, p: &Project, t: f64, w: u32, h: u32) -> Option<Vec<u8>> {
+    let scene = eval::evaluate_with(p, &p.root_symbol, t, false, false);
     let list = tess::layered(&scene, Some(&engine.glyphs));
     let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
     for b in &list.batches {
@@ -910,6 +914,33 @@ fn render_fitted(engine: &Engine, p: &Project, w: u32, h: u32) -> Option<Vec<u8>
     let (hw, hh) = (w as f32 * k / 2.0, h as f32 * k / 2.0);
     let view = View { x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh, background: [0.0, 0.0, 0.0, 0.0] };
     Some(engine.renderer.render(&list, w, h, view))
+}
+
+/// The effects browser's tiles (H2): the selected figure alone, as on this
+/// frame, with `json` (a filter command, or {} for none) applied to a copy,
+/// fitted into w x h with transparency around it. 0 on success, 2 when
+/// nothing is selected or it cannot be drawn.
+#[no_mangle]
+pub extern "C" fn bf_render_effect_preview(e: *const Engine, json: *const c_char, w: u32, h: u32, out: *mut u8) -> i32 {
+    if e.is_null() || out.is_null() || w == 0 || h == 0 || w > 2048 || h > 2048 {
+        return 1;
+    }
+    // SAFETY: live handle
+    let engine = unsafe { &*e };
+    let Some(text) = cstr(json) else { return 1 };
+    let Some(s) = engine.session.as_ref() else { return 2 };
+    let r = catch_unwind(AssertUnwindSafe(|| {
+        let c: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+        s.effect_preview(&c).and_then(|(p, t)| render_fitted_at(engine, &p, t, w, h))
+    }));
+    match r {
+        Ok(Some(px)) => {
+            // SAFETY: caller provides w * h * 4 bytes
+            unsafe { std::ptr::copy_nonoverlapping(px.as_ptr(), out, px.len()) };
+            0
+        }
+        _ => 2,
+    }
 }
 
 /// Draws one built-in figure (barkfart_core::figures) fitted into w x h,

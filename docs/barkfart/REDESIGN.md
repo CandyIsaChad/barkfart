@@ -465,6 +465,23 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
   - Not yet: pictures of the pose inside blocks (needs a per-layer render)
     and the toolbar's Loop toggle.
 
+- **D30. Effects (H2).** The Filters tab is gone: the tabs are
+  Stickfigure, Segment, Pose, in the board's order. The Stickfigure page has
+  an Effects section after Colour: "+" opens the browser; each effect the
+  figure has is a row with an eye (hidden keeps its settings and keys), a tap
+  opens its settings under it, a swipe removes it; Copy and Paste effects;
+  then Blending with the opacity slider.
+  - The browser fills the Properties card: "‹ Properties", search, then
+    Look, Movement and Edges in tiles of three. Look and Edges tiles are the
+    selected figure on this frame with the effect, drawn by the engine on a
+    copy (`bf_render_effect_preview`), with stronger settings than a new
+    effect gets, since a tile shows the figure about a quarter size.
+  - Movement: Wiggle (noise on the figure's position) and Swing (a sine on
+    its angle) are modifiers on top of the poses (`move_fx`). Loop, Follow
+    and Link are shown dimmed ("come later"): they need a source to pick.
+  - "Yours" and "Import…" wait for plugins (K); without any there is nothing
+    to show, so neither appears.
+
 ## 7. Build order (easiest to hardest, nested)
 
 The user's instruction (2026-11-23): "From easiest to hardest. List out
@@ -579,7 +596,7 @@ and tests are never weakened.
 
 ### H. Keyed properties and effects
 - [x] H1. The FX toggle.
-- [ ] H2. The effects browser: built-ins with previews.
+- [x] H2. The effects browser: built-ins with previews.
 - [ ] H3. The keying toggle, property rows, diamonds.
 
 ### I. Joins over time (D8)
