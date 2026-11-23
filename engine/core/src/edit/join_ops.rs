@@ -105,6 +105,8 @@ fn change(st: &mut State, sym: &str, child: &str, parent: Option<&str>, node: Op
         l.parent = parent.map(str::to_string);
         l.parent_node = node.map(str::to_string);
         l.parent_node_rotate = rotate;
+        // a join for the whole timeline replaces any joins over time
+        l.joins.clear();
     }
     // the same placement in the new frame
     let (local, ax, ay, old_rot) = {
@@ -241,4 +243,92 @@ pub fn break_off(st: &mut State, sym: &str, layer: &str, node: &str) -> EditResu
     }
     super::structure::add_layer(st, sym, l2, index + 1)?;
     Ok(new_id)
+}
+
+
+/// Joins over time (D8, I1): from `t` on, `child` is joined to `parent`'s
+/// `node` (or the figure, or to nothing), until its next switch. Nothing
+/// moves: the transform at the switch is kept as the end of the interval
+/// before it, and the keys from `t` to the next switch are rewritten in the
+/// new frame, with one on `t`.
+pub fn switch_at(st: &mut State, sym: &str, child: &str, parent: Option<&str>, node: Option<&str>, rotate: bool, t: f64) -> EditResult<()> {
+    if let Some(target) = parent {
+        let Some(s) = st.project.symbol(sym) else { return fail("no symbol") };
+        if target == child {
+            return fail("a figure cannot join itself");
+        }
+        // no loops through the target's own joins at this moment
+        let mut cur = s.layer(target);
+        let mut guard = s.layers.len() + 1;
+        while let Some(c) = cur {
+            if guard == 0 {
+                break;
+            }
+            guard -= 1;
+            if c.id == child {
+                return fail("that would join a figure to its own joined figure");
+            }
+            cur = c.parent_at(t).0.and_then(|p| s.layer(p));
+        }
+        let Some(f) = s.layer(target).and_then(|l| l.as_figure()) else { return fail("can only join to a figure") };
+        if let Some(n) = node {
+            if f.node(n).is_none() {
+                return fail(format!("no node {n}"));
+            }
+        }
+    }
+    let eps = 1e-9;
+    // the interval the switch opens, and where the layer is over it (world)
+    let (times, world, before, template, ax, ay, old_rot) = {
+        let p = &st.project;
+        let Some(s) = p.symbol(sym) else { return fail("no symbol") };
+        let Some(l) = s.layer(child) else { return fail(format!("no layer {child}")) };
+        let end = l.joins.iter().find(|j| j.time > t + eps).map(|j| j.time);
+        let mut times: Vec<f64> = vec![t];
+        for q in props(l) {
+            for k in q.track.keys() {
+                if k.time > t + eps && end.is_none_or(|e| k.time < e - eps) {
+                    times.push(k.time);
+                }
+            }
+        }
+        times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        times.dedup();
+        let world: Vec<Affine> = times.iter().map(|&tt| eval::parent_frame(p, s, l, tt).mul(&eval::local_transform(p, l, tt))).collect();
+        // the values at t in the frame before the switch
+        let here = eval::local_transform(p, l, t);
+        let (ax, ay, old_rot) = (l.transform.anchor_x.value.f() as f64, l.transform.anchor_y.value.f() as f64, l.transform.rotation.value.f() as f64);
+        let before: [f32; 5] = std::array::from_fn(|i| part(i, ax, ay, old_rot, &here));
+        let mut template: Vec<Key> = Vec::new();
+        for q in props(l) {
+            for k in q.track.keys() {
+                if times.iter().any(|x| (x - k.time).abs() < eps) && !template.iter().any(|x| (x.time - k.time).abs() < eps) {
+                    template.push(*k);
+                }
+            }
+        }
+        (times, world, before, template, ax, ay, old_rot)
+    };
+    {
+        let Some(l) = st.project.layer_mut(sym, child) else { return fail("no layer") };
+        l.joins.retain(|j| (j.time - t).abs() > eps);
+        let at = l.joins.iter().position(|j| j.time > t).unwrap_or(l.joins.len());
+        l.joins.insert(at, JoinSwitch { time: t, parent: parent.map(str::to_string), node: node.map(str::to_string), rotate, before });
+    }
+    // the same places in the new frame
+    let local: Vec<Affine> = {
+        let p = &st.project;
+        let s = p.symbol(sym).expect("symbol");
+        let l = s.layer(child).expect("layer");
+        times.iter().zip(&world).map(|(&tt, w)| eval::parent_frame(p, s, l, tt).inverse().mul(w)).collect()
+    };
+    let l = st.project.layer_mut(sym, child).expect("layer");
+    for (i, q) in props_mut(l).into_iter().enumerate() {
+        for (j, &tt) in times.iter().enumerate() {
+            let interp = template.iter().find(|k| (k.time - tt).abs() < eps).map_or(Interp::Linear, |k| k.interp);
+            let k = q.track.keys().iter().find(|k| (k.time - tt).abs() < eps).copied().unwrap_or(Key::new(tt, Value::F(0.0), interp));
+            q.track.put(Key { time: tt, value: Value::F(part(i, ax, ay, old_rot, &local[j])), ..k });
+        }
+    }
+    Ok(())
 }

@@ -33,7 +33,7 @@ Tick items there as they finish.
 - Scripted editor runs as before. The new script command is `savesheet`.
 - The window is capped at the screen size (about 1300x700).
 
-**Next:** I1 (joins over time in the engine), then I2 (chain markers that join and let go, the join popover, toasts with Undo), then J (the figure editor). Done: sections F, G, H, M, the Picture page, the motion path, UI size (Settings › Screen; script `uiscale k`).
+**Next:** J (the figure editor): J1 header and the save-as-new sheet (D12), then J2–J6. Done: sections F, G, H, I (D32: joins over time; scripts `joinhere N`, `letgo`), M, the Picture page, the motion path, UI size.
 - Done: A1–A6, B1–B6, C1–C8, D1–D7b, E1–E3. D2 (the Movieclip page) is written but not yet seen on screen. D7b: `reset_segment`, `selected.defaults` and `Figure::base` (FORMAT.md); the first-run figure is the engine's render of Stickfigure.nodes (D22).
 - Home script commands: `firstrun`, `projectsscreen`, `backups`, `makeprojects N` (copies the open save N times). Saving writes a picture to `.thumbs/<name>.png`.
 

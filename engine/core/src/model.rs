@@ -1266,6 +1266,20 @@ impl LayerKind {
     }
 }
 
+/// A moment a layer joins a figure or lets go (D8, I1).
+#[derive(Clone, Debug, PartialEq)]
+pub struct JoinSwitch {
+    pub time: f64,
+    /// The layer joined from here on (None: lets go).
+    pub parent: Option<String>,
+    pub node: Option<String>,
+    pub rotate: bool,
+    /// x, y, rotation, scale x, scale y at `time` as they were in the frame
+    /// before the switch: the transform's end point for the interval before
+    /// it, so a tween into the switch doesn't jump.
+    pub before: [f32; 5],
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Layer {
     pub id: String,
@@ -1280,6 +1294,10 @@ pub struct Layer {
     pub parent: Option<String>,
     pub parent_node: Option<String>,
     pub parent_node_rotate: bool,
+    /// D8 / I1: joins over time. From each switch's time on, the layer is
+    /// joined to that parent (or to nothing); before the first switch, to
+    /// `parent` above. Sorted by time.
+    pub joins: Vec<JoinSwitch>,
     pub inherit_effects: bool,
     pub parallax: f32,
     /// "Keep stickfigure during tween" off: during the in-between pictures
@@ -1310,6 +1328,7 @@ impl Layer {
             parent: None,
             parent_node: None,
             parent_node_rotate: true,
+            joins: Vec::new(),
             inherit_effects: false,
             parallax: 0.0,
             vanish_in_tween: false,
@@ -1484,6 +1503,22 @@ impl Layer {
             LayerKind::Figure(f) => Some(f),
             _ => None,
         }
+    }
+
+    /// Who the layer is joined to at t: (parent, joint, turns with the joint).
+    pub fn parent_at(&self, t: f64) -> (Option<&str>, Option<&str>, bool) {
+        match self.joins.iter().rev().find(|j| j.time <= t + 1e-9) {
+            Some(j) => (j.parent.as_deref(), j.node.as_deref(), j.rotate),
+            None => (self.parent.as_deref(), self.parent_node.as_deref(), self.parent_node_rotate),
+        }
+    }
+
+    /// The join interval holding t: its start and, if another switch ends it,
+    /// that switch's time and the transform values it keeps (`before`).
+    pub fn join_span(&self, t: f64) -> (f64, Option<(f64, [f32; 5])>) {
+        let start = self.joins.iter().rev().find(|j| j.time <= t + 1e-9).map_or(f64::NEG_INFINITY, |j| j.time);
+        let end = self.joins.iter().find(|j| j.time > t + 1e-9).map(|j| (j.time, j.before));
+        (start, end)
     }
 
     /// A figure entering a project remembers its segments (D7b).

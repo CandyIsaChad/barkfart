@@ -29,3 +29,8 @@ re-encoding, so autosave stays cheap. `formatVersion` is 1. These rules keep eve
   `rightTriangle`, `upsideDown`). "Reset this segment" restores these. A figure
   without `base` (every file from before) has nothing to reset to, which is
   the default.
+
+- **Layer `joins`** (2026-11-24, D32): a list of switches, each `time`,
+  `parent` (null: lets go), `node`, `rotate` and `before` (x, y, rotation,
+  scale x, scale y at the switch in the frame before it). Files without it
+  keep their one join (`parent`) for the whole animation, the default.

@@ -1148,6 +1148,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           final rows = ((_st['rows'] as List?) ?? const []).cast<Map>();
           final r = rows[int.parse(w[1])];
           _cmd({'op': 'select', 'layer': r['id'], if (r['kind'] == 'picture' || r['kind'] == 'movieclip') 'node': ''});
+        case 'joinhere':
+          // test helper: the selected figure joins the figure on row N from this frame
+          final rows2 = ((_st['rows'] as List?) ?? const []).cast<Map>();
+          _cmd({'op': 'join_here', 'layer': rows2[int.parse(w[1])]['id']});
+        case 'letgo':
+          _cmd({'op': 'let_go_here'});
         case 'jointo':
           // test helper: the selected figure joins the figure on row N (its main joint)
           final rows = ((_st['rows'] as List?) ?? const []).cast<Map>();
@@ -2426,6 +2432,28 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               ),
       ));
     }
+    // I2: joins over time: a grey chain where it joins, a red broken chain
+    // where it lets go (round 10 board); tap one for what it is
+    for (final j in ((r['joins'] as List?) ?? const []).cast<List>()) {
+      final f = (j[0] as num).toInt();
+      final to = j[1] as String?, from = j[2] as String?;
+      final key = GlobalKey();
+      out.add(Positioned(
+        key: key,
+        left: f == 0 ? left + 2 : left + f * cell - 9,
+        top: y + 7,
+        child: kit.Tap(
+          label: to != null ? 'Joins $to at frame ${f + 1}' : 'Lets go of ${from ?? 'its figure'} at frame ${f + 1}',
+          minSize: 18,
+          onTap: _playing ? null : () => _joinPopover(r, f, to, from, key),
+          child: Container(
+            padding: const EdgeInsets.all(2),
+            decoration: BoxDecoration(color: cCard, borderRadius: BorderRadius.circular(4)),
+            child: Pictogram(to != null ? 'chain' : 'broken', size: 13, color: to != null ? const Color(0xFF5D636B) : cDanger, stroke: 2.2),
+          ),
+        ),
+      ));
+    }
     if (drag != null) {
       final (st, len) = drag.preview();
       out.add(Positioned(left: left + st * cell + 1, top: y + (rowH - 26) / 2, child: IgnorePointer(child: bar(0, len * cell - 2, strong: true, ghost: true))));
@@ -2478,6 +2506,63 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _cmd({'op': 'select_many', 'layers': hit});
     }
     setState(() => _panelOpen = true);
+  }
+
+  /// A chain marker tapped (I2): what it is, and Let go / Join elsewhere (a
+  /// join) or Join again (a let-go). Each change is one step with an Undo toast.
+  Future<void> _joinPopover(Map r, int f, String? to, String? from, GlobalKey key) async {
+    final box = key.currentContext?.findRenderObject() as RenderBox?;
+    final at = box == null ? const Offset(200, 300) : box.localToGlobal(Offset.zero);
+    final screen = MediaQuery.sizeOf(context);
+    final name = '${r['name']}';
+    final pick = await showGeneralDialog<int>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Join',
+      barrierColor: const Color(0x00000000),
+      transitionDuration: Duration.zero,
+      pageBuilder: (c, a1, a2) => Stack(children: [
+        Positioned(
+          left: math.min(at.dx, screen.width - 290),
+          bottom: screen.height - at.dy + 6,
+          child: kit.PanelCard(
+            width: 280,
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text(to != null ? '$name is joined to $to from frame ${f + 1}.' : '$name lets go of ${from ?? 'its figure'} at frame ${f + 1}.', style: const TextStyle(color: cText, fontSize: 14)),
+              const SizedBox(height: 8),
+              if (to != null)
+                kit.ButtonPair('Let go', () => Navigator.pop(c, 1), 'Join elsewhere', () => Navigator.pop(c, 2))
+              else
+                kit.ButtonPair('Join again', from == null ? null : () => Navigator.pop(c, 3), 'Close', () => Navigator.pop(c)),
+            ]),
+          ),
+        ),
+      ]),
+    );
+    if (pick == null || !mounted) return;
+    _cmd({'op': 'select', 'layer': r['id']});
+    if (pick == 1) {
+      // from the playhead on (not before the join itself)
+      final at = math.max(_frame, f);
+      _cmd({'op': 'frame', 'i': at});
+      _cmd({'op': 'select', 'layer': r['id']});
+      _cmd({'op': 'unjoin'});
+      if (!mounted) return;
+      kit.showToast(context, '$name lets go of $to at frame ${at + 1}', light: true, icon: 'broken', iconColor: cDanger, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
+    } else if (pick == 2) {
+      _cmd({'op': 'frame', 'i': f});
+      _cmd({'op': 'select', 'layer': r['id']});
+      _cmd({'op': 'join'});
+      _say('Tap a joint on another figure: $name joins it from frame ${f + 1}.', light: true);
+    } else if (pick == 3) {
+      final target = ((_st['rows'] as List?) ?? const []).cast<Map>().where((x) => x['name'] == from).firstOrNull;
+      if (target == null) return;
+      _cmd({'op': 'frame', 'i': f});
+      _cmd({'op': 'select', 'layer': r['id']});
+      _cmd({'op': 'join_here', 'layer': target['id']});
+      if (!mounted) return;
+      kit.showToast(context, '$name joins $from again at frame ${f + 1}', light: true, icon: 'chain', action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
+    }
   }
 
   /// A grip or a held block let go: the new length, start, or place.
@@ -3924,7 +4009,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ] else if (sel['joinedTo'] != null)
         rw.DWidget(kit.PropRow('Joined to', trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           Text('${sel['joinedTo']}', style: const TextStyle(color: cText, fontSize: 14, fontWeight: FontWeight.w600)),
-          kit.WordButton('Let go', size: 13, onTap: () => _cmd({'op': 'unjoin'})),
+          kit.WordButton('Let go', size: 13, onTap: () {
+            final from = sel['joinedTo'];
+            _cmd({'op': 'unjoin'});
+            kit.showToast(context, _frame > 0 ? '${sel['name']} lets go of $from at frame ${_frame + 1}' : '${sel['name']} lets go of $from', light: true, icon: 'broken', iconColor: cDanger, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
+          }),
         ])))
       else
         rw.DLink('Joined to', 'Nothing', onTap: () => _cmd({'op': 'join'})),

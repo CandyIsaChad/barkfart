@@ -467,6 +467,17 @@ fn layer(m: &Obj) -> R<Layer> {
     l.parent = str_(m, "parent")?.map(Into::into);
     l.parent_node = str_(m, "parentNode")?.map(Into::into);
     l.parent_node_rotate = b(m, "parentNodeRotate", true)?;
+    // D8 / I1: joins over time (optional; older files have none)
+    for o in list(m, "joins")? {
+        let jm = as_map(o, "join")?;
+        let mut before = [0f32; 5];
+        let bl = list(jm, "before")?;
+        for (i, v) in bl.iter().take(5).enumerate() {
+            before[i] = v.as_f64().ok_or_else(|| FormatError("join before".into()))? as f32;
+        }
+        l.joins.push(JoinSwitch { time: d(jm, "time", 0.0)?, parent: str_(jm, "parent")?.map(Into::into), node: str_(jm, "node")?.map(Into::into), rotate: b(jm, "rotate", true)?, before });
+    }
+    l.joins.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap_or(std::cmp::Ordering::Equal));
     l.inherit_effects = b(m, "inheritEffects", false)?;
     l.parallax = f(m, "parallax", 0.0)?;
     l.vanish_in_tween = b(m, "vanishInTween", false)?;
@@ -910,6 +921,18 @@ fn layer_json(l: &Layer) -> Json {
     }
     if !l.parent_node_rotate {
         m.put("parentNodeRotate", Json::Bool(false));
+    }
+    if !l.joins.is_empty() {
+        let list = l
+            .joins
+            .iter()
+            .map(|j| {
+                let mut jm = JObj::new();
+                jm.put("time", json::f64(j.time)).put("parent", json::opt(&j.parent)).put("node", json::opt(&j.node)).put("rotate", Json::Bool(j.rotate)).put("before", Json::List(j.before.iter().map(|v| json::f32(*v)).collect()));
+                jm.done()
+            })
+            .collect();
+        m.put("joins", Json::List(list));
     }
     if l.inherit_effects {
         m.put("inheritEffects", Json::Bool(true));

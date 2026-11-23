@@ -389,7 +389,13 @@ impl Session {
                     });
                     if let Some(h) = near.filter(|h| (h.x - x).hypot(h.y - y) <= radius * 1.5) {
                         let sym = self.sym();
-                        self.step("Join", |s| crate::edit::join_ops::join(s, &sym, &child, &h.layer, Some(&h.node), true, t));
+                        // D8: joins are moments: from this frame on (on the first
+                        // frame, for the whole animation, as before)
+                        if t > 1e-9 {
+                            self.step("Join", |s| crate::edit::join_ops::switch_at(s, &sym, &child, Some(&h.layer), Some(&h.node), true, t));
+                        } else {
+                            self.step("Join", |s| crate::edit::join_ops::join(s, &sym, &child, &h.layer, Some(&h.node), true, t));
+                        }
                         self.joining = None;
                         self.selected = self.project().root().and_then(|s| s.layer(&child)).and_then(|l| l.as_figure()).and_then(|f| f.nodes().first().map(|n| (child.clone(), n.id.clone())));
                     } else {
@@ -2017,13 +2023,33 @@ impl Session {
                     self.joining = None;
                 }
             }
+            "join_here" | "let_go_here" => {
+                // D8 / I1: joins are moments. From this frame on the selected
+                // figure is joined to `layer` (its `node`), or lets go
+                if let Some(child) = self.sel_layer() {
+                    let let_go = c["op"] == "let_go_here";
+                    let target = c["layer"].as_str().map(str::to_string);
+                    let node = c["node"].as_str().map(str::to_string);
+                    if !let_go && target.is_none() {
+                        self.message = "Pick the figure to join first.".into();
+                    } else {
+                        self.step(if let_go { "Let go" } else { "Join" }, |s| crate::edit::join_ops::switch_at(s, &sym, &child, if let_go { None } else { target.as_deref() }, node.as_deref(), true, t));
+                    }
+                }
+            }
             "join_cancel" => {
                 self.joining = None;
                 self.rev += 1;
             }
             "unjoin" => {
+                // D8: letting go is a moment too (from this frame on; on the
+                // first frame, for the whole animation)
                 if let Some(l) = self.sel_layer() {
-                    self.step("Unjoin", |s| crate::edit::join_ops::unjoin(s, &sym, &l, t));
+                    if t > 1e-9 {
+                        self.step("Let go", |s| crate::edit::join_ops::switch_at(s, &sym, &l, None, None, true, t));
+                    } else {
+                        self.step("Unjoin", |s| crate::edit::join_ops::unjoin(s, &sym, &l, t));
+                    }
                 }
             }
             "copy_props" => {
@@ -2864,7 +2890,7 @@ impl Session {
                 }), "dragLock": node.drag_lock != 0,
                 "scale": round2(r.f(&layer.transform.scale_y, t).abs()), "figAngle": round2(r.f(&layer.transform.rotation, t)),
                 "locked": layer.locked, "onion": layer.onion,
-                "joinedTo": layer.parent.as_ref().and_then(|pid| p.root()?.layer(pid)).map(|x| x.name.clone().unwrap_or_else(|| x.id.clone())),
+                "joinedTo": layer.parent_at(t).0.and_then(|pid| p.root()?.layer(pid)).map(|x| x.name.clone().unwrap_or_else(|| x.id.clone())),
                 "blend": layer.blend.name(),
                 "keepInTween": !layer.vanish_in_tween,
                 // F4: the pose (block) under the playhead
@@ -3108,6 +3134,12 @@ impl Session {
                         json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone()), "kind": kind, "visible": l.visible, "on": on, "blocks": blocks, "joined": l.parent.is_some(),
                             // M5: what it is joined to (the chain on its row)
                             "joinedTo": l.parent.as_ref().and_then(|pid| s.layer(pid)).filter(|x| !matches!(x.kind, LayerKind::Camera(_))).map(|x| x.name.clone().unwrap_or_else(|| x.id.clone())),
+                            // I2: joins over time, [frame, joined to (null: lets go), what it let go of]
+                            "joins": l.joins.iter().enumerate().map(|(i, j)| {
+                                let name = |id: Option<&str>| id.and_then(|pid| s.layer(pid)).map(|x| x.name.clone().unwrap_or_else(|| x.id.clone()));
+                                let prev = if i == 0 { l.parent.as_deref() } else { l.joins[i - 1].parent.as_deref() };
+                                json!([((j.time * fps).round() as i32), name(j.parent.as_deref()), name(prev)])
+                            }).collect::<Vec<_>>(),
                             "props": animated})
                     })
                     .collect()

@@ -427,8 +427,45 @@ fn resolve_own(l: &Layer, t: f64, r: &mut Resolver, g: &mut Group) {
     }
 }
 
+/// A transform value of a layer with joins over time (I1): sampled from the
+/// keys of its own join interval, with the next switch's `before` value as
+/// the interval's end, so a tween never mixes two parents' frames.
+fn switched(q: &Property, span: (f64, Option<(f64, [f32; 5])>), i: usize, t: f64, r: &mut Resolver) -> f32 {
+    let (start, end) = span;
+    let eps = 1e-9;
+    let mut track = Track::new(q.ty);
+    let mut last_interp = Interp::Linear;
+    for k in q.track.keys() {
+        if k.time >= start - eps && end.is_none_or(|(e, _)| k.time < e - eps) {
+            track.put(*k);
+            last_interp = k.interp;
+        }
+    }
+    if let Some((e, before)) = end {
+        track.put(Key::new(e, Value::F(before[i]), last_interp));
+    }
+    if track.is_empty() {
+        return r.f(q, t);
+    }
+    let mut tmp = q.clone();
+    tmp.id = format!("{}#join{}", q.id, start);
+    tmp.track = track;
+    r.f(&tmp, t)
+}
+
 fn local(l: &Layer, t: f64, r: &mut Resolver) -> Affine {
     let tr = &l.transform;
+    if !l.joins.is_empty() {
+        let span = l.join_span(t);
+        let (x, y) = (switched(&tr.x, span, 0, t, r), switched(&tr.y, span, 1, t, r));
+        let rot = switched(&tr.rotation, span, 2, t, r);
+        let (sx, sy) = (switched(&tr.scale_x, span, 3, t, r), switched(&tr.scale_y, span, 4, t, r));
+        let (ax, ay) = (r.f(&tr.anchor_x, t), r.f(&tr.anchor_y, t));
+        return Affine::translate(x as f64, y as f64)
+            .mul(&Affine::rotate_deg(rot as f64))
+            .mul(&Affine::scale(sx as f64, sy as f64))
+            .mul(&Affine::translate(-ax as f64, -ay as f64));
+    }
     let (x, y) = (r.f(&tr.x, t), r.f(&tr.y, t));
     let rot = r.f(&tr.rotation, t);
     let (sx, sy) = (r.f(&tr.scale_x, t), r.f(&tr.scale_y, t));
@@ -465,7 +502,8 @@ pub fn layer_chain(sym: &Symbol, l: &Layer, t: f64, r: &mut Resolver) -> Affine 
     let mut seen: HashSet<&str> = HashSet::new();
     seen.insert(&l.id);
     let mut cur = l;
-    while let Some(pid) = &cur.parent {
+    // the parent at t (joins over time, I1)
+    while let (Some(pid), node, rotate) = cur.parent_at(t) {
         let Some(p) = sym.layer(pid) else {
             r.diag(DiagnosticKind::MissingRef, format!("{}/parent", cur.id));
             break;
@@ -479,8 +517,8 @@ pub fn layer_chain(sym: &Symbol, l: &Layer, t: f64, r: &mut Resolver) -> Affine 
             cur = p;
             continue;
         }
-        let joint = match &cur.parent_node {
-            Some(nid) => node_frame(p, nid, cur.parent_node_rotate, t, r, &cur.id),
+        let joint = match node {
+            Some(nid) => node_frame(p, nid, rotate, t, r, &cur.id),
             None => None,
         };
         let lp = local(p, t, r);

@@ -504,6 +504,26 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
     on every frame (as Stick Nodes files are), or check that a key never
     reaches back; frame tools still belong to their frame alone.
 
+- **D32. Joins over time (I1, I2).** A layer keeps its static join (the
+  value before any switch: old files still join at frame 1 for good) and a
+  list of switches: from each switch's frame it is joined to a figure's
+  joint, the figure, or nothing. A switch keeps the transform it had in the
+  frame before it, used as the end of the interval before, so a tween into
+  the switch never mixes two parents' frames and nothing jumps. The keys
+  from a switch to the next are written in the new frame, with one on the
+  switch (FORMAT.md, "joins").
+  - Joining on the stage and "Let go" act from the current frame on; on the
+    first frame they act for the whole animation, as before (`join_here`,
+    `let_go_here`, `join_to` for scripts).
+  - A switch stores where things were at that moment: moving the parent on
+    the switch's own frame afterwards moves only the joined side, so a
+    figure can then hop at its let-go. Make the move before letting go.
+  - The timeline shows a grey chain where a figure joins and a red broken
+    chain where it lets go; tapping one says what it is, with Let go / Join
+    elsewhere (or Join again), and changes show a light toast with Undo.
+  - Not yet: the canvas's "main joints only" and the join-anchor handles
+    still read the static join.
+
 ## 7. Build order (easiest to hardest, nested)
 
 The user's instruction (2026-11-23): "From easiest to hardest. List out
@@ -622,8 +642,8 @@ and tests are never weakened.
 - [x] H3. The keying toggle, property rows, diamonds.
 
 ### I. Joins over time (D8)
-- [ ] I1. Engine: the parent becomes a value over time, with offsets stored.
-- [ ] I2. Chain markers, the join popover, toasts with Undo.
+- [x] I1. Engine: the parent becomes a value over time, with offsets stored.
+- [x] I2. Chain markers, the join popover, toasts with Undo.
 
 ### J. The figure editor
 - [ ] J1. Header and the save-as-new sheet (D12).

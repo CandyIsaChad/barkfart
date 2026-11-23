@@ -2195,7 +2195,7 @@ fn every_command_undoes_and_redoes_exactly() {
         json!({"op": "block_length", "frames": 3}), json!({"op": "move_block", "to": 1}),
         json!({"op": "each", "label": "Flip figures", "cmd": {"op": "flip_figure", "h": true}}), json!({"op": "easing", "v": "hold", "block": true}),
         json!({"op": "move_fx", "kind": "wiggle", "on": true}), json!({"op": "stop_animating", "property": "L2/opacity"}),
-        json!({"op": "add_time"}), json!({"op": "blend", "v": "MULTIPLY"}), json!({"op": "delete_pose"}), json!({"op": "easing", "v": "bounce", "block": true}), json!({"op": "move_fx", "kind": "swing", "on": true, "amount": 20}),
+        json!({"op": "add_time"}), json!({"op": "blend", "v": "MULTIPLY"}), json!({"op": "delete_pose"}), json!({"op": "let_go_here"}), json!({"op": "easing", "v": "bounce", "block": true}), json!({"op": "move_fx", "kind": "swing", "on": true, "amount": 20}),
     ];
     let text = |s: &Session| codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
     let mut failures = Vec::new();
@@ -5005,4 +5005,58 @@ fn a_picture_is_selected_and_changed_on_its_page() {
     assert_eq!(st["picture"]["locked"], true);
     let st = s.command(&json!({"op": "undo"}));
     assert_eq!(st["picture"]["opacity"], 1.0);
+}
+
+#[test]
+fn joins_are_moments_and_nothing_jumps() {
+    // D8 / I1: join from a frame on, let go later; the picture doesn't move
+    // at the switch, and from then on the joined figure follows
+    let mut s = animated(); // 4 frames, L2 posed differently on the last
+    s.command(&json!({"op": "select", "layer": "L2"}));
+    let st = s.command(&json!({"op": "duplicate_figure"}));
+    let twin = st["selected"]["layer"].as_str().unwrap().to_string();
+    let before: Vec<_> = (0..4).map(|f| triangles(&s, f)).collect();
+    let fps = s.project().settings.fps as f64;
+    let at = |s: &Session, f: i32| figure_at(s, &twin, f as f64 / fps);
+    let twin_before: Vec<_> = (0..4).map(|f| at(&s, f)).collect();
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "select", "layer": twin}));
+    let st = s.command(&json!({"op": "join_here", "layer": "L2"}));
+    assert_eq!(st["undo"], "Join");
+    for f in 0..4 {
+        assert_eq!(triangles(&s, f), before[f as usize], "frame {f} unchanged by the join");
+    }
+    // moving L2 on frame 4 moves the twin there (joined), not on frame 1
+    s.command(&json!({"op": "frame", "i": 3}));
+    s.command(&json!({"op": "select", "layer": "L2"}));
+    s.command(&json!({"op": "nudge", "dx": 40, "dy": 0}));
+    let (a0, a3) = (at(&s, 0), at(&s, 3));
+    assert!((a0.0 - twin_before[0].0).abs() < 1e-3, "before the join the twin stays: {a0:?}");
+    assert!((a3.0 - twin_before[3].0 - 40.0).abs() < 1.0, "joined, it follows: {a3:?} vs {:?}", twin_before[3]);
+    // let go on frame 3: moving L2 there no longer moves it
+    s.command(&json!({"op": "frame", "i": 2}));
+    s.command(&json!({"op": "select", "layer": twin}));
+    let pic = (0..4).map(|f| triangles(&s, f)).collect::<Vec<_>>();
+    let st = s.command(&json!({"op": "let_go_here"}));
+    assert_eq!(st["undo"], "Let go");
+    for f in 0..4 {
+        assert_eq!(triangles(&s, f), pic[f as usize], "frame {f} unchanged by letting go");
+    }
+    // tweened: no jump at either switch (just made: a parent moved later on
+    // the switch's frame moves only the joined side)
+    for sw in [1.0, 2.0] {
+        let (a, b) = (figure_at(&s, &twin, sw / fps - 1e-6), figure_at(&s, &twin, sw / fps + 1e-6));
+        assert!((a.0 - b.0).abs() < 0.05 && (a.1 - b.1).abs() < 0.05, "switch at frame {}: {a:?} then {b:?}", sw + 1.0);
+    }
+    let t2 = at(&s, 2);
+    s.command(&json!({"op": "select", "layer": "L2"}));
+    s.command(&json!({"op": "nudge", "dx": 0, "dy": 30}));
+    assert!((at(&s, 2).1 - t2.1).abs() < 1e-3, "let go: it stays");
+    // saved and opened, the same
+    let text = codec::encode(s.project());
+    let t = Session::new(Document::new(codec::decode(&text).unwrap()));
+    assert_eq!(codec::encode(t.project()), text);
+    for f in 0..4 {
+        assert_eq!(triangles(&t, f), triangles(&s, f), "reopened frame {f}");
+    }
 }
