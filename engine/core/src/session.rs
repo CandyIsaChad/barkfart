@@ -2696,6 +2696,45 @@ impl Session {
             let mut r = Resolver::new(p);
             json!({"zoom": round2(r.f(&c.zoom, t)), "rotation": round2(r.f(&c.rotation, t))})
         });
+        // G1: the expanded timeline's rows, front first (row order is draw
+        // order). Each: kind, the eye, the frames it is on, its blocks
+        // [start, length, hold] (a block is a pose, lasting to the next).
+        let rows: Vec<J> = p
+            .root()
+            .map(|s| {
+                let fps = st_fps(p);
+                let n = (frames as i32).max(1);
+                let mut r = Resolver::new(p);
+                s.layers
+                    .iter()
+                    .rev()
+                    .filter(|l| !matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_)))
+                    .map(|l| {
+                        let starts = crate::edit::block_ops::pose_frames(l, fps);
+                        let props = crate::edit::block_ops::pose_props_of(l);
+                        let blocks: Vec<J> = starts
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, st)| **st < n)
+                            .map(|(i, st)| {
+                                let next = starts.get(i + 1).copied().unwrap_or(n).min(n);
+                                let hold = props.iter().find_map(|q| q.track.keys().iter().find(|k| ((k.time * fps).round() as i32) == *st)).is_some_and(|k| k.interp == Interp::Hold);
+                                json!([st, next - st, hold])
+                            })
+                            .collect();
+                        let on: Vec<bool> = (0..n.min(2000)).map(|f| r.b(&l.shown, f as f64 / fps)).collect();
+                        let kind = match &l.kind {
+                            LayerKind::Figure(_) => "figure",
+                            LayerKind::Sprite(_) => "picture",
+                            LayerKind::Text(_) => "text",
+                            LayerKind::Symbol(_) => "movieclip",
+                            _ => "other",
+                        };
+                        json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone()), "kind": kind, "visible": l.visible, "on": on, "blocks": blocks, "joined": l.parent.is_some()})
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let no_tween = {
             let k = self.keys_at(t, None);
             !k.is_empty() && k.iter().all(|r| p.property(&r.property).and_then(|q| q.track.keys().iter().find(|x| x.time == r.time)).is_some_and(|x| x.interp == Interp::Hold))
@@ -2706,7 +2745,7 @@ impl Session {
             "canUndo": self.doc.can_undo(), "canRedo": self.doc.can_redo(),
             "undo": self.doc.undo_label(), "redo": self.doc.redo_label(), "dirty": self.doc.dirty(),
             "mode": match self.mode { Mode::Figure => "figure", Mode::All => "all", Mode::Camera => "camera" },
-            "handles": handles, "selected": sel, "figures": figures, "camera": cam, "movieclip": movieclip, "editingClip": (p.root_symbol != self.main_root).then(|| p.root().and_then(|r| r.name.clone()).unwrap_or_else(|| "Movieclip".into())),
+            "handles": handles, "selected": sel, "figures": figures, "rows": rows, "camera": cam, "movieclip": movieclip, "editingClip": (p.root_symbol != self.main_root).then(|| p.root().and_then(|r| r.name.clone()).unwrap_or_else(|| "Movieclip".into())),
             "branchCopied": self.branch_clip.is_some(),
             "watermark": p.settings.watermark.as_ref().map(|(t, c)| json!({"text": t, "color": c.to_rgba8888()})),
             "propsFrom": self.props_clip.as_ref().and_then(|c| p.root()?.layer(&c.source).map(|l| l.name.clone().unwrap_or_else(|| l.id.clone()))),
@@ -3014,10 +3053,11 @@ pub fn anchor_poses(st: &mut crate::edit::State) {
     for id in ids {
         let Some(l) = st.project.layer_mut(&sym, &id) else { continue };
         key_every_frame(&mut l.shown, n, fps);
-        let camera = matches!(l.kind, LayerKind::Camera(_));
+        let camera = matches!(l.kind, LayerKind::Camera(_) | LayerKind::Text(_));
         let ps = crate::edit::block_ops::pose_props(l);
         if camera {
-            // the camera stays a frame-by-frame thing, as in Stick Nodes
+            // the camera and textfields stay frame-by-frame things, as in
+            // Stick Nodes (a textfield sits on one frame)
             for q in ps {
                 key_every_frame(q, n, fps);
             }

@@ -1097,6 +1097,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           unawaited(_firstRun());
         case 'projectsscreen':
           unawaited(_projectsScreen());
+        case 'layers':
+          setState(() => _layersOpen = true);
         case 'backups':
           unawaited(_backupsSheet());
         case 'exportfull':
@@ -1784,19 +1786,21 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// whole seconds bold); the current frame is a pale pill. Per-frame marks
   /// stay, small and quiet (D17); hold a cell to copy frames from it.
   Widget _previewRow() {
-    const cell = 56.0, rulerH = 22.0, thumbH = 32.0;
+    const cell = 56.0, rulerH = 22.0, thumbH = 32.0, rowH = 32.0;
     final fps = _fps.round().clamp(1, 240);
     final step = math.max(1, (fps / 4).round());
     final cur = _playing ? (_playT * _fps).floor() : _frame;
     Widget mark(String icon, Color c) => Padding(padding: const EdgeInsets.only(right: 1), child: Icon(_markIcons[icon], size: 10, color: c));
-    return Container(
-      height: rulerH + thumbH + 10,
-      color: cCard,
-      child: ListView.builder(
+    // G1: the layer rows, when the timeline is unfolded
+    final rows = _layersOpen && !_playing ? ((_st['rows'] as List?) ?? const []).cast<Map>() : const <Map>[];
+    final selLayer = _sel?['layer'];
+    final contentH = rulerH + thumbH + 10 + rows.length * rowH;
+    final strip = ListView.builder(
         controller: _stripScroll,
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 8),
         itemCount: _frames,
+        itemExtent: cell,
         itemBuilder: (c, i) {
           final f = i + 1, isCur = i == cur, sec = f % fps == 0, label = f == 1 || sec || f % step == 0;
           final marks = (_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?;
@@ -1857,10 +1861,94 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                     ),
                   ]),
                 ),
+                if (rows.isNotEmpty) const SizedBox(height: 10),
+                for (final r in rows) _blockCell(r, i, cell, rowH, r['id'] == selLayer),
               ]),
             ),
           );
         },
+      );
+    if (rows.isEmpty) return Container(height: rulerH + thumbH + 10, color: cCard, child: strip);
+    // the names column beside the rows: a blank cell by the ruler, "Preview",
+    // then each layer with its icon, name and eye (read-only for now)
+    Widget name(Map r) {
+      final on = r['visible'] != false, selected = r['id'] == selLayer;
+      const icons = {'figure': 'figure', 'picture': 'picture', 'text': 'text', 'movieclip': 'clip'};
+      return Container(
+        height: rowH,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        color: selected ? cSelected : null,
+        child: Row(children: [
+          Pictogram(icons[r['kind']] ?? 'figure', size: 16, color: selected ? cAccent : cSecondary),
+          const SizedBox(width: 6),
+          Expanded(child: Text('${r['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: on ? cText : cSecondary, fontSize: 13, fontWeight: selected ? FontWeight.w700 : FontWeight.w400))),
+          Pictogram('eye', size: 16, color: on ? const Color(0xFF9AA0A8) : const Color(0xFFD5D8DD)),
+        ]),
+      );
+    }
+
+    return Container(
+      color: cCard,
+      constraints: BoxConstraints(maxHeight: math.min(contentH, MediaQuery.sizeOf(context).height * 0.38)),
+      child: SingleChildScrollView(
+        child: SizedBox(
+          height: contentH,
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Container(
+              width: 140,
+              decoration: const BoxDecoration(border: Border(right: BorderSide(color: Color(0xFFE6E8EB)))),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                const SizedBox(height: rulerH),
+                const SizedBox(height: thumbH, child: Padding(padding: EdgeInsets.only(left: 8), child: Align(alignment: Alignment.centerLeft, child: Text('Preview', style: TextStyle(color: cSecondary, fontSize: 12))))),
+                const SizedBox(height: 10),
+                for (final r in rows) name(r),
+              ]),
+            ),
+            Expanded(child: strip),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  /// One frame's slice of a layer row (G1, G2): quiet blocks, one per pose,
+  /// no markers. The selected figure's pose under the playhead is a little
+  /// stronger. Tapping a block selects the figure there and opens its pose.
+  Widget _blockCell(Map r, int i, double cell, double rowH, bool selectedRow) {
+    final on = (r['on'] as List?)?.elementAtOrNull(i) != false;
+    List? block;
+    for (final b in (r['blocks'] as List? ?? const [])) {
+      final st = (b[0] as num).toInt(), len = (b[1] as num).toInt();
+      if (i >= st && i < st + len) block = b as List;
+    }
+    if (!on || block == null) return SizedBox(height: rowH, width: cell);
+    final st = (block[0] as num).toInt(), len = (block[1] as num).toInt();
+    final first = i == st, last = i == st + len - 1;
+    final strong = selectedRow && _frame >= st && _frame < st + len;
+    const side = BorderSide(color: Color(0xFFD5D9DF));
+    final edge = strong ? const BorderSide(color: cAccent, width: 1.5) : side;
+    return GestureDetector(
+      onTap: _playing
+          ? null
+          : () {
+              _cmd({'op': 'frame', 'i': i});
+              if (r['kind'] == 'figure') {
+                _cmd({'op': 'select', 'layer': r['id']});
+                setState(() => _panelOpen = true);
+                _jumpTo('Pose');
+              }
+            },
+      child: Container(
+        height: rowH,
+        width: cell,
+        padding: EdgeInsets.only(top: 5, bottom: 5, left: first ? 2 : 0, right: last ? 2 : 0),
+        child: Container(
+          decoration: BoxDecoration(
+            color: strong ? const Color(0xFFDCEAF9) : const Color(0xFFEDEFF2),
+            border: Border(top: edge, bottom: edge, left: first ? edge : BorderSide.none, right: last ? edge : BorderSide.none),
+            borderRadius: BorderRadius.horizontal(left: Radius.circular(first ? 6 : 0), right: Radius.circular(last ? 6 : 0)),
+          ),
+        ),
       ),
     );
   }
@@ -1895,6 +1983,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           kit.IconTool('onion', label: 'Onion skin', on: _opts['onion'] == true, onTap: _playing ? null : () => _cmd({'op': 'set', 'k': 'onion', 'v': _opts['onion'] != true})),
           const Spacer(),
           kit.WordButton('$_fpsLabel fps', key: _fpsKey, size: 13, onTap: _playing ? null : _animationPopover),
+          // G1: unfold the layer rows (folded: the ruler and Preview row only)
+          Transform.rotate(
+            angle: _layersOpen ? 0 : math.pi,
+            child: kit.IconTool('chevron', label: _layersOpen ? 'Fold the timeline' : 'Show the layers', onTap: () => setState(() => _layersOpen = !_layersOpen)),
+          ),
         ]),
         Row(mainAxisSize: MainAxisSize.min, children: [
           kit.IconTool('toStart', label: 'Go to the first frame', onTap: () => _goFrame(0)),
@@ -2039,6 +2132,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   bool _panelOpen = true, _hidePanels = false;
+  bool _layersOpen = false;
 
   /// The right rail (REDESIGN §4): undo, redo, Properties, delete; hide the
   /// panels at the bottom.

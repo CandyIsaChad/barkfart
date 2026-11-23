@@ -399,7 +399,9 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
   pose (every joint's angle and length, and its transform) is keyed together
   wherever any part of it is keyed, and on the first frame; no other figure
   is touched. Between its own keys a figure holds or tweens.
-  - The camera stays frame by frame (keyed on every frame), as in Stick Nodes.
+  - The camera and textfields stay frame by frame (keyed on every frame), as
+    in Stick Nodes, where a textfield sits on one frame. (The on/off matrix
+    found a textfield's scale, set and set back, leaving a block boundary.)
   - Being shown stays keyed on every frame: it is a held value, so it changes
     nothing on screen, and "delete on this frame only" relies on it.
   - Frame tools that act on a whole frame ("Do not tween") first key every
@@ -419,6 +421,16 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
     pose here, Hold longer, Copy and Paste pose (moved from Stickfigure, §9).
   - The eases are the four the engine has: Even, Slow start, Slow end, Slow
     both. Bounce (§8) waits for a bounce ease in the engine.
+
+- **D27. The first expanded timeline (G1, G2).** A chevron at the right of
+  the toolbar unfolds the layer rows (script `layers`). The names column has
+  a blank cell by the ruler, "Preview", then each layer front first with its
+  icon, name and eye (read-only). Rows scroll sideways with the strip, since
+  each frame column draws its slice of every row. Blocks are plain pale bars,
+  no markers; the selected figure's pose under the playhead is pale blue
+  with a blue edge. Tapping a block selects the figure on that frame and
+  opens the Pose tab. Pictures of the pose inside blocks (§4) wait for a
+  per-layer render in the engine.
 
 ## 7. Build order (easiest to hardest, nested)
 
@@ -526,8 +538,8 @@ and tests are never weakened.
   blocks.
 
 ### G. The expanded timeline
-- [ ] G1. Layer rows, the names column, eyes (read-only).
-- [ ] G2. Quiet blocks, with selection opening the Pose page.
+- [x] G1. Layer rows, the names column, eyes (read-only).
+- [x] G2. Quiet blocks, with selection opening the Pose page.
 - [ ] G3. Grips to extend, long-press to move, pinch to zoom.
 - [ ] G4. Swipe actions, and right-click on Linux.
 - [ ] G5. Selection box, lasso, the multi-select page.

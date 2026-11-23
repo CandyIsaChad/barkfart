@@ -3067,7 +3067,7 @@ fn a_new_frame_draws_what_the_frame_it_copies_draws() {
             diff(&panel, &s.state(), "", &mut d);
             // where the playhead is, not what the frame shows (the pose's
             // first frame is a frame number too)
-            d.retain(|x| !["/frame:", "/frames:", "/keyed:", "/library:", "/frameMarks:", "/noTweenFrames:", "/frameCopied:", "/frameClipCount:", "/selected/pose/start:"].iter().any(|p| x.starts_with(p)));
+            d.retain(|x| !["/frame:", "/frames:", "/keyed:", "/library:", "/frameMarks:", "/noTweenFrames:", "/frameCopied:", "/frameClipCount:", "/selected/pose/start:", "/rows:"].iter().any(|p| x.starts_with(p)));
             // a frame inserted with Add frame does not copy the frame's timing (the pause,
             // slow motion and silence); a pasted frame does
             if how == "insert" {
@@ -4744,4 +4744,26 @@ fn add_frame_keys_every_figure_on_the_new_frame() {
     s.command(&json!({"op": "insert_frame"}));
     assert_eq!(l2_frames(&s), vec![0, 2, 4], "keyed on the new frame; the frame-4 pose moved to 5");
     assert_eq!(triangles(&s, 2), mid, "the new frame shows the moment it copies");
+}
+
+#[test]
+fn the_timeline_rows_show_each_figures_poses() {
+    // G1: one row per layer, front first; blocks are [start, length, hold]
+    let mut s = sparse();
+    let st = s.command(&json!({"op": "state"}));
+    let rows = st["rows"].as_array().unwrap();
+    let l2 = rows.iter().find(|r| r["id"] == "L2").expect("a row for L2");
+    assert_eq!(l2["kind"], "figure");
+    assert_eq!(l2["blocks"], json!([[0, 3, false], [3, 1, false]]));
+    assert_eq!(l2["on"].as_array().unwrap().len(), 4);
+    s.command(&json!({"op": "select", "layer": "L2"}));
+    s.command(&json!({"op": "easing", "v": "hold"}));
+    s.command(&json!({"op": "add_figure", "kind": "stickman"}));
+    let st = s.command(&json!({"op": "state"}));
+    let rows = st["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_ne!(rows[0]["id"], "L2", "the new figure is in front, so first");
+    assert_eq!(rows[1]["blocks"][0], json!([0, 3, true]));
+    // the new figure is on this frame only
+    assert_eq!(rows[0]["on"], json!([true, false, false, false]));
 }
