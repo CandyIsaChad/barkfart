@@ -39,6 +39,8 @@ typedef _CmdC = Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>);
 typedef _ViewC = Int32 Function(Pointer<Void>, Double, Uint32, Uint32, Float, Float, Float, Float, Uint32, Pointer<Uint8>, Pointer<Uint32>);
 typedef _ViewD = int Function(Pointer<Void>, double, int, int, double, double, double, double, int, Pointer<Uint8>, Pointer<Uint32>);
 typedef _FigC = Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Uint32, Pointer<Uint8>);
+typedef _LayerC = Int32 Function(Pointer<Void>, Pointer<Utf8>, Double, Uint32, Uint32, Pointer<Uint8>);
+typedef _LayerD = int Function(Pointer<Void>, Pointer<Utf8>, double, int, int, Pointer<Uint8>);
 typedef _FigD = int Function(Pointer<Void>, Pointer<Utf8>, int, int, Pointer<Uint8>);
 typedef _FileC = Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, IntPtr, Uint32, Uint32, Pointer<Uint8>);
 typedef _FileD = int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, int, int, int, Pointer<Uint8>);
@@ -222,6 +224,17 @@ class Engine {
     final out = calloc<Uint8>(w * h * 4);
     final k = kind.toNativeUtf8();
     final r = _lib.lookupFunction<_FigC, _FigD>('bf_render_figure')(_handle, k, w, h, out);
+    calloc.free(k);
+    final px = r == 0 ? Uint8List.fromList(out.asTypedList(w * h * 4)) : null;
+    calloc.free(out);
+    return px;
+  }
+
+  /// M4: one layer alone at time t (the pictures inside timeline blocks).
+  Uint8List? renderLayer(String id, double t, int w, int h) {
+    final out = calloc<Uint8>(w * h * 4);
+    final k = id.toNativeUtf8();
+    final r = _lib.lookupFunction<_LayerC, _LayerD>('bf_render_layer')(_handle, k, t, w, h, out);
     calloc.free(k);
     final px = r == 0 ? Uint8List.fromList(out.asTypedList(w * h * 4)) : null;
     calloc.free(out);

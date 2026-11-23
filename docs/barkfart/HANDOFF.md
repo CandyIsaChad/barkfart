@@ -33,7 +33,7 @@ Tick items there as they finish.
 - Scripted editor runs as before. The new script command is `savesheet`.
 - The window is capped at the screen size (about 1300x700).
 
-**Next:** REDESIGN §7 M4 (pose pictures inside blocks, from a per-layer render), then M5, M8, M9. M1–M3, M6, M7 are done: the boards are rendered with docs/barkfart/mockups (`mkdir -p project preview && node boards.mjs`, headless shell at 1344x600). Section H is done (D29–D31).
+**Next:** REDESIGN §7 M5 (Camera row, Sound rows, chain markers), then M8, M9. M1–M4, M6, M7 are done (M4: `bf_render_layer`, pictures cached per layer and frame): the boards are rendered with docs/barkfart/mockups (`mkdir -p project preview && node boards.mjs`, headless shell at 1344x600). Section H is done (D29–D31).
 - Done: A1–A6, B1–B6, C1–C8, D1–D7b, E1–E3. D2 (the Movieclip page) is written but not yet seen on screen. D7b: `reset_segment`, `selected.defaults` and `Figure::base` (FORMAT.md); the first-run figure is the engine's render of Stickfigure.nodes (D22).
 - Home script commands: `firstrun`, `projectsscreen`, `backups`, `makeprojects N` (copies the open save N times). Saving writes a picture to `.thumbs/<name>.png`.
 

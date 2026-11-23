@@ -116,6 +116,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _ticker = createTicker((_) {
       _tick();
       _thumbTick();
+      _rowPicTick();
       _magTick();
     })..start();
     _start();
@@ -1742,6 +1743,67 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _thumbs.keys.where((k) => k >= _frames).toList().forEach((k) => _thumbs.remove(k)?.dispose());
   }
 
+  // M4: the pictures inside timeline blocks, per layer and frame ("id@frame"):
+  // a tween block shows the pose on every frame, a hold block once. Redrawn a
+  // few at a time after a change; the old picture shows until then.
+  final Map<String, ui.Image> _rowPics = {};
+  final Set<String> _rowPicDirty = {};
+  int _rowPicRev = -1;
+
+  /// The pictures the open rows show, as "id@frame".
+  List<String> _rowPicsWanted() {
+    if (!_layersOpen || _playing) return const [];
+    final out = <String>[];
+    for (final r in ((_st['rows'] as List?) ?? const []).cast<Map>()) {
+      if (r['kind'] == 'text') continue;
+      final on = (r['on'] as List?) ?? const [];
+      final blocks = (r['blocks'] as List?) ?? const [];
+      for (var b = 0; b < blocks.length; b++) {
+        final st = (blocks[b][0] as num).toInt(), len = (blocks[b][1] as num).toInt();
+        final tween = blocks[b][2] != true && b + 1 < blocks.length;
+        for (var f = st; f < (tween ? st + len : st + 1); f++) {
+          if (on.elementAtOrNull(f) != false) out.add('${r['id']}@$f');
+        }
+      }
+    }
+    return out;
+  }
+
+  void _rowPicTick() {
+    final e = _engine;
+    if (e == null || _playing || _oneFinger == 1 || _st.isEmpty || !_layersOpen) return;
+    final rev = (_st['rev'] as num?)?.toInt() ?? 0;
+    final wanted = _rowPicsWanted();
+    if (rev != _rowPicRev) {
+      _rowPicRev = rev;
+      _rowPicDirty
+        ..clear()
+        ..addAll(wanted);
+      final keep = wanted.toSet();
+      for (final k in _rowPics.keys.where((k) => !keep.contains(k)).toList()) {
+        _rowPics.remove(k)?.dispose();
+      }
+    }
+    if (_rowPicDirty.isEmpty) return;
+    // nearest the playhead first, a few per tick
+    final order = _rowPicDirty.toList()..sort((a, b) => (int.parse(a.split('@').last) - _frame).abs().compareTo((int.parse(b.split('@').last) - _frame).abs()));
+    for (final k in order.take(3)) {
+      _rowPicDirty.remove(k);
+      final at = k.lastIndexOf('@');
+      final id = k.substring(0, at), f = int.parse(k.substring(at + 1));
+      final px = (44 * math.min(_dpr, 2.0)).round();
+      final pic = e.renderLayer(id, f / _fps, px, px);
+      if (pic == null) continue;
+      ui.decodeImageFromPixels(pic, px, px, ui.PixelFormat.rgba8888, (img) {
+        if (!mounted) return;
+        setState(() {
+          _rowPics.remove(k)?.dispose();
+          _rowPics[k] = img;
+        });
+      });
+    }
+  }
+
   /// Draws one stale frame picture (nearest the current frame first).
   void _thumbTick() {
     final e = _engine;
@@ -2188,11 +2250,18 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             ),
           );
       final figure = r['kind'] == 'figure';
+      // the pose's pictures: every frame of a tween, the first of a hold
+      final tween = !(b[2] == true) && st + len < _frames;
+      final pics = <Widget>[
+        for (var f = a; f <= (tween ? z : a); f++)
+          if (_rowPics['${r['id']}@$f'] case final img?)
+            Positioned(left: (f - a) * cell + (cell - 22) / 2 - 1, top: 2, width: 22, height: 22, child: IgnorePointer(child: RawImage(image: img, fit: BoxFit.contain, filterQuality: FilterQuality.medium))),
+      ];
       out.add(Positioned(
         left: x,
         top: y + (rowH - 26) / 2,
         child: _playing
-            ? bar(x, w)
+            ? Stack(children: [bar(x, w), ...pics])
             : GestureDetector(
                 onTapUp: (d) => select(d.localPosition.dx),
                 onLongPressStart: figure && st > 0
@@ -2207,6 +2276,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 onLongPressEnd: (_) => _endBlockDrag(),
                 child: Stack(children: [
                   bar(x, w, strong: strong),
+                  ...pics,
                   if (strong && figure && st > 0) grip(true),
                   if (strong && figure) grip(false),
                 ]),

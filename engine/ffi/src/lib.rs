@@ -916,6 +916,29 @@ fn render_fitted_at(engine: &Engine, p: &Project, t: f64, w: u32, h: u32) -> Opt
     Some(engine.renderer.render(&list, w, h, view))
 }
 
+/// The pictures inside timeline blocks (M4): layer `id` alone at time t,
+/// fitted into w x h with transparency around it. 0 on success, 2 when the
+/// layer is gone or draws nothing.
+#[no_mangle]
+pub extern "C" fn bf_render_layer(e: *const Engine, id: *const c_char, t: f64, w: u32, h: u32, out: *mut u8) -> i32 {
+    if e.is_null() || out.is_null() || w == 0 || h == 0 || w > 1024 || h > 1024 {
+        return 1;
+    }
+    // SAFETY: live handle
+    let engine = unsafe { &*e };
+    let Some(id) = cstr(id) else { return 1 };
+    let Some(s) = engine.session.as_ref() else { return 2 };
+    let r = catch_unwind(AssertUnwindSafe(|| s.layer_alone(&id).and_then(|p| render_fitted_at(engine, &p, t, w, h))));
+    match r {
+        Ok(Some(px)) => {
+            // SAFETY: caller provides w * h * 4 bytes
+            unsafe { std::ptr::copy_nonoverlapping(px.as_ptr(), out, px.len()) };
+            0
+        }
+        _ => 2,
+    }
+}
+
 /// The effects browser's tiles (H2): the selected figure alone, as on this
 /// frame, with `json` (a filter command, or {} for none) applied to a copy,
 /// fitted into w x h with transparency around it. 0 on success, 2 when

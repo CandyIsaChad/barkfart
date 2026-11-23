@@ -182,6 +182,23 @@ impl Session {
         self.rev
     }
 
+    /// M4: one layer alone (no parent, no effects), for the pictures inside
+    /// its timeline blocks. None when the layer doesn't exist.
+    pub fn layer_alone(&self, id: &str) -> Option<Project> {
+        let mut p = self.project().clone();
+        let root = p.root_mut()?;
+        let keep = root.layers.iter().find(|x| x.id == id)?.clone();
+        let mut layer = (*keep).clone();
+        layer.parent = None;
+        layer.parent_node = None;
+        layer.effects = Default::default();
+        // shown on every frame here: a block only asks for frames it is on
+        layer.shown.track.clear();
+        layer.shown.value = Value::B(true);
+        root.layers = vec![std::sync::Arc::new(layer)];
+        Some(p)
+    }
+
     /// H2: the selected figure alone, as on this frame, with a filter command
     /// applied to a copy (the effects browser's tile previews). None without
     /// a selected figure. The copy is never part of the project or its history.
