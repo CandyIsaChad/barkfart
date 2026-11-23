@@ -1458,7 +1458,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   /// The sections the panel shows now (also the tabs above the stage).
   List<String> _sections() {
-    if (_st['building'] != null) return const ['Figure editor'];
+    // the figure editor (FigureEditor board): Shape, Segment, Figure; the
+    // main joint has only the figure
+    if (_st['building'] != null) return _sel != null && _sel!['root'] != true ? const ['Shape Tools', 'Segment Tools', 'Figure editor'] : const ['Figure editor'];
     if (_st['mode'] == 'camera') return const ['Camera Tools'];
     if (_soundPage && _st['frameSound'] != null) return const ['Sound Tools'];
     if (_frameSelected) return const ['Frame Tools'];
@@ -1521,6 +1523,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         return _cameraTools();
       case 'Figure editor':
         return _builder(_sel);
+      case 'Shape Tools':
+        return _shapeTools(_sel!);
     }
     return const [];
   }
@@ -1722,6 +1726,75 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         ),
       );
     });
+  }
+
+  /// The figure editor's Shape page (FigureEditor board): the seven shapes as
+  /// tiles in the segment's own colour, the current one ringed, then that
+  /// shape's own settings.
+  List<Widget> _shapeTools(Map<String, dynamic> sel) {
+    final shape = sel['shape'] as String? ?? 'line';
+    final c = (sel['color'] as num?)?.toInt() ?? 0xff;
+    final colour = Color(((c & 0xff) << 24) | (c >> 8));
+    void seg(Map<String, Object?> m) => _cmd({'op': 'segment', ...m});
+    const tiles = [('square', 'Segment', 'segment'), ('line', 'Rounded', 'rounded'), ('circle', 'Circle', 'circle'), ('ellipse', 'Ellipse', 'ellipse'), ('triangle', 'Triangle', 'triangle'), ('trapezoid', 'Trapezoid', 'trapezoid'), ('polygon', 'Polygon', 'polygon')];
+    final name = tiles.where((t) => t.$1 == shape).firstOrNull?.$2 ?? 'Segment';
+    final curve = (sel['curve'] as num?)?.toDouble() ?? 0;
+    final sides = (sel['sides'] as num?)?.toInt() ?? 5;
+    final trap = ((sel['trapRatio'] as num?) ?? 1).toDouble();
+    final half = (sel['halfArc'] as num?)?.toInt() ?? 0;
+    final right = (sel['rightTriangle'] as num?)?.toInt() ?? 0;
+    final grid = GridView.count(
+      crossAxisCount: 3,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: 8,
+      crossAxisSpacing: 8,
+      childAspectRatio: 1.25,
+      children: [
+        for (final (id, label, glyph) in tiles)
+          kit.Tap(
+            label: label,
+            minSize: 0,
+            onTap: () => seg({'shape': id}),
+            child: Column(children: [
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(color: cCard, borderRadius: BorderRadius.circular(10), border: Border.all(color: id == shape ? cAccent : cLine, width: id == shape ? 2 : 1)),
+                  child: Center(child: CustomPaint(size: const Size(60, 36), painter: ShapeGlyph(glyph, colour))),
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(label, style: TextStyle(color: id == shape ? cAccent : cText, fontSize: 12, fontWeight: id == shape ? FontWeight.w600 : FontWeight.w400)),
+            ]),
+          ),
+      ],
+    );
+    final rows = <rw.Desc>[
+      rw.DWidget(grid),
+      rw.DTitle(name),
+      if (shape == 'line' || shape == 'square' || shape == 'trapezoid') rw.DStep('Curve radius', curve.round().toString(), onMinus: () => seg({'curve': curve - 5}), onPlus: () => seg({'curve': curve + 5})),
+      if (shape == 'trapezoid') ...[
+        rw.DStep('End thickness', '${(trap * 100).round()}%', onMinus: () => seg({'trapRatio': math.max(0, trap - 0.1)}), onPlus: () => seg({'trapRatio': trap + 0.1})),
+        rw.DTick('Start rounded', sel['trapRoundStart'] == true, onChanged: (v) => seg({'trapRoundStart': v})),
+        rw.DTick('End rounded', sel['trapRoundEnd'] == true, onChanged: (v) => seg({'trapRoundEnd': v})),
+      ],
+      if (shape == 'circle' || shape == 'ellipse') ...[
+        rw.DTick('Half arc', half != 0, onChanged: (v) => seg({'halfArc': v ? 1 : 0})),
+        if (half != 0) rw.DTick('Upside down', half < 0, onChanged: (v) => seg({'halfArc': v ? -1 : 1})),
+      ],
+      if (shape == 'circle') ...[
+        rw.DTick('Is hollow', sel['hollow'] == true, onChanged: (v) => seg({'hollow': v})),
+        rw.DTick('Circle outline colour', sel['outline'] == true, onChanged: (v) => seg({'outline': v})),
+      ],
+      if (shape == 'triangle') ...[
+        rw.DTick('Right triangle', right != 0, onChanged: (v) => seg({'rightTriangle': v ? 1 : 0})),
+        if (right != 0) rw.DTick('Flipped', right < 0, onChanged: (v) => seg({'rightTriangle': v ? -1 : 1})),
+        rw.DTick('Upside down', sel['upsideDown'] == true, onChanged: (v) => seg({'upsideDown': v})),
+      ],
+      if (shape == 'polygon') rw.DStep('Vertices', '$sides', onMinus: () => seg({'sides': math.max(3, sides - 1)}), onPlus: () => seg({'sides': sides + 1})),
+      if (shape == 'ellipse') const rw.DHint('The segment\u2019s thickness sets how tall the ellipse is.'),
+    ];
+    return [for (final d in rows) rw.renderDesc(d)];
   }
 
   /// The Parts list (J3, FigureEditor board): every part of the figure,
@@ -2910,7 +2983,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     );
   }
 
-  static String _tabLabel(String n) => n == 'Stickfigure Filters' ? 'Filters' : n.replaceAll(' Tools', '');
+  static String _tabLabel(String n) => n == 'Stickfigure Filters' ? 'Filters' : n == 'Figure editor' ? 'Figure' : n.replaceAll(' Tools', '');
 
   /// The Properties card (REDESIGN §4): today's sections, tabbed by what is
   /// selected. It floats over the stage on the right.
@@ -2990,6 +3063,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         'Pose' => 'Pose Tools',
         'Frame Tools' => 'Frame ${_frame + 1}',
         'Textfield Tools' => 'Text Tools',
+        'Figure editor' => 'Figure Tools',
         'Selection' => '${((_st['multi'] as List?) ?? const []).length} figures',
         'Nothing selected' => '',
         _ => section,
