@@ -1668,7 +1668,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                     ),
                 ]),
               ),
-            if (_st['mode'] == 'camera') IgnorePointer(child: Container(decoration: BoxDecoration(border: Border.all(color: cAccent, width: 2)))),
+
           ]),
         ),
       );
@@ -4055,10 +4055,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       rw.DButtons('Center camera', () => _cmd({'op': 'camera', 'center': true}), b: 'Reset', onB: () => _cmd({'op': 'reset_camera'})),
       rw.DLink('Auto-camera', auto != null ? 'To frame ${(auto['end'] as num) + 1}' : 'Off', onTap: _autoCameraDialog),
       const rw.DHint("Auto-camera tweens this frame's camera across several frames."),
-      rw.DLink('Lock a figure to the camera', 'Choose', onTap: _cameraLockDialog),
+      rw.DLink('Lock a figure to the camera', switch (((_st['cameraLocks'] as List?) ?? const []).length) { 0 => 'None', 1 => '1 figure', final n => '$n figures' }, onTap: _cameraLockDialog),
       rw.DSeg(const ['None', 'Thirds', 'Phi', 'Spiral'], guide < 3 ? guide : 3, label: guide >= 3 ? 'Guide (spiral ${guide - 2} of 4)' : 'Guide', onSelect: setGuide),
     ];
-    return [for (final d in rows) rw.renderDesc(d), _title('Effects on this frame'), ..._cameraFx()];
+    return [for (final d in rows) rw.renderDesc(d), rw.renderDesc(const rw.DTitle('Effects on this frame')), ..._cameraFx()];
   }
 
   /// Movieclip Tools: the selected movieclip's playback.
@@ -4090,29 +4090,20 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final speed = (fx['wobbleSpeed'] as num?)?.toDouble() ?? 3, zoom = fx['wobbleZoom'] != false;
     final any = xy > 0 || rot > 0;
     void fxCmd(Map<String, Object?> m) => _cmd({'op': 'camera_fx', ...m});
-    return [
-      _Toggle('Widescreen effect', fx['widescreen'] == true, (v) => fxCmd({'widescreen': v})),
-      _gap,
-      _Toggle('Wobble camera XY', xy > 0, (v) => fxCmd({'wobbleXY': v ? 8 : 0})),
-      if (xy > 0) _stepper('Amount', xy.round().toString(), () => fxCmd({'wobbleXY': math.max(1, xy - 1)}), () => fxCmd({'wobbleXY': xy + 1})),
-      _Toggle('Wobble camera rotation', rot > 0, (v) => fxCmd({'wobbleRot': v ? 0.5 : 0})),
-      if (rot > 0) _stepper('Degrees', rot.toStringAsFixed(2), () => fxCmd({'wobbleRot': math.max(0.1, rot - 0.1)}), () => fxCmd({'wobbleRot': rot + 0.1})),
-      Opacity(
-        opacity: any ? 1 : 0.4,
-        child: IgnorePointer(
-          ignoring: !any,
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            _stepper('Wobble speed', speed.toStringAsFixed(2), () => fxCmd({'wobbleSpeed': math.max(0.1, speed - 0.5)}), () => fxCmd({'wobbleSpeed': speed + 0.5})),
-            _Toggle('Scale wobble with zoom', zoom, (v) => fxCmd({'wobbleZoom': v})),
-          ]),
-        ),
-      ),
-      _pair(
-        _Btn('Copy wobble', onTap: () => setState(() => _wobbleClip = (xy, rot, speed, zoom))),
-        _Btn('Paste wobble', enabled: _wobbleClip != null, onTap: () => fxCmd({'wobbleXY': _wobbleClip!.$1, 'wobbleRot': _wobbleClip!.$2, 'wobbleSpeed': _wobbleClip!.$3, 'wobbleZoom': _wobbleClip!.$4})),
-      ),
-      _hint('Widescreen and wobble belong to this frame and show when playing and in exports, not while editing.'),
+    // the Camera board's words; the amounts show under a wobble that is on
+    final rows = <rw.Desc>[
+      rw.DTick('Widescreen', fx['widescreen'] == true, onChanged: (v) => fxCmd({'widescreen': v})),
+      rw.DTick('Wobble position', xy > 0, onChanged: (v) => fxCmd({'wobbleXY': v ? 8 : 0})),
+      if (xy > 0) rw.DStep('Distance', xy.round().toString(), onMinus: () => fxCmd({'wobbleXY': math.max(1, xy - 1)}), onPlus: () => fxCmd({'wobbleXY': xy + 1})),
+      rw.DTick('Wobble rotation', rot > 0, onChanged: (v) => fxCmd({'wobbleRot': v ? 0.5 : 0})),
+      if (rot > 0) rw.DStep('Degrees', rot.toStringAsFixed(2), onMinus: () => fxCmd({'wobbleRot': math.max(0.1, rot - 0.1)}), onPlus: () => fxCmd({'wobbleRot': rot + 0.1})),
+      rw.DStep('Wobble speed', speed.toStringAsFixed(1), onMinus: any ? () => fxCmd({'wobbleSpeed': math.max(0.1, speed - 0.5)}) : null, onPlus: any ? () => fxCmd({'wobbleSpeed': speed + 0.5}) : null),
+      rw.DTick('Scale wobble with zoom', zoom, onChanged: any ? (v) => fxCmd({'wobbleZoom': v}) : null),
+      rw.DButtons('Copy wobble', () => setState(() => _wobbleClip = (xy, rot, speed, zoom)),
+          b: 'Paste wobble', onB: _wobbleClip == null ? null : () => fxCmd({'wobbleXY': _wobbleClip!.$1, 'wobbleRot': _wobbleClip!.$2, 'wobbleSpeed': _wobbleClip!.$3, 'wobbleZoom': _wobbleClip!.$4})),
+      const rw.DHint('Widescreen and wobble belong to this frame and show when playing and in exports, not while editing.'),
     ];
+    return [for (final d in rows) rw.renderDesc(d)];
   }
 
   static const _autoEases = ['Ease v1', 'Ease v2', 'Bounce', 'Elastic', 'Swing'];
@@ -4973,13 +4964,23 @@ class _Overlay extends CustomPainter {
       return;
     }
     final cam = (st['camera'] as List?)?.map((x) => (x as num).toDouble()).toList();
+    final cameraMode = st['mode'] == 'camera';
     if (cam != null && cam.length == 8 && AppSettings.flag('stageBox')) {
-      final frame = Path()..moveTo(v.toScreen(cam[0], cam[1]).dx, v.toScreen(cam[0], cam[1]).dy);
-      for (var i = 2; i < 8; i += 2) {
-        final p = v.toScreen(cam[i], cam[i + 1]);
-        frame.lineTo(p.dx, p.dy);
+      // the stage: the shot itself, or in camera mode the stage at rest (the
+      // camera's frame is drawn over it, Camera board)
+      final Path frame;
+      if (cameraMode) {
+        final w = (st['w'] as num).toDouble() / 2, h = (st['h'] as num).toDouble() / 2;
+        final a = v.toScreen(-w, -h), b = v.toScreen(w, h);
+        frame = Path()..addRect(Rect.fromPoints(a, b));
+      } else {
+        frame = Path()..moveTo(v.toScreen(cam[0], cam[1]).dx, v.toScreen(cam[0], cam[1]).dy);
+        for (var i = 2; i < 8; i += 2) {
+          final p = v.toScreen(cam[i], cam[i + 1]);
+          frame.lineTo(p.dx, p.dy);
+        }
+        frame.close();
       }
-      frame.close();
       // offstage is the checkerboard (REDESIGN §3); slightly see-through so
       // figures standing offstage still show
       final outside = Path.combine(PathOperation.difference, Path()..addRect(Offset.zero & size), frame);
@@ -4989,8 +4990,24 @@ class _Overlay extends CustomPainter {
         ..strokeWidth = 1
         ..color = const Color(0x66000000));
     }
-    // Camera Tools "Mode": composition guides inside the shot (camera mode only)
-    if (cam != null && cam.length == 8 && st['mode'] == 'camera') _guides(canvas, cam, AppSettings.number('cameraGuide'));
+    // camera mode: the camera's frame in blue with square corner handles, and
+    // the chosen guide inside it (Camera board)
+    if (cam != null && cam.length == 8 && cameraMode) {
+      final pts = [for (var i = 0; i < 8; i += 2) v.toScreen(cam[i], cam[i + 1])];
+      canvas.drawPath(Path()..addPolygon(pts, true), Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = cAccent);
+      _guides(canvas, cam, AppSettings.number('cameraGuide'));
+      for (final p in pts) {
+        final r = Rect.fromCenter(center: p, width: 10, height: 10);
+        canvas.drawRect(r, Paint()..color = cCard);
+        canvas.drawRect(r, Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5
+          ..color = cAccent);
+      }
+    }
     // a selected textfield: a thin blue box around the text
     final tf = st['textfield'] as Map<String, dynamic>?;
     if (tf != null) {
@@ -5116,12 +5133,26 @@ class _Overlay extends CustomPainter {
       ..strokeWidth = 1.5
       ..color = c;
     void line(double u0, double w0, double u1, double w1, Color c) => canvas.drawLine(at(u0, w0), at(u1, w1), pen(c));
+    void dashed(double u0, double w0, double u1, double w1) {
+      final a = at(u0, w0), b = at(u1, w1);
+      final len = (b - a).distance;
+      if (len < 1) return;
+      final d = (b - a) / len;
+      final p = pen(const Color(0xFFA9C8EC))..strokeWidth = 1.2;
+      for (var t = 0.0; t < len; t += 9) {
+        canvas.drawLine(a + d * t, a + d * math.min(len, t + 5), p);
+      }
+    }
+
     switch (mode) {
+      case 0:
+        // None (Camera board): no lines
+        return;
       case 1 || 2:
         final a = mode == 1 ? 1 / 3 : 0.382;
         for (final k in [a, 1 - a]) {
-          line(k, 0, k, 1, const Color(0xCC2F6BE8));
-          line(0, k, 1, k, const Color(0xCCE0383A));
+          dashed(k, 0, k, 1);
+          dashed(0, k, 1, k);
         }
       case >= 3 && <= 6:
         // golden spiral: r = e^(b θ), b = ln(phi) / (pi / 2), around the phi point
