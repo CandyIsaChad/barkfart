@@ -1220,6 +1220,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           unawaited(_colorPicker(((_sel?['color'] as num?) ?? 0xff).toInt(), (c) => _cmd({'op': 'segment', 'color': c})));
         case 'loopto':
           unawaited(_loopToPopup());
+        case 'uiscale':
+          // test helper: the UI size
+          AppSettings.values['uiScale'] = double.parse(w[1]);
+          AppSettings.uiScale.value = double.parse(w[1]);
         case 'settings':
           unawaited(_settingsDialog());
         case 'set':
@@ -2960,6 +2964,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             );
         final left = card([
           const rw.DTitle('Screen'),
+          // the Settings board's UI size: 75% to 150%
+          rw.DSlider('UI size', '${(AppSettings.uiScale.value * 100).round()}%', (AppSettings.uiScale.value - 0.75) / 0.75, onChanged: (x) {
+            final k = ((0.75 + x * 0.75) * 20).round() / 20;
+            AppSettings.values['uiScale'] = k;
+            AppSettings.uiScale.value = k;
+            unawaited(AppSettings.save());
+            set(() {});
+          }),
           number('padLeft', 'Padding on the left', 0, 120, 4),
           number('padRight', 'Padding on the right', 0, 120, 4),
           if (!nerd) const rw.DHint('Padding keeps controls clear of notches and rounded corners.'),

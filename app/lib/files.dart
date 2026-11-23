@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:path_provider/path_provider.dart';
 
 Future<Directory> _docs() async {
@@ -233,7 +234,16 @@ class AppSettings {
     'zoomButtons': false,
     'guides': false,
     'stageBox': true,
+    // the timeline toolbar's Loop, the Preview row, the motion path (round 10)
+    'loopPlay': true,
+    'previewRow': true,
+    'motionPath': true,
+    // Settings › Screen › UI size (1 = 100%)
+    'uiScale': 1.0,
   };
+
+  /// The UI size, which the app's root listens to (Settings board).
+  static final ValueNotifier<double> uiScale = ValueNotifier(1.0);
 
   static Future<File> _file() async {
     final override = Platform.environment['BARKFART_DOCS'];
@@ -255,6 +265,7 @@ class AppSettings {
     } catch (_) {
       // a damaged settings file: the defaults
     }
+    uiScale.value = ((values['uiScale'] as num?) ?? 1).toDouble().clamp(0.75, 1.5);
   }
 
   static Future<void> save() async {
