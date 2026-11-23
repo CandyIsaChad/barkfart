@@ -2772,6 +2772,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         'Stickfigure Tools' => '',
         'Pose' => 'Pose Tools',
         'Frame Tools' => 'Frame ${_frame + 1}',
+        'Textfield Tools' => 'Text Tools',
         'Selection' => '',
         'Nothing selected' => '',
         _ => section,
@@ -2802,6 +2803,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         return ('Delete this pose', () => _cmd({'op': 'delete_pose'}), null);
       case 'Frame Tools':
         return ('Clear frame', () => _cmd({'op': 'clear_frame'}), null);
+      case 'Textfield Tools' when _st['textfield'] != null:
+        return ('Delete text', () => _cmd({'op': 'delete_textfield'}), null);
+      case 'Movieclip Tools' when _st['movieclip'] != null:
+        return ('Delete movieclip', () => _cmd({'op': 'delete_here'}), null);
     }
     return null;
   }
@@ -3061,7 +3066,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final cur = tf['font'] as String?;
     final project = ((_st['projectFonts'] as List?) ?? const []).cast<Map>();
     return [
-      _label('Font'),
       Wrap(spacing: 4, runSpacing: 4, children: [
         _Chip('Default', cur == null, () => _cmd({'op': 'textfield', 'font': null})),
         for (final f in _bundledFonts) _Chip(f, cur == f, () => _cmd({'op': 'textfield', 'font': f})),
@@ -3479,7 +3483,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       rw.DSeg(const ['Hold', 'Tween into it'], hold == null ? -1 : (hold ? 0 : 1), label: 'Until the next pose', onSelect: (i) => each(i == 0 ? 'Hold' : 'Tween', {'op': 'easing', 'v': i == 0 ? 'hold' : 'linear', 'block': true})),
       rw.DButtons('New pose here', () => each('New pose', {'op': 'new_pose'}), b: 'Hold longer', onB: () => each('Hold longer', {'op': 'hold_longer'})),
       const rw.DTitle('Look'),
-      rw.DWidget(kit.PropRow('Colour', secondary: color == null ? 'Mixed' : null, trailing: SizedBox(width: 180, child: _swatches(color ?? 0x808080ff, (c) => each('Colour figures', {'op': 'figure', 'color': c}))))),
+      rw.DWidget(kit.PropRow('Colour', secondary: color == null ? 'Mixed' : null, trailing: _swatches(color ?? 0x808080ff, (c) => each('Colour figures', {'op': 'figure', 'color': c})))),
       rw.DButtons('Flip sideways', () => each('Flip figures', {'op': 'flip_figure', 'h': true}), b: 'Flip over', onB: () => each('Flip figures', {'op': 'flip_figure', 'h': false})),
       rw.DTick('Locked', same('locked'), onChanged: (v) => each(v ? 'Lock figures' : 'Unlock figures', {'op': 'figure', 'locked': v})),
       rw.DTick('Visible in onion skin', same('onion'), onChanged: (v) => each('Onion skin', {'op': 'figure', 'onion': v})),
@@ -3814,15 +3818,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     } else {
       final align = {'left': 0, 'center': 1, 'right': 2}[tf['align'] as String?] ?? 1;
       final scale = (tf['scale'] as num?)?.toDouble() ?? 1;
+      // the Text board's order; fonts and copying the words alone follow
       rows = [
-        rw.DName(tf['name'] as String? ?? 'Textfield'),
         rw.DWidget(_TextFieldBox(text: tf['text'] as String? ?? '', onChanged: (v) => _cmd({'op': 'textfield', 'text': v}))),
         const rw.DWidget(SizedBox(height: 6)),
-        // the words alone, between textfields
-        rw.DButtons('Copy text', () => setState(() => _textClip = tf['text'] as String? ?? ''), b: 'Paste text', onB: _textClip != null ? () => _cmd({'op': 'textfield', 'text': _textClip}) : null),
-        for (final w in _fontChoice(tf)) rw.DWidget(w),
         rw.DSeg(const ['Left', 'Center', 'Right'], align, label: 'Alignment', onSelect: (i) => _cmd({'op': 'textfield', 'align': i})),
-        rw.DWidget(kit.PropRow('Colour', trailing: SizedBox(width: 180, child: _swatches((tf['color'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'textfield', 'color': c}))))),
+        rw.DWidget(kit.PropRow('Colour', trailing: _swatches((tf['color'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'textfield', 'color': c})))),
         rw.DStep('Scale', scale.toStringAsFixed(2), onMinus: scale > 0.05 ? () => _cmd({'op': 'textfield', 'scale': math.max(0.05, scale - 0.05)}) : null, onPlus: () => _cmd({'op': 'textfield', 'scale': scale + 0.05})),
         rw.DTick('Locked', tf['locked'] == true, onChanged: (v) {
           // the two locks exclude each other
@@ -3834,10 +3835,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           _cmd({'op': 'camera_lock', 'layer': tf['layer'], 'on': v});
         }),
         const rw.DHint('Locked to camera: it stays put in the shot however the camera moves, for titles and captions.'),
-        rw.DButtons('Copy', () => _cmd({'op': 'copy_textfield'}), b: 'Paste', onB: _st['textfieldCopied'] == true ? () => _cmd({'op': 'paste_textfield'}) : null),
-        rw.DButtons('Add textfield', () => _cmd({'op': 'add_textfield'})),
-        rw.DDanger('Delete textfield', () => _cmd({'op': 'delete_textfield'})),
-        const rw.DHint('Removes it from this frame.'),
+        rw.DButtons('Copy text', () => _cmd({'op': 'copy_textfield'}), b: 'Paste text', onB: _st['textfieldCopied'] == true ? () => _cmd({'op': 'paste_textfield'}) : null),
+        const rw.DTitle('Font'),
+        for (final w in _fontChoice(tf)) rw.DWidget(w),
+        // the words alone, between textfields
+        rw.DButtons('Copy words', () => setState(() => _textClip = tf['text'] as String? ?? ''), b: 'Paste words', onB: _textClip != null ? () => _cmd({'op': 'textfield', 'text': _textClip}) : null),
       ];
     }
     return [for (final d in rows) rw.renderDesc(d)];
@@ -4068,8 +4070,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     const modes = ['once', 'loop', 'pingpong'];
     final frames = (mc['frames'] as num?)?.toInt() ?? 0;
     final rows = <rw.Desc>[
-      rw.DName('${mc['name']}', link: 'Edit movieclip ›', onLink: () => _cmd({'op': 'edit_movieclip'})),
-      rw.DInfo('Length', '$frames frame${frames == 1 ? '' : 's'}'),
+      rw.DInfo('${mc['name']}', '$frames frame${frames == 1 ? '' : 's'} long'),
       rw.DSeg(const ['Once', 'Loop', 'Ping-pong'], modes.indexOf('${mc['loop']}').clamp(0, 2), label: 'Plays', onSelect: (i) => _cmd({'op': 'movieclip', 'loop': modes[i]})),
       rw.DStep('Speed', speed.toStringAsFixed(2), onMinus: speed > 0 ? () => _cmd({'op': 'movieclip', 'speed': math.max(0, speed - 0.1)}) : null, onPlus: () => _cmd({'op': 'movieclip', 'speed': speed + 0.1})),
       rw.DStep('Start offset', '${off.toStringAsFixed(2)} s', onMinus: () => _cmd({'op': 'movieclip', 'offset': off - 0.1}), onPlus: () => _cmd({'op': 'movieclip', 'offset': off + 0.1})),
