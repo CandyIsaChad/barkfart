@@ -1555,17 +1555,17 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                     Positioned.fill(child: _stage()),
                     if (_arrows && !_playing) Positioned(left: _arrowsAt.dx, top: _arrowsAt.dy, child: _arrowsWindow()),
                     if (_magnifier && !_playing) Positioned(left: _magAt.dx, top: _magAt.dy, child: _magnifierWindow()),
-                    if (!_fsNow && _panelOpen && !_hidePanels)
-                      // tablets and big windows dock it as a full-height column (D20)
-                      dock
-                          ? Positioned(top: 0, right: 0, bottom: 0, width: 360, child: _propertiesCard(docked: true))
-                          : Positioned(top: 8, right: 8, bottom: 8, width: big ? 360 : 320, child: _propertiesCard()),
+                    // floating over the stage; docked, it is a column beside it (below)
+                    if (!_fsNow && _panelOpen && !_hidePanels && !dock) Positioned(top: 8, right: 8, bottom: 8, width: big ? 360 : 320, child: _propertiesCard()),
                     if (_viewOptions) Positioned(top: 8, left: 8, bottom: 8, width: 330, child: _viewOptionsPanel()),
                   ]),
                 ),
               ),
             ]),
           ),
+          // tablets and big windows dock Properties as a full-height column
+          // beside the stage, which centres in what is left (D20, Tablet board)
+          if (!_fsNow && _panelOpen && !_hidePanels && dock) SizedBox(width: 360, child: _propertiesCard(docked: true)),
           if (!_fsNow) _rightRail(pad, leftHand),
         ])),
         // the timeline spans the window under both rails (round 10 board);
