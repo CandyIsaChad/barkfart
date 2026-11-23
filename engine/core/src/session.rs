@@ -86,6 +86,9 @@ pub struct Session {
     /// G5: several figures selected at once (layer ids, the first also in
     /// `selected`); empty when one or none is.
     multi: Vec<String>,
+    /// D5 / H3: the keying toggle. Off (the default), a change to an effect
+    /// or the opacity is the same on every frame; on, it is a key here.
+    pub keying: bool,
     /// Copied stickfigure (with joined figures) and copied figure properties.
     /// Copied figures and the time they were copied at (their pose there).
     figure_clip: Option<(Vec<Layer>, f64)>,
@@ -166,7 +169,7 @@ impl Session {
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
         let main_root = doc.project().root_symbol.clone();
-        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, multi: Vec::new(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, multi: Vec::new(), keying: false, frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -894,6 +897,7 @@ impl Session {
                     "onion_after" => self.doc.project_mut().view.onion_after = (c["v"].as_i64().unwrap_or(1) as i32).clamp(0, 3),
                     "onion_front" => self.doc.project_mut().view.onion_in_front = b("v"),
                     "tween_new" => self.tools.editor.default_interp = if b("v") { Interp::Linear } else { Interp::Hold },
+                    "keying" => self.keying = b("v"),
                     _ => {}
                 }
                 self.rev += 1;
@@ -2436,7 +2440,8 @@ impl Session {
             "filter" => {
                 if let Some(l) = self.sel_layer() {
                     let c2 = c.clone();
-                    self.step("Stickfigure filters", move |s| crate::edit::filters::apply(s, &sym, &l, &c2, t));
+                    let keyed = self.keying;
+                    self.step("Stickfigure filters", move |s| crate::edit::filters::apply_keyed(s, &sym, &l, &c2, t, keyed));
                 }
             }
             "clear_filters" => {
@@ -2451,6 +2456,18 @@ impl Session {
                         self.message = "Filters copied.".into();
                         self.rev += 1;
                     }
+                }
+            }
+            "stop_animating" => {
+                // H3: the × on a property row: the value it has here, on every frame
+                if let Some(id) = c["property"].as_str().map(str::to_string) {
+                    self.step("Stop animating", |s| {
+                        let Some(q) = s.project.property_mut(&id) else { return crate::edit::fail("no such property") };
+                        let v = q.key_value(t);
+                        q.track.clear();
+                        q.value = v;
+                        Ok(())
+                    });
                 }
             }
             "move_fx" => {
@@ -2851,7 +2868,25 @@ impl Session {
                             LayerKind::Symbol(_) => "movieclip",
                             _ => "other",
                         };
-                        json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone()), "kind": kind, "visible": l.visible, "on": on, "blocks": blocks, "joined": l.parent.is_some()})
+                        // H3: animated values other than the pose (effects, opacity,
+                        // colours): a thin row each, a diamond where the value changes
+                        let pose_ids: std::collections::HashSet<&str> = props.iter().map(|q| q.id.as_str()).collect();
+                        let animated: Vec<J> = l
+                            .properties()
+                            .into_iter()
+                            .filter(|q| q.id != l.shown.id && !pose_ids.contains(q.id.as_str()))
+                            .filter_map(|q| {
+                                let keys = q.track.keys();
+                                let mut marks: Vec<i32> = Vec::new();
+                                for (i, k) in keys.iter().enumerate() {
+                                    if i == 0 || keys[i - 1].value != k.value {
+                                        marks.push((k.time * fps).round() as i32);
+                                    }
+                                }
+                                (marks.len() > 1 || (keys.len() > 1 && keys.iter().any(|k| k.value != keys[0].value))).then(|| json!({"id": q.id, "name": prop_label(l, &q.id), "keys": marks}))
+                            })
+                            .collect();
+                        json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone()), "kind": kind, "visible": l.visible, "on": on, "blocks": blocks, "joined": l.parent.is_some(), "props": animated})
                     })
                     .collect()
             })
@@ -2883,7 +2918,7 @@ impl Session {
             "hasCamera": p.root().is_some_and(|s| s.layers.iter().any(|l| matches!(l.kind, LayerKind::Camera(_)))),
             "opts": {
                 "stretch": self.stretch_all, "scope": if self.tools.key_scope == KeyScope::Joint { "joint" } else { "figure" },
-                "snap": self.tools.snap_degrees, "onion": self.onion, "axis": self.tools.axis_lock, "static": self.tools.show_static,
+                "snap": self.tools.snap_degrees, "onion": self.onion, "keying": self.keying, "axis": self.tools.axis_lock, "static": self.tools.show_static,
                 "tweenNew": self.tools.editor.default_interp != Interp::Hold, "mainOnly": self.tools.main_nodes_only,
                 "onionBefore": p.view.onion_before, "onionAfter": p.view.onion_after, "onionFront": p.view.onion_in_front,
             },
@@ -3197,6 +3232,41 @@ pub fn anchor_poses(st: &mut crate::edit::State) {
             key_at(q, &frames, fps);
         }
     }
+}
+
+/// A readable name for a layer's property (H3 property rows): "Glow amount",
+/// "Blur radius", "Opacity", "armR1 colour".
+fn prop_label(l: &Layer, id: &str) -> String {
+    let rest = id.strip_prefix(&format!("{}/", l.id)).unwrap_or(id);
+    let word = |p: &str| match p {
+        "mix" => "amount".to_string(),
+        "color" | "tint" => "colour".to_string(),
+        "gradientColor" => "gradient colour".to_string(),
+        "outlineColor" => "outline colour".to_string(),
+        other => other.to_string(),
+    };
+    if rest == "opacity" {
+        return "Opacity".into();
+    }
+    if let Some((node, param)) = rest.split_once('/') {
+        if let Some(kind) = node.strip_prefix("filter.") {
+            let name = match kind {
+                "invert" => "Invert",
+                "adjust" => "Colour",
+                "pixelate" => "Pixelate",
+                "tint" => "Tint",
+                "outline" => "Outline",
+                "blur" => "Blur",
+                "motion" => "Motion blur",
+                "glow" => "Glow",
+                "shadow" => "Shadow",
+                k => k,
+            };
+            return if kind == "invert" && param == "mix" { name.into() } else { format!("{name} {}", word(param)) };
+        }
+        return format!("{node} {}", word(param));
+    }
+    rest.to_string()
 }
 
 /// Every layer's pose keyed on one frame (frame tools that act on the whole

@@ -712,6 +712,7 @@ fn textfields_are_added_on_this_frame_and_dragged_keyed() {
 #[test]
 fn stickfigure_filters_map_to_effect_nodes_on_this_frame() {
     let mut s = session();
+    s.command(&json!({"op": "set", "k": "keying", "v": true})); // per-frame effects are keyed (D5)
     let st = s.command(&json!({"op": "state"}));
     let id = st["figures"][0]["id"].as_str().unwrap().to_string();
     s.command(&json!({"op": "select", "layer": id}));
@@ -2193,7 +2194,7 @@ fn every_command_undoes_and_redoes_exactly() {
         json!({"op": "reset_segment"}), json!({"op": "break_off"}), json!({"op": "new_pose"}), json!({"op": "hold_longer"}),
         json!({"op": "block_length", "frames": 3}), json!({"op": "move_block", "to": 1}),
         json!({"op": "each", "label": "Flip figures", "cmd": {"op": "flip_figure", "h": true}}), json!({"op": "easing", "v": "hold", "block": true}),
-        json!({"op": "move_fx", "kind": "wiggle", "on": true}), json!({"op": "move_fx", "kind": "swing", "on": true, "amount": 20}),
+        json!({"op": "move_fx", "kind": "wiggle", "on": true}), json!({"op": "stop_animating", "property": "L2/opacity"}), json!({"op": "move_fx", "kind": "swing", "on": true, "amount": 20}),
     ];
     let text = |s: &Session| codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
     let mut failures = Vec::new();
@@ -3001,8 +3002,12 @@ next_edit_tests! {
     after_a_switch_new_pose_is_unchanged => 15,
 }
 
+/// The toggle rows that are effects: keys since D5, not frame snapshots.
+const EFFECT_ROWS: [&str; 12] = ["invert", "motion blur", "blur", "pixelate", "hue shift", "saturation", "tint amount", "glow amount", "shadow opacity", "outline amount", "opacity", "motion blur distance kept while off"];
+
 /// Controls that belong to one frame (the middle one) leave the pictures at
-/// the exact times of the first and last frame as they were.
+/// the exact times of the first and last frame as they were; an effect (a
+/// key) leaves the first frame as it was.
 #[test]
 fn a_per_frame_control_on_the_middle_frame_leaves_the_other_frames_alone() {
     let per_frame = [
@@ -3018,12 +3023,20 @@ fn a_per_frame_control_on_the_middle_frame_leaves_the_other_frames_alone() {
         }
         checked += 1;
         let mut s = three_frames(setup);
+        s.command(&json!({"op": "set", "k": "keying", "v": true})); // per-frame effects are keyed (D5)
         let fps = s.project().settings.fps as f64;
-        let ends = |s: &Session| -> Vec<Vec<u8>> { [0.0, 2.0 / fps].iter().map(|t| small_picture(s.project(), *t)).collect() };
+        // an effect is a key (D5): it lasts until the next key, so it may
+        // reach the last frame, but never a frame before it; frame tools
+        // belong to their frame alone
+        let effect = EFFECT_ROWS.contains(name);
+        let ends = |s: &Session| -> Vec<Vec<u8>> {
+            let ts: &[f64] = if effect { &[0.0] } else { &[0.0, 2.0] };
+            ts.iter().map(|t| small_picture(s.project(), *t / fps)).collect()
+        };
         let before = ends(&s);
         s.command(on);
         if ends(&s) != before {
-            failures.push(format!("{name}: changed the first or last frame while set on the middle one"));
+            failures.push(format!("{name}: changed {} while set on the middle one", if effect { "the first frame" } else { "the first or last frame" }));
         }
     }
     assert_eq!(checked, per_frame.len(), "every name in the list is a row");
@@ -3839,7 +3852,8 @@ fn random_editing_with_undo_and_redo_walks_the_history_exactly() {
 }
 
 /// Random editing against a model of three more per-frame values: the camera
-/// zoom, the invert filter and the blur filter of the man. Inserted frames
+/// zoom, the invert filter and the blur filter of the man (keyed on every
+/// frame, as in a Stick Nodes project). Inserted frames
 /// copy them, pasted frames bring the copied frame's, deleted frames take
 /// theirs along, and a frame rate change leaves them on their frames.
 #[test]
@@ -3853,6 +3867,14 @@ fn random_frame_editing_keeps_camera_and_filter_values_with_their_frames() {
             ((rng >> 33) as usize) % n
         };
         let mut s = two_poses();
+        // effects keyed on every frame, as Stick Nodes files arrive: then a
+        // change on a frame stays on that frame (with keying on, D5)
+        s.command(&json!({"op": "set", "k": "keying", "v": true}));
+        for i in 0..s.state()["frames"].as_i64().unwrap() {
+            s.command(&json!({"op": "frame", "i": i}));
+            s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+            s.command(&json!({"op": "filter", "invert": false, "blur": 0}));
+        }
         s.command(&json!({"op": "add_camera"}));
         let read = |s: &mut Session, i: usize| -> (f64, bool, f64) {
             s.command(&json!({"op": "frame", "i": i as i64}));
@@ -3948,6 +3970,7 @@ fn random_frame_editing_keeps_camera_and_filter_values_with_their_frames() {
 #[test]
 fn clearing_or_pasting_filters_on_one_frame_leaves_the_other_frames_alone() {
     let mut s = two_poses();
+    s.command(&json!({"op": "set", "k": "keying", "v": true})); // per-frame effects are keyed (D5)
     s.command(&json!({"op": "frame", "i": 1}));
     s.command(&json!({"op": "insert_frame"}));
     let on = |s: &mut Session, frame: i64| -> (bool, f64) {
@@ -4609,7 +4632,7 @@ fn keyed_frames_of(q: &barkfart_core::model::Property, fps: f64) -> Vec<i64> {
 fn a_figure_keyed_on_some_frames_only_stays_that_way() {
     // F3: the whole-figure key rule. Frames are no longer snapshots: a figure
     // can hold or tween across frames where it has no key of its own.
-    let mut s = animated(); // 4 frames, figure L2 posed differently on frame 4
+    let s = animated(); // 4 frames, figure L2 posed differently on frame 4
     let fps = s.project().settings.fps as f64;
     let mut p = s.project().clone();
     let sym = p.root_symbol.clone();
@@ -4846,4 +4869,73 @@ fn wiggle_moves_the_figure_not_its_joints() {
     let before = angles(&s);
     s.command(&json!({"op": "move_fx", "kind": "wiggle", "on": true}));
     assert_eq!(angles(&s), before, "the joints keep their angles");
+}
+
+#[test]
+fn with_keying_off_an_effect_is_the_same_on_every_frame() {
+    // D5: effects are static unless the keying toggle is on
+    let mut s = two_poses();
+    s.command(&json!({"op": "select", "layer": "L2"}));
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "filter", "blur": 7}));
+    let blur = |s: &mut Session, f: i64| {
+        let st = s.command(&json!({"op": "frame", "i": f}));
+        st["selected"]["filters"]["blur"].as_f64().unwrap()
+    };
+    assert_eq!(blur(&mut s, 0), 7.0, "frame 1 too");
+    assert_eq!(blur(&mut s, 1), 7.0);
+    // keying on: a key on this frame, lasting until the next key; never
+    // reaching back
+    s.command(&json!({"op": "insert_frame"}));
+    assert_eq!(blur(&mut s, 2), 7.0);
+    s.command(&json!({"op": "set", "k": "keying", "v": true}));
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "filter", "blur": 2}));
+    assert_eq!(blur(&mut s, 1), 2.0);
+    assert_eq!(blur(&mut s, 0), 7.0, "the frame before keeps its value");
+    assert_eq!(blur(&mut s, 2), 2.0, "the frame after holds it: no key of its own");
+    // keying off again: an animated value still keys (never flattened)
+    s.command(&json!({"op": "set", "k": "keying", "v": false}));
+    s.command(&json!({"op": "frame", "i": 2}));
+    s.command(&json!({"op": "filter", "blur": 5}));
+    assert_eq!(blur(&mut s, 2), 5.0);
+    assert_eq!(blur(&mut s, 0), 7.0, "the animation stays");
+    assert_eq!(blur(&mut s, 1), 2.0);
+}
+
+#[test]
+fn an_effect_switched_on_later_appears_on_its_frame() {
+    // D5: the first key holds the old value from the start, so a glow keyed
+    // on frame 3 appears there instead of fading in from frame 1
+    let mut s = two_poses();
+    s.command(&json!({"op": "insert_frame"}));
+    s.command(&json!({"op": "insert_frame"}));
+    s.command(&json!({"op": "select", "layer": "L2"}));
+    s.command(&json!({"op": "set", "k": "keying", "v": true}));
+    s.command(&json!({"op": "frame", "i": 3}));
+    s.command(&json!({"op": "filter", "glowAmount": 0.8}));
+    let glow = |s: &mut Session, f: i64| s.command(&json!({"op": "frame", "i": f}))["selected"]["filters"]["glowAmount"].as_f64().unwrap();
+    assert_eq!(glow(&mut s, 2), 0.0);
+    assert_eq!(glow(&mut s, 1), 0.0);
+    assert_eq!(glow(&mut s, 3), 0.8);
+}
+
+#[test]
+fn an_animated_effect_gets_a_row_and_can_stop_animating() {
+    // H3: property rows with diamonds where the value changes; × makes it static
+    let mut s = two_poses();
+    s.command(&json!({"op": "select", "layer": "L2"}));
+    s.command(&json!({"op": "set", "k": "keying", "v": true}));
+    s.command(&json!({"op": "filter", "glowAmount": 0.4}));
+    s.command(&json!({"op": "frame", "i": 1}));
+    let st = s.command(&json!({"op": "filter", "glowAmount": 0.9}));
+    let row = st["rows"].as_array().unwrap().iter().find(|r| r["id"] == "L2").unwrap().clone();
+    let glow = row["props"].as_array().unwrap().iter().find(|p| p["name"] == "Glow amount").expect("a Glow amount row").clone();
+    assert_eq!(glow["keys"], json!([0, 1]));
+    let st = s.command(&json!({"op": "stop_animating", "property": glow["id"]}));
+    assert_eq!(st["undo"], "Stop animating");
+    let row = st["rows"].as_array().unwrap().iter().find(|r| r["id"] == "L2").unwrap().clone();
+    assert!(row["props"].as_array().unwrap().iter().all(|p| p["name"] != "Glow amount"));
+    let st = s.command(&json!({"op": "frame", "i": 0}));
+    assert_eq!(st["selected"]["filters"]["glowAmount"], 0.9, "the value it had there, everywhere");
 }

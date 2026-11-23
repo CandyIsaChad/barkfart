@@ -35,8 +35,32 @@ fn fps_of(st: &State) -> f64 {
     }
 }
 
+thread_local! {
+    /// D5 / H3: while `apply` runs with keying off, a change sets the value
+    /// on every frame (the property stays static) instead of keying t.
+    static STATIC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 fn key_at(p: &mut Property, t: f64, v: Value) {
+    // a value that already changes over time is animated: a change keys it
+    // here whatever the toggle says (keying off never flattens an animation)
+    let animated = p.track.keys().windows(2).any(|w| w[0].value != w[1].value);
+    if STATIC.with(|s| s.get()) && !animated {
+        p.value = v;
+        let keys: Vec<Key> = p.track.keys().iter().map(|k| Key { value: v, ..*k }).collect();
+        p.track.clear();
+        for k in keys {
+            p.track.put(k);
+        }
+        return;
+    }
     let interp = if p.ty.continuous() { Interp::Linear } else { Interp::Hold };
+    // a first key keeps what the frames before showed: the old value from the
+    // start, held (an effect switched on here appears here, it doesn't fade in
+    // from the first frame; later changes tween as keys do)
+    if p.track.is_empty() && t > 0.0 && p.value != v {
+        p.track.put(Key::new(0.0, p.value, Interp::Hold));
+    }
     p.track.put(Key::new(t, v, interp));
 }
 
@@ -52,7 +76,7 @@ fn key_every_frame(p: &mut Property, n: i32, fps: f64) {
     }
 }
 
-/// Makes sure the filter's effect node exists, silent (mix 0) on every frame.
+/// Makes sure the filter's effect node exists, silent (mix 0).
 fn ensure(l: &mut Layer, n: i32, fps: f64, id: &str, ty: &str) {
     if l.effects.nodes.contains_key(id) {
         return;
@@ -74,9 +98,10 @@ fn ensure(l: &mut Layer, n: i32, fps: f64, id: &str, ty: &str) {
         }
         _ => {}
     }
-    for i in 0..n {
-        e.mix.track.put(Key::new(i as f64 / fps, Value::F(0.0), Interp::Linear));
-    }
+    // silent until a control turns it on: a value, not a key on every frame
+    // (D5: keys are where something changes; H3)
+    let _ = (n, fps);
+    e.mix.value = Value::F(0.0);
     if l.effects.append(e).is_ok() {
         reorder(l);
     }
@@ -119,6 +144,15 @@ fn set_param(l: &mut Layer, id: &str, name: &str, ty: ValueType, t: f64, v: Valu
 }
 
 /// Applies the controls present in the command ({"op":"filter", ...}).
+/// Applies the controls with the keying toggle (D5): keyed, a change is a
+/// key on t; not keyed, it is the value on every frame.
+pub fn apply_keyed(st: &mut State, sym: &str, id: &str, c: &J, t: f64, keyed: bool) -> EditResult<()> {
+    STATIC.with(|s| s.set(!keyed));
+    let r = apply(st, sym, id, c, t);
+    STATIC.with(|s| s.set(false));
+    r
+}
+
 pub fn apply(st: &mut State, sym: &str, id: &str, c: &J, t: f64) -> EditResult<()> {
     let (n, fps) = (super::frame_ops::frame_count(st), fps_of(st));
     let Some(l) = st.project.layer_mut(sym, id) else { return fail("no figure") };
@@ -136,7 +170,6 @@ pub fn apply(st: &mut State, sym: &str, id: &str, c: &J, t: f64) -> EditResult<(
         }
     }
     if let Some(v) = c["opacity"].as_f64() {
-        key_every_frame(&mut l.opacity, n, fps);
         key_at(&mut l.opacity, t, Value::F(v.clamp(0.0, 1.0) as f32));
     }
     if let Some(v) = c["invert"].as_bool() {

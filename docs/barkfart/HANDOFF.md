@@ -33,7 +33,7 @@ Tick items there as they finish.
 - Scripted editor runs as before. The new script command is `savesheet`.
 - The window is capped at the screen size (about 1300x700).
 
-**Next:** H3 (the keying toggle, property rows, diamonds). H2 is done (D30: Effects section and browser; scripts `effects`, `fxopen <kind>`; engine `move_fx`, filter `shown`, `bf_render_effect_preview`). H1 and the timeline correction (D29), sections F and G (D24–D28) are done.
+**Next:** a pass matching every built screen to its round 10 board (render them with docs/barkfart/mockups: `mkdir -p project preview && node boards.mjs`, then the headless shell at 1344x600). Known gaps: the timeline spans the full width under both rails; pose pictures in blocks; join chain markers; the Camera and Sound rows; the Loop toggle; swatch rows instead of the colour box; Pose page ease pictures and Delete this pose; Frame page titled "Frame N"; the + menu (five kinds, paste and import in the choosers); no bottom bar when folded. Section H is done (D29–D31).
 - Done: A1–A6, B1–B6, C1–C8, D1–D7b, E1–E3. D2 (the Movieclip page) is written but not yet seen on screen. D7b: `reset_segment`, `selected.defaults` and `Figure::base` (FORMAT.md); the first-run figure is the engine's render of Stickfigure.nodes (D22).
 - Home script commands: `firstrun`, `projectsscreen`, `backups`, `makeprojects N` (copies the open save N times). Saving writes a picture to `.thumbs/<name>.png`.
 

@@ -482,6 +482,28 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
   - "Yours" and "Import…" wait for plugins (K); without any there is nothing
     to show, so neither appears.
 
+- **D31. Keying (H3), and why keys reach across frames.** The user asked
+  (2026-11-23) whether keyframes shouldn't be unique to each frame. They are:
+  a key sits on one frame. What spans frames is the value between keys: it
+  holds, or tweens into the next key. That is what lets a held pose (D2)
+  carry an effect without setting it on every frame, and a ramp be two keys.
+  Stick Nodes felt per-frame because every frame was a full copy; files from
+  it are keyed on every frame and still behave per frame.
+  - The keying toggle (◇ by "+") decides whether a still value starts
+    animating: off, a change is the value on every frame; on, it is a key on
+    this frame. A value that is already animated always keys, so keying off
+    never flattens an animation.
+  - A first key holds the old value from the start, so an effect switched on
+    at frame 9 appears at 9 instead of fading in from frame 1.
+  - New effects no longer get a silent key on every frame (a snapshot-model
+    leftover that made keyed effects drop back on the next frame).
+  - Animated values other than the pose show as thin rows under their layer
+    (the disclosure arrow): grey diamonds where the value changes, × to stop
+    animating (its value here, on every frame).
+  - Tests that asserted frame snapshots for effects now use a project keyed
+    on every frame (as Stick Nodes files are), or check that a key never
+    reaches back; frame tools still belong to their frame alone.
+
 ## 7. Build order (easiest to hardest, nested)
 
 The user's instruction (2026-11-23): "From easiest to hardest. List out
@@ -597,7 +619,7 @@ and tests are never weakened.
 ### H. Keyed properties and effects
 - [x] H1. The FX toggle.
 - [x] H2. The effects browser: built-ins with previews.
-- [ ] H3. The keying toggle, property rows, diamonds.
+- [x] H3. The keying toggle, property rows, diamonds.
 
 ### I. Joins over time (D8)
 - [ ] I1. Engine: the parent becomes a value over time, with offsets stored.

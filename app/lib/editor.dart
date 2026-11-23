@@ -1102,6 +1102,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           setState(() => _layersOpen = true);
         case 'effects':
           await _openFxBrowser();
+        case 'openrows':
+          setState(() => _openRows.addAll([for (final r in ((_st['rows'] as List?) ?? const []).cast<Map>()) '${r['id']}']));
         case 'fxopen':
           setState(() => _fxOpen = w[1]);
         case 'fx':
@@ -1829,7 +1831,22 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final selLayer = _sel?['layer'];
     final showPreview = AppSettings.values['previewRow'] != false;
     final top = rulerH + (showPreview ? stripH + gap : 0);
-    final contentH = top + rows.length * rowH + (rows.isEmpty ? 6 : 0);
+    // H3: a layer's animated values as thin rows under it, when opened
+    const propH = 24.0;
+    final ys = <double>[];
+    final props = <(Map, Map, double)>[]; // layer, property, y
+    var yy = top;
+    for (final r in rows) {
+      ys.add(yy);
+      yy += rowH;
+      if (_openRows.contains(r['id'])) {
+        for (final pr in ((r['props'] as List?) ?? const []).cast<Map>()) {
+          props.add((r, pr, yy));
+          yy += propH;
+        }
+      }
+    }
+    final contentH = yy + (rows.isEmpty ? 6 : 0);
     final width = left * 2 + _frames * cell;
     final aspect = ((_st['w'] as num?) ?? 16) / ((_st['h'] as num?) ?? 9);
     int frameAt(double x) => ((x - left) / cell).floor().clamp(0, _frames - 1);
@@ -1851,7 +1868,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           child: CustomPaint(
             painter: _TimelinePainter(
               frames: _frames, cell: cell, left: left, fps: fps, cur: cur, rulerH: rulerH,
-              stripH: showPreview ? stripH : 0, rowsTop: top, rowH: rowH, rowCount: rows.length,
+              stripH: showPreview ? stripH : 0,
+              lines: [for (final y in ys) y + rowH, for (final (_, _, y) in props) y + propH],
+              bands: [for (final (_, _, y) in props) (y, propH)],
               aspect: aspect.toDouble(), thumbs: _thumbs,
             ),
           ),
@@ -1886,7 +1905,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 ),
               ),
         // the rows' blocks: one per pose
-        for (var k = 0; k < rows.length; k++) ..._rowBlocks(rows[k], top + k * rowH, rowH, cell, left, rows[k]['id'] == selLayer),
+        for (var k = 0; k < rows.length; k++) ..._rowBlocks(rows[k], ys[k], rowH, cell, left, rows[k]['id'] == selLayer),
+        // grey diamonds where an animated value changes
+        for (final (_, pr, y) in props)
+          for (final f in ((pr['keys'] as List?) ?? const []).cast<num>())
+            Positioned(
+              left: left + f * cell + cell / 2 - 5,
+              top: y + propH / 2 - 5,
+              child: IgnorePointer(child: Transform.rotate(angle: math.pi / 4, child: Container(width: 8, height: 8, decoration: BoxDecoration(color: const Color(0xFF8A9099), borderRadius: BorderRadius.circular(1.5))))),
+            ),
         // the playhead: a pale line and the pill
         Positioned(left: left + cur * cell + cell / 2 - 0.75, top: rulerH - 2, width: 1.5, height: contentH - rulerH + 2, child: const IgnorePointer(child: ColoredBox(color: Color(0xFF8DB8E8)))),
         Positioned(
@@ -1956,7 +1983,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             }
           });
         },
-        onPointerUp: (_) => _finishBox(rows, cell, top, rowH),
+        onPointerUp: (_) => _finishBox(rows, ys, cell, rowH),
         onPointerCancel: (_) => setState(() => _boxPath = null),
         child: Stack(children: [
           area,
@@ -1974,6 +2001,16 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         padding: const EdgeInsets.symmetric(horizontal: 8),
         decoration: BoxDecoration(color: selected ? cSelected : null, border: const Border(bottom: BorderSide(color: Color(0xFFEEF0F2)))),
         child: Row(children: [
+          if (((r['props'] as List?) ?? const []).isNotEmpty)
+            kit.Tap(
+              label: _openRows.contains(r['id']) ? 'Hide ${r['name']}\u2019s animated values' : 'Show ${r['name']}\u2019s animated values',
+              minSize: 20,
+              onTap: () => setState(() => _openRows.contains(r['id']) ? _openRows.remove(r['id']) : _openRows.add('${r['id']}')),
+              child: Transform.rotate(angle: _openRows.contains(r['id']) ? 0 : -math.pi / 2, child: const Pictogram('chevron', size: 14, color: cSecondary)),
+            )
+          else
+            const SizedBox(width: 14),
+          const SizedBox(width: 4),
           Pictogram(icons[r['kind']] ?? 'figure', size: 16, color: selected ? cAccent : cSecondary),
           const SizedBox(width: 6),
           Expanded(child: Text('${r['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: on ? cText : cSecondary, fontSize: 13, fontWeight: selected ? FontWeight.w700 : FontWeight.w400))),
@@ -2026,7 +2063,25 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               ]),
             ),
           ),
-        for (final r in rows) name(r),
+        for (final r in rows) ...[
+          name(r),
+          if (_openRows.contains(r['id']))
+            for (final pr in ((r['props'] as List?) ?? const []).cast<Map>())
+              Container(
+                height: propH,
+                padding: const EdgeInsets.only(left: 30, right: 2),
+                decoration: const BoxDecoration(color: Color(0xFFFAFBFC), border: Border(bottom: BorderSide(color: Color(0xFFEEF0F2)))),
+                child: Row(children: [
+                  Expanded(child: Text('${pr['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cSecondary, fontSize: 12))),
+                  kit.Tap(
+                    label: 'Stop animating ${pr['name']}',
+                    minSize: 24,
+                    onTap: () => _cmd({'op': 'stop_animating', 'property': pr['id']}),
+                    child: const Pictogram('x', size: 13, color: Color(0xFF9AA0A8)),
+                  ),
+                ]),
+              ),
+        ],
       ]),
     );
     return Container(
@@ -2138,7 +2193,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// A selection box or lasso let go: the figures whose poses it covers (a
   /// plain double tap: the row under it). One figure is selected; several
   /// open the multi-select page.
-  void _finishBox(List<Map> rows, double cell, double top, double rowH) {
+  void _finishBox(List<Map> rows, List<double> ys, double cell, double rowH) {
     final path = _boxPath;
     if (path == null) return;
     setState(() => _boxPath = null);
@@ -2158,7 +2213,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     for (var k = 0; k < rows.length; k++) {
       final r = rows[k];
       if (r['kind'] != 'figure') continue;
-      final y0 = top + k * rowH, cy = y0 + rowH / 2;
+      final y0 = ys[k], cy = y0 + rowH / 2;
       if (point) {
         if (path.first.dy >= y0 && path.first.dy < y0 + rowH) hit.add('${r['id']}');
         continue;
@@ -2350,6 +2405,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       padding: const EdgeInsets.symmetric(horizontal: 6),
       child: Row(children: [
         kit.IconTool('plus', key: _addKey, label: 'Add', color: cAccent, onTap: _playing ? null : _addMenu),
+        // H3 (D5): keying. Off, a change to an effect or the opacity is the
+        // same on every frame; on, it is a key on this frame
+        kit.IconTool('key', label: _opts['keying'] == true ? 'Keying: changes make keys' : 'Keying off: changes apply to every frame', on: _opts['keying'] == true, onTap: _playing ? null : () => _cmd({'op': 'set', 'k': 'keying', 'v': _opts['keying'] != true})),
         const Spacer(),
         // §4: the Stick Nodes bridge and the two pose words; copy, paste and
         // delete frame are on the Frame page (tap the ruler)
@@ -2403,6 +2461,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   bool _panelOpen = true, _hidePanels = false;
   bool _layersOpen = false, _rowActionsOpen = false;
+  final Set<String> _openRows = {};
   // G3: the timeline's zoom (a frame's width), a pinch's start, a block drag
   double _cellW = 56, _pinchFrom = 56;
   _BlockDrag? _blockDrag;
@@ -5042,9 +5101,11 @@ class _BlockDrag {
 
 /// The ruler, the merged Preview row and the rows' lines (REDESIGN §4, D16).
 class _TimelinePainter extends CustomPainter {
-  _TimelinePainter({required this.frames, required this.cell, required this.left, required this.fps, required this.cur, required this.rulerH, required this.stripH, required this.rowsTop, required this.rowH, required this.rowCount, required this.aspect, required this.thumbs});
-  final int frames, fps, cur, rowCount;
-  final double cell, left, rulerH, stripH, rowsTop, rowH, aspect;
+  _TimelinePainter({required this.frames, required this.cell, required this.left, required this.fps, required this.cur, required this.rulerH, required this.stripH, required this.lines, required this.bands, required this.aspect, required this.thumbs});
+  final int frames, fps, cur;
+  final double cell, left, rulerH, stripH, aspect;
+  final List<double> lines;
+  final List<(double, double)> bands;
   final Map<int, ui.Image> thumbs;
 
   @override
@@ -5092,9 +5153,12 @@ class _TimelinePainter extends CustomPainter {
         ..strokeWidth = 1
         ..color = cLine);
     }
-    // rows: a faint line under each
-    for (var k = 0; k < rowCount; k++) {
-      canvas.drawRect(Rect.fromLTWH(0, rowsTop + (k + 1) * rowH - 1, size.width, 1), Paint()..color = const Color(0xFFEEF0F2));
+    // property rows: a paler band; every row: a faint line under it
+    for (final (y, h) in bands) {
+      canvas.drawRect(Rect.fromLTWH(0, y, size.width, h), Paint()..color = const Color(0xFFFAFBFC));
+    }
+    for (final y in lines) {
+      canvas.drawRect(Rect.fromLTWH(0, y - 1, size.width, 1), Paint()..color = const Color(0xFFEEF0F2));
     }
   }
 
