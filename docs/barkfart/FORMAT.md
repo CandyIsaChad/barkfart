@@ -34,3 +34,10 @@ re-encoding, so autosave stays cheap. `formatVersion` is 1. These rules keep eve
   `parent` (null: lets go), `node`, `rotate` and `before` (x, y, rotation,
   scale x, scale y at the switch in the frame before it). Files without it
   keep their one join (`parent`) for the whole animation, the default.
+
+- **Symbol `groups` and layer `group`** (2026-11-24, D33): a symbol may
+  list groups, each `id` (a `G` id), `name`, `opacity` (a plain number),
+  `open` (its folder row) and optional `effects` (an effect stack, static
+  values). A layer in a group names it in `group`. Members sit next to each
+  other in the layer list; one level only. Both are written only when there
+  are groups, so files without them are unchanged.

@@ -478,6 +478,7 @@ fn layer(m: &Obj) -> R<Layer> {
         l.joins.push(JoinSwitch { time: d(jm, "time", 0.0)?, parent: str_(jm, "parent")?.map(Into::into), node: str_(jm, "node")?.map(Into::into), rotate: b(jm, "rotate", true)?, before });
     }
     l.joins.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap_or(std::cmp::Ordering::Equal));
+    l.group = str_(m, "group")?.map(Into::into);
     l.inherit_effects = b(m, "inheritEffects", false)?;
     l.parallax = f(m, "parallax", 0.0)?;
     l.vanish_in_tween = b(m, "vanishInTween", false)?;
@@ -523,6 +524,18 @@ fn symbol(m: &Obj) -> R<Symbol> {
         let mut st = EffectStack::default();
         read_stack(as_map(sm.get("stack").unwrap_or(&J::Null), "stack")?, &mut st, &format!("{}/fx{}", s.id, n + k))?;
         s.scoped_effects.push(ScopedStack { scope: sc, stack: st });
+    }
+    // K / D33: groups of layers (optional; older files have none)
+    for o in list(m, "groups")? {
+        let gm = as_map(o, "group")?;
+        let id = req(gm, "id")?;
+        let mut g = LayerGroup::new(id, str_(gm, "name")?.unwrap_or("Group"));
+        g.opacity = f(gm, "opacity", 1.0)?;
+        g.open = b(gm, "open", true)?;
+        if let Some(e) = gm.get("effects") {
+            read_stack(as_map(e, "effects")?, &mut g.effects, id)?;
+        }
+        s.groups.push(g);
     }
     Ok(s)
 }
@@ -934,6 +947,9 @@ fn layer_json(l: &Layer) -> Json {
             .collect();
         m.put("joins", Json::List(list));
     }
+    if let Some(g) = &l.group {
+        m.put("group", json::s(g));
+    }
     if l.inherit_effects {
         m.put("inheritEffects", Json::Bool(true));
     }
@@ -1081,6 +1097,21 @@ fn symbol_json(s: &Symbol) -> Json {
         })
         .collect();
     m.put("scopedEffects", Json::List(scoped));
+    if !s.groups.is_empty() {
+        let groups = s
+            .groups
+            .iter()
+            .map(|g| {
+                let mut gm = JObj::new();
+                gm.put("id", json::s(&g.id)).put("name", json::s(&g.name)).put("opacity", json::f32(g.opacity)).put("open", Json::Bool(g.open));
+                if !g.effects.is_empty() {
+                    gm.put("effects", stack_json(&g.effects));
+                }
+                gm.done()
+            })
+            .collect();
+        m.put("groups", Json::List(groups));
+    }
     m.done()
 }
 

@@ -422,6 +422,8 @@ impl Session {
             snap_keys(s);
             anchor_poses(s);
             snap_keys(s);
+            // K / D33: groups stay together, one level, never empty
+            crate::edit::group_ops::tidy(s);
             Ok(v)
         });
         self.changed();
@@ -2310,6 +2312,49 @@ impl Session {
                     self.rev += 1;
                 }
             }
+            "group" => {
+                // K: the layers named, else the several selected, else the selected one
+                let list: Vec<String> = match c["layers"].as_array() {
+                    Some(a) => a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
+                    None if self.multi.len() > 1 => self.multi.clone(),
+                    None => self.sel_layer().into_iter().collect(),
+                };
+                let name = c["name"].as_str().map(str::to_string);
+                if let Some(gid) = self.step("Group", |s| crate::edit::group_ops::group(s, &sym, &list, name.as_deref())) {
+                    self.message = match list.len() {
+                        0 | 1 => String::new(),
+                        _ => "Grouped. They now sit together in the layer list.".into(),
+                    };
+                    let _ = gid;
+                }
+            }
+            "ungroup" => {
+                if let Some(gid) = c["group"].as_str().map(str::to_string) {
+                    self.step("Ungroup", |s| crate::edit::group_ops::ungroup(s, &sym, &gid));
+                }
+            }
+            "delete_group" => {
+                if let Some(gid) = c["group"].as_str().map(str::to_string) {
+                    if self.step("Delete group", |s| crate::edit::group_ops::delete(s, &sym, &gid)).is_some() {
+                        self.validate();
+                    }
+                }
+            }
+            "group_set" => {
+                if let Some(gid) = c["group"].as_str().map(str::to_string) {
+                    let (name, opacity, open) = (c["name"].as_str().map(str::to_string), c["opacity"].as_f64().map(|v| v as f32), c["open"].as_bool());
+                    // opening and closing the folder row is not an edit to undo
+                    if name.is_none() && opacity.is_none() && open.is_some() {
+                        let r = self.doc.project_mut().symbol_mut(&sym).and_then(|s| s.groups.iter_mut().find(|g| g.id == gid)).map(|g| g.open = open.unwrap_or(true));
+                        if r.is_some() {
+                            self.rev += 1;
+                        }
+                    } else {
+                        let label = if name.is_some() { "Rename group" } else { "Group opacity" };
+                        self.step(label, |s| crate::edit::group_ops::set(s, &sym, &gid, name.as_deref(), opacity, open));
+                    }
+                }
+            }
             "copy_poses" => {
                 // several figures (the multi-select board): each one's pose here
                 let list: Vec<String> = if self.multi.len() > 1 { self.multi.clone() } else { self.sel_layer().into_iter().collect() };
@@ -3473,6 +3518,10 @@ impl Session {
                 "onionBefore": p.view.onion_before, "onionAfter": p.view.onion_after, "onionFront": p.view.onion_in_front,
             },
             "pose": self.pose_clip.is_some(), "posesCopied": self.poses_clip.len(),
+            "groups": p.root().map(|r| r.groups.iter().map(|g| json!({
+                "id": g.id, "name": g.name, "opacity": round2(g.opacity), "open": g.open, "effects": g.effects.nodes.len(),
+                "members": r.layers.iter().rev().filter(|l| l.group.as_deref() == Some(g.id.as_str())).map(|l| l.id.clone()).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>()).unwrap_or_default(),
             "joining": self.joining.is_some(),
             "frameCopied": self.frame_clip.is_some(),
             "figureCopied": self.figure_clip.is_some(), "propsCopied": self.props_clip.is_some(),

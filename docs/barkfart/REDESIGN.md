@@ -523,6 +523,20 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
     elsewhere (or Join again), and changes show a light toast with Undo.
   - Not yet: the canvas's "main joints only" and the join-anchor handles
     still read the static join.
+- **D33. Groups (K).** A group is a record in its symbol and a `group` id on
+  each member (not a member list, so deleting or copying layers can't leave
+  stale ids). One level only. Members sit next to each other in row order,
+  gathered at the frontmost one when grouped (the layers between go behind,
+  and the toast says so); `tidy` keeps this after every edit, drops empty
+  groups and keeps cameras, sounds and adjustment layers out. The members
+  draw inside one scene group with the group's opacity and effects.
+  - Group opacity is a plain value and group effects hold static settings
+    for now: hooking group properties into keys (frame insert and delete,
+    lookups by id) is its own job.
+  - "Draw order: free" (D9) stays off the group page: with the group drawn
+    as one, a member can't go in front of layers outside it. Adding it means
+    breaking the wrapper for that member.
+  - Delete group takes its layers; figures joined to them are let go.
 
 ## 7. Build order (easiest to hardest, nested)
 

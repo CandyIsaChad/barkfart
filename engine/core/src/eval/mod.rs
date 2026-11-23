@@ -314,6 +314,8 @@ fn eval_symbol<'p>(ctx: &mut Ctx<'p>, w: Work<'p>, stack: &mut Vec<Work<'p>>, on
     let sym = w.symbol;
     let t = w.time;
     let any_solo = sym.layers.iter().any(|l| l.solo);
+    // K / D33: the open group (its id and its scene group's slot) members are drawn into
+    let mut open: Option<(&str, Slot)> = None;
     for l in &sym.layers {
         if !l.visible || (onion_only && !l.onion) {
             continue;
@@ -356,9 +358,31 @@ fn eval_symbol<'p>(ctx: &mut Ctx<'p>, w: Work<'p>, stack: &mut Vec<Work<'p>>, on
         if adjustment {
             g.adjustment = true;
         }
-        let into = ctx.group_at(&w.into);
+        // a group's members go into one scene group with the group's opacity
+        // and effects (made with its first member that draws)
+        let member = l.group.as_deref().and_then(|gid| sym.groups.iter().find(|x| x.id == gid));
+        let parent_slot = match member {
+            Some(lg) => {
+                if open.as_ref().is_none_or(|(id, _)| *id != lg.id) {
+                    let mut gg = Group::new(format!("{}/{}", sym.id, lg.id));
+                    gg.opacity = lg.opacity.clamp(0.0, 1.0);
+                    resolve_stack(&lg.effects, t, &mut ctx.r, &mut gg);
+                    let into = ctx.group_at(&w.into);
+                    into.children.push(Item::Group(gg));
+                    let mut gs = w.into.clone();
+                    gs.push(into.children.len() - 1);
+                    open = Some((lg.id.as_str(), gs));
+                }
+                open.as_ref().map(|(_, s)| s.clone()).expect("just opened")
+            }
+            None => {
+                open = None;
+                w.into.clone()
+            }
+        };
+        let into = ctx.group_at(&parent_slot);
         into.children.push(Item::Group(g));
-        let mut slot = w.into.clone();
+        let mut slot = parent_slot.clone();
         slot.push(into.children.len() - 1);
         match &l.kind {
             LayerKind::Figure(f) => emit_figure(ctx, &l.id, f, l.colors_jump, &xf, t, &slot),
@@ -405,10 +429,15 @@ fn resolve_effects(l: &Layer, sym: &Symbol, t: f64, r: &mut Resolver, g: &mut Gr
 }
 
 fn resolve_own(l: &Layer, t: f64, r: &mut Resolver, g: &mut Group) {
-    if l.effects.is_empty() {
+    resolve_stack(&l.effects, t, r, g);
+}
+
+/// An effect stack's enabled effects at time t, onto a scene group.
+fn resolve_stack(effects: &EffectStack, t: f64, r: &mut Resolver, g: &mut Group) {
+    if effects.is_empty() {
         return;
     }
-    for e in l.effects.chain() {
+    for e in effects.chain() {
         if !e.enabled {
             continue;
         }

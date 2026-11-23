@@ -8,6 +8,7 @@ pub mod editor;
 pub mod figure_ops;
 pub mod filters;
 pub mod frame_ops;
+pub mod group_ops;
 pub mod join_ops;
 pub mod layer_ops;
 pub mod symbol_ops;

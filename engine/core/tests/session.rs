@@ -5312,3 +5312,109 @@ fn several_figures_copy_and_paste_their_poses_and_become_one_movieclip() {
     assert_eq!(figures(&s), before - 2, "both went into the clip");
     assert!(st["multi"].is_null());
 }
+
+/// K / D33: groups of layers. One undo step to group or ungroup; members
+/// sit together in row order; the group's opacity reaches the picture; an
+/// empty group goes; files keep groups, and files without them are as before.
+#[test]
+fn layers_group_and_ungroup() {
+    let mut s = session();
+    s.command(&json!({"op": "add_figure", "kind": "ball"}));
+    s.command(&json!({"op": "add_figure", "kind": "stick"}));
+    let ids: Vec<String> = s.project().root().unwrap().layers.iter().filter(|l| l.as_figure().is_some()).map(|l| l.id.clone()).collect();
+    assert_eq!(ids.len(), 3);
+    let (a, b, c) = (ids[0].clone(), ids[1].clone(), ids[2].clone());
+    let undo = s.state()["undo"].clone();
+    let plain = codec::encode(s.project());
+    assert!(!plain.contains("\"groups\"") && !plain.contains("\"group\""), "no groups, nothing written");
+    // the first and the last: they come together at the front, the middle one goes behind
+    let st = s.command(&json!({"op": "group", "layers": [a, c]}));
+    assert_eq!(st["undo"], "Group");
+    let g = &st["groups"][0];
+    let gid = g["id"].as_str().unwrap().to_string();
+    assert!(gid.starts_with('G'));
+    assert_eq!(g["name"], "Group 1");
+    assert_eq!(g["members"], json!([c, a]), "front first, as the rows list them");
+    let order: Vec<String> = s.project().root().unwrap().layers.iter().map(|l| l.id.clone()).collect();
+    let pos = |id: &str| order.iter().position(|x| x == id).unwrap();
+    assert_eq!(pos(&c), pos(&a) + 1, "together: {order:?}");
+    assert!(pos(&b) < pos(&a), "the one between went behind: {order:?}");
+    // the layer's own scene group is still found by its id inside the group
+    let p = s.project();
+    let scene = barkfart_core::eval::evaluate(p, &p.root_symbol, 0.0);
+    assert!(barkfart_core::tess::selection_outline(&scene, &a, 2.0, 0xff00ff).triangle_count() > 0);
+    // the group's opacity reaches the picture: its members draw as one
+    // faded layer (an isolated group in the draw list, named by the group)
+    let drawn = |s: &Session| {
+        let p = s.project();
+        format!("{:?}", barkfart_core::tess::layered(&barkfart_core::eval::evaluate(p, &p.root_symbol, 0.0), None))
+    };
+    assert!(!drawn(&s).contains(&format!("S1/{gid}")), "at full opacity nothing is isolated");
+    let st = s.command(&json!({"op": "group_set", "group": gid, "opacity": 0.5}));
+    assert_eq!(st["undo"], "Group opacity");
+    assert_eq!(st["groups"][0]["opacity"], 0.5);
+    assert!(drawn(&s).contains(&format!("S1/{gid}")), "the group is drawn as one faded layer");
+    // opening and closing the folder is not an undo step
+    let st = s.command(&json!({"op": "group_set", "group": gid, "open": false}));
+    assert_eq!(st["groups"][0]["open"], false);
+    assert_eq!(st["undo"], "Group opacity");
+    // renamed, saved and read back
+    s.command(&json!({"op": "group_set", "group": gid, "name": "Crowd"}));
+    let text = codec::encode(s.project());
+    let back = codec::decode(&text).unwrap();
+    assert_eq!(codec::encode(&back), text, "groups survive a round trip");
+    assert_eq!(back.root().unwrap().groups[0].name, "Crowd");
+    assert_eq!(back.root().unwrap().groups[0].opacity, 0.5);
+    // a member sent back stays with its group
+    s.command(&json!({"op": "select", "layer": c}));
+    s.command(&json!({"op": "layer_order", "forward": false}));
+    let order: Vec<String> = s.project().root().unwrap().layers.iter().map(|l| l.id.clone()).collect();
+    let (pa, pc) = (order.iter().position(|x| *x == a).unwrap(), order.iter().position(|x| *x == c).unwrap());
+    assert_eq!(pa.abs_diff(pc), 1, "still together: {order:?}");
+    // ungroup: one step, the layers stay where they are
+    let st = s.command(&json!({"op": "ungroup", "group": gid}));
+    assert_eq!(st["undo"], "Ungroup");
+    assert_eq!(st["groups"], json!([]));
+    assert!(s.project().root().unwrap().layers.iter().all(|l| l.group.is_none()));
+    let st = s.command(&json!({"op": "undo"}));
+    assert_eq!(st["groups"].as_array().unwrap().len(), 1);
+    // deleting every member drops the group
+    for id in [&a, &c] {
+        s.command(&json!({"op": "select", "layer": id}));
+        s.command(&json!({"op": "delete_figure"}));
+    }
+    assert_eq!(s.state()["groups"], json!([]), "an empty group goes");
+    // and undo all the way back to before grouping: as it was
+    while s.state()["undo"] != undo {
+        s.command(&json!({"op": "undo"}));
+    }
+    let now = codec::encode(s.project());
+    // ids are never handed out twice, so only the id counter may differ
+    let diff: Vec<(&str, &str)> = now.lines().zip(plain.lines()).filter(|(x, y)| x != y && !x.contains("\"idCounter\"")).take(6).collect();
+    assert!(diff.is_empty() && now.lines().count() == plain.lines().count(), "{diff:?}");
+}
+
+#[test]
+fn deleting_a_group_takes_its_layers_and_frees_figures_joined_to_them() {
+    let mut s = session();
+    s.command(&json!({"op": "add_figure", "kind": "ball"}));
+    let ids: Vec<String> = s.project().root().unwrap().layers.iter().filter(|l| l.as_figure().is_some()).map(|l| l.id.clone()).collect();
+    let (body, ball) = (ids[0].clone(), ids[1].clone());
+    // the ball is joined to the body; only the body is grouped
+    s.command(&json!({"op": "select", "layer": ball}));
+    s.command(&json!({"op": "join_to", "layer": body}));
+    let st = s.command(&json!({"op": "group", "layers": [body]}));
+    let gid = st["groups"][0]["id"].as_str().unwrap().to_string();
+    let st = s.command(&json!({"op": "delete_group", "group": gid}));
+    assert_eq!(st["undo"], "Delete group");
+    let r = s.project().root().unwrap();
+    assert!(r.layer(&body).is_none());
+    let left = r.layer(&ball).expect("the ball stays");
+    assert!(left.parent.is_none(), "and is on its own");
+    // cameras and sounds never join a group
+    let st = s.command(&json!({"op": "add_camera"}));
+    let cam = st["rows"][0]["id"].as_str().unwrap().to_string();
+    let st = s.command(&json!({"op": "group", "layers": [cam]}));
+    assert_eq!(st["groups"], json!([]));
+    assert!(!st["message"].as_str().unwrap().is_empty());
+}

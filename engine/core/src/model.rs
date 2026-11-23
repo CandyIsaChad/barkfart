@@ -1310,6 +1310,9 @@ pub struct Layer {
     pub lock_move_only: bool,
     pub transform: Transform,
     pub effects: EffectStack,
+    /// K / D33: the group this layer belongs to (an id in its symbol's
+    /// `groups`). A group's members sit next to each other in row order.
+    pub group: Option<String>,
     pub kind: LayerKind,
 }
 
@@ -1336,6 +1339,7 @@ impl Layer {
             lock_move_only: false,
             transform: Transform::new(id),
             effects: EffectStack::default(),
+            group: None,
             kind,
         }
     }
@@ -1549,6 +1553,26 @@ pub struct ScopedStack {
     pub stack: EffectStack,
 }
 
+/// K / D33: a group of layers in one symbol. One level only (groups don't
+/// nest); its members are the layers whose `group` is this id, next to each
+/// other in row order. Its opacity and effects apply to the members drawn
+/// together. Camera, sound and adjustment layers are never members.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LayerGroup {
+    pub id: String,
+    pub name: String,
+    pub opacity: f32,
+    pub effects: EffectStack,
+    /// The folder row is open (its members' rows show).
+    pub open: bool,
+}
+
+impl LayerGroup {
+    pub fn new(id: &str, name: &str) -> LayerGroup {
+        LayerGroup { id: id.into(), name: name.into(), opacity: 1.0, effects: EffectStack::default(), open: true }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Symbol {
     pub id: String,
@@ -1558,11 +1582,13 @@ pub struct Symbol {
     pub layers: Vec<Arc<Layer>>,
     pub markers: Vec<Marker>,
     pub scoped_effects: Vec<ScopedStack>,
+    /// K / D33: groups of layers (see `Layer::group`).
+    pub groups: Vec<LayerGroup>,
 }
 
 impl Symbol {
     pub fn new(id: &str, name: Option<&str>, duration: f64) -> Symbol {
-        Symbol { id: id.into(), name: name.map(str::to_string), duration, layers: Vec::new(), markers: Vec::new(), scoped_effects: Vec::new() }
+        Symbol { id: id.into(), name: name.map(str::to_string), duration, layers: Vec::new(), markers: Vec::new(), scoped_effects: Vec::new(), groups: Vec::new() }
     }
 
     pub fn layer(&self, id: &str) -> Option<&Layer> {
