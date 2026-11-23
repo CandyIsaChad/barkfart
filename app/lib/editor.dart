@@ -1420,11 +1420,23 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (_st['multi'] != null) return const ['Selection'];
     if (sel != null) return const ['Stickfigure Tools', 'Segment Tools', 'Pose'];
     if (_st['editingClip'] != null) return const ['Movieclip editor', 'Textfield Tools'];
-    return const ['Project Tools', 'Textfield Tools'];
+    // nothing selected: Save, Export and the add menu live in the top bar and
+    // the timeline (§9); the card says how to fill it
+    return const ['Nothing selected'];
   }
 
   List<Widget> _sectionBody(String name) {
     switch (name) {
+      case 'Nothing selected':
+        return [
+          for (final d in <rw.Desc>[
+            const rw.DHint('Tap a figure for its properties, a block for its pose, or the ruler for the whole frame.'),
+            if (_st['figureCopied'] == true || _st['textfieldCopied'] == true)
+              rw.DButtons(_st['figureCopied'] == true ? 'Paste figure' : 'Paste text', _st['figureCopied'] == true ? _pasteFigure : () => _cmd({'op': 'paste_textfield'}),
+                  b: _st['figureCopied'] == true && _st['textfieldCopied'] == true ? 'Paste text' : null, onB: () => _cmd({'op': 'paste_textfield'})),
+          ])
+            rw.renderDesc(d),
+        ];
       case 'Project Tools':
         return _projectTools();
       case 'Library Tools':
@@ -1549,7 +1561,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       child: Stack(alignment: Alignment.center, children: [
         Row(children: [
           kit.WordButton('Projects', key: _projectsKey, onTap: _projectsMenu),
-          kit.WordButton('View', onTap: () => setState(() => _viewOptions = !_viewOptions)),
+          kit.WordButton('View', filled: _viewOptions, onTap: () => setState(() => _viewOptions = !_viewOptions)),
           kit.WordButton('Export', onTap: _exportDialog),
         ]),
         IgnorePointer(
@@ -1902,6 +1914,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               swatches: _swatches,
               vertical: _vertical,
               onVertical: (v) => _vertical = v,
+              fps: _fps,
             ));
     if (opts == null) return;
     await _runExport(opts['format'] as int, opts['w'] as int, opts['h'] as int, opts['start'] as int, opts['count'] as int, opts['transparent'] as bool || opts['silent'] == true, opts['name'] as String);
@@ -1938,7 +1951,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         }
       }
     }
-    final contentH = yy + (rows.isEmpty ? 6 : 0);
+    // the States board: an animation with nothing in it says how to start
+    final empty = _layersOpen && !_playing && !rows.any((r) => r['kind'] != 'camera');
+    if (empty) yy += 2 * rowH;
+    final contentH = yy + (rows.isEmpty && !empty ? 6 : 0);
     final width = left * 2 + _frames * cell;
     final aspect = ((_st['w'] as num?) ?? 16) / ((_st['h'] as num?) ?? 9);
     int frameAt(double x) => ((x - left) / cell).floor().clamp(0, _frames - 1);
@@ -2192,7 +2208,17 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       child: SingleChildScrollView(
         child: SizedBox(
           height: contentH,
-          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [names, Expanded(child: area)]),
+          child: Stack(children: [
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [names, Expanded(child: area)]),
+            if (empty)
+              Positioned(
+                left: MediaQuery.sizeOf(context).width >= 900 ? 210 : 140,
+                right: 0,
+                top: yy - 2 * rowH,
+                height: 2 * rowH,
+                child: const IgnorePointer(child: Center(child: Text('Nothing here yet. Tap + to add a stick figure.', style: TextStyle(color: cSecondary, fontSize: 14)))),
+              ),
+          ]),
         ),
       ),
     );
@@ -2574,6 +2600,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       padding: const EdgeInsets.symmetric(horizontal: 6),
       child: Row(children: [
         kit.IconTool('plus', key: _addKey, label: 'Add', color: cAccent, onTap: _playing ? null : _addMenu),
+        if (!_playing && !((_st['rows'] as List?) ?? const []).any((r) => (r as Map)['kind'] != 'camera'))
+          const Padding(padding: EdgeInsets.only(left: 4, right: 4), child: _StartHere()),
         // H3 (D5): keying. Off, a change to an effect or the opacity is the
         // same on every frame; on, it is a key on this frame
         kit.IconTool('key', label: _opts['keying'] == true ? 'Keying: changes make keys' : 'Keying off: changes apply to every frame', on: _opts['keying'] == true, onTap: _playing ? null : () => _cmd({'op': 'set', 'k': 'keying', 'v': _opts['keying'] != true})),
@@ -2672,6 +2700,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   Widget _propertiesCard({bool docked = false}) {
     if (_fxBrowser && _sel != null && !_playing) return kit.PanelCard(docked: docked, padding: EdgeInsets.zero, child: _effectsBrowser());
     final names = _sections();
+    if (names.length == 1 && names.first == 'Nothing selected' && !docked) {
+      return Align(
+        alignment: Alignment.topCenter,
+        child: kit.PanelCard(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: _sectionBody('Nothing selected'))),
+      );
+    }
     final current = names.contains(_tab) ? names.indexOf(_tab) : 0;
     return kit.PanelCard(
       docked: docked,
@@ -2739,6 +2773,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         'Pose' => 'Pose Tools',
         'Frame Tools' => 'Frame ${_frame + 1}',
         'Selection' => '',
+        'Nothing selected' => '',
         _ => section,
       };
 
@@ -2963,8 +2998,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             setState(() => _fullscreen = v);
           }),
           rw.DHint(tween
-              ? '$n in-between pictures per frame when playing and exporting (${rate.round()} a second). The last frame tweens into the first when looping. Turning effects off while playing helps when playback lags; exports always have them.'
-              : 'Each frame shows for 1/${_fps.round()} s. Turning effects off while playing helps when playback lags; exports always have them.'),
+              ? 'In-between pictures added between frames when playing and exporting (${rate.round()} a second). Your poses stay the same.'
+              : 'Each frame shows for 1/${_fps.round()} s. Tweening on adds in-between pictures; your poses stay the same.'),
         ];
         return Stack(children: [
           Positioned(
@@ -5261,6 +5296,27 @@ String _friendlyTime(DateTime t, {bool seconds = false}) {
   return '$d, $time';
 }
 
+/// The States board's "Start here" bubble beside + (an empty animation).
+class _StartHere extends StatelessWidget {
+  const _StartHere();
+  @override
+  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
+        CustomPaint(size: const Size(6, 12), painter: _NubLeft()),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(color: cHint, borderRadius: BorderRadius.circular(8)),
+          child: const Text('Start here', style: TextStyle(color: cText, fontSize: 13)),
+        ),
+      ]);
+}
+
+class _NubLeft extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) => canvas.drawPath(Path()..moveTo(size.width, 0)..lineTo(0, size.height / 2)..lineTo(size.width, size.height)..close(), Paint()..color = cHint);
+  @override
+  bool shouldRepaint(_NubLeft o) => false;
+}
+
 /// A sound clip's waveform (M5): rounded bars, as on the round 10 board.
 class _WavePeaks extends CustomPainter {
   _WavePeaks(this.peaks);
@@ -5529,7 +5585,8 @@ class _ExportDialog extends StatefulWidget {
   final Widget Function(int, void Function(int)) swatches;
   final bool vertical;
   final ValueChanged<bool> onVertical;
-  const _ExportDialog(this.w, this.h, this.frames, this.name, {this.watermark, required this.cmd, required this.swatches, this.vertical = false, required this.onVertical});
+  final double fps;
+  const _ExportDialog(this.w, this.h, this.frames, this.name, {this.watermark, required this.cmd, required this.swatches, this.vertical = false, required this.onVertical, this.fps = 30});
 
   @override
   State<_ExportDialog> createState() => _ExportDialogState();
@@ -5548,6 +5605,12 @@ class _ExportDialogState extends State<_ExportDialog> {
   late bool _vertical = widget.vertical;
 
   static const _widths = [320, 640, 1280, 1920];
+
+  String _seconds(int frames) {
+    final s = frames / (widget.fps > 0 ? widget.fps : 30);
+    final t = s == s.roundToDouble() ? '${s.round()}' : s.toStringAsFixed(1);
+    return '$t second${t == '1' ? '' : 's'}';
+  }
 
   // shown in the redesign's order (REDESIGN §8); the engine's codes stay 0 GIF, 1 PNG frames, 2 video
   static const _order = [2, 0, 1];
@@ -5615,11 +5678,8 @@ class _ExportDialogState extends State<_ExportDialog> {
               kit.WordButton('Turn the cameras 90°', filled: true, expand: true, height: 36, onTap: () => widget.cmd({'op': 'rotate_cameras'})),
               const SizedBox(height: 4),
             ],
-            kit.Hint(_format == 2
-                ? 'A video (H.264, with the sound) that Photos and video players open. Videos can’t be transparent.'
-                : _format == 1
-                    ? '$count pictures, with the soundtrack as a WAV when there is sound.'
-                    : 'A GIF, with the soundtrack as a WAV when there is sound. Saved in the Barkfart Exports folder.'),
+            // the board's summary: how long, then what the format can't do
+            kit.Hint('${_seconds(count)} at ${widget.fps == widget.fps.roundToDouble() ? widget.fps.round() : widget.fps} fps. ${_format == 2 ? 'Videos can’t be transparent; GIF and PNG frames can.' : _format == 1 ? '$count pictures, with the soundtrack as a WAV when there is sound.' : 'A GIF in the Barkfart Exports folder, with the soundtrack as a WAV when there is sound.'}'),
             Row(children: [
               Expanded(child: kit.WordButton('Cancel', onTap: () => Navigator.pop(context), filled: true, expand: true, height: 40)),
               const SizedBox(width: 8),
