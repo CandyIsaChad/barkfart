@@ -652,7 +652,7 @@ Render the boards (docs/barkfart/mockups: `mkdir -p project preview && node boar
 - [x] M5. The Camera row, Sound rows, join chain markers on rows.
 - [x] M6. Pose page: "Pose Tools", name and "frames 5 to 8", ease pictures, "Length in frames", pinned "Delete this pose".
 - [x] M7. Frame page: "Frame N" title and hint, Add time here / Remove this frame, background swatches, pinned "Clear frame"; the selected frame outlined in the strip.
-- [ ] M8. The "+" menu: Stick figure, Picture, Text, Sound, Movieclip, then Group (planned); paste and import live in the choosers' footers.
+- [x] M8. The "+" menu: Stick figure, Picture, Text, Sound, Movieclip, then Group (planned); paste and import live in the choosers' footers.
 - [ ] M9. The rest, board by board: Animation popover, Export, View, Camera (the frame on the stage), Text, Picture, Movieclip, Sound, Group, Projects, First run, Settings, States, Tablet.
 
 ### K. Hardest, later

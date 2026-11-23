@@ -2510,7 +2510,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final box = _addKey.currentContext?.findRenderObject() as RenderBox?;
     final screen = MediaQuery.sizeOf(context);
     final at = box == null ? Offset(8, screen.height - 48) : box.localToGlobal(Offset.zero);
-    final editing = _st['editingClip'] != null;
     final items = <(String, String, VoidCallback?)>[
       ('figure', 'Stick figure', () {
         setState(() => _libType = 0);
@@ -2521,12 +2520,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ('sound', 'Sound', _importSounds),
       ('clip', 'Movieclip', () {
         setState(() => _libType = 1);
-        _figurePicker();
+        _figurePicker(movieclip: true);
       }),
-      ('plus', 'New movieclip', editing ? null : () => _cmd({'op': 'new_movieclip'})),
-      ('folder', 'Import from Files…', _importFromFiles),
-      ('figure', 'Paste stick figure', _st['figureCopied'] == true ? _pasteFigure : null),
-      ('parts', 'This project\u2019s library…', _libraryDialog),
+      // planned (K): shown as on the board, not yet usable
+      ('folder', 'Group', null),
     ];
     final pick = await showGeneralDialog<int>(
       context: context,
@@ -4385,7 +4382,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   /// "Add a figure": a window over the editor with the user's Stick Nodes
   /// figures (Barkfart Figures folder) and the built-in ones, with pictures.
-  Future<void> _figurePicker() async {
+  Future<void> _figurePicker({bool movieclip = false}) async {
     final e = _engine;
     if (e == null) return;
     final entries = <_PickEntry>[];
@@ -4419,9 +4416,19 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       entries.add(_PickEntry(key, name.replaceAll(RegExp(r'\.(nodes|nodemc)$'), ''), false, effect: path.contains('/effects/')));
     }
     if (!mounted) return;
-    final picked = await showDialog<List<String>>(context: context, builder: (c) => _FigurePicker(entries, _previews));
+    final picked = await showDialog<List<String>>(context: context, builder: (c) => _FigurePicker(entries, _previews, movieclip: movieclip, canPaste: _st['figureCopied'] == true, editing: _st['editingClip'] != null));
     for (final k in picked ?? const <String>[]) {
-      if (k.startsWith('file:')) {
+      // the footer's words (round 10 board): import, paste, the project's
+      // library, a new movieclip
+      if (k == '#import') {
+        await _importFromFiles();
+      } else if (k == '#paste') {
+        _pasteFigure();
+      } else if (k == '#library') {
+        await _libraryDialog();
+      } else if (k == '#newclip') {
+        _cmd({'op': 'new_movieclip'});
+      } else if (k.startsWith('file:')) {
         final path = k.substring(5);
         _refresh(e.importFile(path.split(Platform.pathSeparator).last, await File(path).readAsBytes()));
         _thumbsChanged('import');
@@ -5398,7 +5405,8 @@ class _PickEntry {
 class _FigurePicker extends StatefulWidget {
   final List<_PickEntry> entries;
   final Map<String, ui.Image> previews;
-  const _FigurePicker(this.entries, this.previews);
+  final bool movieclip, canPaste, editing;
+  const _FigurePicker(this.entries, this.previews, {this.movieclip = false, this.canPaste = false, this.editing = false});
 
   @override
   State<_FigurePicker> createState() => _FigurePickerState();
@@ -5407,14 +5415,16 @@ class _FigurePicker extends StatefulWidget {
 class _FigurePickerState extends State<_FigurePicker> {
   final List<String> _picked = [];
   String _filter = '';
-  int _tab = 0; // Stock, Yours, Effects
+  int _tab = 0; // Stock (figures, then effect figures), Yours
 
   Widget _tile(_PickEntry f) {
     final on = _picked.contains(f.id);
     final img = widget.previews[f.id];
+    // a tap adds it (round 10 board); holding picks several, added together
     return GestureDetector(
-      onTap: () => setState(() => on ? _picked.remove(f.id) : _picked.add(f.id)),
-      onDoubleTap: () => Navigator.pop(context, [f.id]),
+      onTap: () => _picked.isEmpty ? Navigator.pop(context, [f.id]) : setState(() => on ? _picked.remove(f.id) : _picked.add(f.id)),
+      onLongPress: () => setState(() => on ? _picked.remove(f.id) : _picked.add(f.id)),
+      onSecondaryTap: () => setState(() => on ? _picked.remove(f.id) : _picked.add(f.id)),
       child: Column(children: [
         Expanded(
           child: Container(
@@ -5433,7 +5443,7 @@ class _FigurePickerState extends State<_FigurePicker> {
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     final match = widget.entries.where((f) => f.name.toLowerCase().contains(_filter.toLowerCase())).toList();
-    final lists = [match.where((f) => !f.mine && !f.effect).toList(), match.where((f) => f.mine).toList(), match.where((f) => f.effect).toList()];
+    final lists = [[...match.where((f) => !f.mine && !f.effect), ...match.where((f) => !f.mine && f.effect)], match.where((f) => f.mine).toList()];
     final list = lists[_tab];
     return Dialog(
       backgroundColor: cCard,
@@ -5445,10 +5455,10 @@ class _FigurePickerState extends State<_FigurePicker> {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            const Text('Add a stick figure', textAlign: TextAlign.center, style: TextStyle(color: cTitle, fontSize: 17, fontWeight: FontWeight.w700)),
+            Text(widget.movieclip ? 'Add a movieclip' : 'Add a stick figure', textAlign: TextAlign.center, style: const TextStyle(color: cTitle, fontSize: 17, fontWeight: FontWeight.w600)),
             const SizedBox(height: 10),
             Row(children: [
-              SizedBox(width: 300, child: kit.Segmented(const ['Stock', 'Yours', 'Effects'], _tab, onSelect: (i) => setState(() => _tab = i))),
+              SizedBox(width: 240, child: kit.Segmented(const ['Stock', 'Yours'], _tab, onSelect: (i) => setState(() => _tab = i))),
               const SizedBox(width: 12),
               Expanded(
                 child: Padding(
@@ -5459,7 +5469,7 @@ class _FigurePickerState extends State<_FigurePicker> {
                       isDense: true,
                       filled: true,
                       fillColor: cControl,
-                      hintText: 'Search',
+                      hintText: widget.movieclip ? 'Search' : 'Search figures',
                       prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF8A9099)),
                       contentPadding: const EdgeInsets.symmetric(vertical: 10),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
@@ -5488,15 +5498,17 @@ class _FigurePickerState extends State<_FigurePicker> {
             Container(
               padding: const EdgeInsets.only(top: 10),
               decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFFE6E8EB)))),
+              // the board's footer: Import from Files… and Paste figure; the
+              // project's library and New movieclip beside them
               child: Row(children: [
-                Text(_picked.isEmpty ? 'Tap figures to pick them; double-tap adds one.' : '${_picked.length} picked', style: const TextStyle(color: cSecondary, fontSize: 12)),
+                kit.WordButton('Import from Files…', size: 14, onTap: () => Navigator.pop(context, ['#import'])),
+                kit.WordButton('This project\u2019s library…', size: 14, onTap: () => Navigator.pop(context, ['#library'])),
+                if (widget.movieclip) kit.WordButton('New movieclip', size: 14, onTap: widget.editing ? null : () => Navigator.pop(context, ['#newclip'])),
                 const Spacer(),
-                SizedBox(width: 110, child: kit.WordButton('Cancel', filled: true, expand: true, height: 38, onTap: () => Navigator.pop(context))),
-                const SizedBox(width: 8),
-                SizedBox(
-                  width: 120,
-                  child: kit.WordButton(_picked.isEmpty ? 'Add' : 'Add (${_picked.length})', primary: true, expand: true, height: 38, onTap: _picked.isEmpty ? null : () => Navigator.pop(context, List<String>.from(_picked))),
-                ),
+                if (_picked.isNotEmpty)
+                  kit.WordButton('Add ${_picked.length}', size: 14, primary: true, onTap: () => Navigator.pop(context, List<String>.from(_picked)))
+                else
+                  kit.WordButton('Paste figure', size: 14, onTap: widget.canPaste ? () => Navigator.pop(context, ['#paste']) : null),
               ]),
             ),
           ]),
