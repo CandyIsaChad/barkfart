@@ -958,7 +958,13 @@ fn creation_mode_draws_a_segment_from_a_joint() {
     assert_eq!(st["hit"], true);
     s.command(&json!({"op": "move", "x": x + 30.0, "y": y + 10.0}));
     let st = s.command(&json!({"op": "move", "x": x + 60.0, "y": y + 40.0}));
-    assert!((st["drawLine"][2].as_f64().unwrap() - (x + 60.0) as f64).abs() < 0.01);
+    assert!((st["drawLine"]["line"][2].as_f64().unwrap() - (x + 60.0) as f64).abs() < 0.01);
+    // J5: the readout, in the figure's own space (the starter figure is
+    // drawn at twice its size: 72 on the stage is 36 to the figure)
+    assert_eq!(st["drawLine"]["length"], 36.0);
+    assert_eq!(st["drawLine"]["angle"], 34.0);
+    assert_eq!(st["drawLine"]["shape"], "circle");
+    assert!(st["drawLine"]["mirror"].is_null(), "Mirror is off");
     let st = s.command(&json!({"op": "up"}));
     assert_eq!(st["undo"], "Draw segment");
     assert!(st["drawLine"].is_null());
@@ -5134,4 +5140,41 @@ fn the_size_reference_stands_beside_the_figure_and_changes_nothing() {
     // and it can be hidden
     let st = s.command(&json!({"op": "set", "k": "sizeref", "v": false}));
     assert!(st["sizeRef"].is_null());
+}
+
+#[test]
+fn mirror_draws_the_segment_across_the_centre_line_too() {
+    // J5 / D13: a drawing toggle, nothing stored
+    let mut s = session();
+    let st = s.command(&json!({"op": "state"}));
+    let fig = st["figures"][0]["id"].as_str().unwrap().to_string();
+    s.command(&json!({"op": "build", "layer": fig}));
+    s.command(&json!({"op": "draw_tool", "shape": "line"}));
+    let st = s.command(&json!({"op": "set", "k": "mirror", "v": true}));
+    assert_eq!(st["opts"]["mirror"], true);
+    // from the right hand: the left hand gets the mirror image
+    let (x, y) = handle(&st, 6);
+    let n = st["handles"].as_array().unwrap().len();
+    s.command(&json!({"op": "down", "x": x, "y": y, "r": 20}));
+    let st = s.command(&json!({"op": "move", "x": x + 50.0, "y": y + 20.0}));
+    let m: Vec<f64> = st["drawLine"]["mirror"].as_array().expect("a mirror line").iter().map(|v| v.as_f64().unwrap()).collect();
+    let root = handle(&st, 0);
+    assert!((m[0] - (2.0 * root.0 - x) as f64).abs() < 0.5 && (m[1] - y as f64).abs() < 0.5, "starts at the other hand: {m:?}");
+    assert!((m[2] - (2.0 * root.0 - x - 50.0) as f64).abs() < 0.5 && (m[3] - (y + 20.0) as f64).abs() < 0.5, "ends mirrored: {m:?}");
+    let st = s.command(&json!({"op": "up"}));
+    assert_eq!(st["undo"], "Draw segment", "one step for both");
+    let hs = st["handles"].as_array().unwrap();
+    assert_eq!(hs.len(), n + 2);
+    let near = |px: f64, py: f64| hs.iter().any(|h| (h[0].as_f64().unwrap() - px).abs() < 0.5 && (h[1].as_f64().unwrap() - py).abs() < 0.5);
+    assert!(near((x + 50.0) as f64, (y + 20.0) as f64) && near(m[2], m[3]));
+    let st = s.command(&json!({"op": "undo"}));
+    assert_eq!(st["handles"].as_array().unwrap().len(), n);
+    // from a joint on the centre line, a segment straight up has no mirror
+    let (hx, hy) = handle(&st, 1);
+    s.command(&json!({"op": "down", "x": hx, "y": hy, "r": 20}));
+    let st = s.command(&json!({"op": "move", "x": root.0, "y": hy + 60.0}));
+    if (hx - root.0).abs() < 0.5 {
+        assert!(st["drawLine"]["mirror"].is_null());
+    }
+    s.command(&json!({"op": "cancel"}));
 }

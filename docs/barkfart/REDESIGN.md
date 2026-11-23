@@ -653,7 +653,7 @@ and tests are never weakened.
 - [x] J2. The shape shelf.
 - [x] J3. The Parts list. The editor's Properties are Shape / Segment / Figure tabs (the main joint shows only Figure).
 - [x] J4. Shape-coded handles, the size reference. The main node is a dark square and the selected joint a red dot everywhere; in the figure editor connectors are diamonds and polyfill anchors triangles (handle flag 128). The "Stock size" figure is the app's default stickfigure (`bf_set_stock`) drawn faintly by the engine to the right, feet level; View options › Stock size figure hides it.
-- [ ] J5. Ghost and readout while drawing; the Mirror toggle.
+- [x] J5. Ghost and readout while drawing; the Mirror toggle. `drawLine` is now {line, length, angle, width, shape, mirror}: a light ghost of the shape at its real thickness, a ring at the finger and a "Length N, A°" pill in the figure's own units (left of the finger where a panel may cover it). Mirror (`set mirror`) draws the same segment from the joint across the centre line in the same undo step; nothing is stored (D13).
 - [ ] J6. Polyfills in either winding direction.
 
 ### M. Matching the round 10 boards (after the user, 2026-11-23: "the mockup is there for a reason")

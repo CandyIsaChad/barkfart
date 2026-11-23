@@ -33,7 +33,7 @@ Tick items there as they finish.
 - Scripted editor runs as before. The new script command is `savesheet`.
 - The window is capped at the screen size (about 1300x700).
 
-**Next:** J5 (the drawing ghost and "Length N, A°" readout; the Mirror toggle), then J6. J1–J4 are done (J4: shape-coded handles, `sizeRef`, `bf_set_stock`; script `state h` prints the handles), with the editor's Properties as Shape / Segment / Figure tabs (J3: the Parts list, engine `parts`, `reorder_at`) (scripts `editcopysheet`, `editcopy`; the shelf replaces the timeline while editing). Done: sections F, G, H, I (D32: joins over time; scripts `joinhere N`, `letgo`), M, the Picture page, the motion path, UI size.
+**Next:** J6 (polyfills in either winding direction), then K. J1–J5 are done (J5: `drawLine` map, `set mirror`; script `hold i dx dy` presses and moves without letting go) (J4: shape-coded handles, `sizeRef`, `bf_set_stock`; script `state h` prints the handles), with the editor's Properties as Shape / Segment / Figure tabs (J3: the Parts list, engine `parts`, `reorder_at`) (scripts `editcopysheet`, `editcopy`; the shelf replaces the timeline while editing). Done: sections F, G, H, I (D32: joins over time; scripts `joinhere N`, `letgo`), M, the Picture page, the motion path, UI size.
 - Done: A1–A6, B1–B6, C1–C8, D1–D7b, E1–E3. D2 (the Movieclip page) is written but not yet seen on screen. D7b: `reset_segment`, `selected.defaults` and `Figure::base` (FORMAT.md); the first-run figure is the engine's render of Stickfigure.nodes (D22).
 - Home script commands: `firstrun`, `projectsscreen`, `backups`, `makeprojects N` (copies the open save N times). Saving writes a picture to `.thumbs/<name>.png`.
 

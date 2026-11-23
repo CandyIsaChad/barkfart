@@ -1096,6 +1096,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           final from = _view.toScreen((h[0] as num).toDouble(), (h[1] as num).toDouble());
           final to = from + Offset(double.parse(w[2]), double.parse(w[3]));
           await _fakeDrag(from, to);
+        case 'hold':
+          // scripted: press handle i and move by (dx, dy) screen points, still held
+          final h = (_st['handles'] as List)[int.parse(w[1])] as List;
+          final from = _view.toScreen((h[0] as num).toDouble(), (h[1] as num).toDouble());
+          _down(PointerDownEvent(pointer: 78, position: from));
+          for (var i = 1; i <= 8; i++) {
+            await Future<void>.delayed(const Duration(milliseconds: 16));
+            _move(PointerMoveEvent(pointer: 78, position: from + Offset(double.parse(w[2]), double.parse(w[3])) * (i / 8)));
+          }
         case 'pan':
           final from = Offset(_view.size.width - 30, _view.size.height - 30);
           await _fakeDrag(from, from + Offset(double.parse(w[1]), double.parse(w[2])));
@@ -1877,6 +1886,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// from a joint draws, one picked at a time; Select draws nothing.
   Widget _shapeShelf() {
     final tool = _st['drawTool'] as String? ?? 'none';
+    final mirror = (_st['opts'] as Map?)?['mirror'] == true;
     const tools = [
       ('none', 'Select', 'select'),
       ('square', 'Segment', 'segment'),
@@ -1917,7 +1927,26 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           child: Center(
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
-              child: Row(mainAxisSize: MainAxisSize.min, children: [for (final (id, label, glyph) in tools) Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: tile(id, label, glyph))]),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                for (final (id, label, glyph) in tools) Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: tile(id, label, glyph)),
+                // a quiet Mirror toggle after a divider (D13: drawing only, nothing stored)
+                Container(width: 1, height: 40, margin: const EdgeInsets.symmetric(horizontal: 10), color: cLine),
+                kit.Tap(
+                  label: mirror ? 'Mirror, on' : 'Mirror, off',
+                  minSize: 0,
+                  onTap: () => _cmd({'op': 'set', 'k': 'mirror', 'v': !mirror}),
+                  child: Container(
+                    width: 74,
+                    height: 64,
+                    decoration: BoxDecoration(color: mirror ? const Color(0xFFE8F0FA) : null, borderRadius: BorderRadius.circular(12)),
+                    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      CustomPaint(size: const Size(40, 26), painter: ShapeGlyph('mirror', mirror ? cAccent : cInk2b)),
+                      const SizedBox(height: 4),
+                      Text('Mirror', style: TextStyle(color: mirror ? cAccent : cSecondary, fontSize: 12, fontWeight: mirror ? FontWeight.w600 : FontWeight.w400)),
+                    ]),
+                  ),
+                ),
+              ]),
             ),
           ),
         ),
@@ -5518,16 +5547,41 @@ class _Overlay extends CustomPainter {
       }
     }
     // creation mode: the segment being drawn
-    final dl = (st['drawLine'] as List?)?.map((x) => (x as num).toDouble()).toList();
-    if (dl != null && dl.length == 4) {
-      canvas.drawLine(v.toScreen(dl[0], dl[1]), v.toScreen(dl[2], dl[3]), Paint()
-        ..color = const Color(0xCC1A1A1A)
-        ..strokeWidth = 6
-        ..strokeCap = StrokeCap.round);
-      canvas.drawCircle(v.toScreen(dl[2], dl[3]), 7, Paint()
+    // a segment being drawn (J5, FigureEditor board): a light ghost of the
+    // shape, a ring where the finger is, and its mirror image when Mirror is on
+    final dl = st['drawLine'] as Map?;
+    void ghost(List l) {
+      final a = v.toScreen((l[0] as num).toDouble(), (l[1] as num).toDouble()), b = v.toScreen((l[2] as num).toDouble(), (l[3] as num).toDouble());
+      final width = math.max(4.0, ((dl!['width'] as num?)?.toDouble() ?? 0) * v.s);
+      final tint = Paint()..color = cAccent.withValues(alpha: 0.28);
+      switch (dl['shape']) {
+        case 'circle' || 'ellipse' || 'polygon' || 'triangle':
+          // the shape spans its segment
+          final r = (b - a).distance / 2;
+          if (dl['shape'] == 'ellipse') {
+            canvas.save();
+            canvas.translate((a.dx + b.dx) / 2, (a.dy + b.dy) / 2);
+            canvas.rotate((b - a).direction);
+            canvas.drawOval(Rect.fromCenter(center: Offset.zero, width: r * 2, height: width), tint);
+            canvas.restore();
+          } else {
+            canvas.drawCircle((a + b) / 2, r, tint);
+          }
+        default:
+          canvas.drawLine(a, b, tint
+            ..strokeWidth = width
+            ..strokeCap = dl['shape'] == 'line' ? StrokeCap.round : StrokeCap.butt);
+      }
+      canvas.drawCircle(b, 15, Paint()..color = cAccent.withValues(alpha: 0.14));
+      canvas.drawCircle(b, 15, Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2
-        ..color = cAccent);
+        ..strokeWidth = 1.5
+        ..color = cAccent.withValues(alpha: 0.35));
+    }
+
+    if (dl != null) {
+      if (dl['mirror'] is List) ghost(dl['mirror'] as List);
+      ghost(dl['line'] as List);
     }
     // the figure editor's size reference: the engine draws the stock figure
     // faintly; its label goes under its feet
@@ -5637,6 +5691,22 @@ class _Overlay extends CustomPainter {
         )..layout();
         tp.paint(canvas, p + const Offset(7, -16));
       }
+    }
+    // the drawing readout, over everything: "Length N, A°"
+    if (dl != null) {
+      final l = dl['line'] as List;
+      final b = v.toScreen((l[2] as num).toDouble(), (l[3] as num).toDouble());
+      final tp = TextPainter(
+        text: TextSpan(text: 'Length ${(dl['length'] as num).round()}, ${(dl['angle'] as num).round()}\u00b0', style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w600, fontFamily: kit.kFont)),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      // right of the finger as on the board, or left of it where a floating
+      // panel may cover the stage's right side
+      final bw = tp.width + 22, room = size.width - (size.width > 700 ? 380 : 0);
+      final left = b.dx + 16 + bw > room ? b.dx - 16 - bw : b.dx + 16;
+      final box = RRect.fromRectAndRadius(Rect.fromLTWH(left, math.max(4, b.dy - 26), bw, 22), const Radius.circular(11));
+      canvas.drawRRect(box, Paint()..color = const Color(0xDB222428));
+      tp.paint(canvas, Offset(box.left + 11, box.top + (22 - tp.height) / 2));
     }
   }
 

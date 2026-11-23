@@ -76,6 +76,9 @@ pub struct Session {
     /// it shows.
     pub stock: Option<std::sync::Arc<Project>>,
     pub size_ref: bool,
+    /// Figure editor "Mirror" (D13): a segment drawn from a joint is drawn
+    /// across the figure's centre line too. A drawing toggle only.
+    pub mirror: bool,
     /// The main animation's symbol. While a movieclip is edited the project's
     /// root symbol is the movieclip's, so every tool works on its frames;
     /// saving always writes the main one as the root.
@@ -182,7 +185,7 @@ impl Session {
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
         let main_root = doc.project().root_symbol.clone();
-        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, stock: None, size_ref: true, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, multi: Vec::new(), copy_edit: None, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, stock: None, size_ref: true, mirror: false, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, multi: Vec::new(), copy_edit: None, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -637,7 +640,14 @@ impl Session {
                     let shape = self.draw.unwrap_or(Shape::Line);
                     let sym = self.sym();
                     let t = self.time();
-                    let made = self.step("Draw segment", |s| draw_segment(s, &sym, &layer, &from, shape, x, y, t));
+                    let twin = if self.mirror { mirrored(self.project(), &sym, &layer, &from, x, y, t) } else { None };
+                    let made = self.step("Draw segment", |s| {
+                        let id = draw_segment(s, &sym, &layer, &from, shape, x, y, t)?;
+                        if let Some((from2, _, _, x2, y2)) = &twin {
+                            draw_segment(s, &sym, &layer, from2, shape, *x2, *y2, t)?;
+                        }
+                        Ok(id)
+                    });
                     if let Some(id) = made {
                         self.selected = Some((layer, id));
                     }
@@ -973,6 +983,7 @@ impl Session {
                     "keying" => self.keying = b("v"),
                     "path" => self.motion_path = b("v"),
                     "sizeref" => self.size_ref = b("v"),
+                    "mirror" => self.mirror = b("v"),
                     _ => {}
                 }
                 self.rev += 1;
@@ -3108,8 +3119,18 @@ impl Session {
             json!({"asset": a, "name": sound_name(p, &a), "volume": round2(vol), "pan": round2(pan), "pitch": (c.pitch * 100.0).round() / 100.0,
                 "fadeIn": (c.fade_in * 10.0).round() / 10.0, "fadeOut": (c.fade_out * 10.0).round() / 10.0, "loop": c.loop_})
         });
+        // the segment being drawn (J5): its ends, its length and angle in the
+        // figure's own space, how thick it will be on the stage, the shape;
+        // and its mirror image when Mirror is on
         let draw_line = match &self.gesture {
-            Gesture::Draw { x0, y0, x, y, .. } => json!([x0, y0, x, y]),
+            Gesture::Draw { layer, from, x0, y0, x, y, .. } => {
+                let sym = self.sym();
+                let shape = self.draw.unwrap_or(Shape::Line);
+                let (len, deg, width) = draw_measure(p, &sym, layer, from, *x, *y, t).unwrap_or((0.0, 0.0, 0.0));
+                let twin = if self.mirror { mirrored(p, &sym, layer, from, *x, *y, t) } else { None };
+                json!({"line": [x0, y0, x, y], "length": len.round(), "angle": deg.round(), "width": round2(width as f32), "shape": shape_name(shape),
+                    "mirror": twin.map(|(_, a, b, c, d)| json!([round2(a), round2(b), round2(c), round2(d)]))})
+            }
             _ => J::Null,
         };
         let fset = crate::timing::frame_settings(p, self.frame);
@@ -3298,7 +3319,7 @@ impl Session {
             "opts": {
                 "stretch": self.stretch_all, "scope": if self.tools.key_scope == KeyScope::Joint { "joint" } else { "figure" },
                 "snap": self.tools.snap_degrees, "onion": self.onion, "keying": self.keying, "path": self.motion_path, "axis": self.tools.axis_lock, "static": self.tools.show_static,
-                "tweenNew": self.tools.editor.default_interp != Interp::Hold, "mainOnly": self.tools.main_nodes_only, "sizeRef": self.size_ref,
+                "tweenNew": self.tools.editor.default_interp != Interp::Hold, "mainOnly": self.tools.main_nodes_only, "sizeRef": self.size_ref, "mirror": self.mirror,
                 "onionBefore": p.view.onion_before, "onionAfter": p.view.onion_after, "onionFront": p.view.onion_in_front,
             },
             "pose": self.pose_clip.is_some(),
@@ -3808,6 +3829,58 @@ fn draw_segment(s: &mut crate::edit::State, sym: &str, layer: &str, from: &str, 
         n.color.value = Value::C(Color::rgba8888(0x1a1a1aff));
     }
     Ok(id)
+}
+
+/// While a segment is drawn from `from` to the stage point (x, y): its length
+/// and angle (degrees, anticlockwise from the figure's x axis) in the
+/// figure's own space, and how thick it will be on the stage.
+fn draw_measure(p: &Project, sym: &str, layer: &str, from: &str, x: f32, y: f32, t: f64) -> Option<(f64, f64, f64)> {
+    let sy = p.symbol(sym)?;
+    let l = sy.layer(layer)?;
+    let f = l.as_figure()?;
+    let mut r = Resolver::new(p);
+    let pose = crate::eval::FigurePose::compute(f, t, &mut r);
+    let fi = f.index_of(from)?;
+    let st = eval::layer_stage(p, sy, l, t);
+    let inv = st.inverse();
+    let (dx, dy) = (inv.map_x(x as f64, y as f64) - pose.x[fi], inv.map_y(x as f64, y as f64) - pose.y[fi]);
+    let n = &f.nodes()[fi];
+    // a new segment takes its parent's thickness (the original's defaults off the main node)
+    let thick = if n.parent.is_none() { 32.0 } else { r.f(&n.thickness, t) as f64 };
+    let k = (st.map_x(1.0, 0.0) - st.map_x(0.0, 0.0)).hypot(st.map_y(1.0, 0.0) - st.map_y(0.0, 0.0));
+    Some((dx.hypot(dy), dy.atan2(dx).to_degrees(), thick * k))
+}
+
+/// Mirror drawing (D13): the joint across the figure's centre line (the
+/// vertical through its main node) from `from`, or `from` itself when it
+/// sits on the line, with the drop point mirrored. Returns that joint, its
+/// stage position and the mirrored drop point; None when there is no such
+/// joint or the mirror image would be the same segment.
+fn mirrored(p: &Project, sym: &str, layer: &str, from: &str, x: f32, y: f32, t: f64) -> Option<(String, f32, f32, f32, f32)> {
+    let sy = p.symbol(sym)?;
+    let l = sy.layer(layer)?;
+    let f = l.as_figure()?;
+    let mut r = Resolver::new(p);
+    let pose = crate::eval::FigurePose::compute(f, t, &mut r);
+    let st = eval::layer_stage(p, sy, l, t);
+    let inv = st.inverse();
+    let (lx, ly) = (inv.map_x(x as f64, y as f64), inv.map_y(x as f64, y as f64));
+    let ax = pose.x[f.nodes().iter().position(|n| n.parent.is_none())?];
+    let fi = f.index_of(from)?;
+    let (wx, wy) = (2.0 * ax - pose.x[fi], pose.y[fi]);
+    let j = (0..f.nodes().len())
+        .map(|j| (j, (pose.x[j] - wx).hypot(pose.y[j] - wy)))
+        .filter(|(_, d)| *d <= 1.5)
+        .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))?
+        .0;
+    let (mx, my) = (2.0 * ax - lx, ly);
+    if j == fi && (mx - lx).abs() < 2.0 {
+        return None;
+    }
+    let s = |x: f64, y: f64| (st.map_x(x, y) as f32, st.map_y(x, y) as f32);
+    let (jx, jy) = s(pose.x[j], pose.y[j]);
+    let (dx, dy) = s(mx, my);
+    Some((f.nodes()[j].id.clone(), jx, jy, dx, dy))
 }
 
 /// The root's "Frame sounds" audio layer, added (at the bottom) when missing.
