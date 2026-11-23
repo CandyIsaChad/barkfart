@@ -71,6 +71,11 @@ pub struct Session {
     /// Figure editor "Background color": the stage colour while editing a
     /// figure (view only).
     pub editor_bg: Option<u32>,
+    /// Figure editor size reference (FigureEditor board): the stock figure
+    /// (the app's default stickfigure; None: the built-in one) and whether
+    /// it shows.
+    pub stock: Option<std::sync::Arc<Project>>,
+    pub size_ref: bool,
     /// The main animation's symbol. While a movieclip is edited the project's
     /// root symbol is the movieclip's, so every tool works on its frames;
     /// saving always writes the main one as the root.
@@ -177,7 +182,7 @@ impl Session {
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
         let main_root = doc.project().root_symbol.clone();
-        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, multi: Vec::new(), copy_edit: None, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, stock: None, size_ref: true, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, multi: Vec::new(), copy_edit: None, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -967,6 +972,7 @@ impl Session {
                     "tween_new" => self.tools.editor.default_interp = if b("v") { Interp::Linear } else { Interp::Hold },
                     "keying" => self.keying = b("v"),
                     "path" => self.motion_path = b("v"),
+                    "sizeref" => self.size_ref = b("v"),
                     _ => {}
                 }
                 self.rev += 1;
@@ -2846,6 +2852,37 @@ impl Session {
         self.doc.state.assets.get(path).cloned()
     }
 
+    /// The figure editor's size reference (FigureEditor board): the stock
+    /// figure at its own size, standing on the same ground just right of the
+    /// figure being built, as a project of its own to draw faintly behind;
+    /// and where its "Stock size" label goes (handle space, y up).
+    pub fn size_reference(&self) -> Option<(Project, [f32; 2])> {
+        if !self.size_ref {
+            return None;
+        }
+        let b = self.building.as_ref()?;
+        let p = self.project();
+        let mut all = CanvasTools::default();
+        all.show_static = true;
+        let extent = |hs: &mut dyn Iterator<Item = crate::edit::canvas::Handle>| {
+            hs.fold(None, |e: Option<[f32; 4]>, h| Some(e.map_or([h.x, h.y, h.x, h.y], |[x0, y0, x1, y1]| [x0.min(h.x), y0.min(h.y), x1.max(h.x), y1.max(h.y)])))
+        };
+        let [_, by0, bx1, _] = extent(&mut all.handles(p, self.time()).into_iter().filter(|h| h.layer == *b))?;
+        let mut stock = self.stock.as_deref().cloned().unwrap_or_else(new_editor_project);
+        let [sx0, sy0, sx1, _] = extent(&mut all.handles(&stock, 0.0).into_iter())?;
+        // its joints clear the built figure's by a body's width; feet level
+        let (dx, dy) = (bx1 + 140.0 - sx0, by0 - sy0);
+        let r = stock.root_mut()?;
+        for l in r.layers.iter_mut() {
+            let l = std::sync::Arc::make_mut(l);
+            for (q, d) in [(&mut l.transform.x, dx), (&mut l.transform.y, dy)] {
+                q.track.clear();
+                q.value = Value::F(q.value.f() + d);
+            }
+        }
+        Some((stock, [(sx0 + sx1) / 2.0 + dx, by0 - 34.0]))
+    }
+
     /// Everything the app draws besides the picture.
     pub fn state(&self) -> J {
         let p = self.project();
@@ -2869,7 +2906,8 @@ impl Session {
                 let flags = h.root as u32 | (sel as u32) << 1 | (fig as u32) << 2 | (near as u32) << 3;
                 if self.building.is_some() {
                     // figure editor View options: node highlight and draw order
-                    // (16 polynode, 32 connector, 64 drag / angle lock; then the index)
+                    // (16 polynode, 32 connector, 64 drag / angle lock, 128 polyfill
+                    // anchor; then the index)
                     let f = p.root().and_then(|r| r.layer(&h.layer)).and_then(|l| l.as_figure());
                     let (extra, idx) = f.and_then(|f| {
                         let i = f.index_of(&h.node)?;
@@ -2877,7 +2915,9 @@ impl Session {
                         let poly = f.polyfills.iter().any(|pf| pf.nodes.iter().any(|x| *x == h.node));
                         let conn = n.legacy_extras.contains_key(crate::eval::pose::CONNECT_TO) || n.legacy_extras.get("connector").is_some_and(|v| v == "b:true");
                         let lock = n.drag_lock != 0 || n.angle_lock != 0;
-                        Some(((poly as u32) << 4 | (conn as u32) << 5 | (lock as u32) << 6, i))
+                        // 128: a polyfill hangs off this joint (its anchor; a triangle handle)
+                        let anchor = f.polyfills.iter().any(|pf| pf.anchor == h.node);
+                        Some(((poly as u32) << 4 | (conn as u32) << 5 | (lock as u32) << 6 | (anchor as u32) << 7, i))
                     }).unwrap_or((0, 0));
                     handles.push(json!([round2(h.x), round2(h.y), flags | extra, idx]));
                     continue;
@@ -3258,7 +3298,7 @@ impl Session {
             "opts": {
                 "stretch": self.stretch_all, "scope": if self.tools.key_scope == KeyScope::Joint { "joint" } else { "figure" },
                 "snap": self.tools.snap_degrees, "onion": self.onion, "keying": self.keying, "path": self.motion_path, "axis": self.tools.axis_lock, "static": self.tools.show_static,
-                "tweenNew": self.tools.editor.default_interp != Interp::Hold, "mainOnly": self.tools.main_nodes_only,
+                "tweenNew": self.tools.editor.default_interp != Interp::Hold, "mainOnly": self.tools.main_nodes_only, "sizeRef": self.size_ref,
                 "onionBefore": p.view.onion_before, "onionAfter": p.view.onion_after, "onionFront": p.view.onion_in_front,
             },
             "pose": self.pose_clip.is_some(),
@@ -3272,6 +3312,7 @@ impl Session {
             "frameClipCount": self.frame_clip.as_ref().map(|c| c.1).unwrap_or(0),
             "connecting": self.connecting,
             "editorBg": self.editor_bg,
+            "sizeRef": self.size_reference().map(|(_, at)| json!([round2(at[0]), round2(at[1])])),
             "trace": self.trace.as_ref().map(|(f, l)| json!({"frame": f, "layer": l})),
             "polyfill": self.polyfill.as_ref().and_then(|id| {
                 let f = p.root()?.layer(self.building.as_ref()?)?.as_figure()?;

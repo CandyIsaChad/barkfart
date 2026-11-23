@@ -29,6 +29,8 @@ pub struct Engine {
     label: Vec<u8>,
     /// The open project with its history, selection and gestures.
     session: Option<Session>,
+    /// The app's default stickfigure, for the figure editor's size reference.
+    stock: Option<std::sync::Arc<Project>>,
     /// Decoded sounds by asset id (the plan is rebuilt from them after edits).
     sounds: std::collections::HashMap<String, std::sync::Arc<barkfart_core::audio::Pcm>>,
     plan_rev: u64,
@@ -66,7 +68,9 @@ impl Engine {
             }
         }
         let assets = entries.into_iter().map(|(k, v)| (k, std::sync::Arc::new(v))).collect();
-        self.session = Some(Session::new(Document::with_assets(p, assets)));
+        let mut s = Session::new(Document::with_assets(p, assets));
+        s.stock = self.stock.clone();
+        self.session = Some(s);
         self.player.stop();
         self.plan_rev = 0;
         self.refresh_plan();
@@ -182,6 +186,7 @@ pub extern "C" fn bf_engine_new() -> *mut Engine {
                 redirect: None,
                 label,
                 session: None,
+                stock: None,
                 sounds: Default::default(),
                 plan_rev: 0,
                 answer: vec![0],
@@ -745,6 +750,11 @@ pub extern "C" fn bf_render_view(e: *const Engine, t: f64, w: u32, h: u32, x0: f
             let scene = barkfart_core::eval::Scene { root, time: t, diagnostics: Vec::new(), primitives: 0 };
             list = list.with_underlay(tess::layered(&scene, None));
         }
+        // Figure editor size reference: the stock figure, faint, beside the one being built
+        if let Some((sp, _)) = engine.session.as_ref().and_then(|s| s.size_reference()) {
+            let sc = eval::evaluate_with(&sp, &sp.root_symbol, 0.0, false, false);
+            list = list.with_underlay(tess::trace_ghost(&sc, None, 0x222428, 0.1));
+        }
         // Figure editor "Trace": a frame or a figure faintly behind
         if let Some((fr, ly)) = engine.session.as_ref().filter(|s| s.building.is_some()).and_then(|s| s.trace.clone()) {
             let fps = p.settings.fps.max(1.0) as f64;
@@ -1042,6 +1052,25 @@ pub extern "C" fn bf_import(e: *mut Engine, name: *const c_char, data: *const u8
     engine.answer = serde_json::to_vec(&v).unwrap_or_default();
     engine.answer.push(0);
     engine.answer.as_ptr() as *const c_char
+}
+
+/// The app's default stickfigure (a Stick Nodes figure file), kept for the
+/// figure editor's size reference in every project opened after.
+#[no_mangle]
+pub extern "C" fn bf_set_stock(e: *mut Engine, name: *const c_char, data: *const u8, len: usize) -> i32 {
+    if e.is_null() || data.is_null() {
+        return 1;
+    }
+    // SAFETY: live handle; the caller passes len readable bytes
+    let (engine, bytes) = unsafe { (&mut *e, std::slice::from_raw_parts(data, len)) };
+    let name = cstr(name).unwrap_or_else(|| "Stickfigure.nodes".into());
+    let Ok(p) = catch_unwind(AssertUnwindSafe(|| barkfart_core::session::new_editor_project_with(&name, bytes))) else { return 3 };
+    let p = std::sync::Arc::new(p);
+    engine.stock = Some(p.clone());
+    if let Some(s) = engine.session.as_mut() {
+        s.stock = Some(p);
+    }
+    0
 }
 
 /// Opens a new project whose first figure comes from a Stick Nodes figure file.

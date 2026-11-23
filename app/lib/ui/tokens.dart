@@ -12,6 +12,9 @@ const cSecondary = Color(0xFF6B7078); // secondary ink
 const cAccent = Color(0xFF1577D6); // blue: words, active states
 const cDanger = Color(0xFFD91A3A); // red: destructive words, the selected handle
 const cRoot = Color(0xFFFF9F0A);
+
+/// The main node's square handle (REDESIGN §3).
+const cRootNode = Color(0xFF2A2B30);
 const cTitle = Color(0xFFCC1736); // red, centred section titles
 const cLine = Color(0xFFDADDE2); // dividers
 const cCard = Color(0xFFFFFFFF); // panels, sheets, tiles

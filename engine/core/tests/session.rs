@@ -5101,3 +5101,37 @@ fn the_parts_list_is_front_first_and_reorders() {
     assert_eq!(after.last().unwrap()["id"], front.as_str(), "now at the back");
     s.command(&json!({"op": "edit_copy_end"}));
 }
+
+#[test]
+fn the_size_reference_stands_beside_the_figure_and_changes_nothing() {
+    // J4: the figure editor's "Stock size" figure is view only
+    let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../app/assets/stock/figures/Stickfigure.nodes")).unwrap();
+    let make = || barkfart_core::session::new_editor_project_with("Stickfigure.nodes", &bytes);
+    let mut s = Session::new(Document::new(make()));
+    s.stock = Some(std::sync::Arc::new(make()));
+    let st = s.command(&json!({"op": "state"}));
+    assert!(st["sizeRef"].is_null(), "only in the figure editor");
+    let (x, y) = handle(&st, 6);
+    s.command(&json!({"op": "down", "x": x, "y": y, "r": 20}));
+    s.command(&json!({"op": "up"}));
+    let st = s.command(&json!({"op": "edit_copy"}));
+    let at: Vec<f64> = st["sizeRef"].as_array().expect("a label").iter().map(|v| v.as_f64().unwrap()).collect();
+    let hs = st["handles"].as_array().unwrap().clone();
+    let right = hs.iter().map(|h| h[0].as_f64().unwrap()).fold(f64::MIN, f64::max);
+    let low = hs.iter().map(|h| h[1].as_f64().unwrap()).fold(f64::MAX, f64::min);
+    assert!(at[0] > right + 100.0, "to the right of the figure: {at:?} vs {right}");
+    assert!(at[1] < low, "under the feet: {at:?} vs {low}");
+    // a tap on a joint moves nothing
+    for i in 0..hs.len() {
+        let (x, y) = handle(&st, i);
+        s.command(&json!({"op": "down", "x": x, "y": y, "r": 20}));
+        for _ in 0..8 {
+            s.command(&json!({"op": "move", "x": x, "y": y}));
+        }
+        let after = s.command(&json!({"op": "up"}));
+        assert_eq!(after["handles"].as_array().unwrap().iter().map(|h| (h[0].clone(), h[1].clone())).collect::<Vec<_>>(), hs.iter().map(|h| (h[0].clone(), h[1].clone())).collect::<Vec<_>>(), "tap {i}");
+    }
+    // and it can be hidden
+    let st = s.command(&json!({"op": "set", "k": "sizeref", "v": false}));
+    assert!(st["sizeRef"].is_null());
+}

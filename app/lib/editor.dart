@@ -123,6 +123,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   Future<void> _start() async {
+    // the default stickfigure, for the figure editor's "Stock size" reference
+    try {
+      final bytes = (await rootBundle.load('assets/stock/figures/Stickfigure.nodes')).buffer.asUint8List();
+      _engine?.setStock('Stickfigure.nodes', bytes);
+    } catch (_) {}
     final e = _engine;
     if (e == null) return;
     var firstRun = false;
@@ -1113,6 +1118,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           await _saveShot(w[1]);
         case 'state':
           debugPrint('state: ${_st['frame']}/${_st['frames']} undo=${_st['undo']} selected=${_sel?['node']} handles=${(_st['handles'] as List).length} ms=${_engineMs.toStringAsFixed(1)}');
+          if (w.length > 1) debugPrint('handles: ${_st['handles']}');
         case 'import':
           // scripted: import a file (path) onto this frame
           final f = File(w.sublist(1).join(' '));
@@ -4733,6 +4739,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       rw.DTick('Only main joints', _opts['mainOnly'] == true, onChanged: (v) => _cmd({'op': 'set', 'k': 'mainonly', 'v': v})),
       if (_st['building'] != null) ...[
         rw.DTick('Static joints', _opts['static'] != false, onChanged: (v) => _cmd({'op': 'set', 'k': 'static', 'v': v})),
+        rw.DTick('Stock size figure', _opts['sizeRef'] != false, onChanged: (v) => _cmd({'op': 'set', 'k': 'sizeref', 'v': v})),
         rw.DTick('Draw order numbers', AppSettings.flag('drawOrder'), onChanged: (v) => flag('drawOrder', v)),
         rw.DSeg(const ['None', 'Polyfills', 'Connectors', 'Locks'], AppSettings.number('nodeHighlight').clamp(0, 3), label: 'Highlight', onSelect: (i) => number('nodeHighlight', i)),
       ],
@@ -5522,10 +5529,20 @@ class _Overlay extends CustomPainter {
         ..strokeWidth = 2
         ..color = cAccent);
     }
+    // the figure editor's size reference: the engine draws the stock figure
+    // faintly; its label goes under its feet
+    final ref = st['sizeRef'] as List?;
+    if (ref != null) {
+      final tp = TextPainter(
+        text: const TextSpan(text: 'Stock size', style: TextStyle(color: Color(0xFF9AA0A8), fontSize: 11, fontFamily: kit.kFont)),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, v.toScreen((ref[0] as num).toDouble(), (ref[1] as num).toDouble()) - Offset(tp.width / 2, tp.height / 2));
+    }
     final hs = (st['handles'] as List?) ?? const [];
     // selected joint red, the joints connected to it purple with a line to
     // each, everything else blue rings (after the original's look)
-    const purple = Color(0xFFA43BE0), red = Color(0xFFE0383A), blue = Color(0xFF2F6BE8);
+    const purple = Color(0xFFA534D0), red = Color(0xFFD91A3A), blue = Color(0xFF2D63E0);
     Offset? selAt;
     final near = <Offset>[];
     for (final h in hs) {
@@ -5549,7 +5566,7 @@ class _Overlay extends CustomPainter {
       final p = v.toScreen((l[0] as num).toDouble(), (l[1] as num).toDouble());
       final f = (l[2] as num).toInt();
       final root = f & 1 != 0, sel = f & 2 != 0, nb = f & 8 != 0;
-      final color = sel ? red : nb ? purple : (root ? cRoot : blue);
+      final color = sel ? red : nb ? purple : (root ? cRootNode : blue);
       // Settings: node style (0 legacy squares, 1 modern rings, 2 solid dots)
       // and line width (1 thin ... 5 thick)
       final style = AppSettings.number('nodeStyle'), k = 0.6 + 0.2 * AppSettings.number('lineWidth').clamp(1, 5);
@@ -5566,12 +5583,50 @@ class _Overlay extends CustomPainter {
       final hl = AppSettings.number('nodeHighlight');
       final lit = (hl == 1 && f & 16 != 0) || (hl == 2 && f & 32 != 0) || (hl == 3 && f & 64 != 0);
       if (lit) canvas.drawCircle(p, 9, Paint()..color = const Color(0xAAFFB020));
-      if (root || style == 0) {
-        final r = Rect.fromCenter(center: p, width: (root ? 10 : 8) * k, height: (root ? 10 : 8) * k);
+      // shape-coded (FigureEditor board): the main node a dark square, the
+      // selected joint a red dot, connectors diamonds and polyfill anchors
+      // triangles in the figure editor, every other joint a ring
+      final fill = Paint()..color = const Color(0xE6FFFFFF);
+      final edge = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5 * k
+        ..color = Colors.white;
+      if (root) {
+        final r = RRect.fromRectAndRadius(Rect.fromCenter(center: p, width: 10 * k, height: 10 * k), Radius.circular(1.5 * k));
+        canvas.drawRRect(r, Paint()..color = sel ? red : cRootNode);
+        canvas.drawRRect(r, edge);
+      } else if (sel && style != 0) {
+        canvas.drawCircle(p, 7.5 * k, Paint()..color = red);
+        canvas.drawCircle(p, 7.5 * k, edge..strokeWidth = 2 * k);
+      } else if (f & 32 != 0 || f & 128 != 0) {
+        final d = (f & 32 != 0 ? 6.5 : 7) * k;
+        final path = f & 32 != 0
+            ? (Path()
+              ..moveTo(p.dx, p.dy - d)
+              ..lineTo(p.dx + d, p.dy)
+              ..lineTo(p.dx, p.dy + d)
+              ..lineTo(p.dx - d, p.dy)
+              ..close())
+            : (Path()
+              ..moveTo(p.dx, p.dy - d)
+              ..lineTo(p.dx + d, p.dy + d * 0.75)
+              ..lineTo(p.dx - d, p.dy + d * 0.75)
+              ..close());
+        final pen = Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2 * k
+          ..strokeJoin = StrokeJoin.round
+          ..color = nb ? purple : (f & 32 != 0 ? const Color(0xFF2D9A8C) : const Color(0xFFD9821E));
+        canvas.drawPath(path, halo);
+        canvas.drawPath(path, fill);
+        canvas.drawPath(path, pen);
+      } else if (style == 0) {
+        final r = Rect.fromCenter(center: p, width: 8 * k, height: 8 * k);
         canvas.drawRect(r, halo);
         canvas.drawRect(r, stroke);
       } else {
         canvas.drawCircle(p, 5.5 * k, halo);
+        if (style != 2) canvas.drawCircle(p, 5.5 * k, fill);
         canvas.drawCircle(p, 5.5 * k, stroke);
       }
       // Show draw order: each joint's place in the drawing order

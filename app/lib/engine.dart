@@ -177,11 +177,16 @@ class Engine {
   void newProject() => _lib.lookupFunction<_DocNewC, _DocNewD>('bf_doc_new')(_handle);
 
   /// Opens a new project whose figure comes from a Stick Nodes figure file.
-  void newProjectWith(String name, Uint8List figure) {
+  void newProjectWith(String name, Uint8List figure) => _withFigure('bf_doc_new_with', name, figure);
+
+  /// The app's default stickfigure, for the figure editor's size reference.
+  void setStock(String name, Uint8List figure) => _withFigure('bf_set_stock', name, figure);
+
+  void _withFigure(String fn, String name, Uint8List figure) {
     final data = calloc<Uint8>(figure.length);
     data.asTypedList(figure.length).setAll(0, figure);
     final n = name.toNativeUtf8();
-    _lib.lookupFunction<_ImportC2, _ImportD2>('bf_doc_new_with')(_handle, n, data, figure.length);
+    _lib.lookupFunction<_ImportC2, _ImportD2>(fn)(_handle, n, data, figure.length);
     calloc.free(n);
     calloc.free(data);
   }

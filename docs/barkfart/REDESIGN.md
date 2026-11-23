@@ -652,7 +652,7 @@ and tests are never weakened.
   new figure writes the copy to your figures first (chooser › Yours).
 - [x] J2. The shape shelf.
 - [x] J3. The Parts list. The editor's Properties are Shape / Segment / Figure tabs (the main joint shows only Figure).
-- [ ] J4. Shape-coded handles, the size reference.
+- [x] J4. Shape-coded handles, the size reference. The main node is a dark square and the selected joint a red dot everywhere; in the figure editor connectors are diamonds and polyfill anchors triangles (handle flag 128). The "Stock size" figure is the app's default stickfigure (`bf_set_stock`) drawn faintly by the engine to the right, feet level; View options › Stock size figure hides it.
 - [ ] J5. Ghost and readout while drawing; the Mirror toggle.
 - [ ] J6. Polyfills in either winding direction.
 
