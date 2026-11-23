@@ -2192,6 +2192,7 @@ fn every_command_undoes_and_redoes_exactly() {
         // D7b, F1, F4
         json!({"op": "reset_segment"}), json!({"op": "break_off"}), json!({"op": "new_pose"}), json!({"op": "hold_longer"}),
         json!({"op": "block_length", "frames": 3}), json!({"op": "move_block", "to": 1}),
+        json!({"op": "each", "label": "Flip figures", "cmd": {"op": "flip_figure", "h": true}}), json!({"op": "easing", "v": "hold", "block": true}),
     ];
     let text = |s: &Session| codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
     let mut failures = Vec::new();
@@ -4766,4 +4767,43 @@ fn the_timeline_rows_show_each_figures_poses() {
     assert_eq!(rows[1]["blocks"][0], json!([0, 3, true]));
     // the new figure is on this frame only
     assert_eq!(rows[0]["on"], json!([true, false, false, false]));
+}
+
+#[test]
+fn several_figures_change_together_in_one_step() {
+    // G5: select_many and each
+    let mut s = sparse();
+    s.command(&json!({"op": "select", "layer": "L2"}));
+    let st = s.command(&json!({"op": "duplicate_figure"}));
+    let twin = st["selected"]["layer"].as_str().unwrap().to_string();
+    assert_ne!(twin, "L2");
+    let twin_frames = |s: &Session| {
+        let p = s.project();
+        barkfart_core::edit::block_ops::pose_frames(p.root().unwrap().layer(&twin).unwrap(), p.settings.fps as f64)
+    };
+    assert_eq!(twin_frames(&s), vec![0, 3], "the copy has the same poses");
+    let ids = vec!["L2".to_string(), twin.clone()];
+    let st = s.command(&json!({"op": "select_many", "layers": ids}));
+    assert_eq!(st["multi"].as_array().unwrap().len(), 2);
+    assert_eq!(st["selected"]["layer"], "L2");
+    let undo = st["undo"].clone();
+    // colour for both, one step
+    let st = s.command(&json!({"op": "each", "label": "Colour figures", "cmd": {"op": "figure", "color": 0x00ff00ffu32}}));
+    assert_eq!(st["undo"], "Colour figures");
+    assert!(st["multi"].as_array().unwrap().iter().all(|m| m["color"] == 0x00ff00ffu32), "{}", st["multi"]);
+    let st = s.command(&json!({"op": "undo"}));
+    assert_eq!(st["undo"], undo);
+    // New pose skips a figure that has one on this frame already
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "select", "layer": "L2"}));
+    s.command(&json!({"op": "new_pose"}));
+    s.command(&json!({"op": "select_many", "layers": ["L2", twin]}));
+    let st = s.command(&json!({"op": "each", "label": "New pose", "cmd": {"op": "new_pose"}}));
+    assert_eq!(st["undo"], "New pose");
+    assert_eq!(l2_frames(&s), vec![0, 1, 3]);
+    assert_eq!(twin_frames(&s), vec![0, 1, 3]);
+    assert_eq!(st["multi"].as_array().unwrap().len(), 2, "still both");
+    // picking one figure ends the group
+    let st = s.command(&json!({"op": "select", "layer": "L2"}));
+    assert!(st["multi"].is_null());
 }

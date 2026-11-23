@@ -83,6 +83,9 @@ pub struct Session {
     /// The last tap (no drag): where, and which handle, for node digging.
     last_tap: Option<(f32, f32, String, String)>,
     pose_clip: Option<(IndexMap<String, f32>, IndexMap<String, f32>)>,
+    /// G5: several figures selected at once (layer ids, the first also in
+    /// `selected`); empty when one or none is.
+    multi: Vec<String>,
     /// Copied stickfigure (with joined figures) and copied figure properties.
     /// Copied figures and the time they were copied at (their pose there).
     figure_clip: Option<(Vec<Layer>, f64)>,
@@ -163,7 +166,7 @@ impl Session {
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
         let main_root = doc.project().root_symbol.clone();
-        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, multi: Vec::new(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -759,8 +762,13 @@ impl Session {
                     "out" => (Interp::Bezier, Ease::new(0.0, 0.0, 0.58, 1.0)),
                     _ => (Interp::Linear, Ease::LINEAR),
                 };
-                // the Pose page names its pose's first frame
-                let at = c["frame"].as_i64().map(|f| f as f64 / st_fps(self.project())).unwrap_or(t);
+                // the Pose page names its pose's first frame; "block": the selected
+                // figure's pose under the playhead (several figures: each its own)
+                let fps_now = st_fps(self.project());
+                let block_start = (c["block"].as_bool() == Some(true))
+                    .then(|| self.sel_layer().and_then(|l| crate::edit::block_ops::block_at(self.project().root()?.layer(&l)?, fps_now, self.frame).map(|(st, _)| st)))
+                    .flatten();
+                let at = c["frame"].as_i64().map(|f| f as f64 / fps_now).or(block_start.map(|f| f as f64 / fps_now)).unwrap_or(t);
                 let sel = self.keys_at(at, self.sel_layer().as_deref());
                 if sel.is_empty() {
                     self.message = "Nothing is keyed on this frame.".into();
@@ -866,8 +874,62 @@ impl Session {
                 }
                 self.rev += 1;
             }
+            "select_many" => {
+                // G5: the selection box or lasso; figures only, in row order
+                let p = self.project();
+                let ids: Vec<String> = c["layers"].as_array().map(|a| a.iter().filter_map(|v| v.as_str()).filter(|id| p.root().and_then(|r| r.layer(id)).is_some_and(|l| l.as_figure().is_some())).map(str::to_string).collect()).unwrap_or_default();
+                let mut seen = std::collections::HashSet::new();
+                let ids: Vec<String> = ids.into_iter().filter(|x| seen.insert(x.clone())).collect();
+                let first = ids.first().and_then(|l| p.root()?.layer(l)?.as_figure()?.nodes().first().map(|n| (l.clone(), n.id.clone())));
+                self.selected_text = None;
+                self.selected = first;
+                self.multi = if ids.len() > 1 { ids } else { Vec::new() };
+                self.rev += 1;
+            }
+            "each" => {
+                // G5: one command for every selected figure, as one step. A
+                // figure it cannot apply to is skipped (a New pose where it has
+                // one already); an error anywhere undoes the lot.
+                let inner = c["cmd"].clone();
+                let iop = inner["op"].as_str().unwrap_or("").to_string();
+                let label = c["label"].as_str().unwrap_or("Change figures").to_string();
+                let list: Vec<String> = if self.multi.len() > 1 { self.multi.clone() } else { self.sel_layer().into_iter().collect() };
+                let (keep, keep_multi) = (self.selected.clone(), self.multi.clone());
+                let fps = st_fps(self.project());
+                let fr = self.frame;
+                self.doc.begin(&label);
+                let mut said = String::new();
+                for l in &list {
+                    let Some(layer) = self.project().root().and_then(|r| r.layer(l)).cloned() else { continue };
+                    if iop == "new_pose" && crate::edit::block_ops::pose_frames(&layer, fps).contains(&fr) {
+                        continue;
+                    }
+                    let Some(root) = layer.as_figure().and_then(|f| f.nodes().first().map(|n| n.id.clone())) else { continue };
+                    self.selected = Some((l.clone(), root));
+                    self.command(&inner);
+                    if said.is_empty() {
+                        said = self.message.clone();
+                    }
+                    if !self.doc.in_transaction() {
+                        break; // an error cancelled the group
+                    }
+                }
+                if self.doc.in_transaction() {
+                    self.doc.commit();
+                }
+                let alive = |s: &Self, id: &str| s.project().root().and_then(|r| r.layer(id)).is_some();
+                self.multi = keep_multi.into_iter().filter(|id| alive(self, id)).collect();
+                if self.multi.len() < 2 {
+                    self.multi.clear();
+                }
+                self.selected = keep.filter(|(id, _)| alive(self, id)).or_else(|| self.multi.first().and_then(|l| self.project().root()?.layer(l)?.as_figure()?.nodes().first().map(|n| (l.clone(), n.id.clone()))));
+                self.message = said;
+                self.changed();
+                self.validate();
+            }
             "select" => {
                 let l = c["layer"].as_str().map(str::to_string);
+                self.multi.clear();
                 self.selected_text = None;
                 self.selected = match l {
                     Some(l) => {
@@ -2377,6 +2439,10 @@ impl Session {
             }
             _ => self.message = format!("unknown command {op}"),
         }
+        // G5: the group lasts while its first figure stays selected
+        if !self.multi.is_empty() && self.selected.as_ref().map(|s| &s.0) != self.multi.first() {
+            self.multi.clear();
+        }
         self.state()
     }
 
@@ -2696,6 +2762,26 @@ impl Session {
             let mut r = Resolver::new(p);
             json!({"zoom": round2(r.f(&c.zoom, t)), "rotation": round2(r.f(&c.rotation, t))})
         });
+        // G5: the figures selected together, with what the multi-select page
+        // shows mixed: colour, locked, onion skin, the pose under the playhead
+        let multi: Option<Vec<J>> = (self.multi.len() > 1).then(|| {
+            let fps = st_fps(p);
+            let fr = self.frame;
+            self.multi
+                .iter()
+                .filter_map(|id| {
+                    let l = p.root()?.layer(id)?;
+                    let f = l.as_figure()?;
+                    let block = crate::edit::block_ops::block_at(l, fps, fr);
+                    let hold = block.and_then(|(st, _)| crate::edit::block_ops::pose_props_of(l).iter().find_map(|q| q.track.keys().iter().find(|k| ((k.time * fps).round() as i32) == st).copied())).is_some_and(|k| k.interp == Interp::Hold);
+                    Some(json!({
+                        "id": id, "name": l.name.clone().unwrap_or_else(|| id.clone()),
+                        "color": f.color.map(|c| c.to_rgba8888()), "locked": l.locked, "onion": l.onion,
+                        "hold": hold, "here": block.is_some_and(|(st, _)| st == fr),
+                    }))
+                })
+                .collect()
+        });
         // G1: the expanded timeline's rows, front first (row order is draw
         // order). Each: kind, the eye, the frames it is on, its blocks
         // [start, length, hold] (a block is a pose, lasting to the next).
@@ -2745,7 +2831,7 @@ impl Session {
             "canUndo": self.doc.can_undo(), "canRedo": self.doc.can_redo(),
             "undo": self.doc.undo_label(), "redo": self.doc.redo_label(), "dirty": self.doc.dirty(),
             "mode": match self.mode { Mode::Figure => "figure", Mode::All => "all", Mode::Camera => "camera" },
-            "handles": handles, "selected": sel, "figures": figures, "rows": rows, "camera": cam, "movieclip": movieclip, "editingClip": (p.root_symbol != self.main_root).then(|| p.root().and_then(|r| r.name.clone()).unwrap_or_else(|| "Movieclip".into())),
+            "handles": handles, "selected": sel, "figures": figures, "rows": rows, "multi": multi, "camera": cam, "movieclip": movieclip, "editingClip": (p.root_symbol != self.main_root).then(|| p.root().and_then(|r| r.name.clone()).unwrap_or_else(|| "Movieclip".into())),
             "branchCopied": self.branch_clip.is_some(),
             "watermark": p.settings.watermark.as_ref().map(|(t, c)| json!({"text": t, "color": c.to_rgba8888()})),
             "propsFrom": self.props_clip.as_ref().and_then(|c| p.root()?.layer(&c.source).map(|l| l.name.clone().unwrap_or_else(|| l.id.clone()))),

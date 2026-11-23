@@ -33,7 +33,7 @@ Tick items there as they finish.
 - Scripted editor runs as before. The new script command is `savesheet`.
 - The window is capped at the screen size (about 1300x700).
 
-**Next:** G5 (selection box, lasso, the multi-select page). G1–G4 are done (D27): rows and blocks (script `layers`), grip and long-press move (`blockdrag dx [move]`, `blockdrop`), zoom (`zoomtimeline w`), row swipe actions Duplicate and Delete (`rowactions`). Section F is done (D24–D26).
+**Next:** section H (H1 the FX toggle, H2 the effects browser, H3 keyed properties). Section G is done (D27, D28): rows and blocks (`layers`), grip and move (`blockdrag dx [move]`, `blockdrop`), zoom (`zoomtimeline w`), row swipes (`rowactions`), box and lasso with the multi-select page (`selectall`, `boxdemo`; engine `select_many`, `each`). Section F is done (D24–D26).
 - Done: A1–A6, B1–B6, C1–C8, D1–D7b, E1–E3. D2 (the Movieclip page) is written but not yet seen on screen. D7b: `reset_segment`, `selected.defaults` and `Figure::base` (FORMAT.md); the first-run figure is the engine's render of Stickfigure.nodes (D22).
 - Home script commands: `firstrun`, `projectsscreen`, `backups`, `makeprojects N` (copies the open save N times). Saving writes a picture to `.thumbs/<name>.png`.
 

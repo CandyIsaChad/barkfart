@@ -432,6 +432,17 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
   opens the Pose tab. Pictures of the pose inside blocks (§4) wait for a
   per-layer render in the engine.
 
+- **D28. Selecting several figures (G5).** In the unfolded timeline,
+  double-tap and drag draws a box, triple-tap and drag a lasso; the taps are
+  counted from raw touches so a plain tap on a block stays instant. The
+  figures whose poses the shape covers are selected (a plain double tap: the
+  row under it). Several open the multi-select page: Hold or Tween into it,
+  New pose here, Hold longer, colour, flip, locked, onion skin, Duplicate,
+  Delete from this frame, Pick one. Each change is one step for all of them
+  (`each`); a figure it can't apply to is skipped. Mixed values show a dash,
+  no chosen segment, or "Mixed" (D18). The group ends when one figure is
+  picked.
+
 ## 7. Build order (easiest to hardest, nested)
 
 The user's instruction (2026-11-23): "From easiest to hardest. List out
@@ -542,7 +553,7 @@ and tests are never weakened.
 - [x] G2. Quiet blocks, with selection opening the Pose page.
 - [x] G3. Grips to extend, long-press to move, pinch to zoom.
 - [x] G4. Swipe actions, and right-click on Linux.
-- [ ] G5. Selection box, lasso, the multi-select page.
+- [x] G5. Selection box, lasso, the multi-select page.
 
 ### H. Keyed properties and effects
 - [ ] H1. The FX toggle.

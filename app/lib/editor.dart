@@ -1108,6 +1108,16 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           }
         case 'blockdrop':
           _endBlockDrag();
+        case 'selectall':
+          // test helper: every figure row selected together
+          final ids = [for (final r in ((_st['rows'] as List?) ?? const []).cast<Map>()) if (r['kind'] == 'figure') r['id']];
+          _cmd({'op': 'select_many', 'layers': ids});
+        case 'boxdemo':
+          // test helper: a lasso shape drawn over the rows, not let go
+          setState(() {
+            _lasso = true;
+            _boxPath = [const Offset(20, 70), const Offset(160, 62), const Offset(200, 110), const Offset(90, 130), const Offset(30, 105)];
+          });
         case 'rowactions':
           // test helper: open the first row's swipe actions
           setState(() => _rowActionsOpen = true);
@@ -1380,6 +1390,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (_st['textfield'] != null) return const ['Textfield Tools'];
     if (_st['movieclip'] != null) return const ['Movieclip Tools'];
     final sel = _sel;
+    if (_st['multi'] != null) return const ['Selection'];
     if (sel != null) return const ['Stickfigure Tools', 'Pose', 'Stickfigure Filters', 'Segment Tools'];
     if (_st['editingClip'] != null) return const ['Movieclip editor', 'Textfield Tools'];
     return const ['Project Tools', 'Textfield Tools'];
@@ -1406,6 +1417,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         return _stickfigureTools(_sel!);
       case 'Pose':
         return _poseTools(_sel!);
+      case 'Selection':
+        return _multiTools(((_st['multi'] as List?) ?? const []).cast<Map>());
       case 'Stickfigure Filters':
         return _stickfigureFilters(_sel!);
       case 'Textfield Tools':
@@ -1817,6 +1830,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         padding: const EdgeInsets.symmetric(horizontal: 8),
         itemCount: _frames,
         itemExtent: cell,
+        physics: _boxPath != null ? const NeverScrollableScrollPhysics() : null,
         itemBuilder: (c, i) {
           final f = i + 1, isCur = i == cur, sec = f % fps == 0, label = f == 1 || sec || f % step == 0;
           final marks = (_st['frameMarks'] as List?)?.elementAtOrNull(i) as List?;
@@ -1901,6 +1915,41 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ),
     );
     if (rows.isEmpty) return Container(height: rulerH + thumbH + 10, color: cCard, child: zoomable);
+    // G5: double-tap and drag for a selection box, triple-tap and drag for a
+    // lasso (counted from raw touches, so a plain tap stays instant)
+    final boxable = Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (e) {
+        final now = DateTime.now();
+        final quick = now.difference(_lastDown) < const Duration(milliseconds: 350) && (e.localPosition - _lastDownAt).distance < 24;
+        _taps = quick ? _taps + 1 : 1;
+        _lastDown = now;
+        _lastDownAt = e.localPosition;
+        if (_taps >= 2 && !_playing) {
+          setState(() {
+            _boxPath = [e.localPosition];
+            _lasso = _taps >= 3;
+          });
+        }
+      },
+      onPointerMove: (e) {
+        final path = _boxPath;
+        if (path == null) return;
+        setState(() {
+          if (_lasso) {
+            path.add(e.localPosition);
+          } else {
+            _boxPath = [path.first, e.localPosition];
+          }
+        });
+      },
+      onPointerUp: (_) => _finishBox(rows, cell, rulerH + thumbH + 10, rowH),
+      onPointerCancel: (_) => setState(() => _boxPath = null),
+      child: Stack(children: [
+        zoomable,
+        if (_boxPath != null) Positioned.fill(child: IgnorePointer(child: CustomPaint(painter: _BoxPainter(_boxPath!, _lasso)))),
+      ]),
+    );
     // the names column beside the rows: a blank cell by the ruler, "Preview",
     // then each layer with its icon, name and eye (read-only for now)
     Widget name(Map r) {
@@ -1956,7 +2005,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 for (final r in rows) name(r),
               ]),
             ),
-            Expanded(child: zoomable),
+            Expanded(child: boxable),
           ]),
         ),
       ),
@@ -2055,6 +2104,53 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         ),
       ),
     );
+  }
+
+  /// A selection box or lasso let go: the figures whose poses it covers (a
+  /// plain double tap: the row under it). One figure is selected; several
+  /// open the multi-select page.
+  void _finishBox(List<Map> rows, double cell, double top, double rowH) {
+    final path = _boxPath;
+    if (path == null) return;
+    setState(() => _boxPath = null);
+    final off = _stripScroll.hasClients ? _stripScroll.offset : 0.0;
+    final hit = <String>[];
+    final rect = Rect.fromPoints(path.first, path.last);
+    final point = !_lasso && rect.width < 6 && rect.height < 6;
+    bool inLasso(Offset p) {
+      var inside = false;
+      for (var a = 0, b = path.length - 1; a < path.length; b = a++) {
+        final (pa, pb) = (path[a], path[b]);
+        if ((pa.dy > p.dy) != (pb.dy > p.dy) && p.dx < (pb.dx - pa.dx) * (p.dy - pa.dy) / (pb.dy - pa.dy) + pa.dx) inside = !inside;
+      }
+      return inside;
+    }
+
+    for (var k = 0; k < rows.length; k++) {
+      final r = rows[k];
+      if (r['kind'] != 'figure') continue;
+      final y0 = top + k * rowH, cy = y0 + rowH / 2;
+      if (point) {
+        if (path.first.dy >= y0 && path.first.dy < y0 + rowH) hit.add('${r['id']}');
+        continue;
+      }
+      final on = (r['on'] as List?) ?? const [];
+      for (var i = 0; i < _frames; i++) {
+        if (on.elementAtOrNull(i) == false) continue;
+        final c = Offset(8 + i * cell + cell / 2 - off, cy);
+        if (_lasso ? inLasso(c) : rect.inflate(cell / 2).contains(c) && rect.top <= y0 + rowH && rect.bottom >= y0) {
+          hit.add('${r['id']}');
+          break;
+        }
+      }
+    }
+    if (hit.isEmpty) return;
+    if (hit.length == 1) {
+      _cmd({'op': 'select', 'layer': hit.first});
+    } else {
+      _cmd({'op': 'select_many', 'layers': hit});
+    }
+    setState(() => _panelOpen = true);
   }
 
   /// A grip or a held block let go: the new length, or the new start.
@@ -2258,6 +2354,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   // G3: the timeline's zoom (a frame's width), a pinch's start, a block drag
   double _cellW = 56, _pinchFrom = 56;
   _BlockDrag? _blockDrag;
+  // G5: quick taps counted for the box (2) and lasso (3); the shape being drawn
+  int _taps = 0;
+  DateTime _lastDown = DateTime(0);
+  Offset _lastDownAt = Offset.zero;
+  List<Offset>? _boxPath;
+  bool _lasso = false;
 
   /// The right rail (REDESIGN §4): undo, redo, Properties, delete; hide the
   /// panels at the bottom.
@@ -3003,6 +3105,37 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ),
     );
     if (n != null) _cmd({'op': 'tween_add', 'n': n});
+  }
+
+  /// The multi-select page (REDESIGN D18, G5): what applies to every selected
+  /// figure, each change one step. A value that differs between them shows a
+  /// dash (tick boxes), no choice (segments) or "Mixed" (colour).
+  List<Widget> _multiTools(List<Map> multi) {
+    void each(String label, Map<String, Object?> cmd) => _cmd({'op': 'each', 'label': label, 'cmd': cmd});
+    bool? same(String k) {
+      final v = multi.map((m) => m[k] == true).toSet();
+      return v.length == 1 ? v.first : null;
+    }
+
+    final colors = multi.map((m) => m['color']).toSet();
+    final color = (colors.length == 1 ? colors.first as num? : null)?.toInt();
+    final hold = same('hold');
+    final rows = <rw.Desc>[
+      rw.DInfo('${multi.length} figures', ''),
+      rw.DHint(multi.map((m) => '${m['name']}').join(', ')),
+      const rw.DTitle('Pose'),
+      rw.DSeg(const ['Hold', 'Tween into it'], hold == null ? -1 : (hold ? 0 : 1), label: 'Until the next pose', onSelect: (i) => each(i == 0 ? 'Hold' : 'Tween', {'op': 'easing', 'v': i == 0 ? 'hold' : 'linear', 'block': true})),
+      rw.DButtons('New pose here', () => each('New pose', {'op': 'new_pose'}), b: 'Hold longer', onB: () => each('Hold longer', {'op': 'hold_longer'})),
+      const rw.DTitle('Look'),
+      rw.DWidget(kit.PropRow('Colour', secondary: color == null ? 'Mixed' : null, trailing: SizedBox(width: 180, child: _swatches(color ?? 0x808080ff, (c) => each('Colour figures', {'op': 'figure', 'color': c}))))),
+      rw.DButtons('Flip sideways', () => each('Flip figures', {'op': 'flip_figure', 'h': true}), b: 'Flip over', onB: () => each('Flip figures', {'op': 'flip_figure', 'h': false})),
+      rw.DTick('Locked', same('locked'), onChanged: (v) => each(v ? 'Lock figures' : 'Unlock figures', {'op': 'figure', 'locked': v})),
+      rw.DTick('Visible in onion skin', same('onion'), onChanged: (v) => each('Onion skin', {'op': 'figure', 'onion': v})),
+      rw.DButtons('Duplicate', () => each('Duplicate figures', {'op': 'duplicate_figure'}), b: 'Pick one', onB: () => _cmd({'op': 'select', 'layer': multi.first['id']})),
+      rw.DDanger('Delete from this frame', () => each('Delete figures', {'op': 'delete_here'})),
+      const rw.DHint('Double-tap the timeline and drag for a box; triple-tap and drag to draw a lasso.'),
+    ];
+    return [for (final d in rows) rw.renderDesc(d)];
   }
 
   /// The Pose page (REDESIGN §8, F4): the selected figure's pose under the
@@ -4560,6 +4693,34 @@ String _friendlyTime(DateTime t, {bool seconds = false}) {
           ? 'Yesterday'
           : '${t.day} ${months[t.month - 1]}${t.year == now.year ? '' : ' ${t.year}'}';
   return '$d, $time';
+}
+
+/// The timeline's selection box or lasso, as it is drawn (G5).
+class _BoxPainter extends CustomPainter {
+  _BoxPainter(this.path, this.lasso);
+  final List<Offset> path;
+  final bool lasso;
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (path.length < 2) return;
+    final fill = Paint()..color = cAccent.withValues(alpha: 0.08);
+    final line = Paint()
+      ..color = cAccent
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    if (lasso) {
+      final p = Path()..addPolygon(path, true);
+      canvas.drawPath(p, fill);
+      canvas.drawPath(p, line);
+    } else {
+      final r = RRect.fromRectAndRadius(Rect.fromPoints(path.first, path.last), const Radius.circular(4));
+      canvas.drawRRect(r, fill);
+      canvas.drawRRect(r, line);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_BoxPainter old) => true;
 }
 
 /// A block being lengthened by its grip or moved after a long press (G3).
