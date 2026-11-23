@@ -916,6 +916,24 @@ fn render_fitted_at(engine: &Engine, p: &Project, t: f64, w: u32, h: u32) -> Opt
     Some(engine.renderer.render(&list, w, h, view))
 }
 
+/// A sound clip's waveform (M5): `n` loudness values (0..1) of `asset`
+/// between `from` and `to` seconds, written to `out`. Returns how many were
+/// written (0 when the sound can't be read).
+#[no_mangle]
+pub extern "C" fn bf_sound_peaks(e: *const Engine, asset: *const c_char, from: f64, to: f64, n: u32, out: *mut f32) -> u32 {
+    if e.is_null() || out.is_null() || n == 0 || n > 4096 {
+        return 0;
+    }
+    // SAFETY: live handle
+    let engine = unsafe { &*e };
+    let Some(asset) = cstr(asset) else { return 0 };
+    let Some(s) = engine.session.as_ref() else { return 0 };
+    let peaks = catch_unwind(AssertUnwindSafe(|| s.sound_peaks(&asset, from, to, n as usize))).unwrap_or_default();
+    // SAFETY: caller provides n floats
+    unsafe { std::ptr::copy_nonoverlapping(peaks.as_ptr(), out, peaks.len().min(n as usize)) };
+    peaks.len().min(n as usize) as u32
+}
+
 /// The pictures inside timeline blocks (M4): layer `id` alone at time t,
 /// fitted into w x h with transparency around it. 0 on success, 2 when the
 /// layer is gone or draws nothing.

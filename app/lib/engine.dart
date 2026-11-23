@@ -230,6 +230,17 @@ class Engine {
     return px;
   }
 
+  /// M5: a sound clip's loudness in n parts (0..1), for its waveform.
+  List<double> soundPeaks(String asset, double from, double to, int n) {
+    final out = calloc<Float>(n);
+    final k = asset.toNativeUtf8();
+    final got = _lib.lookupFunction<Uint32 Function(Pointer<Void>, Pointer<Utf8>, Double, Double, Uint32, Pointer<Float>), int Function(Pointer<Void>, Pointer<Utf8>, double, double, int, Pointer<Float>)>('bf_sound_peaks')(_handle, k, from, to, n, out);
+    final list = [for (var i = 0; i < got; i++) out[i].toDouble()];
+    calloc.free(k);
+    calloc.free(out);
+    return list;
+  }
+
   /// M4: one layer alone at time t (the pictures inside timeline blocks).
   Uint8List? renderLayer(String id, double t, int w, int h) {
     final out = calloc<Uint8>(w * h * 4);

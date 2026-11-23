@@ -86,6 +86,8 @@ pub struct Session {
     /// G5: several figures selected at once (layer ids, the first also in
     /// `selected`); empty when one or none is.
     multi: Vec<String>,
+    /// M5: each sound's length in seconds, by asset path (decoded once).
+    sound_seconds: std::cell::RefCell<HashMap<String, f64>>,
     /// D5 / H3: the keying toggle. Off (the default), a change to an effect
     /// or the opacity is the same on every frame; on, it is a key here.
     pub keying: bool,
@@ -169,7 +171,7 @@ impl Session {
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
         let main_root = doc.project().root_symbol.clone();
-        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, multi: Vec::new(), keying: false, frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, multi: Vec::new(), keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -180,6 +182,41 @@ impl Session {
 
     pub fn rev(&self) -> u64 {
         self.rev
+    }
+
+    /// M5: a sound file's length in seconds (0 when it can't be read).
+    pub fn sound_length(&self, asset: &str) -> f64 {
+        let p = self.project();
+        let Some(path) = p.assets.get(asset).map(|a| a.path.clone()) else { return 0.0 };
+        if let Some(v) = self.sound_seconds.borrow().get(&path) {
+            return *v;
+        }
+        let v = self.doc.state.assets.get(&path).and_then(|b| crate::audio::decode_sound(b)).map(|pcm| pcm.seconds()).unwrap_or(0.0);
+        self.sound_seconds.borrow_mut().insert(path, v);
+        v
+    }
+
+    /// M5: a sound's loudness in `n` parts between `from` and `to` seconds of
+    /// its file (0..1), for the waveform on its row. Empty when it can't be read.
+    pub fn sound_peaks(&self, asset: &str, from: f64, to: f64, n: usize) -> Vec<f32> {
+        let p = self.project();
+        let Some(path) = p.assets.get(asset).map(|a| a.path.clone()) else { return Vec::new() };
+        let Some(bytes) = self.doc.state.assets.get(&path) else { return Vec::new() };
+        let Some(pcm) = crate::audio::decode_sound(bytes) else { return Vec::new() };
+        let ch = pcm.channels.max(1) as usize;
+        let rate = pcm.rate.max(1) as f64;
+        let frames = pcm.data.len() / ch;
+        let (a, b) = (((from * rate) as usize).min(frames), ((to.max(from) * rate) as usize).min(frames));
+        if b <= a || n == 0 {
+            return Vec::new();
+        }
+        (0..n)
+            .map(|i| {
+                let (s0, s1) = (a + (b - a) * i / n, a + (b - a) * (i + 1) / n);
+                let peak = pcm.data[s0 * ch..s1.max(s0 + 1).min(frames) * ch].iter().map(|v| (*v as i32).unsigned_abs()).max().unwrap_or(0);
+                peak as f32 / 32768.0
+            })
+            .collect()
     }
 
     /// M4: one layer alone (no parent, no effects), for the pictures inside
@@ -1968,6 +2005,15 @@ impl Session {
                 self.joining = self.sel_layer();
                 self.rev += 1;
             }
+            "join_to" => {
+                // the join gesture as one command: the selected figure joins
+                // `layer` at joint `node` (or the figure itself)
+                if let (Some(child), Some(target)) = (self.sel_layer(), c["layer"].as_str().map(str::to_string)) {
+                    let node = c["node"].as_str().map(str::to_string);
+                    self.step("Join", |s| crate::edit::join_ops::join(s, &sym, &child, &target, node.as_deref(), true, t));
+                    self.joining = None;
+                }
+            }
             "join_cancel" => {
                 self.joining = None;
                 self.rev += 1;
@@ -2886,14 +2932,42 @@ impl Session {
             .root()
             .map(|s| {
                 let fps = st_fps(p);
+                // the camera row leads (round 10 board), wherever the camera sits
+                // in the layer list (it draws nothing, so its place there is moot)
+                let mut order: Vec<&std::sync::Arc<Layer>> = s.layers.iter().rev().collect();
+                order.sort_by_key(|l| !matches!(l.kind, LayerKind::Camera(_)));
                 let n = (frames as i32).max(1);
                 let mut r = Resolver::new(p);
-                s.layers
-                    .iter()
-                    .rev()
-                    .filter(|l| !matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_)))
+                order
+                    .into_iter()
                     .map(|l| {
-                        let starts = crate::edit::block_ops::pose_frames(l, fps);
+                        // M5: a sound row is its clips: [first frame, frames, asset, in, out]
+                        if let LayerKind::Audio(clips) = &l.kind {
+                            let list: Vec<J> = clips
+                                .iter()
+                                .map(|c| {
+                                    // a clip without an end plays to the end of its file
+                                    let out = if c.out > c.in_ { c.out } else { c.asset.as_deref().map(|a| self.sound_length(a)).unwrap_or(0.0) };
+                                    let secs = ((out - c.in_) / c.pitch.max(0.01)).max(0.0);
+                                    json!([round2((c.start * fps) as f32), round2((secs * fps) as f32), c.asset, c.in_, out])
+                                })
+                                .collect();
+                            return json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| "Sound".into()), "kind": "sound", "visible": l.visible, "clips": list, "blocks": [], "on": [], "props": []});
+                        }
+                        let mut starts = crate::edit::block_ops::pose_frames(l, fps);
+                        // M5: the camera is keyed on every frame; its row shows where
+                        // the view changes, so equal neighbours read as one block
+                        if matches!(l.kind, LayerKind::Camera(_)) {
+                            let props = crate::edit::block_ops::pose_props_of(l);
+                            let at = |f: i32| props.iter().map(|q| q.key_value(f as f64 / fps)).collect::<Vec<_>>();
+                            let mut kept: Vec<i32> = Vec::new();
+                            for f in starts {
+                                if kept.last().is_none_or(|&prev| at(prev) != at(f)) {
+                                    kept.push(f);
+                                }
+                            }
+                            starts = kept;
+                        }
                         let props = crate::edit::block_ops::pose_props_of(l);
                         let blocks: Vec<J> = starts
                             .iter()
@@ -2911,6 +2985,7 @@ impl Session {
                             LayerKind::Sprite(_) => "picture",
                             LayerKind::Text(_) => "text",
                             LayerKind::Symbol(_) => "movieclip",
+                            LayerKind::Camera(_) => "camera",
                             _ => "other",
                         };
                         // H3: animated values other than the pose (effects, opacity,
@@ -2931,7 +3006,10 @@ impl Session {
                                 (marks.len() > 1 || (keys.len() > 1 && keys.iter().any(|k| k.value != keys[0].value))).then(|| json!({"id": q.id, "name": prop_label(l, &q.id), "keys": marks}))
                             })
                             .collect();
-                        json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone()), "kind": kind, "visible": l.visible, "on": on, "blocks": blocks, "joined": l.parent.is_some(), "props": animated})
+                        json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone()), "kind": kind, "visible": l.visible, "on": on, "blocks": blocks, "joined": l.parent.is_some(),
+                            // M5: what it is joined to (the chain on its row)
+                            "joinedTo": l.parent.as_ref().and_then(|pid| s.layer(pid)).filter(|x| !matches!(x.kind, LayerKind::Camera(_))).map(|x| x.name.clone().unwrap_or_else(|| x.id.clone())),
+                            "props": animated})
                     })
                     .collect()
             })

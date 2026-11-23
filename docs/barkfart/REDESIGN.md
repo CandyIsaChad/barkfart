@@ -649,7 +649,7 @@ Render the boards (docs/barkfart/mockups: `mkdir -p project preview && node boar
   changed for the first time was created with the new value, so the key
   reached back to frame 1.
 - [x] M4. Pose pictures inside blocks (one per frame for a tween, once for a hold), from a per-layer render.
-- [ ] M5. The Camera row, Sound rows, join chain markers on rows.
+- [x] M5. The Camera row, Sound rows, join chain markers on rows.
 - [x] M6. Pose page: "Pose Tools", name and "frames 5 to 8", ease pictures, "Length in frames", pinned "Delete this pose".
 - [x] M7. Frame page: "Frame N" title and hint, Add time here / Remove this frame, background swatches, pinned "Clear frame"; the selected frame outlined in the strip.
 - [ ] M8. The "+" menu: Stick figure, Picture, Text, Sound, Movieclip, then Group (planned); paste and import live in the choosers' footers.

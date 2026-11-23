@@ -1112,6 +1112,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           setState(() => _layersOpen = true);
         case 'effects':
           await _openFxBrowser();
+        case 'selectrow':
+          // test helper: select the figure on timeline row N
+          final rows = ((_st['rows'] as List?) ?? const []).cast<Map>();
+          _cmd({'op': 'select', 'layer': rows[int.parse(w[1])]['id']});
+        case 'jointo':
+          // test helper: the selected figure joins the figure on row N (its main joint)
+          final rows = ((_st['rows'] as List?) ?? const []).cast<Map>();
+          _cmd({'op': 'join_to', 'layer': rows[int.parse(w[1])]['id']});
         case 'openrows':
           setState(() => _openRows.addAll([for (final r in ((_st['rows'] as List?) ?? const []).cast<Map>()) '${r['id']}']));
         case 'fxopen':
@@ -1747,6 +1755,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   // a tween block shows the pose on every frame, a hold block once. Redrawn a
   // few at a time after a change; the old picture shows until then.
   final Map<String, ui.Image> _rowPics = {};
+  // M5: waveforms, by asset, clip range and bar count
+  final Map<String, List<double>> _peaks = {};
   final Set<String> _rowPicDirty = {};
   int _rowPicRev = -1;
 
@@ -1755,7 +1765,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (!_layersOpen || _playing) return const [];
     final out = <String>[];
     for (final r in ((_st['rows'] as List?) ?? const []).cast<Map>()) {
-      if (r['kind'] == 'text') continue;
+      if (r['kind'] == 'text' || r['kind'] == 'camera' || r['kind'] == 'sound') continue;
       final on = (r['on'] as List?) ?? const [];
       final blocks = (r['blocks'] as List?) ?? const [];
       for (var b = 0; b < blocks.length; b++) {
@@ -2086,7 +2096,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     // then each layer front first with its icon, name and eye
     Widget name(Map r) {
       final on = r['visible'] != false, selected = r['id'] == selLayer || ((_st['multi'] as List?)?.any((m) => (m as Map)['id'] == r['id']) ?? false);
-      const icons = {'figure': 'figure', 'picture': 'picture', 'text': 'text', 'movieclip': 'clip'};
+      const icons = {'figure': 'figure', 'picture': 'picture', 'text': 'text', 'movieclip': 'clip', 'camera': 'camera', 'sound': 'sound'};
       final row = Container(
         height: rowH,
         padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -2196,6 +2206,31 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   List<Widget> _rowBlocks(Map r, double y, double rowH, double cell, double left, bool selectedRow) {
     final on = (r['on'] as List?) ?? const [];
     final out = <Widget>[];
+    // M5: a sound row is its clips, with the waveform
+    if (r['kind'] == 'sound') {
+      for (final c in ((r['clips'] as List?) ?? const []).cast<List>()) {
+        // drawn up to the end of the animation (a longer sound plays on past it)
+        final x = left + (c[0] as num).toDouble() * cell + 1;
+        final w = math.max(8.0, math.min((c[1] as num).toDouble() * cell, (_frames - (c[0] as num).toDouble()) * cell) - 2);
+        final n = math.max(1, ((w - 12) / 4).floor());
+        final key = '${c[2]}@${c[3]}@${c[4]}@$n';
+        final peaks = _peaks[key] ??= _engine?.soundPeaks('${c[2]}', (c[3] as num).toDouble(), (c[4] as num).toDouble(), n) ?? const <double>[];
+        out.add(Positioned(
+          left: x,
+          top: y + (rowH - 26) / 2,
+          child: GestureDetector(
+            onTap: _playing ? null : () => _cmd({'op': 'frame', 'i': (c[0] as num).floor()}),
+            child: Container(
+              width: w,
+              height: 26,
+              decoration: BoxDecoration(color: const Color(0xFFE9F2F7), borderRadius: BorderRadius.circular(5), border: Border.all(color: const Color(0xFFC9DDE8))),
+              child: CustomPaint(painter: _WavePeaks(peaks)),
+            ),
+          ),
+        ));
+      }
+      return out;
+    }
     final drag = _blockDrag != null && _blockDrag!.layer == r['id'] ? _blockDrag : null;
     Widget bar(double x, double w, {bool strong = false, bool ghost = false}) => Container(
           width: w,
@@ -2223,6 +2258,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       final x = left + a * cell + 1, w = (z - a + 1) * cell - 2;
       void select(double dx) {
         _cmd({'op': 'frame', 'i': (a + dx ~/ cell).clamp(0, _frames - 1)});
+        if (r['kind'] == 'camera') {
+          _setMode('camera');
+          return;
+        }
         if (r['kind'] == 'figure') {
           _cmd({'op': 'select', 'layer': r['id']});
           setState(() => _panelOpen = true);
@@ -2250,12 +2289,34 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             ),
           );
       final figure = r['kind'] == 'figure';
-      // the pose's pictures: every frame of a tween, the first of a hold
+      // the pose's pictures: every frame of a tween, the first of a hold (a
+      // camera row shows the camera's glyph)
       final tween = !(b[2] == true) && st + len < _frames;
+      // a joined figure's first block carries the chain (M5): the pictures move over
+      final chain = r['joinedTo'] != null && a == on.indexWhere((v) => v != false);
+      final nudge = chain ? 9.0 : 0.0;
       final pics = <Widget>[
         for (var f = a; f <= (tween ? z : a); f++)
-          if (_rowPics['${r['id']}@$f'] case final img?)
-            Positioned(left: (f - a) * cell + (cell - 22) / 2 - 1, top: 2, width: 22, height: 22, child: IgnorePointer(child: RawImage(image: img, fit: BoxFit.contain, filterQuality: FilterQuality.medium))),
+          if (r['kind'] == 'camera')
+            Positioned(left: (f - a) * cell + (cell - 16) / 2 - 1, top: 5, child: const IgnorePointer(child: Pictogram('camera', size: 16, color: Color(0xFF8A9099))))
+          else if (_rowPics['${r['id']}@$f'] case final img?)
+            Positioned(left: (f - a) * cell + (cell - 22) / 2 - 1 + (f == a ? nudge : 0), top: 2, width: 22, height: 22, child: IgnorePointer(child: RawImage(image: img, fit: BoxFit.contain, filterQuality: FilterQuality.medium))),
+        if (chain)
+          Positioned(
+            left: 3,
+            top: 6,
+            child: kit.Tap(
+              label: 'Joined to ${r['joinedTo']}',
+              minSize: 14,
+              onTap: () {
+                _cmd({'op': 'select', 'layer': r['id']});
+                setState(() => _panelOpen = true);
+                _jumpTo('Stickfigure Tools');
+                _say('${r['name']} is joined to ${r['joinedTo']}. Let go on its Stickfigure page.', light: true);
+              },
+              child: const Pictogram('chain', size: 13, color: Color(0xFF5D636B), stroke: 2.2),
+            ),
+          ),
       ];
       out.add(Positioned(
         left: x,
@@ -5191,6 +5252,26 @@ String _friendlyTime(DateTime t, {bool seconds = false}) {
           ? 'Yesterday'
           : '${t.day} ${months[t.month - 1]}${t.year == now.year ? '' : ' ${t.year}'}';
   return '$d, $time';
+}
+
+/// A sound clip's waveform (M5): rounded bars, as on the round 10 board.
+class _WavePeaks extends CustomPainter {
+  _WavePeaks(this.peaks);
+  final List<double> peaks;
+  @override
+  void paint(Canvas canvas, Size size) {
+    final pen = Paint()..color = const Color(0xFF86AFC8);
+    // its own loudest moment fills the height, so a quiet sound still shows its shape
+    final top = peaks.fold<double>(0, math.max);
+    for (var i = 0; i < peaks.length; i++) {
+      final a = math.max(0.12, top > 0 ? (peaks[i] / top).clamp(0.0, 1.0) : 0.0);
+      final h = a * (size.height - 8);
+      canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(6 + i * 4.0, (size.height - h) / 2, 2.2, h), const Radius.circular(1)), pen);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_WavePeaks o) => o.peaks != peaks;
 }
 
 /// The timeline's selection box or lasso, as it is drawn (G5).
