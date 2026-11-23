@@ -3,6 +3,7 @@
 //! a step costs only pointer copies, and every operation is a plain function
 //! that changes the project. One begin/commit is one undo step.
 
+pub mod block_ops;
 pub mod editor;
 pub mod figure_ops;
 pub mod filters;

@@ -759,7 +759,9 @@ impl Session {
                     "out" => (Interp::Bezier, Ease::new(0.0, 0.0, 0.58, 1.0)),
                     _ => (Interp::Linear, Ease::LINEAR),
                 };
-                let sel = self.keys_at(t, self.sel_layer().as_deref());
+                // the Pose page names its pose's first frame
+                let at = c["frame"].as_i64().map(|f| f as f64 / st_fps(self.project())).unwrap_or(t);
+                let sel = self.keys_at(at, self.sel_layer().as_deref());
                 if sel.is_empty() {
                     self.message = "Nothing is keyed on this frame.".into();
                 } else {
@@ -1415,6 +1417,34 @@ impl Session {
                 if let Some((l, n)) = self.selected.clone() {
                     let h = c.get("h").and_then(|v| v.as_bool()).unwrap_or(true);
                     self.step("Flip branch", |s| figure_ops::flip_branch(s, &sym, &l, &n, h, t));
+                }
+            }
+            // F4: blocks. A block is one figure's pose key, lasting until its
+            // next one; these change the selected figure's row only.
+            "new_pose" | "hold_longer" | "block_length" | "move_block" => {
+                let layer = c["layer"].as_str().map(str::to_string).or_else(|| self.sel_layer());
+                if let Some(l) = layer {
+                    let fr = self.frame;
+                    let op = c["op"].as_str().unwrap_or("").to_string();
+                    let (frames, to) = (c["frames"].as_i64().unwrap_or(1) as i32, c["to"].as_i64().unwrap_or(fr as i64) as i32);
+                    let label = match op.as_str() {
+                        "new_pose" => "New pose",
+                        "hold_longer" => "Hold longer",
+                        "block_length" => "Pose length",
+                        _ => "Move pose",
+                    };
+                    let done = self.step(label, |s| match op.as_str() {
+                        "new_pose" => crate::edit::block_ops::new_pose(s, &sym, &l, fr),
+                        "hold_longer" => crate::edit::block_ops::hold_longer(s, &sym, &l, fr),
+                        "block_length" => crate::edit::block_ops::set_block_length(s, &sym, &l, fr, frames),
+                        _ => crate::edit::block_ops::move_block(s, &sym, &l, fr, to),
+                    });
+                    if done.is_some() && op == "move_block" {
+                        self.frame = to;
+                        self.changed();
+                    }
+                } else {
+                    self.message = "Select a figure first.".into();
                 }
             }
             "break_off" => {
@@ -2511,6 +2541,29 @@ impl Session {
             let layer = p.root()?.layer(l)?;
             let f = layer.as_figure()?;
             let node = f.node(n)?;
+            // F4: the pose (block) under the playhead
+            let pose = {
+                let fps = st_fps(p);
+                let fr = (t * fps).round() as i32;
+                let n = (p.root().map(|r| r.duration).unwrap_or(0.0) * fps).round().max(1.0) as i32;
+                crate::edit::block_ops::block_at(layer, fps, fr).map(|(start, next)| {
+                    let key = node.rotation.track.keys().iter().find(|k| ((k.time * fps).round() as i32) == start).copied();
+                    json!({
+                        "start": start, "length": next.unwrap_or(n) - start, "last": next.is_none(),
+                        "hold": key.is_some_and(|k| k.interp == Interp::Hold),
+                        // the "easing" command's names
+                        "ease": key.map(|k| match k.interp {
+                            Interp::Hold => "hold",
+                            Interp::Linear => "linear",
+                            _ if k.ease == Ease::new(0.42, 0.0, 0.58, 1.0) => "smooth",
+                            _ if k.ease == Ease::new(0.42, 0.0, 1.0, 1.0) => "in",
+                            _ if k.ease == Ease::new(0.0, 0.0, 0.58, 1.0) => "out",
+                            _ => "custom",
+                        }),
+                        "here": start == fr,
+                    })
+                })
+            };
             let mut r = Resolver::new(p);
             Some(json!({
                 "layer": l, "node": n, "name": layer.name.clone().unwrap_or_else(|| l.clone()),
@@ -2539,6 +2592,8 @@ impl Session {
                 "locked": layer.locked, "onion": layer.onion,
                 "joinedTo": layer.parent.as_ref().and_then(|pid| p.root()?.layer(pid)).map(|x| x.name.clone().unwrap_or_else(|| x.id.clone())),
                 "keepInTween": !layer.vanish_in_tween,
+                // F4: the pose (block) under the playhead
+                "pose": pose,
                 "tweenColors": !layer.colors_jump,
                 "figColor": f.color.map(|c| c.to_rgba8888()).unwrap_or_else(|| f.nodes().get(1).map(|n| color_of(&mut r, &n.color, t)).unwrap_or(0x000000ff)),
                 "layerPos": p.root()?.layers.iter().filter(|x| x.as_figure().is_some()).position(|x| x.id == *l).map(|i| i + 1),
@@ -2960,7 +3015,7 @@ pub fn anchor_poses(st: &mut crate::edit::State) {
         let Some(l) = st.project.layer_mut(&sym, &id) else { continue };
         key_every_frame(&mut l.shown, n, fps);
         let camera = matches!(l.kind, LayerKind::Camera(_));
-        let ps = pose_props(l);
+        let ps = crate::edit::block_ops::pose_props(l);
         if camera {
             // the camera stays a frame-by-frame thing, as in Stick Nodes
             for q in ps {
@@ -2981,29 +3036,6 @@ pub fn anchor_poses(st: &mut crate::edit::State) {
     }
 }
 
-/// A layer's pose: its transform, and every joint's angle and length (a
-/// figure) or the view (the camera). What the whole-figure rule keys together.
-fn pose_props(l: &mut Layer) -> Vec<&mut Property> {
-    let tr = &mut l.transform;
-    let mut ps: Vec<&mut Property> = vec![&mut tr.x, &mut tr.y, &mut tr.rotation, &mut tr.scale_x, &mut tr.scale_y];
-    match &mut l.kind {
-        LayerKind::Figure(f) => {
-            for nd in f.nodes_mut() {
-                ps.push(&mut nd.rotation);
-                ps.push(&mut nd.length);
-            }
-        }
-        LayerKind::Camera(c) => {
-            ps.push(&mut c.x);
-            ps.push(&mut c.y);
-            ps.push(&mut c.zoom);
-            ps.push(&mut c.rotation);
-        }
-        _ => {}
-    }
-    ps
-}
-
 /// Every layer's pose keyed on one frame (frame tools that act on the whole
 /// frame, like "Do not tween").
 pub fn key_whole_frame(st: &mut crate::edit::State, frame: i32) {
@@ -3012,7 +3044,7 @@ pub fn key_whole_frame(st: &mut crate::edit::State, frame: i32) {
     let ids: Vec<String> = st.project.root().map(|s| s.layers.iter().map(|l| l.id.clone()).collect()).unwrap_or_default();
     for id in ids {
         let Some(l) = st.project.layer_mut(&sym, &id) else { continue };
-        for q in pose_props(l) {
+        for q in crate::edit::block_ops::pose_props(l) {
             key_at(q, &[frame as i64], fps);
         }
     }

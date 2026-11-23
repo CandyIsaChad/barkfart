@@ -1364,7 +1364,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (_st['textfield'] != null) return const ['Textfield Tools'];
     if (_st['movieclip'] != null) return const ['Movieclip Tools'];
     final sel = _sel;
-    if (sel != null) return const ['Stickfigure Tools', 'Stickfigure Filters', 'Segment Tools'];
+    if (sel != null) return const ['Stickfigure Tools', 'Pose', 'Stickfigure Filters', 'Segment Tools'];
     if (_st['editingClip'] != null) return const ['Movieclip editor', 'Textfield Tools'];
     return const ['Project Tools', 'Textfield Tools'];
   }
@@ -1388,6 +1388,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         return _frameToolsPanel();
       case 'Stickfigure Tools':
         return _stickfigureTools(_sel!);
+      case 'Pose':
+        return _poseTools(_sel!);
       case 'Stickfigure Filters':
         return _stickfigureFilters(_sel!);
       case 'Textfield Tools':
@@ -2076,7 +2078,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         if (!_playing && _showTabs && names.length > 1)
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 10, 10, 0),
-            child: names.length <= 3
+            child: names.length <= 4
                 ? kit.Segmented([for (final n in names) _tabLabel(n)], current, onSelect: (i) => _jumpTo(names[i]))
                 : SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
@@ -2784,8 +2786,34 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (n != null) _cmd({'op': 'tween_add', 'n': n});
   }
 
-  static const _easings = [('linear', 'Linear'), ('smooth', 'Ease'), ('in', 'Ease in'), ('out', 'Ease out'), ('hold', 'None')];
-  int _easing = 0;
+  /// The Pose page (REDESIGN §8, F4): the selected figure's pose under the
+  /// playhead, a block lasting until its next pose. Hold or tween into the
+  /// next, the ease, its length, a new pose here, copy and paste.
+  List<Widget> _poseTools(Map<String, dynamic> sel) {
+    final pose = sel['pose'] as Map?;
+    if (pose == null) return [rw.renderDesc(const rw.DHint('This figure has no pose yet.'))];
+    final start = (pose['start'] as num).toInt();
+    final len = (pose['length'] as num).toInt();
+    final here = pose['here'] == true, last = pose['last'] == true;
+    final ease = pose['ease'] as String? ?? 'linear';
+    final hold = ease == 'hold';
+    void easing(String v) => _cmd({'op': 'easing', 'v': v, 'frame': start});
+    const eases = ['linear', 'in', 'out', 'smooth'];
+    final rows = <rw.Desc>[
+      rw.DInfo(here ? 'Starts on this frame' : 'Started on frame ${start + 1}', last ? 'Lasts to the end' : '$len frame${len == 1 ? '' : 's'}'),
+      rw.DSeg(const ['Hold', 'Tween into it'], hold ? 0 : 1, label: 'Until the next pose', onSelect: (i) => easing(i == 0 ? 'hold' : 'linear')),
+      if (!hold) rw.DSeg(const ['Even', 'Slow start', 'Slow end', 'Slow both'], math.max(0, eases.indexOf(ease)), label: 'Ease', onSelect: (i) => easing(eases[i])),
+      rw.DStep('Length', '$len',
+          onMinus: !last && len > 1 ? () => _cmd({'op': 'block_length', 'frames': len - 1}) : null,
+          onPlus: () => _cmd({'op': 'block_length', 'frames': len + 1})),
+      if (last) const rw.DHint('The last pose lasts to the end of the animation; lengthening it makes the animation longer.'),
+      rw.DButtons('New pose here', here ? null : () => _cmd({'op': 'new_pose'}), b: 'Hold longer', onB: () => _cmd({'op': 'hold_longer'})),
+      const rw.DHint('A pose is this figure alone: the others keep theirs.'),
+      rw.DButtons('Copy pose', () => _cmd({'op': 'copy_pose'}), b: 'Paste pose', onB: _st['pose'] == true ? () => _cmd({'op': 'paste_pose'}) : null),
+    ];
+    return [for (final d in rows) rw.renderDesc(d)];
+  }
+
 
   /// Stickfigure Tools as rows (D15; REDESIGN §8 Stickfigure page). Every old
   /// control is kept; the pencil is "Edit segments" (the figure editor).
@@ -2816,10 +2844,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       rw.DTick('Locked', sel['locked'] == true, onChanged: (v) => _cmd({'op': 'figure', 'locked': v})),
       rw.DTick('Visible in onion skin', sel['onion'] != false, onChanged: (v) => _cmd({'op': 'figure', 'onion': v})),
       const rw.DTitle('Tweening'),
-      rw.DLink('Ease to the next frame', _easings[_easing].$2, onTap: () {
-        setState(() => _easing = (_easing + 1) % _easings.length);
-        _cmd({'op': 'easing', 'v': _easings[_easing].$1});
-      }),
       rw.DTick('Stay on stage between poses', sel['keepInTween'] != false, onChanged: (v) => _cmd({'op': 'figure', 'keepInTween': v})),
       rw.DTick('Blend colours between poses', sel['tweenColors'] != false, onChanged: (v) => _cmd({'op': 'figure', 'tweenColors': v})),
       const rw.DHint('These apply when the animation tweens. Stay: the figure stays during the in-betweens before a frame it is not on. Blend: colours change gradually instead of at the next frame.'),
@@ -2829,7 +2853,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         child: rw.renderDesc(rw.DButtons('Copy figure', () => _cmd({'op': 'copy_figure', 'joined': true}), b: 'Paste figure', onB: _st['figureCopied'] == true ? _pasteFigure : null)),
       )),
       rw.DButtons('Copy properties', () => _cmd({'op': 'copy_props'}), b: 'Paste properties', onB: _st['propsCopied'] == true ? _pastePropsDialog : null),
-      rw.DButtons('Copy pose', () => _cmd({'op': 'copy_pose'}), b: 'Paste pose', onB: _st['pose'] == true ? () => _cmd({'op': 'paste_pose'}) : null),
       rw.DButtons('Convert to movieclip…', () async {
         final ok = await _ask('Convert to movieclip?', 'This figure and the figures joined to it become a movieclip that plays their animation in a loop, in their place. It can be broken apart again.', ['Cancel', 'Convert']);
         if (ok == 'Convert') _cmd({'op': 'to_movieclip'});

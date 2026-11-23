@@ -408,6 +408,18 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
   - Old projects and imports are keyed on every frame already, so they play
     exactly as before.
 
+- **D26. Blocks before the timeline (F4).** A block is one figure's pose key,
+  lasting until its next one. The commands work on the selected figure's
+  row: `new_pose`, `hold_longer`, `block_length` and `move_block` (a pose
+  moves only between its neighbours; the first stays on the first frame).
+  "Add frame" stays the bridge that keys every figure on the new frame.
+  - Until the expanded timeline (G) can select blocks, the Pose page is a tab
+    beside Stickfigure (four tabs fit). It shows the pose under the playhead:
+    where it started and its length, Hold or "Tween into it", the ease, New
+    pose here, Hold longer, Copy and Paste pose (moved from Stickfigure, §9).
+  - The eases are the four the engine has: Even, Slow start, Slow end, Slow
+    both. Bounce (§8) waits for a bounce ease in the engine.
+
 ## 7. Build order (easiest to hardest, nested)
 
 The user's instruction (2026-11-23): "From easiest to hardest. List out
@@ -510,7 +522,7 @@ and tests are never weakened.
   become "smoothness".
 - [x] F3. The whole-figure key rule replaces anchor_poses. Legacy imports
   must play exactly as they do today.
-- [ ] F4. Commands: Add frame, New pose, Hold longer, moving and extending
+- [x] F4. Commands: Add frame, New pose, Hold longer, moving and extending
   blocks.
 
 ### G. The expanded timeline

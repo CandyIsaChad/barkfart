@@ -2189,6 +2189,9 @@ fn every_command_undoes_and_redoes_exactly() {
         json!({"op": "connector_set", "percent": 0.3, "reversed": true}),
         json!({"op": "movieclip", "loop": "once", "speed": 1.5, "offset": 0.2}),
         json!({"op": "edit_movieclip"}), json!({"op": "movieclip_done"}),
+        // D7b, F1, F4
+        json!({"op": "reset_segment"}), json!({"op": "break_off"}), json!({"op": "new_pose"}), json!({"op": "hold_longer"}),
+        json!({"op": "block_length", "frames": 3}), json!({"op": "move_block", "to": 1}),
     ];
     let text = |s: &Session| codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
     let mut failures = Vec::new();
@@ -2222,6 +2225,23 @@ fn every_command_undoes_and_redoes_exactly() {
             }
             "reset_camera" => {
                 s.command(&json!({"op": "camera", "zoom": 1.5, "rotation": 12}));
+            }
+            // a segment that differs from how it came
+            "reset_segment" => {
+                s.command(&json!({"op": "segment", "thickness": 77}));
+            }
+            // a frame without a pose of its own: the first pose held a frame longer
+            "new_pose" => {
+                s.command(&json!({"op": "frame", "i": 0}));
+                s.command(&json!({"op": "hold_longer"}));
+                s.command(&json!({"op": "frame", "i": 1}));
+            }
+            // a later pose with room before it
+            "move_block" => {
+                s.command(&json!({"op": "frame", "i": 0}));
+                s.command(&json!({"op": "hold_longer"}));
+                s.command(&json!({"op": "hold_longer"}));
+                s.command(&json!({"op": "frame", "i": 3}));
             }
             "textfield" => {
                 s.command(&json!({"op": "add_textfield"}));
@@ -2907,6 +2927,9 @@ fn follow_up_edits() -> Vec<(&'static str, Vec<Value>)> {
         ("rotate cameras", vec![json!({"op": "rotate_cameras"})]),
         ("camera zoom", vec![json!({"op": "camera", "zoom": 1.4, "rotation": 8})]),
         ("background colour", vec![json!({"op": "frame_bg", "color": 0x336699ffu32})]),
+        ("break off", vec![json!({"op": "break_off"})]),
+        ("hold longer", vec![json!({"op": "hold_longer"})]),
+        ("new pose", vec![json!({"op": "frame", "i": 2}), json!({"op": "new_pose"})]),
     ]
 }
 
@@ -2971,6 +2994,9 @@ next_edit_tests! {
     after_a_switch_rotate_cameras_is_unchanged => 10,
     after_a_switch_camera_zoom_is_unchanged => 11,
     after_a_switch_background_colour_is_unchanged => 12,
+    after_a_switch_break_off_is_unchanged => 13,
+    after_a_switch_hold_longer_is_unchanged => 14,
+    after_a_switch_new_pose_is_unchanged => 15,
 }
 
 /// Controls that belong to one frame (the middle one) leave the pictures at
@@ -3039,7 +3065,9 @@ fn a_new_frame_draws_what_the_frame_it_copies_draws() {
             // the frame counters and the clipboard)
             let mut d = Vec::new();
             diff(&panel, &s.state(), "", &mut d);
-            d.retain(|x| !["/frame:", "/frames:", "/keyed:", "/library:", "/frameMarks:", "/noTweenFrames:", "/frameCopied:", "/frameClipCount:"].iter().any(|p| x.starts_with(p)));
+            // where the playhead is, not what the frame shows (the pose's
+            // first frame is a frame number too)
+            d.retain(|x| !["/frame:", "/frames:", "/keyed:", "/library:", "/frameMarks:", "/noTweenFrames:", "/frameCopied:", "/frameClipCount:", "/selected/pose/start:"].iter().any(|p| x.starts_with(p)));
             // a frame inserted with Add frame does not copy the frame's timing (the pause,
             // slow motion and silence); a pasted frame does
             if how == "insert" {
@@ -4628,4 +4656,92 @@ fn a_figure_keyed_on_some_frames_only_stays_that_way() {
         assert_eq!(keyed_frames_of(&n.length, fps), vec![0, 1, 3], "{}", n.id);
     }
     assert_eq!(keyed_frames_of(&l.transform.x, fps), vec![0, 1, 3]);
+}
+
+/// `animated()` with figure L2 keyed on frames 1 and 4 only (indexes 0, 3).
+fn sparse() -> Session {
+    let s = animated();
+    let fps = s.project().settings.fps as f64;
+    let mut p = s.project().clone();
+    let sym = p.root_symbol.clone();
+    let l = p.layer_mut(&sym, "L2").unwrap();
+    for q in barkfart_core::edit::block_ops::pose_props(l) {
+        for fr in [1, 2] {
+            if let Ok(i) = q.track.index_of(fr as f64 / fps) {
+                q.track.remove_at(i);
+            }
+        }
+    }
+    Session::new(Document::new(p))
+}
+
+fn l2_frames(s: &Session) -> Vec<i32> {
+    let p = s.project();
+    barkfart_core::edit::block_ops::pose_frames(p.root().unwrap().layer("L2").unwrap(), p.settings.fps as f64)
+}
+
+#[test]
+fn blocks_lengthen_shorten_move_and_start() {
+    // F4: one figure's row, one step each
+    let mut s = sparse();
+    assert_eq!(l2_frames(&s), vec![0, 3]);
+    assert_eq!(s.state()["frames"], 4);
+    let st = s.command(&json!({"op": "select", "layer": "L2"}));
+    assert_eq!(st["selected"]["pose"]["start"], 0);
+    assert_eq!(st["selected"]["pose"]["length"], 3);
+    assert_eq!(st["selected"]["pose"]["here"], true);
+
+    // Hold longer: the next pose starts a frame later; the animation grows
+    let st = s.command(&json!({"op": "hold_longer"}));
+    assert_eq!(st["undo"], "Hold longer");
+    assert_eq!(l2_frames(&s), vec![0, 4]);
+    assert_eq!(st["frames"], 5);
+    assert_eq!(st["selected"]["pose"]["length"], 4);
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(l2_frames(&s), vec![0, 3]);
+    assert_eq!(s.state()["frames"], 4);
+
+    // a set length, shorter
+    let st = s.command(&json!({"op": "block_length", "frames": 2}));
+    assert_eq!(st["undo"], "Pose length");
+    assert_eq!(l2_frames(&s), vec![0, 2]);
+    s.command(&json!({"op": "undo"}));
+
+    // New pose on frame 2 (index 1): the picture does not change, the row gets a block
+    let before: Vec<_> = (0..4).map(|f| triangles(&s, f)).collect();
+    s.command(&json!({"op": "frame", "i": 1}));
+    let st = s.command(&json!({"op": "new_pose"}));
+    assert_eq!(st["undo"], "New pose");
+    assert_eq!(l2_frames(&s), vec![0, 1, 3]);
+    for f in 0..4 {
+        assert_eq!(triangles(&s, f), before[f as usize], "frame {f}");
+    }
+    let st = s.command(&json!({"op": "new_pose"}));
+    assert!(!st["message"].as_str().unwrap_or("").is_empty(), "not twice on one frame: it says why");
+    assert_eq!(l2_frames(&s), vec![0, 1, 3]);
+
+    // move that pose to frame 3 (index 2): it can't pass the poses beside it
+    let st = s.command(&json!({"op": "move_block", "to": 2}));
+    assert_eq!(st["undo"], "Move pose");
+    assert_eq!(st["frame"], 2, "the playhead follows the pose");
+    assert_eq!(l2_frames(&s), vec![0, 2, 3]);
+    let st = s.command(&json!({"op": "move_block", "to": 3}));
+    assert_eq!(st["undo"], "Move pose", "refused: no new step");
+    assert_eq!(l2_frames(&s), vec![0, 2, 3]);
+    // the first pose stays on the first frame
+    s.command(&json!({"op": "frame", "i": 0}));
+    s.command(&json!({"op": "move_block", "to": 1}));
+    assert_eq!(l2_frames(&s), vec![0, 2, 3]);
+}
+
+#[test]
+fn add_frame_keys_every_figure_on_the_new_frame() {
+    // F4's bridge: Add frame copies the whole moment, sparse rows included,
+    // and pushes later keys right
+    let mut s = sparse();
+    let mid = triangles(&s, 1);
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "insert_frame"}));
+    assert_eq!(l2_frames(&s), vec![0, 2, 4], "keyed on the new frame; the frame-4 pose moved to 5");
+    assert_eq!(triangles(&s, 2), mid, "the new frame shows the moment it copies");
 }
