@@ -1166,7 +1166,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           // test helper: select the figure on timeline row N
           final rows = ((_st['rows'] as List?) ?? const []).cast<Map>();
           final r = rows[int.parse(w[1])];
-          _cmd({'op': 'select', 'layer': r['id'], if (r['kind'] == 'picture' || r['kind'] == 'movieclip') 'node': ''});
+          _cmd(r['kind'] == 'group' ? {'op': 'select', 'group': r['id']} : {'op': 'select', 'layer': r['id'], if (r['kind'] == 'picture' || r['kind'] == 'movieclip') 'node': ''});
         case 'joinhere':
           // test helper: the selected figure joins the figure on row N from this frame
           final rows2 = ((_st['rows'] as List?) ?? const []).cast<Map>();
@@ -1482,6 +1482,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (_st['textfield'] != null) return const ['Textfield Tools'];
     if (_st['movieclip'] != null) return const ['Movieclip Tools'];
     if (_st['picture'] != null) return const ['Picture Tools'];
+    if (_st['group'] != null) return const ['Group Tools'];
     final sel = _sel;
     if (_st['multi'] != null) return const ['Selection'];
     if (sel != null) return const ['Stickfigure Tools', 'Segment Tools', 'Pose'];
@@ -1497,6 +1498,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         return _soundsBlock();
       case 'Picture Tools':
         return _pictureTools(_st['picture'] as Map);
+      case 'Group Tools' when _st['group'] != null:
+        return _groupTools(_st['group'] as Map);
       case 'Nothing selected':
         return [
           for (final d in <rw.Desc>[
@@ -2149,8 +2152,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final cell = _cellW;
     final fps = _fps.round().clamp(1, 240);
     final cur = _playing ? (_playT * _fps).floor().clamp(0, _frames - 1) : _frame;
-    final rows = _layersOpen && !_playing ? ((_st['rows'] as List?) ?? const []).cast<Map>() : const <Map>[];
-    final selLayer = _sel?['layer'];
+    final allRows = _layersOpen && !_playing ? ((_st['rows'] as List?) ?? const []).cast<Map>() : const <Map>[];
+    // K: a folded group hides its members' rows
+    final folded = {for (final r in allRows) if (r['kind'] == 'group' && r['open'] == false) r['id']};
+    final rows = folded.isEmpty ? allRows : allRows.where((r) => !folded.contains(r['group'])).toList();
+    final selLayer = _sel?['layer'] ?? (_st['group'] as Map?)?['id'];
     final showPreview = AppSettings.values['previewRow'] != false;
     final top = rulerH + (showPreview ? stripH + gap : 0);
     // H3: a layer's animated values as thin rows under it, when opened
@@ -2329,13 +2335,22 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     // then each layer front first with its icon, name and eye
     Widget name(Map r) {
       final on = r['visible'] != false, selected = r['id'] == selLayer || ((_st['multi'] as List?)?.any((m) => (m as Map)['id'] == r['id']) ?? false);
-      const icons = {'figure': 'figure', 'picture': 'picture', 'text': 'text', 'movieclip': 'clip', 'camera': 'camera', 'sound': 'sound'};
+      const icons = {'figure': 'figure', 'picture': 'picture', 'text': 'text', 'movieclip': 'clip', 'camera': 'camera', 'sound': 'sound', 'group': 'folder'};
+      final isGroup = r['kind'] == 'group';
       final row = Container(
         height: rowH,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
+        // K: a group's members sit 20 in under its folder row
+        padding: EdgeInsets.only(left: r['group'] != null ? 28 : 8, right: 8),
         decoration: BoxDecoration(color: selected ? cSelected : null, border: const Border(bottom: BorderSide(color: Color(0xFFEEF0F2)))),
         child: Row(children: [
-          if (((r['props'] as List?) ?? const []).isNotEmpty)
+          if (isGroup)
+            kit.Tap(
+              label: r['open'] == false ? 'Open ${r['name']}' : 'Fold ${r['name']}',
+              minSize: 20,
+              onTap: () => _cmd({'op': 'group_set', 'group': r['id'], 'open': r['open'] == false}),
+              child: Transform.rotate(angle: r['open'] == false ? -math.pi / 2 : 0, child: const Pictogram('chevron', size: 14, color: cSecondary)),
+            )
+          else if (((r['props'] as List?) ?? const []).isNotEmpty)
             kit.Tap(
               label: _openRows.contains(r['id']) ? 'Hide ${r['name']}\u2019s animated values' : 'Show ${r['name']}\u2019s animated values',
               minSize: 20,
@@ -2352,6 +2367,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           Pictogram('eye', size: 18, color: on ? const Color(0xFF9AA0A8) : const Color(0xFFD5D8DD)),
         ]),
       );
+      if (isGroup && !_playing) return GestureDetector(onTap: () => _cmd({'op': 'select', 'group': r['id']}), child: row);
       if (r['kind'] != 'figure' || _playing) return row;
       // G4: swipe a row (right-click on Linux) for Duplicate and Delete
       void pick() => _cmd({'op': 'select', 'layer': r['id']});
@@ -2449,6 +2465,33 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   List<Widget> _rowBlocks(Map r, double y, double rowH, double cell, double left, bool selectedRow) {
     final on = (r['on'] as List?) ?? const [];
     final out = <Widget>[];
+    // K: a group's row is a thin bar over the whole animation with a tick at
+    // every member's pose (Group board); tapping it selects the group
+    if (r['kind'] == 'group') {
+      final ticks = ((r['ticks'] as List?) ?? const []).cast<num>();
+      final w = _frames * cell;
+      out.add(Positioned(
+        left: left,
+        top: y + rowH / 2 - 6,
+        width: w,
+        height: 12,
+        child: GestureDetector(
+          onTap: () => _cmd({'op': 'select', 'group': r['id']}),
+          child: Container(
+            decoration: BoxDecoration(
+              color: selectedRow ? const Color(0xFFE8F0FA) : const Color(0xFFEEF0F3),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: selectedRow ? cAccent : const Color(0xFFDCDFE4), width: selectedRow ? 2 : 1),
+            ),
+            child: Stack(children: [
+              for (final f in ticks)
+                if (f < _frames) Positioned(left: f * cell + cell / 2 - 0.75, top: 2, bottom: 2, width: 1.5, child: ColoredBox(color: selectedRow ? cAccent : const Color(0xFF9AA0A8))),
+            ]),
+          ),
+        ),
+      ));
+      return out;
+    }
     // M5: a sound row is its clips, with the waveform
     if (r['kind'] == 'sound') {
       for (final c in ((r['clips'] as List?) ?? const []).cast<List>()) {
@@ -3100,6 +3143,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         'Textfield Tools' => 'Text Tools',
         'Figure editor' => 'Figure Tools',
         'Selection' => '${((_st['multi'] as List?) ?? const []).length} figures',
+        'Group Tools' => '',
         'Nothing selected' => '',
         _ => section,
       };
@@ -3138,6 +3182,17 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         );
       case 'Picture Tools' when _st['picture'] != null:
         return ('Delete picture', () => _cmd({'op': 'delete_here'}), null);
+      case 'Group Tools' when _st['group'] != null:
+        final g = _st['group'] as Map;
+        return (
+          'Delete group',
+          () async {
+            final n = ((g['members'] as List?) ?? const []).length;
+            final ok = await _ask('Delete ${g['name']}?', 'The group and the ${n == 1 ? 'layer' : '$n layers'} in it are deleted from every frame. Undo brings them back.', ['Cancel', 'Delete group']);
+            if (ok == 'Delete group') _cmd({'op': 'delete_group', 'group': g['id']});
+          },
+          null
+        );
       case 'Sound Tools' when _st['frameSound'] != null:
         return ('Delete sound', () => _cmd({'op': 'frame_sound', 'asset': null}), null);
       case 'Textfield Tools' when _st['textfield'] != null:
@@ -3865,6 +3920,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       rw.DButtons('New pose here', () => each('New pose', {'op': 'new_pose'}), b: 'Hold longer', onB: () => each('Hold longer', {'op': 'hold_longer'})),
       rw.DButtons('Flip sideways', () => each('Flip figures', {'op': 'flip_figure', 'h': true}), b: 'Flip over', onB: () => each('Flip figures', {'op': 'flip_figure', 'h': false})),
       rw.DTick('Visible in onion skin', same('onion'), onChanged: (v) => each('Onion skin', {'op': 'figure', 'onion': v})),
+      rw.DButtons('Group', () => _cmd({'op': 'group'})),
       rw.DButtons('Copy poses', () => _cmd({'op': 'copy_poses'}), b: 'Paste poses', onB: ((_st['posesCopied'] as num?) ?? 0) > 0 ? () => _cmd({'op': 'paste_poses'}) : null),
       rw.DButtons('Make movieclip…', () async {
         final ok = await _ask('Make a movieclip?', 'These ${n < words.length ? words[n] : n} figures and the figures joined to them become one movieclip that plays their animation in a loop, in their place. It can be broken apart again.', ['Cancel', 'Make movieclip']);
@@ -3873,6 +3929,38 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       rw.DButtons('Duplicate', () => each('Duplicate figures', {'op': 'duplicate_figure'}), b: 'Pick one', onB: () => _cmd({'op': 'select', 'layer': multi.first['id']})),
       rw.DDanger('Delete from this frame', () => each('Delete figures', {'op': 'delete_here'})),
       const rw.DHint('Double-tap the timeline and drag for a box; triple-tap and drag to draw a lasso.'),
+    ];
+    return [for (final d in rows) rw.renderDesc(d)];
+  }
+
+  /// The Group page (round 10 Group board): its name with Rename, what a
+  /// group does, its opacity; moving it whole, Ungroup and Make movieclip.
+  /// "Delete group" is pinned. (Group effects and "Draw order: free" come
+  /// later, D33.)
+  List<Widget> _groupTools(Map g) {
+    final gid = g['id'];
+    final members = ((g['members'] as List?) ?? const []).cast<Map>();
+    final opacity = ((g['opacity'] as num?) ?? 1).toDouble();
+    final rows = <rw.Desc>[
+      rw.DName('${g['name']}', link: 'Rename', onLink: () async {
+        final n = await _askName('Rename group', '${g['name']}');
+        if (n != null && n.trim().isNotEmpty) _cmd({'op': 'group_set', 'group': gid, 'name': n.trim()});
+      }),
+      const rw.DHint('A group keeps layers together in the list. Moving it moves everything in it.'),
+      const rw.DTitle('Blending'),
+      rw.DSlider('Opacity', '${(opacity * 100).round()}%', opacity, onChanged: (x) => _cmd({'op': 'group_set', 'group': gid, 'opacity': (x * 100).round() / 100})),
+      const rw.DTitle('Group'),
+      rw.DButtons('Send back', () => _cmd({'op': 'group_order', 'group': gid, 'forward': false}), b: 'Bring forward', onB: () => _cmd({'op': 'group_order', 'group': gid, 'forward': true})),
+      rw.DButtons('Ungroup', () => _cmd({'op': 'ungroup', 'group': gid}), b: 'Make movieclip…', onB: members.isEmpty
+          ? null
+          : () async {
+              final ok = await _ask('Make a movieclip?', 'Everything in ${g['name']} becomes one movieclip that plays its animation in a loop, in its place. It can be broken apart again.', ['Cancel', 'Make movieclip']);
+              if (ok != 'Make movieclip') return;
+              _cmd({'op': 'select_many', 'layers': [for (final m in members) m['id']]});
+              if (members.length == 1) _cmd({'op': 'select', 'layer': members.first['id']});
+              _cmd({'op': 'to_movieclip'});
+            }),
+      rw.DHint('In it: ${members.map((m) => m['name']).join(', ')}.'),
     ];
     return [for (final d in rows) rw.renderDesc(d)];
   }

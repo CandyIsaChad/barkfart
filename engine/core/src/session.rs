@@ -60,6 +60,8 @@ pub struct Session {
     pub selected: Option<(String, String)>,
     /// The selected textfield layer (figures and textfields never both).
     pub selected_text: Option<String>,
+    /// K: the selected group (its folder row was tapped; the Group page).
+    pub selected_group: Option<String>,
     pub onion: bool,
     /// Every drag stretches (the Drag: Stretch switch); otherwise only stretchy segments do.
     pub stretch_all: bool,
@@ -194,7 +196,7 @@ impl Session {
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
         let main_root = doc.project().root_symbol.clone();
-        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, stock: None, size_ref: true, mirror: false, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, poses_clip: Vec::new(), multi: Vec::new(), copy_edit: None, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, selected_group: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, stock: None, size_ref: true, mirror: false, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, poses_clip: Vec::new(), multi: Vec::new(), copy_edit: None, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -309,6 +311,11 @@ impl Session {
             });
             if !ok {
                 self.selected = None;
+            }
+        }
+        if let Some(g) = &self.selected_group {
+            if !self.project().root().is_some_and(|r| r.groups.iter().any(|x| x.id == *g)) {
+                self.selected_group = None;
             }
         }
         if let Some(id) = &self.selected_text {
@@ -443,6 +450,10 @@ impl Session {
         let t = self.time();
         match self.mode {
             Mode::Figure => {
+                // any press on the stage ends a group's selection
+                if self.selected_group.take().is_some() {
+                    self.rev += 1;
+                }
                 let prev = self.last_tap.as_ref().filter(|(tx, ty, _, _)| (tx - x).hypot(ty - y) <= radius).map(|(_, _, l, n)| (l.clone(), n.clone()));
                 // nearest joint wins; tapping the same spot again steps to the next one under the finger
                 self.sync_tools();
@@ -1098,6 +1109,7 @@ impl Session {
                 self.rev += 1;
             }
             "select_many" => {
+                self.selected_group = None;
                 // G5: the selection box or lasso; figures only, in row order
                 let p = self.project();
                 let ids: Vec<String> = c["layers"].as_array().map(|a| a.iter().filter_map(|v| v.as_str()).filter(|id| p.root().and_then(|r| r.layer(id)).is_some_and(|l| l.as_figure().is_some())).map(str::to_string).collect()).unwrap_or_default();
@@ -1154,6 +1166,8 @@ impl Session {
                 let l = c["layer"].as_str().map(str::to_string);
                 self.multi.clear();
                 self.selected_text = None;
+                // K: a group's folder row selects the group (the Group page)
+                self.selected_group = c["group"].as_str().filter(|g| self.project().root().is_some_and(|r| r.groups.iter().any(|x| x.id == *g))).map(str::to_string);
                 self.selected = match l {
                     Some(l) => {
                         let root = self.project().root().and_then(|s| s.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
@@ -2328,6 +2342,12 @@ impl Session {
                     let _ = gid;
                 }
             }
+            "group_order" => {
+                if let Some(gid) = c["group"].as_str().map(str::to_string) {
+                    let fwd = b("forward");
+                    self.step(if fwd { "Bring group forward" } else { "Send group back" }, |s| crate::edit::group_ops::move_group(s, &sym, &gid, fwd));
+                }
+            }
             "ungroup" => {
                 if let Some(gid) = c["group"].as_str().map(str::to_string) {
                     self.step("Ungroup", |s| crate::edit::group_ops::ungroup(s, &sym, &gid));
@@ -3455,11 +3475,34 @@ impl Session {
                                 let prev = if i == 0 { l.parent.as_deref() } else { l.joins[i - 1].parent.as_deref() };
                                 json!([((j.time * fps).round() as i32), name(j.parent.as_deref()), name(prev)])
                             }).collect::<Vec<_>>(),
-                            "props": animated})
+                            "props": animated, "group": l.group})
                     })
                     .collect()
             })
             .unwrap_or_default();
+        // K / D33: a group's folder row comes right before its members (which
+        // sit together), with a tick wherever a member has a pose
+        let rows: Vec<J> = {
+            let groups = p.root().map(|r| r.groups.clone()).unwrap_or_default();
+            let mut out: Vec<J> = Vec::with_capacity(rows.len() + groups.len());
+            let mut seen: Vec<String> = Vec::new();
+            for (i, r) in rows.iter().enumerate() {
+                if let Some(gid) = r["group"].as_str() {
+                    if !seen.iter().any(|x| x == gid) {
+                        seen.push(gid.to_string());
+                        let members: Vec<&J> = rows[i..].iter().filter(|x| x["group"].as_str() == Some(gid)).collect();
+                        let mut ticks: Vec<i64> = members.iter().flat_map(|m| m["blocks"].as_array().map(|b| b.iter().filter_map(|x| x[0].as_i64()).collect::<Vec<_>>()).unwrap_or_default()).collect();
+                        ticks.sort_unstable();
+                        ticks.dedup();
+                        let g = groups.iter().find(|x| x.id == gid);
+                        out.push(json!({"id": gid, "kind": "group", "name": g.map(|x| x.name.clone()).unwrap_or_default(), "open": g.is_none_or(|x| x.open),
+                            "visible": members.iter().any(|m| m["visible"] != false), "count": members.len(), "ticks": ticks, "blocks": [], "on": [], "props": []}));
+                    }
+                }
+                out.push(r.clone());
+            }
+            out
+        };
         let no_tween = {
             let k = self.keys_at(t, None);
             !k.is_empty() && k.iter().all(|r| p.property(&r.property).and_then(|q| q.track.keys().iter().find(|x| x.time == r.time)).is_some_and(|x| x.interp == Interp::Hold))
@@ -3518,6 +3561,14 @@ impl Session {
                 "onionBefore": p.view.onion_before, "onionAfter": p.view.onion_after, "onionFront": p.view.onion_in_front,
             },
             "pose": self.pose_clip.is_some(), "posesCopied": self.poses_clip.len(),
+            "group": self.selected_group.as_ref().and_then(|gid| {
+                let r = p.root()?;
+                let g = r.groups.iter().find(|x| x.id == *gid)?;
+                let members: Vec<&std::sync::Arc<Layer>> = r.layers.iter().rev().filter(|l| l.group.as_deref() == Some(gid.as_str())).collect();
+                Some(json!({"id": g.id, "name": g.name, "opacity": round2(g.opacity), "open": g.open,
+                    "effects": g.effects.chain().into_iter().map(|e| e.ty.clone()).collect::<Vec<_>>(),
+                    "members": members.iter().map(|l| json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone())})).collect::<Vec<_>>()}))
+            }),
             "groups": p.root().map(|r| r.groups.iter().map(|g| json!({
                 "id": g.id, "name": g.name, "opacity": round2(g.opacity), "open": g.open, "effects": g.effects.nodes.len(),
                 "members": r.layers.iter().rev().filter(|l| l.group.as_deref() == Some(g.id.as_str())).map(|l| l.id.clone()).collect::<Vec<_>>(),

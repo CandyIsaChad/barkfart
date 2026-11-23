@@ -151,3 +151,39 @@ pub fn set(st: &mut State, sym: &str, gid: &str, name: Option<&str>, opacity: Op
     }
     Ok(())
 }
+
+/// "Send back" / "Bring forward" for a whole group: it moves past the next
+/// layer that draws (or the next group, whole), its members staying together.
+pub fn move_group(st: &mut State, sym: &str, gid: &str, forward: bool) -> EditResult<()> {
+    let s = symbol(st, sym)?;
+    let at: Vec<usize> = (0..s.layers.len()).filter(|&i| s.layers[i].group.as_deref() == Some(gid)).collect();
+    let (Some(&a), Some(&b)) = (at.first(), at.last()) else { return fail("There is no such group.") };
+    let draws = |l: &Layer| !matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_));
+    // the neighbour to pass: one drawn layer, or a whole other group
+    let span = |i: usize| -> (usize, usize) {
+        match s.layers[i].group.clone() {
+            Some(g) => {
+                let idx: Vec<usize> = (0..s.layers.len()).filter(|&k| s.layers[k].group.as_deref() == Some(g.as_str())).collect();
+                (idx[0], *idx.last().expect("member"))
+            }
+            None => (i, i),
+        }
+    };
+    let (lo, hi) = if forward {
+        let Some(n) = (b + 1..s.layers.len()).find(|&i| draws(&s.layers[i])) else { return Ok(()) };
+        let (_, e) = span(n);
+        (a, e)
+    } else {
+        let Some(n) = (0..a).rev().find(|&i| draws(&s.layers[i])) else { return Ok(()) };
+        let (f, _) = span(n);
+        (f, b)
+    };
+    // rotate the range so the group lands on the other side of what it passed
+    let k = b + 1 - a;
+    if forward {
+        s.layers[lo..=hi].rotate_right(hi + 1 - lo - k);
+    } else {
+        s.layers[lo..=hi].rotate_left(a - lo);
+    }
+    Ok(())
+}

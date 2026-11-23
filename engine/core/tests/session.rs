@@ -5418,3 +5418,46 @@ fn deleting_a_group_takes_its_layers_and_frees_figures_joined_to_them() {
     assert_eq!(st["groups"], json!([]));
     assert!(!st["message"].as_str().unwrap().is_empty());
 }
+
+#[test]
+fn a_group_has_a_folder_row_a_page_and_moves_as_one() {
+    // K: the Group board: the folder row before its members, ticks at their
+    // poses; tapping it selects the group; it moves back and forth whole
+    let mut s = animated();
+    s.command(&json!({"op": "add_figure", "kind": "ball"}));
+    s.command(&json!({"op": "add_figure", "kind": "stick"}));
+    let ids: Vec<String> = s.project().root().unwrap().layers.iter().filter(|l| l.as_figure().is_some()).map(|l| l.id.clone()).collect();
+    let (a, b, c) = (ids[0].clone(), ids[1].clone(), ids[2].clone());
+    let st = s.command(&json!({"op": "group", "layers": [a, b], "name": "Fighters"}));
+    let gid = st["groups"][0]["id"].as_str().unwrap().to_string();
+    let rows = st["rows"].as_array().unwrap();
+    let at = rows.iter().position(|r| r["id"] == gid.as_str()).expect("a folder row");
+    assert_eq!(rows[at]["kind"], "group");
+    assert_eq!(rows[at]["name"], "Fighters");
+    assert_eq!(rows[at]["count"], 2);
+    assert_eq!(rows[at + 1]["group"], gid.as_str());
+    assert_eq!(rows[at + 2]["group"], gid.as_str());
+    assert!(rows.iter().filter(|r| r["group"] == gid.as_str()).count() == 2);
+    let ticks: Vec<i64> = rows[at]["ticks"].as_array().unwrap().iter().map(|v| v.as_i64().unwrap()).collect();
+    assert!(ticks.contains(&0) && ticks.contains(&3), "a tick at each member pose: {ticks:?}");
+    // tapping the folder row selects the group; a press on the stage ends it
+    let st = s.command(&json!({"op": "select", "group": gid}));
+    assert_eq!(st["group"]["name"], "Fighters");
+    assert_eq!(st["group"]["members"].as_array().unwrap().len(), 2);
+    assert!(st["selected"].is_null());
+    let st = s.command(&json!({"op": "down", "x": 5000.0, "y": 5000.0, "r": 10}));
+    assert!(st["group"].is_null());
+    s.command(&json!({"op": "up"}));
+    // the group is behind c; bring it forward: both pass c together
+    let order = |s: &Session| -> Vec<String> { s.project().root().unwrap().layers.iter().filter(|l| l.as_figure().is_some()).map(|l| l.id.clone()).collect() };
+    assert_eq!(order(&s), vec![a.clone(), b.clone(), c.clone()]);
+    let st = s.command(&json!({"op": "group_order", "group": gid, "forward": true}));
+    assert_eq!(st["undo"], "Bring group forward");
+    assert_eq!(order(&s), vec![c.clone(), a.clone(), b.clone()]);
+    s.command(&json!({"op": "group_order", "group": gid, "forward": false}));
+    assert_eq!(order(&s), vec![a.clone(), b.clone(), c.clone()]);
+    // folded, the rows still list the members (the app hides them)
+    let st = s.command(&json!({"op": "group_set", "group": gid, "open": false}));
+    let rows = st["rows"].as_array().unwrap();
+    assert_eq!(rows.iter().find(|r| r["id"] == gid.as_str()).unwrap()["open"], false);
+}

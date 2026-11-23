@@ -693,7 +693,7 @@ Render the boards (docs/barkfart/mockups: `mkdir -p project preview && node boar
 - [x] M9. The rest, board by board (done: Animation popover, Export, View,
   Camera, Text, Sound, Movieclip, multi-select, Projects, Settings' About,
   States' empty animation and nothing-selected, Tablet docking). Still apart
-  from the boards, each waiting on a feature: Group for several figures (K), "Edit as a new figure…" (J1), the
+  from the boards, each waiting on a feature: "Edit as a new figure…" (J1), the
   Missing-plugin card (K). (UI size, the motion path and "Edit as a new
   figure…" are done. A selected picture now has its dashed box on the
   stage: drag inside it to move, a corner grip to scale about the opposite
@@ -705,6 +705,13 @@ Render the boards (docs/barkfart/mockups: `mkdir -p project preview && node boar
 ### K. Hardest, later
 Groups; the Luau plugin runtime (it needs the `mlua` crate, so it waits
 until a dependency fetch is approved); Script layers; emitters.
+- [x] K1. Groups (D33): engine (`group`, `ungroup`, `group_set`,
+  `group_order`, `delete_group`; `select` with `group`), the folder row
+  with its chevron and the members 20 in, the summary bar with a tick at
+  every member pose, the Group page (name and Rename, opacity, Send back /
+  Bring forward, Ungroup, Make movieclip, "Delete group" pinned) and Group
+  on the several-selected page. Not yet: group effects in the browser,
+  dragging rows in and out of a group.
 
 ## 8. Designed in round 10 (2026-11-23)
 
