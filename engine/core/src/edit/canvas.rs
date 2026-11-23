@@ -220,6 +220,24 @@ impl CanvasTools {
         out
     }
 
+    /// The motion path (round 10 boards): where one joint is on every frame,
+    /// in the handles' space.
+    pub fn joint_path(&self, p: &Project, layer: &str, node: &str, frames: i32, fps: f64) -> Vec<(f32, f32)> {
+        let s = root_symbol(p);
+        let Some(l) = s.layer(layer) else { return Vec::new() };
+        let LayerKind::Figure(f) = &l.kind else { return Vec::new() };
+        let Some(i) = f.index_of(node) else { return Vec::new() };
+        let mut r = Resolver::new(p);
+        (0..frames.clamp(0, 2000))
+            .map(|fr| {
+                let t = fr as f64 / fps;
+                let v = self.view_with(p, l, t, &mut r);
+                let pose = FigurePose::compute(f, t, &mut r);
+                (v.map_x(pose.x[i], pose.y[i]) as f32, v.map_y(pose.x[i], pose.y[i]) as f32)
+            })
+            .collect()
+    }
+
     /// Nearest handle within radius; ties go to the topmost layer, then joints over main nodes.
     pub fn pick(&self, p: &Project, x: f32, y: f32, radius: f32, t: f64) -> Option<Handle> {
         let mut best: Option<Handle> = None;

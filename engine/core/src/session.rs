@@ -88,6 +88,8 @@ pub struct Session {
     multi: Vec<String>,
     /// M5: each sound's length in seconds, by asset path (decoded once).
     sound_seconds: std::cell::RefCell<HashMap<String, f64>>,
+    /// The motion path on the stage (View › Motion path).
+    pub motion_path: bool,
     /// D5 / H3: the keying toggle. Off (the default), a change to an effect
     /// or the opacity is the same on every frame; on, it is a key here.
     pub keying: bool,
@@ -171,7 +173,7 @@ impl Session {
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
         let main_root = doc.project().root_symbol.clone();
-        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, multi: Vec::new(), keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, multi: Vec::new(), motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -954,6 +956,7 @@ impl Session {
                     "onion_front" => self.doc.project_mut().view.onion_in_front = b("v"),
                     "tween_new" => self.tools.editor.default_interp = if b("v") { Interp::Linear } else { Interp::Hold },
                     "keying" => self.keying = b("v"),
+                    "path" => self.motion_path = b("v"),
                     _ => {}
                 }
                 self.rev += 1;
@@ -2915,6 +2918,17 @@ impl Session {
             let mode = match sl.loop_mode { SymbolLoop::Once => "once", SymbolLoop::Loop => "loop", SymbolLoop::PingPong => "pingpong" };
             Some(json!({"layer": l, "name": layer.name.clone().unwrap_or_else(|| l.clone()), "loop": mode, "speed": round2(r.d(&sl.speed, t) as f32), "offset": round2(r.d(&sl.time_offset, t) as f32), "frames": p.symbol(&sl.symbol).map(|s| (s.duration * st_fps(p)).round() as i64).unwrap_or(0)}))
         });
+        // the motion path: the selected joint's place on every frame, and the
+        // frames its figure has poses on (numbered on the stage)
+        let motion_path = self.selected.as_ref().filter(|_| self.motion_path && self.mode == Mode::Figure).and_then(|(l, n)| {
+            let layer = p.root()?.layer(l)?;
+            let f = layer.as_figure()?;
+            f.node(n)?.parent.as_ref()?;
+            let fps = st_fps(p);
+            let pts = self.tools.joint_path(p, l, n, frames as i32, fps);
+            let keys = crate::edit::block_ops::pose_frames(layer, fps);
+            Some(json!({"points": pts.iter().map(|(x, y)| json!([round2(*x), round2(*y)])).collect::<Vec<_>>(), "keys": keys}))
+        });
         // the Picture page: the selected picture
         let picture = self.selected.as_ref().and_then(|(l, n)| {
             if !n.is_empty() {
@@ -3111,7 +3125,7 @@ impl Session {
             "mode": match self.mode { Mode::Figure => "figure", Mode::All => "all", Mode::Camera => "camera" },
             "handles": handles, "selected": sel, "figures": figures, "rows": rows, "multi": multi,
             // H1: the FX toggle shows only when something has effects
-            "hasEffects": p.root().is_some_and(|r| r.layers.iter().any(|l| crate::edit::filters::any_active(l))), "camera": cam, "movieclip": movieclip, "picture": picture, "editingClip": (p.root_symbol != self.main_root).then(|| p.root().and_then(|r| r.name.clone()).unwrap_or_else(|| "Movieclip".into())),
+            "hasEffects": p.root().is_some_and(|r| r.layers.iter().any(|l| crate::edit::filters::any_active(l))), "camera": cam, "movieclip": movieclip, "picture": picture, "motionPath": motion_path, "editingClip": (p.root_symbol != self.main_root).then(|| p.root().and_then(|r| r.name.clone()).unwrap_or_else(|| "Movieclip".into())),
             "branchCopied": self.branch_clip.is_some(),
             "watermark": p.settings.watermark.as_ref().map(|(t, c)| json!({"text": t, "color": c.to_rgba8888()})),
             "propsFrom": self.props_clip.as_ref().and_then(|c| p.root()?.layer(&c.source).map(|l| l.name.clone().unwrap_or_else(|| l.id.clone()))),
@@ -3126,7 +3140,7 @@ impl Session {
             "hasCamera": p.root().is_some_and(|s| s.layers.iter().any(|l| matches!(l.kind, LayerKind::Camera(_)))),
             "opts": {
                 "stretch": self.stretch_all, "scope": if self.tools.key_scope == KeyScope::Joint { "joint" } else { "figure" },
-                "snap": self.tools.snap_degrees, "onion": self.onion, "keying": self.keying, "axis": self.tools.axis_lock, "static": self.tools.show_static,
+                "snap": self.tools.snap_degrees, "onion": self.onion, "keying": self.keying, "path": self.motion_path, "axis": self.tools.axis_lock, "static": self.tools.show_static,
                 "tweenNew": self.tools.editor.default_interp != Interp::Hold, "mainOnly": self.tools.main_nodes_only,
                 "onionBefore": p.view.onion_before, "onionAfter": p.view.onion_after, "onionFront": p.view.onion_in_front,
             },

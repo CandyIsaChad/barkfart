@@ -147,6 +147,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     }
     await AppSettings.load();
     e.command({'op': 'set', 'k': 'axis', 'v': AppSettings.flag('axisLock')});
+    e.command({'op': 'set', 'k': 'path', 'v': AppSettings.values['motionPath'] != false});
     _refresh(e.command({'op': 'state'}));
     // draw every frame picture for the project just opened
     _thumbsChanged('open');
@@ -2563,6 +2564,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     );
   }
 
+  /// The motion path on the stage (View › Motion path; the Segment page's
+  /// "Show motion path"): one setting, kept between runs.
+  void _setMotionPath(bool v) {
+    AppSettings.values['motionPath'] = v;
+    unawaited(AppSettings.save());
+    _cmd({'op': 'set', 'k': 'path', 'v': v});
+  }
+
   /// The FX toggle: effects while editing off, or back to how they were
   /// (Settings › While editing keeps the choice of All or No blur).
   void _toggleFx() {
@@ -4144,6 +4153,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         ],
       ],
       const rw.DTitle('Movement'),
+      rw.DTick('Show motion path', _opts['path'] == true, onChanged: _setMotionPath),
       rw.DTick('Is stretchy', sel['stretchy'] == true, onChanged: (v) => _cmd({'op': 'node', 'stretchy': v}), changed: ch('stretchy'), reset: reset('stretchy', onOff(d['stretchy']), {'op': 'node', 'stretchy': d['stretchy']})),
       rw.DTick('Lock node', sel['pinned'] == true, onChanged: (v) => _cmd({'op': 'pin', 'v': v})),
       rw.DTick('Drag lock', sel['dragLock'] == true, onChanged: (v) => _cmd({'op': 'node', 'dragLock': v})),
@@ -4497,6 +4507,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         rw.DTick(label, AppSettings.flag(k), onChanged: (v) => flag(k, v)),
       const rw.DTitle('While editing'),
       rw.DSeg(const ['None', 'No blur', 'All'], AppSettings.number('showFilters').clamp(0, 2), label: 'Effects', onSelect: (i) => number('showFilters', i)),
+      rw.DTick('Motion path', _opts['path'] == true, onChanged: _setMotionPath),
       rw.DTick('Preview row', AppSettings.values['previewRow'] != false, onChanged: (v) => setState(() {
             AppSettings.values['previewRow'] = v;
             unawaited(AppSettings.save());
@@ -5129,6 +5140,41 @@ class _Overlay extends CustomPainter {
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.5
           ..color = cAccent);
+      }
+    }
+    // the motion path (round 10 boards): the selected joint on every frame,
+    // pale red, numbered where its figure has poses
+    final mp = st['motionPath'] as Map?;
+    if (mp != null) {
+      final pts = [for (final q in (mp['points'] as List)) v.toScreen(((q as List)[0] as num).toDouble(), (q[1] as num).toDouble())];
+      if (pts.length > 1) {
+        canvas.drawPath(Path()..addPolygon(pts, false), Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5
+          ..color = const Color(0x99E04A62));
+        for (final p in pts) {
+          canvas.drawCircle(p, 2.2, Paint()..color = const Color(0xFFD91A3A));
+        }
+        // poses: a hollow ring and the frame number (frames on one spot share a label)
+        final labels = <Offset, List<int>>{};
+        for (final k in ((mp['keys'] as List?) ?? const []).cast<num>()) {
+          final i = k.toInt();
+          if (i < 0 || i >= pts.length) continue;
+          final at = labels.keys.firstWhere((o) => (o - pts[i]).distance < 6, orElse: () => pts[i]);
+          (labels[at] ??= []).add(i + 1);
+        }
+        for (final e in labels.entries) {
+          canvas.drawCircle(e.key, 5.5, Paint()..color = cCard);
+          canvas.drawCircle(e.key, 5.5, Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.8
+            ..color = const Color(0xFFD91A3A));
+          final tp = TextPainter(
+            text: TextSpan(text: e.value.join(', '), style: const TextStyle(color: Color(0xFFD91A3A), fontSize: 11, fontWeight: FontWeight.w700)),
+            textDirection: TextDirection.ltr,
+          )..layout();
+          tp.paint(canvas, e.key + const Offset(8, -16));
+        }
       }
     }
     // a selected textfield: a thin blue box around the text

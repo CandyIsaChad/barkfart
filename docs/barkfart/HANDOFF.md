@@ -33,7 +33,7 @@ Tick items there as they finish.
 - Scripted editor runs as before. The new script command is `savesheet`.
 - The window is capped at the screen size (about 1300x700).
 
-**Next:** the motion path on the stage and the UI size setting (REDESIGN §7 M9's list), then I (joins over time) and J (the figure editor). The Picture page is done (engine `picture`, state `picture`; tap a picture's block). Sections F, G, H and M are done.
+**Next:** run `cd engine && cargo test -q --workspace` first (the motion-path commit was not run through the full suite; it only adds state and a canvas helper). Then the UI size setting, then I (joins over time) and J (the figure editor). Done: sections F, G, H, M (board pass), the Picture page, the motion path (View › Motion path, Segment › Show motion path; engine `set path`, state `motionPath`).
 - Done: A1–A6, B1–B6, C1–C8, D1–D7b, E1–E3. D2 (the Movieclip page) is written but not yet seen on screen. D7b: `reset_segment`, `selected.defaults` and `Figure::base` (FORMAT.md); the first-run figure is the engine's render of Stickfigure.nodes (D22).
 - Home script commands: `firstrun`, `projectsscreen`, `backups`, `makeprojects N` (copies the open save N times). Saving writes a picture to `.thumbs/<name>.png`.
 
