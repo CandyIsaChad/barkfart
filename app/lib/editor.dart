@@ -1139,6 +1139,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           unawaited(_firstRun());
         case 'projectsscreen':
           unawaited(_projectsScreen());
+        case 'editcopy':
+          _cmd({'op': 'edit_copy'});
+        case 'editcopysheet':
+          unawaited(_editCopySheet('${_sel?['name'] ?? 'The figure'}'));
         case 'layers':
           setState(() => _layersOpen = true);
         case 'effects':
@@ -1551,7 +1555,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       body: RepaintBoundary(
         key: _shot,
         child: Column(children: [
-        if (!_fsNow) _appBar(pad),
+        if (!_fsNow) (_st['copyEdit'] is Map ? _copyHeader(pad, _st['copyEdit'] as Map) : _appBar(pad)),
         Expanded(child: Row(textDirection: leftHand ? TextDirection.rtl : TextDirection.ltr, children: [
           if (!_fsNow) _leftRail(pad, leftHand),
           Expanded(
@@ -1782,7 +1786,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           ]),
         ),
       ),
-      SizedBox(width: narrow ? 60 : 96, child: _Btn('Done', accent: true, onTap: () => _cmd({'op': 'build_done'}))),
+      // editing a copy ends with the header's Cancel or Save as new figure (D12)
+      if (_st['copyEdit'] == null) SizedBox(width: narrow ? 60 : 96, child: _Btn('Done', accent: true, onTap: () => _cmd({'op': 'build_done'}))),
       const SizedBox(width: 8),
     ]);
     });
@@ -3993,7 +3998,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final rows = <rw.Desc>[
       // the round 10 board, top to bottom (the figure editor link stays "Edit
       // segments" until editing makes a new figure, J1 / D12)
-      rw.DName(sel['name'] as String? ?? 'Figure', link: 'Edit segments ›', onLink: () => _cmd({'op': 'build'})),
+      rw.DName(sel['name'] as String? ?? 'Figure', link: 'Edit as a new figure…', onLink: () => _editCopySheet(sel['name'] as String? ?? 'The figure')),
       rw.DWidget(kit.PropRow('Colour', trailing: _swatches((sel['figColor'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'figure', 'color': c})))),
       ..._effectRows(sel),
       rw.DLink('Blend', blendNames[blend], onTap: () => _cmd({'op': 'blend', 'v': blends[(blend + 1) % blends.length]})),
@@ -4818,6 +4823,63 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   /// The figure editor: structure tools for the selected segment.
+  /// "Edit as a new figure…" (D12, the EditCopy board): editing never
+  /// changes the animated figure, so it asks first, then edits a copy.
+  Future<void> _editCopySheet(String name) async {
+    final go = await kit.showSheet<bool>(context, title: 'Editing makes a new figure', width: 400, children: (c) => [
+          Text('$name in this animation won\u2019t change. You\u2019ll edit a copy, which you can save to your library and add to any frame.', textAlign: TextAlign.center, style: const TextStyle(color: cText, fontSize: 15, height: 1.35)),
+          const SizedBox(height: 14),
+          kit.ButtonPair('Cancel', () => Navigator.pop(c, false), 'Edit a copy', () => Navigator.pop(c, true), true),
+        ]);
+    if (go == true) _cmd({'op': 'edit_copy'});
+  }
+
+  /// The figure editor's header (EditCopy / FigureEditor boards): Cancel, the
+  /// copy's name over "… stays as it is", Save as new figure.
+  Widget _copyHeader(EdgeInsets pad, Map ce) {
+    return Container(
+      height: 44 + pad.top,
+      padding: EdgeInsets.only(top: pad.top, left: pad.left + 8, right: pad.right + 8),
+      decoration: const BoxDecoration(color: cCard, border: Border(bottom: BorderSide(color: cLine))),
+      child: Stack(alignment: Alignment.center, children: [
+        Row(children: [
+          kit.WordButton('Cancel', onTap: () => _cmd({'op': 'edit_copy_end'})),
+          const Spacer(),
+          kit.WordButton('Save as new figure', strong: true, onTap: _saveCopy),
+        ]),
+        IgnorePointer(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('${ce['name']}', style: const TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w700)),
+            Text('${ce['of']} in your animation stays as it is', style: const TextStyle(color: cSecondary, fontSize: 12)),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  /// Save as new figure: the copy becomes a figure file in your figures (the
+  /// chooser's Yours), and the editor closes; the animation is as it was.
+  Future<void> _saveCopy() async {
+    final e = _engine;
+    final ce = _st['copyEdit'] as Map?;
+    if (e == null || ce == null) return;
+    final bytes = e.figureFile();
+    if (bytes == null) {
+      _say('Could not save the figure: ${e.lastError}');
+      return;
+    }
+    final dir = await figuresDir();
+    final clean = '${ce['name']}'.trim().replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    var f = File('${dir.path}/$clean.nodes');
+    for (var k = 2; f.existsSync(); k++) {
+      f = File('${dir.path}/$clean ($k).nodes');
+    }
+    await f.writeAsBytes(bytes);
+    _cmd({'op': 'edit_copy_end'});
+    final saved = f.path.split(Platform.pathSeparator).last.replaceAll('.nodes', '');
+    if (mounted) kit.showToast(context, 'Saved $saved to your figures. Add it from + › Stick figure › Yours.', light: true);
+  }
+
   /// Save Stickfigure As: a Stick Nodes .nodes file in the Barkfart Figures
   /// folder (it then shows in Add stickfigure... and works in Stick Nodes).
   Future<void> _saveFigureFile() async {

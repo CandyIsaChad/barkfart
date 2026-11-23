@@ -646,7 +646,10 @@ and tests are never weakened.
 - [x] I2. Chain markers, the join popover, toasts with Undo.
 
 ### J. The figure editor
-- [ ] J1. Header and the save-as-new sheet (D12).
+- [x] J1. Header and the save-as-new sheet (D12). `edit_copy` keeps the
+  document as it was and edits a copy (the original hidden meanwhile);
+  `edit_copy_end` puts the document back exactly, history included. Save as
+  new figure writes the copy to your figures first (chooser › Yours).
 - [ ] J2. The shape shelf.
 - [ ] J3. The Parts list.
 - [ ] J4. Shape-coded handles, the size reference.
@@ -679,7 +682,8 @@ Render the boards (docs/barkfart/mockups: `mkdir -p project preview && node boar
   from the boards, each waiting on a feature: dragging a picture on the
   stage (the Picture page itself is done: tap its block), Group and Make movieclip / Copy and Paste poses for
   several figures (K and engine work), "Edit as a new figure…" (J1), the
-  Missing-plugin card (K). (UI size and the motion path are done.) Earlier list: Animation popover, Export, View, Camera (the frame on the stage), Text, Picture, Movieclip, Sound, Group, Projects, First run, Settings, States, Tablet.
+  Missing-plugin card (K). (UI size, the motion path and "Edit as a new
+  figure…" are done.) Earlier list: Animation popover, Export, View, Camera (the frame on the stage), Text, Picture, Movieclip, Sound, Group, Projects, First run, Settings, States, Tablet.
 
 ### K. Hardest, later
 Groups; the Luau plugin runtime (it needs the `mlua` crate, so it waits

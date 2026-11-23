@@ -76,6 +76,7 @@ pub fn fail<T>(s: impl Into<String>) -> EditResult<T> {
 }
 
 /// The project and its history.
+#[derive(Clone)]
 pub struct Document {
     pub state: State,
     undo: Vec<(String, State)>,
@@ -195,6 +196,15 @@ impl Document {
     }
 
     /// How many steps can be undone / redone (for the tests that walk the history).
+    /// Puts back a copy taken earlier (the figure editor's copy, D12): the
+    /// project and its history as they were. Ids keep counting up.
+    pub fn restore(&mut self, earlier: Document) {
+        let counter = self.state.project.id_counter;
+        *self = earlier;
+        self.state.project.id_counter = self.state.project.id_counter.max(counter);
+        self.revision += 1;
+    }
+
     pub fn undo_depth(&self) -> usize {
         self.undo.len()
     }

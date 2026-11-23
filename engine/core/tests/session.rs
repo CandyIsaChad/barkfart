@@ -5060,3 +5060,26 @@ fn joins_are_moments_and_nothing_jumps() {
         assert_eq!(triangles(&t, f), triangles(&s, f), "reopened frame {f}");
     }
 }
+
+#[test]
+fn editing_a_figure_edits_a_copy() {
+    // D12 / J1: the animated figure never changes; the copy can be saved
+    let mut s = animated();
+    let st = s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    let undo = st["undo"].clone();
+    let no_counter = |x: &str| x.lines().filter(|l| !l.contains("\"idCounter\"")).collect::<Vec<_>>().join("\n");
+    let text = codec::encode(s.project());
+    let st = s.command(&json!({"op": "edit_copy"}));
+    assert_eq!(st["copyEdit"]["of"], "Figure 1");
+    assert!(st["copyEdit"]["name"].as_str().unwrap().ends_with("(copy)"));
+    assert!(st["building"]["layer"].is_string());
+    s.command(&json!({"op": "select", "layer": st["building"]["layer"], "node": "armR1"}));
+    s.command(&json!({"op": "segment", "thickness": 60}));
+    let (_, file) = s.figure_file().expect("the copy as a figure file");
+    assert!(!file.is_empty());
+    let st = s.command(&json!({"op": "edit_copy_end"}));
+    assert!(st["building"].is_null() && st["copyEdit"].is_null());
+    assert_eq!(no_counter(&codec::encode(s.project())), no_counter(&text), "the animation is as it was");
+    assert_eq!(st["undo"], undo, "and so is its history");
+    assert_eq!(st["selected"]["layer"], "L2");
+}

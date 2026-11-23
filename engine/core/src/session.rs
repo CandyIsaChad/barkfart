@@ -88,6 +88,10 @@ pub struct Session {
     multi: Vec<String>,
     /// M5: each sound's length in seconds, by asset path (decoded once).
     sound_seconds: std::cell::RefCell<HashMap<String, f64>>,
+    /// D12 / J1: editing makes a new figure. While a copy is edited, the
+    /// document as it was (restored at the end, Cancel or Save), the
+    /// original layer, and the frame.
+    copy_edit: Option<(Box<Document>, String, i32)>,
     /// The motion path on the stage (View › Motion path).
     pub motion_path: bool,
     /// D5 / H3: the keying toggle. Off (the default), a change to an effect
@@ -173,7 +177,7 @@ impl Session {
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
         let main_root = doc.project().root_symbol.clone();
-        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, multi: Vec::new(), motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, multi: Vec::new(), copy_edit: None, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -1141,6 +1145,54 @@ impl Session {
                     Some(x) => Some(shape_named(x)),
                 };
                 self.rev += 1;
+            }
+            "edit_copy" => {
+                // D12 / J1: the figure editor works on a copy; the animated
+                // figure never changes. Ends with edit_copy_end.
+                if let (Some(l), None) = (self.sel_layer(), self.copy_edit.as_ref()) {
+                    if self.project().root().and_then(|s| s.layer(&l)).and_then(|x| x.as_figure()).is_some() {
+                        let snapshot = Box::new(self.doc.clone());
+                        let fr = self.frame;
+                        let made = self.step("Edit a copy", |s| {
+                            let ids = layer_ops::duplicate(s, &sym, &l, false, 0.0, 0.0)?;
+                            let c = ids.first().cloned().ok_or_else(|| crate::edit::EditError("no copy".into()))?;
+                            let name = s.project.root().and_then(|r| r.layer(&l)).and_then(|x| x.name.clone()).unwrap_or_else(|| "Figure".into());
+                            if let Some(x) = s.project.layer_mut(&sym, &c) {
+                                x.name = Some(format!("{name} (copy)"));
+                            }
+                            // the original stays as it is, out of the way while editing
+                            if let Some(x) = s.project.layer_mut(&sym, &l) {
+                                x.visible = false;
+                            }
+                            Ok(c)
+                        });
+                        if let Some(c) = made {
+                            self.copy_edit = Some((snapshot, l, fr));
+                            self.building = Some(c.clone());
+                            let root = self.project().root().and_then(|s| s.layer(&c)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
+                            self.selected = root.map(|r| (c, r));
+                            self.mode = Mode::Figure;
+                            self.rev += 1;
+                        }
+                    }
+                }
+            }
+            "edit_copy_end" => {
+                // Cancel or Save as new figure (the app saves the copy's file
+                // first): the animation and its history as they were
+                if let Some((snapshot, l, fr)) = self.copy_edit.take() {
+                    self.doc.restore(*snapshot);
+                    self.draw = None;
+                    self.building = None;
+                    self.polyfill = None;
+                    self.connecting = false;
+                    self.trace = None;
+                    self.frame = fr;
+                    let root = self.project().root().and_then(|s| s.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
+                    self.selected = root.map(|r| (l, r));
+                    self.changed();
+                    self.validate();
+                }
             }
             "build_done" => {
                 self.draw = None;
@@ -3157,7 +3209,13 @@ impl Session {
             "mode": match self.mode { Mode::Figure => "figure", Mode::All => "all", Mode::Camera => "camera" },
             "handles": handles, "selected": sel, "figures": figures, "rows": rows, "multi": multi,
             // H1: the FX toggle shows only when something has effects
-            "hasEffects": p.root().is_some_and(|r| r.layers.iter().any(|l| crate::edit::filters::any_active(l))), "camera": cam, "movieclip": movieclip, "picture": picture, "motionPath": motion_path, "editingClip": (p.root_symbol != self.main_root).then(|| p.root().and_then(|r| r.name.clone()).unwrap_or_else(|| "Movieclip".into())),
+            "hasEffects": p.root().is_some_and(|r| r.layers.iter().any(|l| crate::edit::filters::any_active(l))), "camera": cam, "movieclip": movieclip, "picture": picture, "motionPath": motion_path,
+            // J1: the copy being edited, and the figure it came from
+            "copyEdit": self.copy_edit.as_ref().and_then(|(_, l, _)| {
+                let copy = self.building.as_ref().and_then(|b| p.root()?.layer(b)).and_then(|x| x.name.clone());
+                let of = self.doc.state.project.root().and_then(|r| r.layer(l)).and_then(|x| x.name.clone());
+                Some(json!({"name": copy?, "of": of.unwrap_or_else(|| "The figure".into())}))
+            }), "editingClip": (p.root_symbol != self.main_root).then(|| p.root().and_then(|r| r.name.clone()).unwrap_or_else(|| "Movieclip".into())),
             "branchCopied": self.branch_clip.is_some(),
             "watermark": p.settings.watermark.as_ref().map(|(t, c)| json!({"text": t, "color": c.to_rgba8888()})),
             "propsFrom": self.props_clip.as_ref().and_then(|c| p.root()?.layer(&c.source).map(|l| l.name.clone().unwrap_or_else(|| l.id.clone()))),
