@@ -3006,6 +3006,7 @@ impl Session {
                     let c2 = c.clone();
                     let (ed, keyed) = (self.tools.editor.clone(), self.keying);
                     self.step("Picture", move |s| {
+                        let tw = s.project.settings.tween_interp;
                         let (sx, sy, op_id) = {
                             let Some(x) = s.project.root().and_then(|r| r.layer(&l)) else { return crate::edit::fail("no picture") };
                             if !matches!(x.kind, LayerKind::Sprite(_)) {
@@ -3038,7 +3039,8 @@ impl Session {
                             // D5: static unless keying (or already animated)
                             let animated = q.track.keys().windows(2).any(|w| w[0].value != w[1].value);
                             if keyed || animated {
-                                q.track.put(Key::new(t, v, Interp::Linear));
+                                let interp = crate::edit::editor::interp_at(q, t, tw);
+                                q.track.put(Key::new(t, v, interp));
                             } else {
                                 set_static(q, v);
                             }

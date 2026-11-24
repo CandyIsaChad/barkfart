@@ -538,7 +538,11 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
     animations and their starter figure tween Smooth; Stick Nodes files and
     the reference starter stay Linear, so imports play as they were made.
     Hold, Linear and the eased curves (slow end, slow both, bounce) are
-    unchanged.
+    unchanged. It covers everything the Segment and Stickfigure pages can
+    animate: angle, length, thickness, scale, colours, position, turn,
+    opacity and every effect value. The camera, text and the frame
+    background are keyed on every frame, so there is nothing between poses
+    for an ease to shape; choices (shape, blend) and switches don't tween.
   - The Pose page gets Auto as a fifth ease, first (the board has four), and
     "Tween into it" means Auto. With Auto, a "Through this pose" row picks
     Settle, Swing or Sharp. Free and Aligned need a graph to drag handles in.

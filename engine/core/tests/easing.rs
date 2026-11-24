@@ -163,3 +163,25 @@ fn new_animations_tween_smoothly_and_stick_nodes_ones_stay_linear() {
         assert!((x - y).abs() < 1e-3, "free keeps the curve: {shape:?} vs {frozen:?}");
     }
 }
+
+#[test]
+fn keyed_effects_ease_like_poses_in_a_new_animation() {
+    let mut s = Session::new(Document::new(new_editor_project()));
+    for _ in 0..4 {
+        s.command(&json!({"op": "insert_frame"}));
+    }
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    s.command(&json!({"op": "set", "k": "keying", "v": true}));
+    s.command(&json!({"op": "frame", "i": 0}));
+    s.command(&json!({"op": "filter", "glowAmount": 0.0, "glow": 0xffc83dffu32}));
+    s.command(&json!({"op": "frame", "i": 4}));
+    s.command(&json!({"op": "filter", "glowAmount": 1.0}));
+    let p = s.project();
+    let fps = p.settings.fps as f64;
+    let l = p.root().unwrap().layer("L2").unwrap();
+    let e = l.effects.nodes.get("filter.glow").expect("a glow");
+    let amount = |f: f64| e.mix.key_value(f / fps).f() as f64;
+    assert!((amount(4.0) - 1.0).abs() < 1e-4);
+    assert!(amount(1.0) < 0.25 - 0.03, "eases in: {}", amount(1.0));
+    assert!(e.mix.track.keys().iter().filter(|k| k.time > 0.0).all(|k| k.interp == Interp::Smooth), "smooth keys");
+}

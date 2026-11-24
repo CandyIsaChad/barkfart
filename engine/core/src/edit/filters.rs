@@ -39,6 +39,8 @@ thread_local! {
     /// D5 / H3: while `apply` runs with keying off, a change sets the value
     /// on every frame (the property stays static) instead of keying t.
     static STATIC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// D34: how a new effect key tweens (the project's tweens, set by `apply`).
+    static TWEEN: std::cell::Cell<Interp> = const { std::cell::Cell::new(Interp::Linear) };
 }
 
 fn key_at(p: &mut Property, t: f64, v: Value) {
@@ -54,7 +56,9 @@ fn key_at(p: &mut Property, t: f64, v: Value) {
         }
         return;
     }
-    let interp = if p.ty.continuous() { Interp::Linear } else { Interp::Hold };
+    // a new key tweens as the project's tweens do (D34), or as the key
+    // before it here does
+    let interp = if p.ty.continuous() { crate::edit::editor::interp_at(p, t, TWEEN.with(|x| x.get())) } else { Interp::Hold };
     // a first key keeps what the frames before showed: the old value from the
     // start, held (an effect switched on here appears here, it doesn't fade in
     // from the first frame; later changes tween as keys do)
@@ -157,6 +161,7 @@ pub fn apply_keyed(st: &mut State, sym: &str, id: &str, c: &J, t: f64, keyed: bo
 
 pub fn apply(st: &mut State, sym: &str, id: &str, c: &J, t: f64) -> EditResult<()> {
     let (n, fps) = (super::frame_ops::frame_count(st), fps_of(st));
+    TWEEN.with(|x| x.set(st.project.settings.tween_interp));
     let Some(l) = st.project.layer_mut(sym, id) else { return fail("no figure") };
     if l.as_figure().is_none() {
         return fail("not a figure");
