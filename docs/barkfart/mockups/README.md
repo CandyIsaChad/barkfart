@@ -7,6 +7,8 @@ These scripts draw the redesign boards (REDESIGN.md) as static HTML.
 - `node graph-editor.mjs` writes the Curves (graph) boards, built on the
   timeline and effects boards (run `boards.mjs` first): `graph`,
   `graph-mods` (a value with a modifier) and `graph-mods-add`.
+- `node script-layer.mjs` writes the Script layer board (`script`), built on
+  the timeline board.
 
 Both write `project/*.dc.html` (for the claude.ai design canvas) and
 `preview/*.html` (to open in a browser). They need no packages.
