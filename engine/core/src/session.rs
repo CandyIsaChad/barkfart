@@ -333,7 +333,11 @@ impl Session {
         }
         let mut st = crate::edit::State { project: p, assets: Default::default() };
         if filter.is_object() {
-            crate::edit::filters::apply(&mut st, &sym, &l, filter, t).ok()?;
+            // K2: {"plugin": id} previews a plugin effect with its defaults
+            match filter["plugin"].as_str() {
+                Some(pid) => crate::edit::filters::apply_plugin(&mut st, &sym, &l, &json!({"id": pid}), t, false).ok()?,
+                None => crate::edit::filters::apply(&mut st, &sym, &l, filter, t).ok()?,
+            }
         }
         Some((st.project, t))
     }
@@ -1096,6 +1100,15 @@ impl Session {
                     None => self.message = "There is no plugin in that file.".into(),
                 }
                 self.rev += 1;
+            }
+            "plugin_effect" => {
+                // K2: a plugin effect on the selected figure (add, change, remove)
+                if let Some(l) = self.sel_layer() {
+                    let c2 = c.clone();
+                    let keyed = self.keying;
+                    let label = if c["remove"].as_bool() == Some(true) { "Remove effect" } else { "Effects" };
+                    self.step(label, move |s| crate::edit::filters::apply_plugin(s, &sym, &l, &c2, t, keyed));
+                }
             }
             "plugin_uninstall" => {
                 if let Some(id) = c["id"].as_str() {
@@ -3723,6 +3736,7 @@ impl Session {
                 "layerPos": p.root()?.layers.iter().filter(|x| x.as_figure().is_some()).position(|x| x.id == *l).map(|i| i + 1),
                 "figureCount": p.root()?.layers.iter().filter(|x| x.as_figure().is_some()).count(),
                 "filters": crate::edit::filters::state(p, &p.root_symbol, l, t),
+                "pluginEffects": crate::edit::filters::plugin_state(p, layer, t),
             }))
         });
         let textfield = self.selected_text.as_ref().and_then(|id| {

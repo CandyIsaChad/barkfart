@@ -111,22 +111,18 @@ fn ensure(l: &mut Layer, n: i32, fps: f64, id: &str, ty: &str) {
     }
 }
 
-/// Filters run in the panel's order; anything else stays in front of them.
+/// Filters run in the panel's order; anything else (plugin effects, effects
+/// from files) stays in front of them, in the order it was added.
 fn reorder(l: &mut Layer) {
     let ours: std::collections::HashSet<&str> = ORDER.into_iter().collect();
-    let pre = l
-        .effects
-        .nodes
-        .values()
-        .filter(|e| ours.contains(e.id.as_str()))
-        .filter_map(|e| e.inputs.first().cloned())
-        .find(|x| !ours.contains(x.as_str()));
-    let mut prev = pre;
-    for id in ORDER {
+    let mut chain: Vec<String> = l.effects.nodes.keys().filter(|k| !ours.contains(k.as_str())).cloned().collect();
+    chain.extend(ORDER.iter().filter(|id| l.effects.nodes.contains_key(**id)).map(|id| id.to_string()));
+    let mut prev: Option<String> = None;
+    for id in &chain {
         if let Some(e) = l.effects.nodes.get_mut(id) {
             e.inputs = prev.iter().cloned().collect();
-            prev = Some(id.to_string());
         }
+        prev = Some(id.clone());
     }
     l.effects.output = prev;
 }
@@ -588,4 +584,119 @@ pub fn movement(st: &mut State, sym: &str, id: &str, c: &J) -> EditResult<()> {
         }
     }
     Ok(())
+}
+
+
+/// K2: a plugin effect on a layer: added with its defaults (effect node
+/// `plugin.<id>`, type `plugin:<id>`; a point is two values, a choice its
+/// index), changed like the built-in filters (keyed or static, D5), or
+/// removed. `c`: {"id", "props"?: {name: value}, "enabled"?, "remove"?}.
+pub fn apply_plugin(st: &mut State, sym: &str, layer: &str, c: &J, t: f64, keyed: bool) -> EditResult<()> {
+    use barkfart_script::PropKind as K;
+    let Some(pid) = c["id"].as_str() else { return fail("which plugin?") };
+    let node = format!("plugin.{pid}");
+    let Some(l) = st.project.layer_mut(sym, layer) else { return fail("no layer") };
+    if c["remove"].as_bool() == Some(true) {
+        let ids: Vec<String> = l.effects.nodes.keys().filter(|k| **k == node).cloned().collect();
+        for k in ids {
+            l.effects.nodes.shift_remove(&k);
+        }
+        // the chain runs through what's left
+        reorder(l);
+        return Ok(());
+    }
+    if !l.effects.nodes.contains_key(&node) {
+        let Some(def) = crate::plugins::definition(pid) else { return fail("That plugin isn't installed.") };
+        if def.kind != barkfart_script::Kind::Effect {
+            return fail(format!("{} isn't an effect.", def.name));
+        }
+        let owner = l.id.clone();
+        let mut e = EffectNode::new(&owner, &node, &format!("plugin:{pid}"));
+        for p in &def.props {
+            match &p.kind {
+                K::Number { default, .. } | K::Angle { default } => {
+                    e.param(&owner, &p.name, ValueType::Float, Value::F(*default as f32));
+                }
+                K::Toggle { default } => {
+                    e.param(&owner, &p.name, ValueType::Bool, Value::B(*default));
+                }
+                K::Colour { default } => {
+                    e.param(&owner, &p.name, ValueType::Color, Value::C(Color::new(default[0], default[1], default[2], default[3])));
+                }
+                K::Choice { default, .. } => {
+                    e.param(&owner, &p.name, ValueType::Float, Value::F(*default as f32));
+                }
+                K::Point { default } => {
+                    e.param(&owner, &format!("{}.x", p.name), ValueType::Float, Value::F(default.0 as f32));
+                    e.param(&owner, &format!("{}.y", p.name), ValueType::Float, Value::F(default.1 as f32));
+                }
+                K::Text { .. } => {}
+            }
+        }
+        l.effects.append(e).map_err(super::EditError)?;
+        reorder(l);
+    }
+    let Some(e) = l.effects.nodes.get_mut(&node) else { return fail("no such effect") };
+    if let Some(on) = c["enabled"].as_bool() {
+        e.enabled = on;
+    }
+    if let Some(J::Object(set)) = c.get("props") {
+        STATIC.with(|x| x.set(!keyed));
+        for (k, v) in set {
+            let Some(q) = e.params.get_mut(k.as_str()) else { continue };
+            let value = match (q.ty, v) {
+                (ValueType::Bool, J::Bool(b)) => Value::B(*b),
+                (ValueType::Color, J::Number(n)) => Value::C(Color::rgba8888(n.as_u64().unwrap_or(0xffffffff) as u32)),
+                (_, J::Number(n)) => Value::F(n.as_f64().unwrap_or(0.0) as f32),
+                _ => continue,
+            };
+            key_at(q, t, value);
+        }
+        STATIC.with(|x| x.set(false));
+    }
+    Ok(())
+}
+
+/// K2: a layer's plugin effects for the app: each with its settings (from
+/// the plugin's definition; missing or switched off says so).
+pub fn plugin_state(p: &Project, l: &Layer, t: f64) -> J {
+    use barkfart_script::PropKind as K;
+    let mut r = Resolver::new(p);
+    let list: Vec<J> = l
+        .effects
+        .nodes
+        .values()
+        .filter_map(|e| {
+            let pid = e.ty.strip_prefix("plugin:")?;
+            let def = crate::plugins::definition(pid);
+            let off = crate::plugins::list().into_iter().find(|x| x.def.id == pid).and_then(|x| x.off);
+            let get = |r: &mut Resolver, n: &str| e.params.get(n).map(|q| r.resolve(q, t));
+            let settings: Vec<J> = def
+                .as_ref()
+                .map(|d| {
+                    d.props
+                        .iter()
+                        .filter_map(|pd| {
+                            let (kind, value, extra) = match &pd.kind {
+                                K::Number { min, max, step, .. } => ("number", serde_json::json!(get(&mut r, &pd.name)?.f()), serde_json::json!({"min": min, "max": max, "step": step})),
+                                K::Angle { .. } => ("angle", serde_json::json!(get(&mut r, &pd.name)?.f()), serde_json::json!({})),
+                                K::Toggle { .. } => ("toggle", serde_json::json!(matches!(get(&mut r, &pd.name)?, Value::B(true))), serde_json::json!({})),
+                                K::Colour { .. } => ("colour", serde_json::json!(get(&mut r, &pd.name).map(|v| match v { Value::C(c) => c.to_rgba8888(), _ => 0xffffffff })?), serde_json::json!({})),
+                                K::Choice { options, .. } => {
+                                    let i = get(&mut r, &pd.name)?.f().round().max(0.0) as usize;
+                                    ("choice", serde_json::json!(options.get(i).cloned().unwrap_or_default()), serde_json::json!({"options": options}))
+                                }
+                                K::Point { .. } => ("point", serde_json::json!([get(&mut r, &format!("{}.x", pd.name))?.f(), get(&mut r, &format!("{}.y", pd.name))?.f()]), serde_json::json!({})),
+                                K::Text { .. } => return None,
+                            };
+                            Some(serde_json::json!({"name": pd.name, "label": pd.label.clone().unwrap_or_else(|| pd.name.clone()), "kind": kind, "value": value, "extra": extra}))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Some(serde_json::json!({"id": pid, "name": def.as_ref().map(|d| d.name.clone()).unwrap_or_else(|| pid.to_string()), "version": def.as_ref().map(|d| d.version.clone()),
+                "author": def.as_ref().and_then(|d| d.author.clone()), "missing": def.is_none(), "off": off, "enabled": e.enabled, "settings": settings}))
+        })
+        .collect();
+    serde_json::json!(list)
 }

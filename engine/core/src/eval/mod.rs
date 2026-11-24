@@ -461,6 +461,10 @@ fn resolve_stack(effects: &EffectStack, t: f64, r: &mut Resolver, g: &mut Group)
             };
             params.push((name.clone(), v));
         }
+        // K2: a plugin effect's shader gets the time
+        if e.ty.starts_with("plugin:") {
+            params.push(("__seconds".into(), ParamValue::F(t as f32)));
+        }
         g.effects.push(ResolvedEffect { ty: e.ty.clone(), mix, params });
     }
 }

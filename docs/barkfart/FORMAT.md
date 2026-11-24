@@ -42,6 +42,11 @@ re-encoding, so autosave stays cheap. `formatVersion` is 1. These rules keep eve
   `settings.tweenInterp: "smooth"` says how new tweens move (absent:
   linear). Files without these are unchanged.
 
+- **Plugin effects** (2026-11-24, K2): an effect node `plugin.<id>` of type
+  `plugin:<id>`, its settings ordinary params (a point as `<name>.x` and
+  `<name>.y`, a choice its index). Kept as they are when the plugin isn't
+  installed.
+
 - **Plugin modifiers** (2026-11-24, D36): a property's modifier list may
   hold `{"type": "plugin", "id", "version", "props": {name: value}}`
   (numbers, true/false, text and choices by name, colours as four numbers,

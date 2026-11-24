@@ -78,6 +78,15 @@ pub struct Definition {
     pub description: Option<String>,
     /// In the order the plugin lists them (sorted by name: Luau tables keep no order).
     pub props: Vec<Prop>,
+    /// An effect's shader.
+    pub shader: Option<Shader>,
+}
+
+/// An effect's shader (SCRIPTING.md "The shader"): WGSL text that defines
+/// `fn effect(uv: vec2<f32>, u: Props) -> vec4<f32>`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Shader {
+    pub source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -451,5 +460,33 @@ fn definition(t: &Table) -> Result<Definition, ScriptError> {
         }
     }
     props.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(Definition { name: text(t, "name").filter(|s| !s.trim().is_empty()).unwrap_or_else(|| id.clone()), version: need("version")?, id, kind, author: text(t, "author"), description: text(t, "description"), props })
+    // an effect's shader: bf.wgsl("...") with the shader text itself
+    let shader = match t.get::<Value>("shader") {
+        Ok(Value::Table(sh)) => match text(&sh, "__shader").as_deref() {
+            Some("wgsl") => {
+                let source = text(&sh, "source").unwrap_or_default();
+                if source.trim().ends_with(".wgsl") && !source.contains('{') {
+                    return Err(ScriptError::Invalid("put the shader's text in bf.wgsl(...) itself; shader files next to the plugin come later".into()));
+                }
+                if !source.contains("fn effect") {
+                    return Err(ScriptError::Invalid("its shader needs fn effect(uv: vec2<f32>, u: Props) -> vec4<f32>".into()));
+                }
+                Some(Shader { source })
+            }
+            Some("glsl") => return Err(ScriptError::Invalid("GLSL shaders aren't supported yet; write the shader in WGSL with bf.wgsl(...)".into())),
+            _ => return Err(ScriptError::Invalid("shader = bf.wgsl(\"...\")".into())),
+        },
+        _ => None,
+    };
+    if kind == Kind::Effect && shader.is_none() {
+        return Err(ScriptError::Invalid("an effect needs shader = bf.wgsl(\"...\")".into()));
+    }
+    if kind == Kind::Effect && props.len() > 38 {
+        return Err(ScriptError::Invalid("an effect can have at most 38 settings".into()));
+    }
+    if kind == Kind::Effect && props.iter().any(|p| matches!(p.kind, PropKind::Text { .. })) {
+        return Err(ScriptError::Invalid("an effect's settings can't be text (a shader has no use for it)".into()));
+    }
+    Ok(Definition {
+        shader, name: text(t, "name").filter(|s| !s.trim().is_empty()).unwrap_or_else(|| id.clone()), version: need("version")?, id, kind, author: text(t, "author"), description: text(t, "description"), props })
 }

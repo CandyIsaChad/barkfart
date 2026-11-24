@@ -4557,6 +4557,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         try {
           await File('${(await pluginsDir()).path}/${f.name}').writeAsString(source);
         } catch (_) {}
+        // a new effect's tile gets its picture
+        if (_fxBrowser) await _openFxBrowser();
       }
     }
   }
@@ -4648,6 +4650,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   static const _fxMovement = [('wiggle', 'Wiggle', 'wiggle'), ('swing', 'Swing', 'swing'), ('loop', 'Loop', 'loopmod'), ('follow', 'Follow', 'follow'), ('link', 'Link', 'link')];
 
   bool _fxBrowser = false;
+  List<Map> get _effectPlugins => ((_st['plugins'] as List?) ?? const []).cast<Map>().where((p) => p['kind'] == 'effect').toList();
   String? _fxOpen;
   String _fxSearch = '';
   final Map<String, ui.Image> _fxPreviews = {};
@@ -4678,6 +4681,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       final c = Completer<ui.Image>();
       ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, c.complete);
       _fxPreviews[k] = await c.future;
+    }
+    // K2: your effect plugins, previewed with their defaults
+    for (final p in _effectPlugins) {
+      final px = e.renderEffectPreview(jsonEncode({'plugin': p['id']}), w, h);
+      if (px == null) continue;
+      final c = Completer<ui.Image>();
+      ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, c.complete);
+      _fxPreviews['plugin:${p['id']}'] = await c.future;
     }
     if (mounted) setState(() => _fxBrowser = true);
   }
@@ -4739,9 +4750,48 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       };
     }
 
+    // K2: plugin effects, each with its settings
+    final plugins = group ? const <Map>[] : ((sel['pluginEffects'] as List?) ?? const []).cast<Map>();
+    List<rw.Desc> pluginSettings(Map pe) {
+      void put(Map<String, Object?> props) => _cmd({'op': 'plugin_effect', 'id': pe['id'], 'props': props});
+      return [
+        for (final p in ((pe['settings'] as List?) ?? const []).cast<Map>())
+          switch (p['kind']) {
+            'number' || 'angle' => () {
+                final x = (p['extra'] as Map?) ?? const {};
+                final step = ((x['step'] as num?) ?? (p['kind'] == 'angle' ? 5 : ((x['max'] as num?) != null && (x['max'] as num) <= 1 ? 0.05 : 1))).toDouble();
+                final v = ((p['value'] as num?) ?? 0).toDouble();
+                double c(double y) => y.clamp(((x['min'] as num?) ?? -1e9).toDouble(), ((x['max'] as num?) ?? 1e9).toDouble());
+                return rw.DStep('${p['label']}', step >= 1 ? '${v.round()}' : v.toStringAsFixed(2), onMinus: () => put({p['name']: c(v - step)}), onPlus: () => put({p['name']: c(v + step)}));
+              }(),
+            'toggle' => rw.DTick('${p['label']}', p['value'] == true, onChanged: (v) => put({p['name']: v})),
+            'colour' => rw.DWidget(_swatches(((p['value'] as num?) ?? 0xffffffff).toInt(), (c) => put({p['name']: c}))),
+            'choice' => () {
+                final opts = (((p['extra'] as Map?)?['options'] as List?) ?? const []).cast<String>();
+                final i = opts.indexOf('${p['value']}');
+                return rw.DLink('${p['label']}', '${p['value']}', onTap: opts.isEmpty ? null : () => put({p['name']: (i + 1) % opts.length}));
+              }(),
+            _ => rw.DInfo('${p['label']}', '${p['value']}'),
+          },
+        if (pe['off'] != null) rw.DHint('${pe['off']} Import the plugin again to switch it back on.'),
+      ];
+    }
+
     return [
       rw.DTitle('Effects', onAdd: _openFxBrowser, addLabel: 'Add an effect'),
-      if (list.isEmpty) rw.DHint(group ? 'No effects yet. An effect here works on everything in the group, drawn together.' : 'No effects yet. They show while playing and in exports; FX in the timeline shows them while editing.'),
+      for (final pe in plugins) ...[
+        rw.DFx(pe['missing'] == true ? 'Missing: ${pe['name']}' : '${pe['name']}',
+            note: pe['author'] != null ? 'by ${pe['author']}' : null,
+            missing: pe['missing'] == true || pe['off'] != null,
+            shown: pe['enabled'] != false,
+            open: _fxOpen == 'plugin:${pe['id']}',
+            onTap: () => setState(() => _fxOpen = _fxOpen == 'plugin:${pe['id']}' ? null : 'plugin:${pe['id']}'),
+            onEye: () => _cmd({'op': 'plugin_effect', 'id': pe['id'], 'enabled': pe['enabled'] == false}),
+            onRemove: () => _cmd({'op': 'plugin_effect', 'id': pe['id'], 'remove': true})),
+        if (_fxOpen == 'plugin:${pe['id']}' && pe['missing'] != true) ...pluginSettings(pe),
+      ],
+      if (plugins.any((pe) => pe['missing'] == true)) rw.DHint('${sel['name'] ?? 'This figure'} draws without a missing plugin until it is imported again. Its settings and keys are kept.'),
+      if (list.isEmpty && plugins.isEmpty) rw.DHint(group ? 'No effects yet. An effect here works on everything in the group, drawn together.' : 'No effects yet. They show while playing and in exports; FX in the timeline shows them while editing.'),
       for (final (k, label, shown, remove) in list) ...[
         rw.DFx(label,
             tag: _fxAnimated(sel, label),
@@ -4823,6 +4873,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         );
     Widget pic(String k) => _fxPreviews[k] == null ? const SizedBox.expand() : RawImage(image: _fxPreviews[k], fit: BoxFit.contain);
     final look = [for (final (k, l, on, _) in _fxLook) if (match(l)) tile(l, pic(k), () => pick(k, {'op': 'filter', ...on}))];
+    // K2: effect plugins (one figure at a time)
+    final yours = [
+      for (final p in _effectPlugins)
+        if (match('${p['name']}')) tile('${p['name']}', pic('plugin:${p['id']}'), p['off'] != null || _st['multi'] != null ? null : () => pick('plugin:${p['id']}', {'op': 'plugin_effect', 'id': p['id']})),
+    ];
     final edges = [for (final (k, l, on, _) in _fxEdges) if (match(l)) tile(l, pic(k), () => pick(k, {'op': 'filter', ...on}))];
     final moves = [
       for (final (k, l, icon) in _fxMovement)
@@ -4834,7 +4889,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Padding(
         padding: const EdgeInsets.fromLTRB(6, 8, 10, 0),
-        child: Row(children: [kit.WordButton('‹ Properties', onTap: close), const Spacer()]),
+        child: Row(children: [kit.WordButton('‹ Properties', onTap: close), const Spacer(), kit.WordButton('Import…', onTap: _importPlugin)]),
       ),
       Padding(
         padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
@@ -4854,6 +4909,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ),
       Expanded(
         child: ListView(padding: const EdgeInsets.fromLTRB(14, 0, 14, 16), children: [
+          if (yours.isNotEmpty) ...[title('Yours'), grid(yours)],
           if (look.isNotEmpty) ...[title('Look'), grid(look)],
           if (moves.isNotEmpty) ...[title('Movement'), grid(moves), if (q.isEmpty) const kit.Hint('Loop, Follow and Link come later.')],
           if (edges.isNotEmpty) ...[title('Edges'), grid(edges)],

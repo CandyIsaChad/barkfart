@@ -3,8 +3,14 @@
 Status: the runtime is built (2026-11-24, `engine/script`, mlua 0.12.3 with
 Luau 0.748, MIT): the sandbox, the time budget and memory cap, the
 `@barkfart` API's constructors, plugin definitions read into typed props, and
-calling a modifier's `value(v, p, t)`. Hooking plugins into projects and the
-app comes next, modifiers first. The rest is still a proposal. Barkfart gets plugins written in Luau,
+calling a modifier's `value(v, p, t)`. Modifiers on a value (D36) and
+effects are built; effects take WGSL for now (GLSL needs one more crate,
+`pp-rs`, waiting for the user's okay). An effect's shader defines
+`fn effect(uv: vec2<f32>, u: Props) -> vec4<f32>`: `uv` runs 0..1 from the
+top left, `layer(uv)` is the layer's colour (premultiplied), and `u` holds
+`size`, `time` and each setting by name (a colour is a vec4, a point a
+vec2, a choice its index). `frame(p, t)` extras, shader files beside the
+plugin and several passes come later. The rest is still a proposal. Barkfart gets plugins written in Luau,
 the sandboxed Lua dialect, so people can add their own effects, property
 drivers, tools and panels. LuaJIT is out, because iOS forbids executable
 memory, and Luau's interpreter is fast enough without it.

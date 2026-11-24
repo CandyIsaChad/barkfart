@@ -10,7 +10,7 @@
 
 pub mod glyphs;
 
-use barkfart_core::eval::ResolvedEffect;
+use barkfart_core::eval::{ParamValue, ResolvedEffect};
 use barkfart_core::fx as rfx;
 use barkfart_core::model::{Blend, Color};
 use barkfart_core::tess::{IsoItem, Isolate};
@@ -116,6 +116,10 @@ pub struct Renderer {
     pool: std::sync::Mutex<Vec<(u32, u32, u32, wgpu::Texture)>>,
     /// Images by id (sprite assets, "glyphs:<page>"); missing ids draw in plain colour.
     textures: std::sync::Mutex<std::collections::HashMap<String, wgpu::TextureView>>,
+    /// K2: plugin effects' pipelines by plugin id, with the plugin list's
+    /// generation they were made for (None: the shader didn't compile).
+    plugin_pipes: std::sync::Mutex<std::collections::HashMap<String, (u64, Option<wgpu::RenderPipeline>)>>,
+    fx_pl: wgpu::PipelineLayout,
     pub adapter: AdapterReport,
 }
 
@@ -294,8 +298,54 @@ impl Renderer {
             pipes,
             pool: std::sync::Mutex::new(Vec::new()),
             textures: std::sync::Mutex::new(std::collections::HashMap::new()),
+            plugin_pipes: std::sync::Mutex::new(std::collections::HashMap::new()),
+            fx_pl: fx_pl.clone(),
             adapter: AdapterReport { name: info.name, backend: format!("{:?}", info.backend), driver: format!("{} {}", info.driver, info.driver_info) },
         })
+    }
+
+    /// K2: an effect plugin's pipeline, made once per plugin list generation.
+    /// A shader that doesn't compile switches the plugin off with the
+    /// compiler's first line, and draws nothing new (the layer passes through).
+    fn plugin_pipeline(&self, id: &str) -> Option<(barkfart_script::Definition, wgpu::RenderPipeline)> {
+        let (def, generation) = barkfart_core::plugins::effect(id)?;
+        let mut cache = self.plugin_pipes.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((g, pipe)) = cache.get(id) {
+            if *g == generation {
+                return pipe.clone().map(|p| (def, p));
+            }
+        }
+        let source = plugin_wgsl(&def);
+        let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let module = self.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some(id), source: wgpu::ShaderSource::Wgsl(source.into()) });
+        let pipe = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(id),
+            layout: Some(&self.fx_pl),
+            vertex: wgpu::VertexState { module: &module, entry_point: Some("vs_full"), compilation_options: Default::default(), buffers: &[] },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_plugin"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState { format: FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        let failed = pollster::block_on(scope.pop());
+        let pipe = match failed {
+            None => Some(pipe),
+            Some(e) => {
+                let text = e.to_string();
+                let line = text.lines().find(|l| !l.trim().is_empty() && !l.contains("Validation Error")).unwrap_or("").trim().to_string();
+                barkfart_core::plugins::report_failure(id, format!("Its shader didn't compile: {line}"));
+                None
+            }
+        };
+        cache.insert(id.to_string(), (generation, pipe.clone()));
+        pipe.map(|p| (def, p))
     }
 
     pub fn options(&self) -> Options {
@@ -634,6 +684,53 @@ impl<'a> Frame<'a> {
         out
     }
 
+    /// K2: a plugin effect: its shader over src with its settings (in the
+    /// order the plugin lists them, one vec4 each, after the size and time);
+    /// missing, off or not compiling, src passes through.
+    fn plugin(&mut self, e: &ResolvedEffect, id: &str, src: &wgpu::Texture, rect: Rect) -> wgpu::Texture {
+        use barkfart_script::PropKind as K;
+        let Some((def, pipe)) = self.r.plugin_pipeline(id) else { return self.copy(src, rect) };
+        let num = |n: &str| match e.params.iter().find(|(k, _)| k == n).map(|(_, v)| v) {
+            Some(ParamValue::F(x)) => *x,
+            Some(ParamValue::D(x)) => *x as f32,
+            Some(ParamValue::B(b)) => *b as i32 as f32,
+            _ => 0.0,
+        };
+        let mut v: Vec<[f32; 4]> = vec![[self.w as f32, self.h as f32, num("__seconds"), 0.0]];
+        for p in &def.props {
+            v.push(match &p.kind {
+                K::Colour { .. } => match e.params.iter().find(|(k, _)| *k == p.name).map(|(_, v)| v) {
+                    Some(ParamValue::C(c)) => [c.r, c.g, c.b, c.a],
+                    _ => [1.0; 4],
+                },
+                K::Point { .. } => [num(&format!("{}.x", p.name)), num(&format!("{}.y", p.name)), 0.0, 0.0],
+                _ => [num(&p.name), 0.0, 0.0, 0.0],
+            });
+        }
+        let out = self.texture(1);
+        let bind = self.fx_bind(&v, src, None);
+        let ov = out.create_view(&Default::default());
+        let mut pass = self.enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some(id),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &ov,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&pipe);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.set_scissor_rect(rect.x, rect.y, rect.w, rect.h);
+        pass.draw(0..3, 0..1);
+        drop(pass);
+        out
+    }
+
     /// Draws batches (by index) into a target with their blend modes.
     fn batches(&mut self, list: &DrawList, idx: &[usize], t: &Target, clip: Rect) {
         let mut pass = Self::pass(&mut self.enc, t, false);
@@ -717,7 +814,7 @@ impl<'a> Frame<'a> {
         let mut cur = src;
         for e in list {
             let m = rfx::mix(e);
-            if m <= 0.0 || !rfx::known(&e.ty) {
+            if m <= 0.0 || !(rfx::known(&e.ty) || e.ty.starts_with("plugin:")) {
                 continue;
             }
             let out = self.one(e, &cur, rect);
@@ -752,6 +849,7 @@ impl<'a> Frame<'a> {
         let f = |n: &str, d: f32, lo: f32, hi: f32| rfx::f(e, n, d, lo, hi);
         let col = |c: Color| [c.r, c.g, c.b, c.a];
         match e.ty.as_str() {
+            plugin if plugin.starts_with("plugin:") => self.plugin(e, &plugin["plugin:".len()..], src, rect),
             rfx::BLUR => self.blurred(src, rfx::sigma(f("radius", 6.0, 0.0, rfx::MAX_LENGTH)) * s, rect),
             rfx::GLOW | rfx::SHADOW => {
                 let glow = e.ty == rfx::GLOW;
@@ -860,4 +958,68 @@ fn unpremultiply(px: &mut [u8]) {
             }
         }
     }
+}
+
+
+/// K2: an effect plugin's whole WGSL: the uniform block and textures the
+/// built-in effects use, `Props` (size, time, then each setting by name),
+/// `layer(uv)` (the layer's colour, premultiplied, uv 0..1 from the top
+/// left, smooth between pixels), the plugin's own code with its
+/// `fn effect(uv: vec2<f32>, u: Props) -> vec4<f32>`, and the entry points.
+fn plugin_wgsl(def: &barkfart_script::Definition) -> String {
+    use barkfart_script::PropKind as K;
+    let mut fields = String::from("    size: vec2<f32>,\n    time: f32,\n");
+    let mut init = String::from("vec2<f32>(p.v[0].x, p.v[0].y), p.v[0].z");
+    for (i, p) in def.props.iter().enumerate() {
+        let slot = i + 1;
+        let (ty, val) = match &p.kind {
+            K::Colour { .. } => ("vec4<f32>", format!("p.v[{slot}]")),
+            K::Point { .. } => ("vec2<f32>", format!("p.v[{slot}].xy")),
+            _ => ("f32", format!("p.v[{slot}].x")),
+        };
+        fields.push_str(&format!("    {}: {ty},\n", p.name));
+        init.push_str(&format!(", {val}"));
+    }
+    let src = def.shader.as_ref().map(|s| s.source.as_str()).unwrap_or("");
+    format!(
+        r"struct P {{ v: array<vec4<f32>, 40> }};
+@group(0) @binding(0) var<uniform> p: P;
+@group(0) @binding(1) var t0: texture_2d<f32>;
+@group(0) @binding(2) var t1: texture_2d<f32>;
+
+@vertex
+fn vs_full(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {{
+    let x = f32((i << 1u) & 2u) * 2.0 - 1.0;
+    let y = f32(i & 2u) * 2.0 - 1.0;
+    return vec4<f32>(x, y, 0.0, 1.0);
+}}
+
+struct Props {{
+{fields}}};
+
+fn bf_texel(q: vec2<i32>) -> vec4<f32> {{
+    let d = vec2<i32>(textureDimensions(t0));
+    if (q.x < 0 || q.y < 0 || q.x >= d.x || q.y >= d.y) {{ return vec4<f32>(0.0); }}
+    return textureLoad(t0, q, 0);
+}}
+
+fn layer(uv: vec2<f32>) -> vec4<f32> {{
+    let x = uv * vec2<f32>(textureDimensions(t0)) - 0.5;
+    let b = floor(x);
+    let f = x - b;
+    let q = vec2<i32>(b);
+    let top = mix(bf_texel(q), bf_texel(q + vec2<i32>(1, 0)), f.x);
+    let bottom = mix(bf_texel(q + vec2<i32>(0, 1)), bf_texel(q + vec2<i32>(1, 1)), f.x);
+    return mix(top, bottom, f.y);
+}}
+
+{src}
+
+@fragment
+fn fs_plugin(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {{
+    let u = Props({init});
+    return effect(pos.xy / u.size, u);
+}}
+"
+    )
 }

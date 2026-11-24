@@ -783,6 +783,14 @@ Render the boards (docs/barkfart/mockups: `mkdir -p project preview && node boar
 ### K. Hardest, later
 Groups; the Luau plugin runtime (it needs the `mlua` crate, so it waits
 until a dependency fetch is approved); Script layers; emitters.
+- [x] K2b. Plugin effects: WGSL shaders run over the layer as one more
+  effect pass (the renderer compiles each plugin once per install; a
+  shader that doesn't compile switches the plugin off with the compiler's
+  line), settings keyable like any effect value; the effects browser's
+  Yours with real previews and Import…; cards with settings on the
+  Stickfigure page; a missing plugin orange, the layer drawn without it.
+  Fixed on the way: the filters' chain dropped any effect that wasn't a
+  built-in filter.
 - [x] K2a. The Luau runtime (SCRIPTING.md; the user approved fetching mlua
   2026-11-24): `engine/script` with the sandbox (safe libraries only,
   read-only globals), a time budget per call (loading 200 ms, a modifier

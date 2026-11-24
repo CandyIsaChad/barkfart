@@ -65,6 +65,22 @@ pub fn definition(id: &str) -> Option<Definition> {
     registry().list.iter().find(|x| x.def.id == id).map(|x| x.def.clone())
 }
 
+/// The renderer reports a shader that won't compile (K2 effects).
+pub fn report_failure(id: &str, why: String) {
+    switch_off(id, why);
+}
+
+/// An installed effect plugin that runs: its definition (with its shader) and
+/// the list's generation, so a renderer can tell when to compile again.
+pub fn effect(id: &str) -> Option<(Definition, u64)> {
+    let r = registry();
+    let x = r.list.iter().find(|x| x.def.id == id)?;
+    if x.off.is_some() || x.def.kind != Kind::Effect {
+        return None;
+    }
+    Some((x.def.clone(), r.generation))
+}
+
 fn switch_off(id: &str, why: String) {
     let mut r = registry();
     if let Some(x) = r.list.iter_mut().find(|x| x.def.id == id) {

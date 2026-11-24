@@ -107,6 +107,7 @@ name = "barkfart-render"
 version = "0.1.0"
 dependencies = [
  "barkfart-core",
+ "barkfart-script",
  "bytemuck",
  "fontdue",
  "png",
