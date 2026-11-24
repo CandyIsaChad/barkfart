@@ -42,6 +42,9 @@ re-encoding, so autosave stays cheap. `formatVersion` is 1. These rules keep eve
   `settings.tweenInterp: "smooth"` says how new tweens move (absent:
   linear). Files without these are unchanged.
 
+- **Node `name`** (2026-11-24, D35): a part's own name, written only when
+  given.
+
 - **Symbol `groups` and layer `group`** (2026-11-24, D33): a symbol may
   list groups, each `id` (a `G` id), `name`, `opacity` (a plain number),
   `open` (its folder row) and optional `effects` (an effect stack, static

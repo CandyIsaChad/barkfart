@@ -2242,6 +2242,8 @@ fn every_command_undoes_and_redoes_exactly() {
         // M9 and K (D33): several figures' poses, groups and their effects
         json!({"op": "paste_poses"}), json!({"op": "group"}), json!({"op": "group_set", "opacity": 0.5, "name": "Crowd"}), json!({"op": "group_order", "forward": true}),
         json!({"op": "ungroup"}), json!({"op": "delete_group"}), json!({"op": "filter", "glow": 0xffc83dffu32, "glowAmount": 1.0, "_group": true}),
+        // D34: the graph's one-value handles and Add a value
+        json!({"op": "handles", "v": "vector", "frame": 1, "property": "L2/armR1/rotation"}), json!({"op": "curve_add", "property": "L2/opacity"}),
     ];
     let text = |s: &Session| codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
     let mut failures = Vec::new();

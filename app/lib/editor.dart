@@ -1612,8 +1612,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 ? _shapeShelf()
                 : Column(children: [
                     _controlBar(),
-                    _previewRow(),
-                    if (_layersOpen) _framesBar(),
+                    if (_curvesOn && _layersOpen && !_playing) _curvesView() else _previewRow(),
+                    if (_layersOpen) _curvesOn && !_playing ? _curvesBar() : _framesBar(),
                   ]),
           ),
         ]),
@@ -1832,7 +1832,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     Widget row(int i, Map p) {
       final kind = p['kind'] as String;
       final on = p['id'] == selNode && kind != 'polyfill';
-      final label = kind == 'connector' ? 'Connector ${p['n']}' : kind == 'polyfill' ? 'Polyfill ${p['n']}' : '${words[p['shape']] ?? 'Segment'} ${p['n']}';
+      final label = p['name'] is String ? '${p['name']}' : kind == 'connector' ? 'Connector ${p['n']}' : kind == 'polyfill' ? 'Polyfill ${p['n']}' : '${words[p['shape']] ?? 'Segment'} ${p['n']}';
       final glyph = kind == 'connector' ? 'connector' : kind == 'polyfill' ? 'polyfill' : glyphs[p['shape']] ?? 'segment';
       final item = Container(
         height: 29,
@@ -1848,6 +1848,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       return GestureDetector(
         key: ValueKey('part-${p['id']}'),
         onTap: kind == 'polyfill' ? null : () => _cmd({'op': 'select', 'layer': (_st['building'] as Map)['layer'], 'node': p['id']}),
+        // D35: double-tap to name it (holding drags it to a new place)
+        onDoubleTap: kind == 'polyfill' ? null : () => _renamePart('${p['id']}', label, named: p['name'] is String),
         // polyfills follow their joint; segments drag to a new place
         child: kind == 'polyfill' ? item : ReorderableDelayedDragStartListener(index: i, child: item),
       );
@@ -2923,6 +2925,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 child: Text('FX', style: TextStyle(color: AppSettings.number('showFilters') > 0 ? cAccent : cInk2b, fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.3)),
               ),
             ),
+          // D34: the timeline as curves of the selected figure's values
+          kit.IconTool('curves', label: _curvesOn ? 'Back to the layers' : 'Curves', on: _curvesOn, onTap: _playing ? null : () => _cmd({'op': 'set', 'k': 'curves', 'v': !_curvesOn})),
           const Spacer(),
           kit.Tap(
             key: _fpsKey,
@@ -3035,6 +3039,323 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ]),
     );
     if (pick != null) items[pick].$3?.call();
+  }
+
+  // ---------------------------------------------------------------- curves
+
+  // D34 (the graph board): the selected figure's values as curves. The engine
+  // sends each stretch's exact shape; this draws it and turns drags into
+  // curve_down / curve_move / up (one undo step each).
+  bool get _curvesOn => _opts['curves'] == true;
+  String? _curveSel; // the selected value (its property id)
+  double? _curveKey; // the selected key's frame
+  final Map<String, bool> _curveVis = {};
+  Map<String, (double, double)>? _curveRanges; // kept still after a drag, until Fit
+  double _curveScroll = 0;
+  String? _curveDrag; // key, left, right or scroll
+  Offset _curveFrom = Offset.zero;
+  double _curveScrollFrom = 0;
+  _CurveGeom? _curveGeom;
+
+  static const _curveColours = [Color(0xFFD9482B), Color(0xFF2E8B57), Color(0xFFC28A00), Color(0xFF2D63E0), Color(0xFF9A6BD0), Color(0xFF0E9AA7), Color(0xFFB3446C)];
+
+  List<Map> get _curveChannels => (((_st['curves'] as Map?)?['channels'] as List?) ?? const []).cast<Map>();
+  bool _curveShown(Map c) => _curveVis['${c['id']}'] ?? (c['focus'] == true);
+
+  Widget _curvesView() {
+    final cv = _st['curves'] as Map?;
+    final h = math.min(300.0, MediaQuery.sizeOf(context).height * 0.42);
+    final nameW = MediaQuery.sizeOf(context).width >= 900 ? 210.0 : 140.0;
+    if (cv == null) {
+      return Container(
+        height: 72,
+        color: cCard,
+        alignment: Alignment.center,
+        child: const Text('Select a figure to see its values as curves.', style: TextStyle(color: cSecondary, fontSize: 14)),
+      );
+    }
+    final chans = _curveChannels;
+    // nothing picked yet (or it's gone): the selected joint's first value
+    if (!chans.any((c) => c['id'] == _curveSel)) {
+      _curveSel = '${(chans.where((c) => c['focus'] == true && c['unit'] != 'colour').firstOrNull ?? chans.firstOrNull)?['id'] ?? ''}';
+    }
+    // a key gone (undo, a deleted pose) is no longer selected
+    final sel = chans.where((c) => c['id'] == _curveSel).firstOrNull;
+    if (sel == null || !((sel['keys'] as List).any((k) => ((k as List)[0] as num).toDouble() == _curveKey))) _curveKey = null;
+    final addable = ((cv['addable'] as List?) ?? const []).cast<Map>();
+    Widget nameRow(int i, Map c) {
+      final on = _curveShown(c), picked = c['id'] == _curveSel;
+      final colour = _curveColours[i % _curveColours.length];
+      return GestureDetector(
+        onTap: () => setState(() {
+          _curveSel = '${c['id']}';
+          _curveVis['${c['id']}'] = true;
+        }),
+        child: Container(
+          height: 30,
+          padding: const EdgeInsets.only(left: 14, right: 4),
+          decoration: BoxDecoration(color: picked ? cSelected : null, border: const Border(bottom: BorderSide(color: Color(0xFFE6E8EB)))),
+          child: Row(children: [
+            Container(
+              width: 10,
+              height: 10,
+              decoration: c['unit'] == 'colour'
+                  ? BoxDecoration(borderRadius: BorderRadius.circular(3), color: _rgba((((c['keys'] as List).firstOrNull as List?)?[1] as num?)?.toInt() ?? 0x808080ff))
+                  : BoxDecoration(shape: BoxShape.circle, color: on ? colour : cCard, border: Border.all(color: colour, width: 2)),
+            ),
+            const SizedBox(width: 8),
+            Expanded(child: Text('${c['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: picked ? cAccent : on ? cText : cSecondary, fontWeight: picked ? FontWeight.w600 : FontWeight.w400))),
+            kit.Tap(
+              label: on ? 'Hide ${c['name']}' : 'Show ${c['name']}',
+              minSize: 26,
+              onTap: () => setState(() => _curveVis['${c['id']}'] = !on),
+              child: Pictogram('eye', size: 16, color: on ? const Color(0xFF9AA0A8) : const Color(0xFFD5D8DD)),
+            ),
+          ]),
+        ),
+      );
+    }
+
+    final names = Container(
+      width: nameW,
+      decoration: const BoxDecoration(color: cPanel, border: Border(right: BorderSide(color: Color(0xFFE6E8EB)))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Container(height: 22, decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFE6E8EB))))),
+        Container(
+          height: 32,
+          padding: const EdgeInsets.only(left: 10),
+          decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFE6E8EB)))),
+          child: Row(children: [
+            const Pictogram('figure', size: 18, color: cInk2b),
+            const SizedBox(width: 6),
+            Flexible(child: Text('${cv['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14))),
+            const SizedBox(width: 6),
+            Text('${chans.length} animated', style: const TextStyle(color: cSecondary, fontSize: 12)),
+          ]),
+        ),
+        Expanded(
+          child: ListView(padding: EdgeInsets.zero, children: [
+            for (var i = 0; i < chans.length; i++) nameRow(i, chans[i]),
+            kit.Tap(
+              label: 'Add a value',
+              minSize: 0,
+              onTap: addable.isEmpty ? null : () => _addCurveValue(addable),
+              child: Container(
+                height: 30,
+                padding: const EdgeInsets.only(left: 12),
+                alignment: Alignment.centerLeft,
+                child: Row(children: [
+                  Pictogram('plus', size: 15, color: addable.isEmpty ? cSecondary : cAccent),
+                  const SizedBox(width: 6),
+                  Text('Add a value…', style: TextStyle(color: addable.isEmpty ? cSecondary : cAccent, fontSize: 13, fontWeight: FontWeight.w600)),
+                ]),
+              ),
+            ),
+          ]),
+        ),
+      ]),
+    );
+    final graph = LayoutBuilder(builder: (context, box) {
+      final colours = {for (var i = 0; i < chans.length; i++) '${chans[i]['id']}': _curveColours[i % _curveColours.length]};
+      final geom = _CurveGeom(
+        size: Size(box.maxWidth, h),
+        frames: _frames,
+        cell: _cellW,
+        scroll: _curveScroll,
+        channels: [for (final c in chans) if (_curveShown(c)) c],
+        selected: _curveSel,
+        frozen: _curveRanges,
+      );
+      _curveGeom = geom;
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapUp: (d) => _curveTap(geom, d.localPosition),
+        onPanStart: (d) => _curvePanStart(geom, d.localPosition),
+        onPanUpdate: (d) => _curvePanUpdate(d.localPosition),
+        onPanEnd: (_) => _curvePanEnd(),
+        onPanCancel: _curvePanEnd,
+        child: CustomPaint(size: Size(box.maxWidth, h), painter: _CurvesPainter(geom, colours, _frame, _curveKey, fps: _fps.round().clamp(1, 240))),
+      );
+    });
+    return Container(
+      height: h,
+      color: cCard,
+      child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [names, Expanded(child: ClipRect(child: graph))]),
+    );
+  }
+
+  Future<void> _addCurveValue(List<Map> addable) async {
+    final groups = <String, List<Map>>{};
+    for (final a in addable) {
+      groups.putIfAbsent('${a['group']}', () => []).add(a);
+    }
+    final picked = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: cCard,
+        title: const Text('Add a value', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+        contentPadding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+        content: SizedBox(
+          width: 300,
+          child: ListView(shrinkWrap: true, children: [
+            for (final g in groups.entries) ...[
+              Padding(padding: const EdgeInsets.fromLTRB(12, 10, 12, 2), child: Text(g.key, style: const TextStyle(color: cTitle, fontSize: 12, fontWeight: FontWeight.w700))),
+              for (final a in g.value)
+                kit.Tap(
+                  label: '${a['name']}',
+                  minSize: 0,
+                  onTap: () => Navigator.pop(c, '${a['id']}'),
+                  child: Container(
+                    height: 38,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Row(children: [
+                      Expanded(child: Text('${a['name']}'.replaceFirst('${g.key} ', ''), style: const TextStyle(fontSize: 14))),
+                      Text(a['value'] is num ? (a['value'] as num).toStringAsFixed(2) : '', style: const TextStyle(color: cSecondary, fontSize: 12)),
+                    ]),
+                  ),
+                ),
+            ],
+            const Padding(
+              padding: EdgeInsets.fromLTRB(12, 8, 12, 4),
+              child: Text('Keyed on this frame, so its curve starts here. Choices like shape or blend stay on their pages.', style: TextStyle(color: cSecondary, fontSize: 12)),
+            ),
+          ]),
+        ),
+      ),
+    );
+    if (picked == null) return;
+    _cmd({'op': 'curve_add', 'property': picked});
+    setState(() {
+      _curveVis[picked] = true;
+      _curveSel = picked;
+    });
+  }
+
+  /// The key under a point: (value id, frame), within a finger's reach.
+  (String, double)? _curveKeyAt(_CurveGeom g, Offset p) {
+    (String, double)? best;
+    var bestD = 18.0;
+    for (final c in g.channels) {
+      if (c['unit'] == 'colour') continue;
+      for (final k in (c['keys'] as List).cast<List>()) {
+        final f = (k[0] as num).toDouble();
+        final q = Offset(g.xOf(f), g.yOf(c, (k[1] as num).toDouble()));
+        final d = (q - p).distance;
+        if (d < bestD) {
+          bestD = d;
+          best = ('${c['id']}', f);
+        }
+      }
+    }
+    return best;
+  }
+
+  /// The selected key's handle under a point: "left" or "right".
+  String? _curveHandleAt(_CurveGeom g, Offset p) {
+    final hs = g.handles(_curveSel, _curveKey);
+    if (hs == null) return null;
+    if ((hs.$1 - p).distance < 18) return 'left';
+    if ((hs.$2 - p).distance < 18) return 'right';
+    return null;
+  }
+
+  void _curveTap(_CurveGeom g, Offset p) {
+    if (p.dy < _CurveGeom.rulerH) {
+      _cmd({'op': 'frame', 'i': g.frameAt(p.dx)});
+      return;
+    }
+    final hit = _curveKeyAt(g, p);
+    setState(() {
+      if (hit != null) {
+        _curveSel = hit.$1;
+        _curveKey = hit.$2;
+      } else {
+        _curveKey = null;
+      }
+    });
+  }
+
+  void _curvePanStart(_CurveGeom g, Offset p) {
+    _curveFrom = p;
+    final part = p.dy >= _CurveGeom.rulerH ? _curveHandleAt(g, p) : null;
+    final hit = part == null && p.dy >= _CurveGeom.rulerH ? _curveKeyAt(g, p) : null;
+    if (part == null && hit == null) {
+      _curveDrag = 'scroll';
+      _curveScrollFrom = _curveScroll;
+      return;
+    }
+    if (hit != null) {
+      _curveSel = hit.$1;
+      _curveKey = hit.$2;
+    }
+    // the graph keeps its scale under the finger (Fit lets go of it)
+    _curveRanges = g.ranges();
+    _curveDrag = part ?? 'key';
+    _cmd({'op': 'curve_down', 'property': _curveSel, 'frame': _curveKey, 'part': _curveDrag});
+  }
+
+  void _curvePanUpdate(Offset p) {
+    final g = _curveGeom;
+    final d = p - _curveFrom;
+    if (_curveDrag == 'scroll' || g == null) {
+      final most = math.max(0.0, 16 + _frames * _cellW - (g?.size.width ?? 0));
+      setState(() => _curveScroll = (_curveScrollFrom - d.dx).clamp(0.0, most));
+      return;
+    }
+    if (_curveDrag == null) return;
+    final c = g.channels.where((x) => x['id'] == _curveSel).firstOrNull;
+    if (c == null) return;
+    _cmd({'op': 'curve_move', 'dv': -d.dy * g.valuePerPx(c), 'dt': d.dx / _cellW});
+  }
+
+  void _curvePanEnd() {
+    if (_curveDrag != null && _curveDrag != 'scroll') _cmd({'op': 'up'});
+    _curveDrag = null;
+  }
+
+  /// The bottom bar while Curves is open: the selected key's handles, Fit,
+  /// New pose.
+  Widget _curvesBar() {
+    final c = _curveChannels.where((x) => x['id'] == _curveSel).firstOrNull;
+    final key = c == null || _curveKey == null ? null : (c['keys'] as List).cast<List>().where((k) => (k[0] as num).toDouble() == _curveKey).firstOrNull;
+    const kinds = [('auto_clamped', 'Settle'), ('auto', 'Swing'), ('vector', 'Sharp'), ('free', 'Free'), ('aligned', 'Aligned')];
+    final now = key == null ? null : '${key[3]}';
+    return Container(
+      height: 40,
+      color: cCard,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(children: [
+        Text('Handles', style: TextStyle(color: key == null ? const Color(0xFFB8BDC4) : cSecondary, fontSize: 13)),
+        const SizedBox(width: 8),
+        Flexible(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Container(
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(color: cControl, borderRadius: BorderRadius.circular(9)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                for (final (k, label) in kinds)
+                  kit.Tap(
+                    label: label,
+                    minSize: 0,
+                    onTap: key == null || c?['unit'] == 'colour' ? null : () => _cmd({'op': 'handles', 'v': k, 'frame': _curveKey!.round(), 'property': _curveSel}),
+                    child: Container(
+                      height: 30,
+                      padding: const EdgeInsets.symmetric(horizontal: 11),
+                      alignment: Alignment.center,
+                      decoration: k == now ? BoxDecoration(color: cCard, borderRadius: BorderRadius.circular(7), boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 2, offset: Offset(0, 1))]) : null,
+                      child: Text(label, style: TextStyle(fontSize: 13, fontWeight: k == now ? FontWeight.w700 : FontWeight.w500, color: key == null ? const Color(0xFFB8BDC4) : k == now ? cAccent : cText)),
+                    ),
+                  ),
+              ]),
+            ),
+          ),
+        ),
+        const Spacer(),
+        kit.WordButton('Fit', size: 14, onTap: _curveRanges == null ? null : () => setState(() => _curveRanges = null)),
+        kit.WordButton('New pose', size: 14, onTap: _sel == null || (_sel!['pose'] as Map?)?['here'] == true ? null : () => _cmd({'op': 'new_pose'})),
+      ]),
+    );
   }
 
   /// The timeline's bottom bar: "+" alone on the left, frame words on the right.
@@ -4048,6 +4369,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     return [for (final d in rows) rw.renderDesc(d)];
   }
 
+  /// D35: name a part (empty: back to its shape and place).
+  Future<void> _renamePart(String node, String now, {bool named = true}) async {
+    final n = await _askName('Name this part', named ? now : '');
+    if (n == null) return;
+    _cmd({'op': 'rename_part', 'node': node, 'name': n.trim()});
+  }
+
   /// The Picture page (round 10 Picture board).
   List<Widget> _pictureTools(Map pic) {
     void set(Map<String, Object?> m) => _cmd({'op': 'picture', ...m});
@@ -4572,6 +4900,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final trap = ((sel['trapRatio'] as num?) ?? 1).toDouble();
     final own = sel['ownColor'] == true;
     final rows = <rw.Desc>[
+      // D35: the part's own name (the Parts list and the graph show it)
+      rw.DName('${sel['partName'] ?? 'Segment'}', link: 'Rename', onLink: () => _renamePart('${sel['node']}', '${sel['partName'] ?? ''}', named: sel['partNamed'] == true)),
       rw.DButtons('Flip sideways', () => _cmd({'op': 'flip_branch', 'h': true}), b: 'Flip over', onB: () => _cmd({'op': 'flip_branch', 'h': false})),
       const rw.DTitle('Size'),
       rw.DStep('Thickness', thick.round().toString(),
@@ -6645,4 +6975,293 @@ class _ExportDialogState extends State<_ExportDialog> {
       ),
     );
   }
+}
+
+
+/// D34: the graph's mapping from frames and values to the picture, shared by
+/// the painter and the drags. The selected value's unit sets the scale; a
+/// value in another unit is scaled to fit (drawn dashed).
+class _CurveGeom {
+  _CurveGeom({required this.size, required this.frames, required this.cell, required this.scroll, required this.channels, required this.selected, required this.frozen}) {
+    final sel = channels.where((c) => c['id'] == selected).firstOrNull ?? channels.where((c) => c['unit'] != 'colour').firstOrNull;
+    unit = '${sel?['unit'] ?? 'deg'}';
+    final own = <String, (double, double)>{};
+    for (final c in channels) {
+      if (c['unit'] == 'colour') continue;
+      final vs = <double>[];
+      for (final k in (c['keys'] as List).cast<List>()) {
+        vs.add((k[1] as num).toDouble());
+      }
+      for (final sg in (c['segs'] as List).cast<List>()) {
+        if (sg[0] == 'c') vs.addAll([(sg[2] as num).toDouble(), (sg[4] as num).toDouble()]);
+        if (sg[0] == 's') vs.addAll([for (final q in (sg[1] as List).cast<List>()) (q[1] as num).toDouble()]);
+      }
+      if (vs.isEmpty) continue;
+      own['${c['id']}'] = (vs.reduce(math.min), vs.reduce(math.max));
+    }
+    // the shared scale: every value in the selected one's unit
+    var lo = double.infinity, hi = -double.infinity;
+    for (final c in channels) {
+      final r = own['${c['id']}'];
+      if (r == null || c['unit'] != unit) continue;
+      lo = math.min(lo, r.$1);
+      hi = math.max(hi, r.$2);
+    }
+    for (final c in channels) {
+      final id = '${c['id']}';
+      final r = frozen?[id] ?? (c['unit'] == unit && lo.isFinite ? (lo, hi) : own[id]);
+      if (r == null) continue;
+      var (a, b) = r;
+      if (frozen?[id] == null) {
+        final pad = math.max((b - a) * 0.12, unit == 'deg' ? 5.0 : 0.05);
+        a -= pad;
+        b += pad;
+      }
+      ranges_[id] = (a, b);
+    }
+  }
+
+  static const rulerH = 22.0, left = 8.0, padY = 14.0, bandH = 14.0;
+  final Size size;
+  final int frames;
+  final double cell, scroll;
+  final List<Map> channels;
+  final String? selected;
+  final Map<String, (double, double)>? frozen;
+  late final String unit;
+  final Map<String, (double, double)> ranges_ = {};
+
+  bool get hasBand => channels.any((c) => c['unit'] == 'colour');
+  double get top => rulerH + padY;
+  double get bottom => size.height - padY - (hasBand ? bandH + 10 : 0);
+  double xOf(double frame) => left + frame * cell + cell / 2 - scroll;
+  int frameAt(double x) => ((x + scroll - left) / cell).floor().clamp(0, frames - 1);
+  Map<String, (double, double)> ranges() => Map.of(ranges_);
+  (double, double) range(Map c) => ranges_['${c['id']}'] ?? (0, 1);
+  double yOf(Map c, double v) {
+    final (a, b) = range(c);
+    final span = (b - a).abs() < 1e-9 ? 1.0 : b - a;
+    return top + (b - v) / span * (bottom - top);
+  }
+
+  double valuePerPx(Map c) {
+    final (a, b) = range(c);
+    return ((b - a).abs() < 1e-9 ? 1.0 : b - a) / math.max(1.0, bottom - top);
+  }
+
+  bool fitted(Map c) => c['unit'] != unit;
+
+  /// The selected key's handle ends (left, right) on the picture.
+  (Offset, Offset)? handles(String? id, double? frame) {
+    final c = channels.where((x) => x['id'] == id).firstOrNull;
+    if (c == null || frame == null || c['unit'] == 'colour') return null;
+    final k = (c['keys'] as List).cast<List>().where((k) => (k[0] as num).toDouble() == frame).firstOrNull;
+    if (k == null || k.length < 8) return null;
+    final v = (k[1] as num).toDouble();
+    Offset at(num df, num dv) => Offset(xOf(frame + df.toDouble()), yOf(c, v + dv.toDouble()));
+    return (at(k[4] as num, k[5] as num), at(k[6] as num, k[7] as num));
+  }
+}
+
+class _CurvesPainter extends CustomPainter {
+  _CurvesPainter(this.g, this.colours, this.cur, this.keyFrame, {required this.fps});
+  final _CurveGeom g;
+  final Map<String, Color> colours;
+  final int cur, fps;
+  final double? keyFrame;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    // ruler: ticks every frame, numbers like the timeline's, the playhead pill
+    canvas.drawRect(Rect.fromLTWH(0, _CurveGeom.rulerH - 1, w, 1), Paint()..color = const Color(0xFFE6E8EB));
+    final step = fps >= 24 ? fps ~/ 4 : 3;
+    for (var f = 0; f < g.frames; f++) {
+      final x = g.xOf(f.toDouble());
+      if (x < -20 || x > w + 20) continue;
+      final big = f == 0 || (f + 1) % step == 0;
+      canvas.drawRect(Rect.fromLTWH(x, _CurveGeom.rulerH - (big ? 6 : 4), 1, big ? 6 : 4), Paint()..color = big ? const Color(0xFF9AA0A8) : const Color(0xFFC4C8CE));
+      if (big && f != cur) _text(canvas, '${f + 1}', Offset(x, 3), const Color(0xFF6B7078), 11, centre: true);
+    }
+    // the selected value's held stretches, shaded
+    final sel = g.channels.where((c) => c['id'] == g.selected).firstOrNull;
+    if (sel != null && sel['unit'] != 'colour') {
+      final ks = (sel['keys'] as List).cast<List>();
+      final segs = (sel['segs'] as List).cast<List>();
+      for (var i = 0; i < segs.length && i + 1 < ks.length; i++) {
+        if (segs[i][0] != 'h') continue;
+        final a = g.xOf((ks[i][0] as num).toDouble()), b = g.xOf((ks[i + 1][0] as num).toDouble());
+        canvas.drawRect(Rect.fromLTRB(a, _CurveGeom.rulerH, b, size.height), Paint()..color = const Color(0xFFF6F7F9));
+      }
+    }
+    // value lines in the selected one's unit, labelled at the left
+    if (sel != null && sel['unit'] != 'colour') {
+      final (a, b) = g.range(sel);
+      final nice = _niceStep((b - a) / 4);
+      if (nice > 0) {
+        for (var v = (a / nice).ceil() * nice; v <= b; v += nice) {
+          final y = g.yOf(sel, v);
+          canvas.drawRect(Rect.fromLTWH(0, y, w, 1), Paint()..color = const Color(0xFFEEF0F2));
+          final label = g.unit == 'deg' ? '${v.round()}°' : (nice >= 1 ? '${v.round()}' : v.toStringAsFixed(2));
+          _text(canvas, label, Offset(4, y - 13), const Color(0xFF9AA0A8), 10.5);
+        }
+      }
+      if (g.channels.any((c) => c['unit'] != 'colour' && g.fitted(c))) _text(canvas, 'dashed: scaled to fit', Offset(w - 6, _CurveGeom.rulerH + 3), const Color(0xFF9AA0A8), 11, end: true);
+    }
+    // the playhead
+    final px = g.xOf(cur.toDouble());
+    canvas.drawRect(Rect.fromLTWH(px - 0.75, _CurveGeom.rulerH - 2, 1.5, size.height), Paint()..color = const Color(0xFF8DB8E8));
+    final pill = RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(px, 11), width: math.max(30, 12 + 7.0 * '${cur + 1}'.length), height: 18), const Radius.circular(9));
+    canvas.drawRRect(pill, Paint()..color = const Color(0xFFDCEAF9));
+    _text(canvas, '${cur + 1}', Offset(px, 3), cAccent, 11, centre: true, bold: true);
+    // curves: the selected one on top and stronger
+    final order = [...g.channels.where((c) => c['unit'] != 'colour')]..sort((a, b) => (a['id'] == g.selected ? 1 : 0) - (b['id'] == g.selected ? 1 : 0));
+    for (final c in order) {
+      final colour = colours['${c['id']}'] ?? cInk2b;
+      final picked = c['id'] == g.selected;
+      final path = _path(c, w);
+      final pen = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = picked ? 2.6 : 1.8
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..color = picked ? colour : colour.withValues(alpha: 0.55);
+      canvas.drawPath(g.fitted(c) && !picked ? _dashed(path) : path, pen);
+      for (final k in (c['keys'] as List).cast<List>()) {
+        final f = (k[0] as num).toDouble();
+        if (picked && f == keyFrame) continue;
+        final o = Offset(g.xOf(f), g.yOf(c, (k[1] as num).toDouble()));
+        canvas.drawCircle(o, picked ? 5 : 4, Paint()..color = cCard);
+        canvas.drawCircle(o, picked ? 5 : 4, Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2
+          ..color = picked ? colour : colour.withValues(alpha: 0.6));
+      }
+    }
+    // the colour values: a band along the foot, its keys as dots
+    final bands = g.channels.where((c) => c['unit'] == 'colour').toList();
+    for (final (i, c) in bands.indexed) {
+      final ks = (c['keys'] as List).cast<List>();
+      if (ks.isEmpty) continue;
+      final y = size.height - 10 - _CurveGeom.bandH - i * (_CurveGeom.bandH + 4);
+      final x0 = g.xOf(0), x1 = g.xOf((g.frames - 1).toDouble());
+      final r = RRect.fromRectAndRadius(Rect.fromLTRB(x0, y, x1, y + 12), const Radius.circular(6));
+      final stops = <double>[], cols = <Color>[];
+      for (final k in ks) {
+        stops.add(((g.xOf((k[0] as num).toDouble()) - x0) / math.max(1, x1 - x0)).clamp(0.0, 1.0));
+        cols.add(_EditorPageState._rgba((k[1] as num).toInt()));
+      }
+      if (cols.length == 1) {
+        cols.add(cols.first);
+        stops.add(1);
+      }
+      canvas.drawRRect(r, Paint()..shader = ui.Gradient.linear(Offset(x0, 0), Offset(x1, 0), cols, stops));
+      for (final k in ks) {
+        final o = Offset(g.xOf((k[0] as num).toDouble()), y + 6);
+        canvas.drawCircle(o, 4.5, Paint()..color = cCard);
+        canvas.drawCircle(o, 4.5, Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.6
+          ..color = cInk2b);
+      }
+    }
+    // the selected key: filled, its handles where they shape a curve, the readout
+    if (sel != null && keyFrame != null && sel['unit'] != 'colour') {
+      final k = (sel['keys'] as List).cast<List>().where((k) => (k[0] as num).toDouble() == keyFrame).firstOrNull;
+      if (k != null) {
+        final o = Offset(g.xOf(keyFrame!), g.yOf(sel, (k[1] as num).toDouble()));
+        final hs = g.handles('${sel['id']}', keyFrame);
+        if (hs != null) {
+          final line = Paint()
+            ..color = cText
+            ..strokeWidth = 1.4;
+          for (final h in [hs.$1, hs.$2]) {
+            if ((h - o).distance < 1) continue;
+            canvas.drawLine(o, h, line);
+            canvas.drawCircle(h, 5, Paint()..color = cCard);
+            canvas.drawCircle(h, 5, Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.6
+              ..color = cText);
+          }
+        }
+        canvas.drawCircle(o, 6.5, Paint()..color = cAccent);
+        canvas.drawCircle(o, 6.5, Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2
+          ..color = Colors.white);
+        final v = (k[1] as num).toDouble();
+        final words = 'Frame ${keyFrame!.round() + 1}, ${sel['unit'] == 'deg' ? '${v.round()}°' : v.abs() >= 10 ? v.round() : v.toStringAsFixed(2)}';
+        final tp = TextPainter(text: TextSpan(text: words, style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w600, fontFamily: kit.kFont)), textDirection: TextDirection.ltr)..layout();
+        final bw = tp.width + 22;
+        final at = Offset(o.dx + 14 + bw > size.width ? o.dx - 14 - bw : o.dx + 14, math.min(o.dy + 14, size.height - 26));
+        canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(at.dx, at.dy, bw, 22), const Radius.circular(11)), Paint()..color = const Color(0xDB222428));
+        tp.paint(canvas, Offset(at.dx + 11, at.dy + (22 - tp.height) / 2));
+      }
+    }
+  }
+
+  /// One value's curve: flat before its first key and after its last, and
+  /// each stretch as the engine shapes it.
+  Path _path(Map c, double w) {
+    final ks = (c['keys'] as List).cast<List>();
+    final segs = (c['segs'] as List).cast<List>();
+    final p = Path();
+    if (ks.isEmpty) return p;
+    Offset at(num f, num v) => Offset(g.xOf(f.toDouble()), g.yOf(c, v.toDouble()));
+    final first = at(ks[0][0] as num, ks[0][1] as num);
+    p.moveTo(math.min(0, first.dx), first.dy);
+    p.lineTo(first.dx, first.dy);
+    for (var i = 0; i + 1 < ks.length; i++) {
+      final b = at(ks[i + 1][0] as num, ks[i + 1][1] as num);
+      final sg = i < segs.length ? segs[i] : const ['l'];
+      switch (sg[0]) {
+        case 'h':
+          final a = at(ks[i][0] as num, ks[i][1] as num);
+          p.lineTo(b.dx, a.dy);
+          p.lineTo(b.dx, b.dy);
+        case 'c':
+          final c1 = at(sg[1] as num, sg[2] as num), c2 = at(sg[3] as num, sg[4] as num);
+          p.cubicTo(c1.dx, c1.dy, c2.dx, c2.dy, b.dx, b.dy);
+        case 's':
+          for (final q in (sg[1] as List).cast<List>()) {
+            final o = at(q[0] as num, q[1] as num);
+            p.lineTo(o.dx, o.dy);
+          }
+          p.lineTo(b.dx, b.dy);
+        default:
+          p.lineTo(b.dx, b.dy);
+      }
+    }
+    final last = at(ks.last[0] as num, ks.last[1] as num);
+    p.lineTo(math.max(w, last.dx), last.dy);
+    return p;
+  }
+
+  static Path _dashed(Path src) {
+    final out = Path();
+    for (final m in src.computeMetrics()) {
+      for (var d = 0.0; d < m.length; d += 12) {
+        out.addPath(m.extractPath(d, math.min(m.length, d + 7)), Offset.zero);
+      }
+    }
+    return out;
+  }
+
+  static double _niceStep(double raw) {
+    if (!(raw > 0)) return 0;
+    final p = math.pow(10, (math.log(raw) / math.ln10).floor()).toDouble();
+    for (final m in const [1.0, 2.0, 5.0, 10.0]) {
+      if (m * p >= raw) return m * p;
+    }
+    return 10 * p;
+  }
+
+  static void _text(Canvas canvas, String s, Offset at, Color colour, double size, {bool centre = false, bool end = false, bool bold = false}) {
+    final tp = TextPainter(text: TextSpan(text: s, style: TextStyle(color: colour, fontSize: size, fontWeight: bold ? FontWeight.w700 : FontWeight.w400, fontFamily: kit.kFont)), textDirection: TextDirection.ltr)..layout();
+    tp.paint(canvas, Offset(centre ? at.dx - tp.width / 2 : end ? at.dx - tp.width : at.dx, at.dy));
+  }
+
+  @override
+  bool shouldRepaint(_CurvesPainter o) => true;
 }

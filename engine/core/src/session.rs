@@ -47,6 +47,11 @@ enum Gesture {
     /// about the opposite corner, which stays put. `o` is its origin, `c`
     /// the fixed corner, `d0` the finger's first distance from it.
     PictureScale { layer: String, o: (f32, f32), c: (f32, f32), d0: f32, tx: f32, ty: f32, sx: f32, sy: f32, started: bool },
+    /// D34 (the graph): a key's value is dragged (`v0` its value at the start).
+    CurveKey { prop: String, time: f64, v0: f64, started: bool },
+    /// D34 (the graph): a key's handle is dragged: `right` side, its offset
+    /// (seconds, value) at the start.
+    CurveHandle { prop: String, time: f64, right: bool, h0: (f64, f64), started: bool },
     All { x: f32, y: f32 },
     Camera { xi: String, yi: String, x: f32, y: f32, cx: f32, cy: f32 },
 }
@@ -87,6 +92,10 @@ pub struct Session {
     /// Figure editor "Mirror" (D13): a segment drawn from a joint is drawn
     /// across the figure's centre line too. A drawing toggle only.
     pub mirror: bool,
+    /// D34: the timeline shows curves (the state carries them only then),
+    /// and the values shown although they don't change (Add a value).
+    pub curves: bool,
+    curve_shown: std::collections::HashSet<String>,
     /// The main animation's symbol. While a movieclip is edited the project's
     /// root symbol is the movieclip's, so every tool works on its frames;
     /// saving always writes the main one as the root.
@@ -221,7 +230,7 @@ impl Session {
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
         let main_root = doc.project().root_symbol.clone();
-        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, selected_group: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, stock: None, size_ref: true, mirror: false, draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, poses_clip: Vec::new(), multi: Vec::new(), copy_edit: None, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, selected_group: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, stock: None, size_ref: true, mirror: false, curves: false, curve_shown: Default::default(), draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, poses_clip: Vec::new(), multi: Vec::new(), copy_edit: None, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -683,7 +692,8 @@ impl Session {
     pub fn touch_move(&mut self, x: f32, y: f32) {
         let t = self.time();
         match self.gesture.clone() {
-            Gesture::None => {}
+            // the graph's drags move through "curve_move", not the stage
+            Gesture::None | Gesture::CurveKey { .. } | Gesture::CurveHandle { .. } => {}
             Gesture::Handle { hit, x: x0, y: y0, slop, started } => {
                 if !started {
                     if (x - x0).hypot(y - y0) < slop {
@@ -828,7 +838,7 @@ impl Session {
                 }
                 self.rev += 1;
             }
-            Gesture::Picture { started, .. } | Gesture::PictureScale { started, .. } => {
+            Gesture::Picture { started, .. } | Gesture::PictureScale { started, .. } | Gesture::CurveKey { started, .. } | Gesture::CurveHandle { started, .. } => {
                 if started {
                     if cancel {
                         self.doc.cancel();
@@ -873,7 +883,7 @@ impl Session {
         let op = c["op"].as_str().unwrap_or("");
         let f = |k: &str| c[k].as_f64().unwrap_or(0.0) as f32;
         let b = |k: &str| c[k].as_bool().unwrap_or(false);
-        if self.dragging() && !matches!(op, "move" | "up" | "cancel" | "state") {
+        if self.dragging() && !matches!(op, "move" | "curve_move" | "up" | "cancel" | "state") {
             self.end_gesture(false);
         }
         let sym = self.sym();
@@ -1074,6 +1084,119 @@ impl Session {
                     self.step("Easing", |s| ed.set_interp_in(s, &sel, interp, ease));
                 }
             }
+            "rename_part" => {
+                // D35: a part's own name (empty: back to its shape and place)
+                let layer = self.building.clone().or_else(|| self.sel_layer());
+                let node = c["node"].as_str().map(str::to_string).or_else(|| self.selected.as_ref().map(|(_, n)| n.clone()));
+                if let (Some(l), Some(n)) = (layer, node) {
+                    let name = c["name"].as_str().map(|x| x.trim().to_string()).filter(|x| !x.is_empty());
+                    self.step("Rename part", |s| {
+                        let Some(LayerKind::Figure(f)) = s.project.layer_mut(&sym, &l).map(|x| &mut x.kind) else { return crate::edit::fail("no figure") };
+                        let Some(nd) = f.node_mut(&n) else { return crate::edit::fail("no such part") };
+                        nd.name = name;
+                        Ok(())
+                    });
+                }
+            }
+            "curve_show" => {
+                // the graph: show a value that doesn't change (or stop showing it)
+                if let Some(id) = c["property"].as_str() {
+                    if b("v") {
+                        self.curve_shown.insert(id.to_string());
+                    } else {
+                        self.curve_shown.remove(id);
+                    }
+                    self.rev += 1;
+                }
+            }
+            "curve_add" => {
+                // "Add a value…": a value with no keys is keyed on this frame
+                // (one step); one with keys (a pose value that hasn't moved yet)
+                // is only shown
+                if let Some(id) = c["property"].as_str().map(str::to_string) {
+                    let empty = self.project().property(&id).map(|q| q.track.is_empty());
+                    match empty {
+                        Some(true) => {
+                            if self.step("Add a value", |s| {
+                                let tw = s.project.settings.tween_interp;
+                                let Some(q) = s.project.property_mut(&id) else { return crate::edit::fail("no such value") };
+                                let v = q.key_value(t);
+                                let interp = if q.ty.continuous() { tw } else { Interp::Hold };
+                                q.track.put(Key::new(t, v, interp));
+                                Ok(())
+                            }).is_some() {
+                                self.curve_shown.insert(id);
+                            }
+                        }
+                        Some(false) => {
+                            self.curve_shown.insert(id);
+                            self.rev += 1;
+                        }
+                        None => self.message = "There is no such value.".into(),
+                    }
+                }
+            }
+            "curve_down" => {
+                // the graph: a key (part "key") or one of its handles ("left",
+                // "right") is held; nothing changes until it moves
+                let (Some(id), Some(fr)) = (c["property"].as_str().map(str::to_string), c["frame"].as_f64()) else { return self.state() };
+                let fps = st_fps(self.project());
+                let found = self.project().property(&id).and_then(|q| {
+                    let i = q.track.keys().iter().position(|k| (k.time * fps - fr).abs() < 0.25)?;
+                    Some((i, q.track.keys()[i], q.track.handles_at(i)))
+                });
+                let Some((_, k, (lh, rh))) = found else {
+                    self.message = "No key there.".into();
+                    return self.state();
+                };
+                self.gesture = match c["part"].as_str().unwrap_or("key") {
+                    "left" | "right" => {
+                        let right = c["part"] == "right";
+                        let h0 = if k.handle.stored() { if right { k.rh } else { k.lh } } else if right { rh } else { lh };
+                        Gesture::CurveHandle { prop: id, time: k.time, right, h0, started: false }
+                    }
+                    _ => Gesture::CurveKey { prop: id, time: k.time, v0: k.value.f() as f64, started: false },
+                };
+                self.rev += 1;
+            }
+            "curve_move" => {
+                // deltas from where the drag began: dv (value), dt (frames, handles)
+                let fps = st_fps(self.project());
+                let (dv, dt) = (c["dv"].as_f64().unwrap_or(0.0), c["dt"].as_f64().unwrap_or(0.0) / fps);
+                match std::mem::replace(&mut self.gesture, Gesture::None) {
+                    Gesture::CurveKey { prop, time, v0, started } => {
+                        if !started {
+                            self.doc.begin("Move key");
+                        }
+                        if let Some(q) = self.doc.state.project.property_mut(&prop) {
+                            if let Ok(i) = q.track.index_of(time) {
+                                let k = q.track.keys()[i];
+                                let v = match k.value {
+                                    Value::D(_) => Value::D(v0 + dv),
+                                    Value::F(_) => Value::F((v0 + dv) as f32),
+                                    other => other,
+                                };
+                                // the key keeps its time, tween and handles (whole-figure keys stay together, D25)
+                                q.track.put(Key { value: v, ..k });
+                            }
+                        }
+                        self.gesture = Gesture::CurveKey { prop, time, v0, started: true };
+                    }
+                    Gesture::CurveHandle { prop, time, right, h0, started } => {
+                        if !started {
+                            self.doc.begin("Shape curve");
+                        }
+                        if let Some(q) = self.doc.state.project.property_mut(&prop) {
+                            if let Ok(i) = q.track.index_of(time) {
+                                shape_handle(&mut q.track, i, right, (h0.0 + dt, h0.1 + dv), !started);
+                            }
+                        }
+                        self.gesture = Gesture::CurveHandle { prop, time, right, h0, started: true };
+                    }
+                    other => self.gesture = other,
+                }
+                self.rev += 1;
+            }
             "handles" => {
                 // D34: the handles of the pose's keys (like "easing": a frame,
                 // the selected figure's pose under the playhead, or this frame)
@@ -1086,7 +1209,11 @@ impl Session {
                     .then(|| self.sel_layer().and_then(|l| crate::edit::block_ops::block_at(self.project().root()?.layer(&l)?, fps_now, self.frame).map(|(st, _)| st)))
                     .flatten();
                 let at = c["frame"].as_i64().map(|f| f as f64 / fps_now).or(block_start.map(|f| f as f64 / fps_now)).unwrap_or(t);
-                let sel = self.keys_at(at, self.sel_layer().as_deref());
+                // the graph: one value's key only
+                let sel = match c["property"].as_str() {
+                    Some(pid) => self.project().property(pid).and_then(|q| q.track.keys().iter().find(|k| (k.time - at).abs() < 0.25 / fps_now).map(|k| vec![crate::edit::editor::KeyRef { property: pid.to_string(), time: k.time }])).unwrap_or_default(),
+                    None => self.keys_at(at, self.sel_layer().as_deref()),
+                };
                 if sel.is_empty() {
                     self.message = "Nothing is keyed on this frame.".into();
                 } else {
@@ -1136,7 +1263,8 @@ impl Session {
                     for id in ids {
                         if let Some(l) = s.project.layer_mut(&root, &id) {
                             for p in l.properties_mut() {
-                                let keys: Vec<Key> = p.track.keys().iter().map(|q| Key { time: q.time * k, ..q.clone() }).collect();
+                                // stored handles (D34) are in seconds too, so they scale with the keys
+                                let keys: Vec<Key> = p.track.keys().iter().map(|q| Key { time: q.time * k, lh: (q.lh.0 * k, q.lh.1), rh: (q.rh.0 * k, q.rh.1), ..q.clone() }).collect();
                                 p.track.clear();
                                 for q in keys {
                                     p.track.put(q);
@@ -1189,6 +1317,7 @@ impl Session {
                     "tween_new" => self.tools.editor.default_interp = if b("v") { self.project().settings.tween_interp } else { Interp::Hold },
                     "keying" => self.keying = b("v"),
                     "path" => self.motion_path = b("v"),
+                    "curves" => self.curves = b("v"),
                     "sizeref" => self.size_ref = b("v"),
                     "mirror" => self.mirror = b("v"),
                     _ => {}
@@ -3221,6 +3350,105 @@ impl Session {
         Some((stock, [(sx0 + sx1) / 2.0 + dx, by0 - 34.0]))
     }
 
+    /// D34 (the graph): the selected figure's values that change (and those
+    /// shown on purpose), each with its keys, handles and the exact shape of
+    /// every stretch; and the values that can be added. Only while Curves is
+    /// open.
+    fn curves_state(&self, p: &Project) -> Option<J> {
+        if !self.curves {
+            return None;
+        }
+        let lid = self.sel_layer()?;
+        let l = p.root()?.layer(&lid)?;
+        let f = l.as_figure()?;
+        let fps = st_fps(p);
+        let sel_node = self.selected.as_ref().map(|(_, n)| n.clone()).unwrap_or_default();
+        let root = f.nodes().first().map(|n| n.id.clone()).unwrap_or_default();
+        let fig = l.name.clone().unwrap_or_else(|| l.id.clone());
+        // (value, name, group, unit, the joint it belongs to)
+        let mut cands: Vec<(&Property, String, String, &str, String)> = Vec::new();
+        let tr = &l.transform;
+        for (q, name, unit) in [(&tr.x, "Main joint x", "size"), (&tr.y, "Main joint y", "size"), (&tr.rotation, "Figure turn", "deg"), (&tr.scale_x, "Figure scale x", "ratio"), (&tr.scale_y, "Figure scale y", "ratio")] {
+            cands.push((q, name.into(), "Main joint".into(), unit, root.clone()));
+        }
+        for (i, n) in f.nodes().iter().enumerate() {
+            if n.parent.is_none() {
+                continue;
+            }
+            let part = part_label(n, i);
+            for (q, what, unit) in [(&n.rotation, "angle", "deg"), (&n.length, "length", "size"), (&n.thickness, "thickness", "size"), (&n.scale, "scale", "ratio"), (&n.color, "colour", "colour"), (&n.outline_color, "outline colour", "colour"), (&n.gradient_color, "gradient colour", "colour")] {
+                cands.push((q, format!("{part} {what}"), part.clone(), unit, n.id.clone()));
+            }
+        }
+        cands.push((&l.opacity, "Opacity".into(), fig.clone(), "ratio", String::new()));
+        for e in l.effects.nodes.values() {
+            for q in std::iter::once(&e.mix).chain(e.params.values()) {
+                let unit = if matches!(q.value, Value::C(_)) { "colour" } else { "ratio" };
+                cands.push((q, prop_label(l, &q.id), fig.clone(), unit, String::new()));
+            }
+        }
+        let mut channels = Vec::new();
+        let mut addable = Vec::new();
+        for (q, name, group, unit, node) in cands {
+            if !q.ty.continuous() {
+                continue;
+            }
+            let keys = q.track.keys();
+            let changes = keys.windows(2).any(|w| w[0].value != w[1].value);
+            let focus = node == sel_node;
+            if !changes && !self.curve_shown.contains(&q.id) {
+                // what "Add a value…" offers: the selected joint's values and the figure's own
+                if focus || node.is_empty() || node == root {
+                    addable.push(json!({"id": q.id, "name": name, "group": group, "value": value_json(&q.key_value(self.time()))}));
+                }
+                continue;
+            }
+            let colour = unit == "colour";
+            let ks: Vec<J> = (0..keys.len())
+                .map(|i| {
+                    let k = &keys[i];
+                    let interp = match k.interp {
+                        Interp::Hold => "hold",
+                        Interp::Linear => "linear",
+                        Interp::Bezier => "ease",
+                        Interp::Smooth => "smooth",
+                    };
+                    if colour {
+                        return json!([round3(k.time * fps), value_json(&k.value), interp, k.handle.name()]);
+                    }
+                    let (lh, rh) = if k.handle.stored() { (k.lh, k.rh) } else { q.track.handles_at(i) };
+                    json!([round3(k.time * fps), k.value.f(), interp, k.handle.name(), round3(lh.0 * fps), lh.1, round3(rh.0 * fps), rh.1])
+                })
+                .collect();
+            // each stretch: a cubic, a line, a step, or samples (bounce, elastic)
+            let segs: Vec<J> = if colour {
+                Vec::new()
+            } else {
+                (0..keys.len().saturating_sub(1))
+                    .map(|i| {
+                        let (a, b) = (&keys[i], &keys[i + 1]);
+                        match a.interp {
+                            Interp::Hold => json!(["h"]),
+                            Interp::Linear => json!(["l"]),
+                            _ => match q.track.segment_controls(i, 0) {
+                                Some([x1, y1, x2, y2]) => json!(["c", round3(x1 * fps), y1, round3(x2 * fps), y2]),
+                                None => {
+                                    let pts: Vec<J> = (1..12).map(|j| {
+                                        let tt = a.time + (b.time - a.time) * j as f64 / 12.0;
+                                        json!([round3(tt * fps), q.track.sample(tt).f()])
+                                    }).collect();
+                                    json!(["s", pts])
+                                }
+                            },
+                        }
+                    })
+                    .collect()
+            };
+            channels.push(json!({"id": q.id, "name": name, "group": group, "unit": unit, "node": node, "focus": focus || (sel_node == root && node == root), "keys": ks, "segs": segs}));
+        }
+        Some(json!({"layer": lid, "name": fig, "channels": channels, "addable": addable}))
+    }
+
     /// Everything the app draws besides the picture.
     pub fn state(&self) -> J {
         let p = self.project();
@@ -3306,6 +3534,8 @@ impl Session {
             let mut r = Resolver::new(p);
             Some(json!({
                 "layer": l, "node": n, "name": layer.name.clone().unwrap_or_else(|| l.clone()),
+                // D35: the part as the Parts list and the graph name it, and whether it was named
+                "partName": part_label(node, f.index_of(n).unwrap_or(0)), "partNamed": node.name.is_some(),
                 "root": node.parent.is_none(), "static": node.is_static, "pinned": node.pinned,
                 "smart": node.smart_stretch, "shape": shape_name(node.shape),
                 "thickness": r.f(&node.thickness, t), "color": color_of(&mut r, &node.color, t),
@@ -3644,7 +3874,7 @@ impl Session {
                         continue;
                     }
                     let connector = n.legacy_extras.contains_key(crate::eval::pose::CONNECT_TO) || n.legacy_extras.get("connector").is_some_and(|v| v == "b:true");
-                    out.push(json!({"id": n.id, "kind": if connector { "connector" } else { "segment" }, "shape": shape_name(n.shape), "color": color_of(&mut r, &n.color, t), "n": i + 1}));
+                    out.push(json!({"id": n.id, "kind": if connector { "connector" } else { "segment" }, "shape": shape_name(n.shape), "color": color_of(&mut r, &n.color, t), "n": i + 1, "name": n.name}));
                     for (k, pf) in f.polyfills.iter().enumerate().filter(|(_, pf)| pf.anchor == n.id) {
                         out.push(json!({"id": pf.id, "kind": "polyfill", "color": color_of(&mut r, &pf.color, t), "n": f.nodes().len() + k + 1}));
                     }
@@ -3672,10 +3902,11 @@ impl Session {
             "opts": {
                 "stretch": self.stretch_all, "scope": if self.tools.key_scope == KeyScope::Joint { "joint" } else { "figure" },
                 "snap": self.tools.snap_degrees, "onion": self.onion, "keying": self.keying, "path": self.motion_path, "axis": self.tools.axis_lock, "static": self.tools.show_static,
-                "tweenNew": self.tools.editor.default_interp != Interp::Hold, "mainOnly": self.tools.main_nodes_only, "sizeRef": self.size_ref, "mirror": self.mirror,
+                "tweenNew": self.tools.editor.default_interp != Interp::Hold, "mainOnly": self.tools.main_nodes_only, "sizeRef": self.size_ref, "mirror": self.mirror, "curves": self.curves,
                 "onionBefore": p.view.onion_before, "onionAfter": p.view.onion_after, "onionFront": p.view.onion_in_front,
             },
             "pose": self.pose_clip.is_some(), "posesCopied": self.poses_clip.len(),
+            "curves": self.curves_state(p),
             "group": self.selected_group.as_ref().filter(|_| self.selected.is_none() && self.selected_text.is_none() && self.multi.is_empty()).and_then(|gid| {
                 let r = p.root()?;
                 let g = r.groups.iter().find(|x| x.id == *gid)?;
@@ -4000,6 +4231,82 @@ pub fn anchor_poses(st: &mut crate::edit::State) {
         frames.dedup();
         for q in ps {
             key_at(q, &frames, fps, tw);
+        }
+    }
+}
+
+/// A figure's piece as the Parts list names it: its shape and place.
+fn part_label(n: &Node, i: usize) -> String {
+    if let Some(name) = n.name.as_ref().filter(|x| !x.trim().is_empty()) {
+        return name.clone();
+    }
+    let shape = match n.shape {
+        Shape::Line => "Rounded",
+        Shape::SquareLine => "Segment",
+        Shape::Circle => "Circle",
+        Shape::Ellipse => "Ellipse",
+        Shape::Triangle => "Triangle",
+        Shape::Trapezoid => "Trapezoid",
+        Shape::Polygon => "Polygon",
+        Shape::None => "Joint",
+    };
+    format!("{shape} {}", i + 1)
+}
+
+fn round3(v: f64) -> f64 {
+    (v * 1000.0).round() / 1000.0
+}
+
+/// A value for the app: a number, a colour (rgba), or a switch.
+fn value_json(v: &Value) -> J {
+    match v {
+        Value::F(x) => json!(x),
+        Value::D(x) => json!(x),
+        Value::C(c) => json!(c.to_rgba8888()),
+        Value::B(b) => json!(b),
+    }
+}
+
+/// D34 (the graph): key `i`'s handle on its `right` (or left) side moved to
+/// `h` (seconds, value from the key). An automatic handle becomes Aligned
+/// (seeded from the handles it had, `first`); Aligned keeps the other side
+/// in line at its own length in time; Free moves one side. The segment the
+/// handle shapes becomes Smooth, so the handle takes effect there.
+fn shape_handle(tr: &mut Track, i: usize, right: bool, h: (f64, f64), first: bool) {
+    let n = tr.len();
+    let mut k = tr.keys()[i];
+    if first && !k.handle.stored() {
+        let (lh, rh) = tr.handles_at(i);
+        k = Key { handle: HandleType::Aligned, lh, rh, ..k };
+    }
+    let span = if right { if i + 1 < n { tr.keys()[i + 1].time - k.time } else { 0.0 } } else if i > 0 { k.time - tr.keys()[i - 1].time } else { 0.0 };
+    // a handle stays on its own side, inside its segment
+    let dt = if right { h.0.clamp(1e-6, span.max(1e-6)) } else { h.0.clamp(-span.max(1e-6), -1e-6) };
+    let moved = (dt, h.1);
+    if right {
+        k.rh = moved;
+    } else {
+        k.lh = moved;
+    }
+    if k.handle == HandleType::Aligned {
+        let slope = moved.1 / moved.0;
+        let other = if right { &mut k.lh } else { &mut k.rh };
+        if other.0.abs() > 1e-9 {
+            other.1 = other.0 * slope;
+        }
+    }
+    if right {
+        if i + 1 < n {
+            k.interp = Interp::Smooth;
+        }
+        tr.put(k);
+    } else {
+        tr.put(k);
+        if i > 0 {
+            let p = tr.keys()[i - 1];
+            if p.interp != Interp::Smooth {
+                tr.put(Key { interp: Interp::Smooth, ..p });
+            }
         }
     }
 }

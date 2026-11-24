@@ -562,6 +562,22 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
     than the selected curve's are drawn dashed, scaled to fit; colours are
     a band of the colour over time. Choices and switches stay on their
     pages (a curve for a choice could only ever jump).
+  - Built 2026-11-24: the Curves toggle in the timeline's toolbar; the
+    engine sends each stretch's exact shape (`curves` in the state while
+    `set curves` is on: keys with their handles, and per stretch a cubic, a
+    line, a step or samples). Dragging a key changes its value only (whole-
+    figure keys keep their frames, D25); dragging a handle makes an
+    automatic one Aligned, and the stretch it shapes Smooth. Ops:
+    `curve_down`, `curve_move`, `up`, `curve_add`, `curve_show`, `handles`
+    with `property`. Fit lets go of the scale kept still during a drag.
+- **D35. Parts have names** (the user: so they don't show up as "Node 32"
+  in the graph). A part may have a name of its own (`rename_part`); the
+  Parts list, the Segment page ("Rename") and the graph use it, else its
+  shape and place ("Rounded 9"). Double-tap a part in the Parts list to
+  name it (holding still drags it). Saved in Barkfart projects; a Stick
+  Nodes figure file has no place for it, so a figure saved as .nodes loses
+  its names.
+
 - **D33. Groups (K).** A group is a record in its symbol and a `group` id on
   each member (not a member list, so deleting or copying layers can't leave
   stale ids). One level only. Members sit next to each other in row order,

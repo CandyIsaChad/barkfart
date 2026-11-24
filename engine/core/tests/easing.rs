@@ -185,3 +185,38 @@ fn keyed_effects_ease_like_poses_in_a_new_animation() {
     assert!(amount(1.0) < 0.25 - 0.03, "eases in: {}", amount(1.0));
     assert!(e.mix.track.keys().iter().filter(|k| k.time > 0.0).all(|k| k.interp == Interp::Smooth), "smooth keys");
 }
+
+#[test]
+fn frozen_handles_keep_their_shape_when_the_frame_rate_changes() {
+    // D34: Free handles are in seconds; a new frame rate rescales them with the keys
+    // two poses four frames apart (the frames between hold no keys of their own)
+    let mut s = Session::new(Document::new(new_editor_project()));
+    s.command(&json!({"op": "insert_frame"}));
+    s.command(&json!({"op": "frame", "i": 0}));
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    for _ in 0..3 {
+        s.command(&json!({"op": "hold_longer"}));
+    }
+    s.command(&json!({"op": "frame", "i": 4}));
+    let t4 = 4.0 / s.project().settings.fps as f64;
+    let h = s.tools.handles(s.project(), t4).into_iter().find(|h| h.layer == "L2" && h.node == "armR1").unwrap();
+    s.command(&json!({"op": "down", "x": h.x, "y": h.y, "r": 4}));
+    s.command(&json!({"op": "move", "x": h.x + 60.0, "y": h.y + 90.0}));
+    s.command(&json!({"op": "up"}));
+    // both ends frozen
+    for f in [0, 4] {
+        s.command(&json!({"op": "frame", "i": f}));
+        s.command(&json!({"op": "handles", "v": "free", "block": true}));
+    }
+    let rot = |s: &Session, f: f64| -> f64 {
+        let p = s.project();
+        let q = &p.root().unwrap().layer("L2").unwrap().as_figure().unwrap().node("armR1").unwrap().rotation;
+        q.key_value(f / p.settings.fps as f64).f() as f64
+    };
+    let before: Vec<f64> = (0..=8).map(|i| rot(&s, i as f64 / 2.0)).collect();
+    s.command(&json!({"op": "fps", "v": 24}));
+    let after: Vec<f64> = (0..=8).map(|i| rot(&s, i as f64 / 2.0)).collect();
+    for (a, b) in before.iter().zip(&after) {
+        assert!((a - b).abs() < 1e-3, "the same shape on the same frames: {before:?} vs {after:?}");
+    }
+}

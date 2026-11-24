@@ -210,6 +210,8 @@ const _strokeIcons = <String, List<_Shape>>{
   'sound': [_P(r'M4 9.5h3.5L12 5.5v13l-4.5-4H4z', dashed: false), _P(r'M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11', dashed: false)],
   'swing': [_P(r'M12 3.5v0', dashed: false), _C(12.0, 3.8, 1.0, dashed: false), _P(r'M12 4.5 17 15', dashed: false), _C(17.6, 16.4, 2.4, dashed: false), _P(r'M5.5 14.5a9.5 9.5 0 0 0 14 3.5', dashed: true)],
   'text': [_P(r'M5.5 6h13M12 6v13M9.5 19h5', dashed: false)],
+  // D34: the timeline as curves (a curve through a key)
+  'curves': [_P(r'M3 18c4 0 5-12 9-12s5 12 9 12', dashed: false), _C(12.0, 6.0, 1.6, dashed: false)],
   'undo': [_P(r'M8.5 5.5 4.5 9.5l4 4', dashed: false), _P(r'M4.5 9.5H14a5.5 5.5 0 0 1 0 11h-3', dashed: false)],
   'wiggle': [_P(r'M3 12l2.2-4 2.6 8 2.6-9 2.6 10 2.6-9 2.6 8L20.5 12', dashed: false)],
   'x': [_P(r'M7 7l10 10M17 7 7 17', dashed: false)],

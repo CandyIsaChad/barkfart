@@ -153,7 +153,7 @@ impl Editor {
                 out.put(k);
             }
             for k in moving {
-                out.put(Key { time: pivot + (k.time - pivot) * factor + delta, ..k });
+                out.put(Key { time: pivot + (k.time - pivot) * factor + delta, lh: (k.lh.0 * factor, k.lh.1), rh: (k.rh.0 * factor, k.rh.1), ..k });
             }
             set_keys(p, out.keys().to_vec())?;
         }

@@ -300,6 +300,7 @@ fn node(layer_id: &str, m: &Obj) -> R<Node> {
         Some(s) => Shape::from_name(s).ok_or_else(|| FormatError(format!("shape {s}")))?,
     };
     let mut n = Node::new(layer_id, req(m, "id")?, str_(m, "parent")?, shape);
+    n.name = str_(m, "name")?.map(Into::into);
     n.draw_order = i(m, "draw", UNASSIGNED)?;
     n.curve = f(m, "curve", 0.0)?;
     n.triangle_upside_down = b(m, "upsideDown", false)?;
@@ -827,6 +828,10 @@ fn stack_json(st: &EffectStack) -> Json {
 fn node_json(n: &Node) -> Json {
     let mut m = JObj::new();
     m.put("id", json::s(&n.id)).put("parent", json::opt(&n.parent)).put("shape", json::s(n.shape.name())).put("draw", json::int(n.draw_order as i64));
+    // D35, written only when given
+    if let Some(name) = &n.name {
+        m.put("name", json::s(name));
+    }
     if n.curve != 0.0 {
         m.put("curve", json::f32(n.curve));
     }

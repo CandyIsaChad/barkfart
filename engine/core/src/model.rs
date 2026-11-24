@@ -617,6 +617,30 @@ impl Track {
         from_channels(&a.value, out)
     }
 
+    /// D34 (the graph): segment `i` to `i + 1` of channel `c` as a cubic:
+    /// its two control points as absolute (seconds, value), for a Smooth
+    /// segment or a Bezier ease with a cubic curve. None for the others
+    /// (Hold steps, Linear is straight, bounce and elastic are sampled).
+    pub fn segment_controls(&self, i: usize, c: usize) -> Option<[f64; 4]> {
+        let (a, b) = (self.keys.get(i)?, self.keys.get(i + 1)?);
+        let h = b.time - a.time;
+        let (va, vb) = (channels(&a.value).0[c], channels(&b.value).0[c]);
+        match a.interp {
+            Interp::Smooth => {
+                let x1 = if a.handle.stored() { a.rh.0.clamp(0.0, h) } else { h / 3.0 };
+                let x2 = if b.handle.stored() { h + b.lh.0.clamp(-h, 0.0) } else { h - h / 3.0 };
+                let y1 = va + self.slope(i, c, true) * x1;
+                let y2 = vb - self.slope(i + 1, c, false) * (h - x2);
+                Some([a.time + x1, y1, a.time + x2, y2])
+            }
+            Interp::Bezier if a.ease.kind == EaseKind::Cubic => {
+                let e = a.ease;
+                Some([a.time + e.x1 as f64 * h, va + e.y1 as f64 * (vb - va), a.time + e.x2 as f64 * h, va + e.y2 as f64 * (vb - va)])
+            }
+            _ => None,
+        }
+    }
+
     /// D34: the handles a key has now, as (seconds, value) offsets for its
     /// first channel; what switching it to Free or Aligned keeps.
     pub fn handles_at(&self, i: usize) -> ((f64, f64), (f64, f64)) {
@@ -878,6 +902,9 @@ pub struct Node {
     pub pinned: bool,
     /// Legacy fields not yet understood, kept for re-export ("i:3", "f:1.5", ...).
     pub legacy_extras: IndexMap<String, String>,
+    /// D35: the part's own name (the Parts list, the graph); None: its shape
+    /// and place ("Rounded 9").
+    pub name: Option<String>,
 }
 
 impl Node {
@@ -920,6 +947,7 @@ impl Node {
             drag_lock: 0,
             pinned: false,
             legacy_extras: IndexMap::new(),
+            name: None,
         }
     }
 
