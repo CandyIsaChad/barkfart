@@ -785,6 +785,16 @@ Render the boards (docs/barkfart/mockups: `mkdir -p project preview && node boar
 ### K. Hardest, later
 Groups; the Luau plugin runtime (it needs the `mlua` crate, so it waits
 until a dependency fetch is approved); Script layers; emitters.
+- [x] D37. Motion (the user, 2026-11-24: "UI element animations"). Motion
+  answers something done, is short (80 to 200 ms), eases out
+  (`kit.kEase`), and is off when the system asks for less motion
+  (`kit.motion`). Popovers grow out of what opened them; Properties and
+  View options slide in from their edge and back; the timeline's fold
+  eases (the stage's picture stays in place meanwhile); segmented controls
+  and the Properties tabs slide their card; a tick draws itself in;
+  button-sized taps dip to 95%; toasts rise in; a block's highlight fades;
+  the fold chevron turns. Nothing moves by itself, and playback and
+  scrubbing stay instant.
 - [ ] K2c. Script layers (SCRIPTING.md "Script layers"). Engine done
   2026-11-24: `LayerKind::Script` (plugin, settings, targets, runs with
   seed, Replace, Keep the last frame, keyable Mix), `bf.script` with

@@ -47,6 +47,38 @@ fn wrap(name: &str, e: legacy::LegacyError) -> ImportError {
 }
 
 /// Imports a Stick Nodes file into the project's root symbol.
+/// A figure or movieclip coming in where another already stands (the
+/// bughunt, 2026-11-24: their joints overlapped exactly) steps sideways:
+/// right, left, further right ... as "Add figure" does.
+fn clear_spot(p: &Project, l: &mut Layer) {
+    let Some(root) = p.root() else { return };
+    let taken: Vec<(f32, f32)> = root
+        .layers
+        .iter()
+        .filter(|x| matches!(x.kind, LayerKind::Figure(_) | LayerKind::Symbol(_)))
+        .map(|x| (x.transform.x.key_value(0.0).f(), x.transform.y.key_value(0.0).f()))
+        .collect();
+    let (x0, y) = (l.transform.x.value.f(), l.transform.y.value.f());
+    let free = |x: f32| !taken.iter().any(|(tx, ty)| (tx - x).abs() < 40.0 && (ty - y).abs() < 150.0);
+    for k in 0..12 {
+        let x = x0 + if k % 2 == 1 { 1.0 } else { -1.0 } * 230.0 * ((k + 1) / 2) as f32;
+        if free(if k == 0 { x0 } else { x }) {
+            if k > 0 {
+                l.transform.x.value = Value::F(x);
+                if !l.transform.x.track.is_empty() {
+                    let d = x - x0;
+                    let keys: Vec<Key> = l.transform.x.track.keys().to_vec();
+                    l.transform.x.track.clear();
+                    for kk in keys {
+                        l.transform.x.track.put(Key { value: Value::F(kk.value.f() + d), ..kk });
+                    }
+                }
+            }
+            return;
+        }
+    }
+}
+
 pub fn import_file(p: &mut Project, file_name: &str, bytes: &[u8]) -> Result<Imported, ImportError> {
     let lower = file_name.to_lowercase();
     let name = name_of(file_name).to_string();
@@ -57,7 +89,8 @@ pub fn import_file(p: &mut Project, file_name: &str, bytes: &[u8]) -> Result<Imp
     if lower.ends_with(".nodes") {
         let fig = legacy::read_nodes(bytes).map_err(|e| wrap(&name, e))?;
         let mut rep = Report::default();
-        let l = legacy::to_layer(p, &fig, &name, &mut rep);
+        let mut l = legacy::to_layer(p, &fig, &name, &mut rep);
+        clear_spot(p, &mut l);
         let id = l.id.clone();
         p.root_mut().expect("root").layers.push(std::sync::Arc::new(l));
         return Ok(Imported { layer: id, message: format!("Imported figure {name}"), approximations: rep.approximations, assets: Vec::new() });
@@ -71,6 +104,7 @@ pub fn import_file(p: &mut Project, file_name: &str, bytes: &[u8]) -> Result<Imp
         if let LayerKind::Symbol(s) = &mut inst.kind {
             s.loop_mode = SymbolLoop::Loop;
         }
+        clear_spot(p, &mut inst);
         p.root_mut().expect("root").layers.push(std::sync::Arc::new(inst));
         return Ok(Imported { layer: lid, message: format!("Imported movieclip {name} ({} frames)", mc.frames.len()), approximations: rep.approximations, assets: Vec::new() });
     }

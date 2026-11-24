@@ -126,6 +126,9 @@ pub struct Session {
     /// document as it was (restored at the end, Cancel or Save), the
     /// original layer, and the frame.
     copy_edit: Option<(Box<Document>, String, i32)>,
+    /// The history's depth just after "Edit a copy": an Undo there would undo
+    /// the copy itself, so it ends the editor as Cancel does instead.
+    copy_edit_depth: usize,
     /// The motion path on the stage (View › Motion path).
     pub motion_path: bool,
     /// D5 / H3: the keying toggle. Off (the default), a change to an effect
@@ -236,7 +239,7 @@ impl Session {
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
         let main_root = doc.project().root_symbol.clone();
-        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, selected_group: None, selected_script: None, drag_t: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, stock: None, size_ref: true, mirror: false, curves: false, curve_shown: Default::default(), draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, poses_clip: Vec::new(), multi: Vec::new(), copy_edit: None, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, selected_group: None, selected_script: None, drag_t: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, stock: None, size_ref: true, mirror: false, curves: false, curve_shown: Default::default(), draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, poses_clip: Vec::new(), multi: Vec::new(), copy_edit: None, copy_edit_depth: 0, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -957,6 +960,12 @@ impl Session {
             "up" => self.touch_up(),
             "cancel" => self.touch_cancel(),
             "undo" => {
+                // in the figure editor, undoing past its first change leaves it
+                // as Cancel does (the animation and its history as they were),
+                // so Redo can't bring back a copy nobody is editing
+                if self.copy_edit.is_some() && self.doc.undo_depth() <= self.copy_edit_depth {
+                    return self.command(&json!({"op": "edit_copy_end"}));
+                }
                 self.doc.undo();
                 self.changed();
             }
@@ -1782,6 +1791,7 @@ impl Session {
                         });
                         if let Some(c) = made {
                             self.copy_edit = Some((snapshot, l, fr));
+                            self.copy_edit_depth = self.doc.undo_depth();
                             self.building = Some(c.clone());
                             let root = self.project().root().and_then(|s| s.layer(&c)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
                             self.selected = root.map(|r| (c, r));

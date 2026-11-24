@@ -180,7 +180,8 @@ Widget renderDesc(Desc d) {
     DSlider() => SliderRow(d.label, d.valueText, d.value, onChanged: d.onChanged),
     DLink() => LinkRow(d.label, d.value, onTap: d.onTap),
     DHint() => Hint(d.text),
-    DInfo() => PropRow(d.label, trailing: Text(d.value, style: ink(13, FontWeight.w400, cSecondary))),
+    // a long value (a graphics card's name) gives way, never the label
+    DInfo() => PropRow(d.label, trailing: Flexible(child: Text(d.value, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.right, style: ink(13, FontWeight.w400, cSecondary)))),
     DName() => SizedBox(
         height: 40,
         child: Row(children: [

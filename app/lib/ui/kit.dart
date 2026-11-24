@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart';
 import 'package:material_ui/material_ui.dart' show Material, MaterialType, Tooltip;
 import 'package:flutter/widgets.dart';
 
@@ -13,6 +14,13 @@ import 'tokens.dart';
 
 const kFont = 'NotoSans';
 const _shadowCard = [BoxShadow(color: Color(0x14000000), spreadRadius: 1), BoxShadow(color: Color(0x4D10141A), blurRadius: 28, offset: Offset(0, 10))];
+
+/// Motion (REDESIGN D37): short, and only in answer to something done.
+/// None at all when the system asks for less motion.
+Duration motion(BuildContext context, int ms) => MediaQuery.maybeDisableAnimationsOf(context) == true ? Duration.zero : Duration(milliseconds: ms);
+
+/// Things arriving ease out; the standard curve for the app.
+const Curve kEase = Curves.easeOutCubic;
 
 TextStyle ink([double size = 14, FontWeight w = FontWeight.w400, Color c = cText]) => TextStyle(fontFamily: kFont, fontSize: size, fontWeight: w, color: c, decoration: TextDecoration.none, height: 1.25);
 
@@ -47,16 +55,49 @@ class _TapState extends State<Tap> {
         child: Center(
           widthFactor: 1,
           heightFactor: 1,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 80),
-            decoration: BoxDecoration(color: _down ? widget.pressedColor : null, borderRadius: BorderRadius.circular(widget.radius)),
-            child: widget.child,
+          child: AnimatedScale(
+            // buttons dip a little under the finger (menu rows only shade)
+            scale: _down && widget.minSize >= 44 ? 0.95 : 1,
+            duration: motion(context, 90),
+            curve: kEase,
+            child: AnimatedContainer(
+              duration: motion(context, 80),
+              decoration: BoxDecoration(color: _down ? widget.pressedColor : null, borderRadius: BorderRadius.circular(widget.radius)),
+              child: widget.child,
+            ),
           ),
         ),
       ),
     );
     if (widget.label != null) w = Semantics(button: true, label: widget.label, child: Tooltip(message: widget.label!, waitDuration: const Duration(milliseconds: 600), child: w));
     return MouseRegion(cursor: on ? SystemMouseCursors.click : MouseCursor.defer, child: w);
+  }
+}
+
+/// Touches up to `dy` above or below the child still land on it: a control
+/// drawn shorter than 44 pt keeps a 44 pt touch area without taking more
+/// room. (Its parent must hit-test it, as rows and columns do.)
+class HitPad extends SingleChildRenderObjectWidget {
+  const HitPad({super.key, required this.dy, super.child});
+  final double dy;
+  @override
+  RenderObject createRenderObject(BuildContext context) => RenderHitPad(dy);
+  @override
+  void updateRenderObject(BuildContext context, RenderHitPad renderObject) => renderObject.dy = dy;
+}
+
+class RenderHitPad extends RenderProxyBox {
+  RenderHitPad(this.dy);
+  double dy;
+  @override
+  bool hitTest(BoxHitTestResult result, {required Offset position}) {
+    if (!Rect.fromLTRB(0, -dy, size.width, size.height + dy).contains(position)) return false;
+    final inside = Offset(position.dx, position.dy.clamp(0.0, math.max(0.0, size.height - 0.01)));
+    if (hitTestChildren(result, position: inside)) {
+      result.add(BoxHitTestEntry(this, position));
+      return true;
+    }
+    return false;
   }
 }
 
@@ -146,13 +187,24 @@ class TickBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Tap(
         onTap: onChanged == null ? null : () => onChanged!(!(value ?? false)),
-        child: Opacity(opacity: onChanged == null ? 0.45 : 1, child: CustomPaint(size: Size.square(size), painter: _TickPainter(value))),
+        child: Opacity(
+          opacity: onChanged == null ? 0.45 : 1,
+          // the tick draws itself in when it comes on
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(end: value == false ? 0 : 1),
+            duration: motion(context, 160),
+            curve: kEase,
+            builder: (c, t, _) => CustomPaint(size: Size.square(size), painter: _TickPainter(value, t)),
+          ),
+        ),
       );
 }
 
 class _TickPainter extends CustomPainter {
-  _TickPainter(this.value);
+  _TickPainter(this.value, [this.t = 1]);
   final bool? value;
+  /// How far the tick is drawn in (0: off, 1: on).
+  final double t;
   @override
   void paint(Canvas canvas, Size size) {
     final k = size.width / 30;
@@ -161,23 +213,28 @@ class _TickPainter extends CustomPainter {
     canvas.drawRRect(RRect.fromLTRBR(1, 1, 29, 29, const Radius.circular(7)), Paint()..color = cCard);
     canvas.drawRRect(RRect.fromLTRBR(1, 1, 29, 29, const Radius.circular(7)), Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = on ? 2 : 1.5
-      ..color = on ? cAccent : const Color(0xFFC9CED5));
+      ..strokeWidth = 1.5 + 0.5 * t
+      ..color = Color.lerp(const Color(0xFFC9CED5), cAccent, t)!);
     final pen = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3.2
       ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..color = value == true ? cAccent : value == null ? cAccent : const Color(0xFFD9DDE2);
+      ..strokeJoin = StrokeJoin.round;
     if (value == null) {
-      canvas.drawLine(const Offset(9, 15), const Offset(21, 15), pen);
-    } else {
-      canvas.drawPath(Path()..moveTo(8.5, 15.5)..lineTo(12.9, 19.9)..lineTo(21.5, 10.5), pen);
+      canvas.drawLine(const Offset(9, 15), const Offset(21, 15), pen..color = cAccent);
+      return;
+    }
+    final tick = Path()..moveTo(8.5, 15.5)..lineTo(12.9, 19.9)..lineTo(21.5, 10.5);
+    // the faint tick of an off box, and the blue one drawn along it
+    if (t < 1) canvas.drawPath(tick, pen..color = const Color(0xFFD9DDE2));
+    if (on && t > 0) {
+      final m = tick.computeMetrics().first;
+      canvas.drawPath(m.extractPath(0, m.length * t), pen..color = cAccent);
     }
   }
 
   @override
-  bool shouldRepaint(_TickPainter old) => old.value != value;
+  bool shouldRepaint(_TickPainter old) => old.value != value || old.t != t;
 }
 
 /// One row of a page: label on the left, a control on the right. A small blue
@@ -223,20 +280,34 @@ class Segmented extends StatelessWidget {
         padding: const EdgeInsets.all(3),
         margin: const EdgeInsets.only(bottom: 6),
         decoration: BoxDecoration(color: cControl, borderRadius: BorderRadius.circular(11)),
-        child: Row(children: [
-          for (var i = 0; i < options.length; i++)
-            Expanded(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: onSelect == null ? null : () => onSelect!(i),
-                child: Container(
-                  height: 32,
-                  alignment: Alignment.center,
-                  decoration: i == selected ? BoxDecoration(color: cCard, borderRadius: BorderRadius.circular(8), boxShadow: const [BoxShadow(color: Color(0x24000000), blurRadius: 3, offset: Offset(0, 1))]) : null,
-                  child: Text(options[i], maxLines: 1, overflow: TextOverflow.ellipsis, style: ink(13, FontWeight.w700, onSelect == null ? cTag : cAccent)),
+        child: Stack(children: [
+          // the chosen part's card slides to it
+          if (selected >= 0 && selected < options.length)
+            Positioned.fill(
+              child: AnimatedAlign(
+                alignment: Alignment(options.length < 2 ? 0 : -1 + 2 * selected / (options.length - 1), 0),
+                duration: motion(context, 180),
+                curve: kEase,
+                child: FractionallySizedBox(
+                  widthFactor: 1 / options.length,
+                  child: Container(decoration: BoxDecoration(color: cCard, borderRadius: BorderRadius.circular(8), boxShadow: const [BoxShadow(color: Color(0x24000000), blurRadius: 3, offset: Offset(0, 1))])),
                 ),
               ),
             ),
+          Row(children: [
+            for (var i = 0; i < options.length; i++)
+              Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onSelect == null ? null : () => onSelect!(i),
+                  child: Container(
+                    height: 32,
+                    alignment: Alignment.center,
+                    child: Text(options[i], maxLines: 1, overflow: TextOverflow.ellipsis, style: ink(13, FontWeight.w700, onSelect == null ? cTag : cAccent)),
+                  ),
+                ),
+              ),
+          ]),
         ]),
       );
 }
@@ -477,11 +548,15 @@ class Anchored extends StatelessWidget {
   final bool alignRight, below;
   final Widget Function(double width) card;
 
-  /// The global rect of the widget with this key (null: not laid out).
+  /// Where the widget with this key is, in the popover's own space (the
+  /// root overlay's: Settings › UI size scales everything inside it, so
+  /// window pixels would put the popover off its button). Null: not laid out.
   static Rect? rectOf(GlobalKey key) {
-    final box = key.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) return null;
-    return box.localToGlobal(Offset.zero) & box.size;
+    final ctx = key.currentContext;
+    final box = ctx?.findRenderObject() as RenderBox?;
+    if (ctx == null || box == null || !box.hasSize) return null;
+    final overlay = Overlay.maybeOf(ctx, rootOverlay: true)?.context.findRenderObject() as RenderBox?;
+    return box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
   }
 
   @override
@@ -495,14 +570,25 @@ class Anchored extends StatelessWidget {
     final room = math.max(96.0, goAbove ? roomAbove : roomBelow);
     final w = math.min(width, screen.width - pad.left - pad.right - 2 * margin);
     final left = (alignRight ? anchor.right - w : anchor.left).clamp(pad.left + margin, math.max(pad.left + margin, screen.width - pad.right - margin - w)).toDouble();
+    Widget body = ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: room, maxWidth: w),
+      child: SingleChildScrollView(child: card(w)),
+    );
+    // it grows out of what opened it (the popover's route animates it)
+    final a = ModalRoute.of(context)?.animation;
+    if (a != null) {
+      final c = CurvedAnimation(parent: a, curve: kEase, reverseCurve: Curves.easeInCubic);
+      final ax = ((anchor.center.dx - left) / w * 2 - 1).clamp(-1.0, 1.0);
+      body = FadeTransition(
+        opacity: c,
+        child: ScaleTransition(scale: Tween(begin: 0.94, end: 1.0).animate(c), alignment: Alignment(ax, goAbove ? 1 : -1), child: body),
+      );
+    }
     return Positioned(
       left: left,
       top: goAbove ? null : math.min(anchor.bottom + gap, bottom - 96),
       bottom: goAbove ? screen.height - math.max(anchor.top - gap, top + 96) : null,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: room, maxWidth: w),
-        child: SingleChildScrollView(child: card(w)),
-      ),
+      child: body,
     );
   }
 }
@@ -528,7 +614,12 @@ Future<T?> showSheet<T>(BuildContext context, {required String title, required L
     barrierDismissible: true,
     barrierLabel: title,
     barrierColor: const Color(0x6114181E),
-    transitionDuration: const Duration(milliseconds: 140),
+    transitionDuration: motion(context, 160),
+    // it settles in from a touch smaller (D37)
+    transitionBuilder: (c, a, _, child) {
+      final e = CurvedAnimation(parent: a, curve: kEase, reverseCurve: Curves.easeInCubic);
+      return FadeTransition(opacity: e, child: ScaleTransition(scale: Tween(begin: 0.96, end: 1.0).animate(e), child: child));
+    },
     pageBuilder: (c, a1, a2) => Center(
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: width, maxHeight: MediaQuery.sizeOf(c).height - 24),
@@ -578,7 +669,13 @@ void showToast(BuildContext context, String text, {String? action, VoidCallback?
       right: 0,
       bottom: 24 + MediaQuery.paddingOf(c).bottom,
       child: Center(
-        child: Container(
+        // it rises into place
+        child: TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0, end: 1),
+          duration: motion(c, 200),
+          curve: kEase,
+          builder: (c, t, child) => Opacity(opacity: t, child: Transform.translate(offset: Offset(0, 14 * (1 - t)), child: child)),
+          child: Container(
           constraints: const BoxConstraints(maxWidth: 560),
           padding: EdgeInsets.fromLTRB(16, 6, action == null ? 16 : 6, 6),
           decoration: BoxDecoration(
@@ -598,6 +695,7 @@ void showToast(BuildContext context, String text, {String? action, VoidCallback?
                 child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), child: Text(action, style: ink(14, FontWeight.w700, light ? cAccent : const Color(0xFF9CC8F5)))),
               ),
           ]),
+        ),
         ),
       ),
     ),

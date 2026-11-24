@@ -5168,6 +5168,33 @@ fn editing_a_figure_edits_a_copy() {
 }
 
 #[test]
+fn undo_in_the_figure_editor_stops_at_its_start_and_redo_brings_nothing_stray() {
+    // the bughunt (2026-11-24): Undo right after "Edit a copy", then Redo,
+    // left a "(copy)" layer and a hidden original, with no editor open
+    let mut s = animated();
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    let no_counter = |x: &str| x.lines().filter(|l| !l.contains("\"idCounter\"")).collect::<Vec<_>>().join("\n");
+    let text = codec::encode(s.project());
+    let before = s.state();
+    let st = s.command(&json!({"op": "edit_copy"}));
+    let copy = st["building"]["layer"].clone();
+    // one change in the editor: the first Undo takes it back, still editing
+    s.command(&json!({"op": "select", "layer": copy, "node": "armR1"}));
+    s.command(&json!({"op": "segment", "thickness": 60}));
+    let st = s.command(&json!({"op": "undo"}));
+    assert_eq!(st["building"]["layer"], copy, "still in the editor");
+    // the next would undo the copy itself: it leaves the editor as Cancel does
+    let st = s.command(&json!({"op": "undo"}));
+    assert!(st["building"].is_null() && st["copyEdit"].is_null());
+    assert_eq!(no_counter(&codec::encode(s.project())), no_counter(&text), "the animation is as it was");
+    assert_eq!(st["undo"], before["undo"], "and so is its history");
+    assert_eq!(st["canRedo"], before["canRedo"], "nothing to redo that wasn't there");
+    let st = s.command(&json!({"op": "redo"}));
+    assert!(st["rows"].as_array().unwrap().iter().all(|r| !r["name"].as_str().unwrap_or("").ends_with("(copy)")), "no stray copy");
+    assert!(st["rows"].as_array().unwrap().iter().all(|r| r["visible"] != false), "the original shows");
+}
+
+#[test]
 fn the_parts_list_is_front_first_and_reorders() {
     // J3
     let mut s = session();

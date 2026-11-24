@@ -150,9 +150,26 @@ pub fn set_block_length(st: &mut State, sym: &str, id: &str, frame: i32, frames:
         ensure_length(st, start + frames);
         return Ok(());
     }
+    // the poses after it move with its end; a figure whose last pose is the
+    // animation's last moves the animation's end with it, both ways, so
+    // lengthening and then shortening a pose is a round trip (the bughunt,
+    // 2026-11-24); otherwise the end stays, growing only when it must
+    let others = st
+        .project
+        .symbol(sym)
+        .map(|s| s.layers.iter().filter(|x| x.id != id && matches!(x.kind, LayerKind::Figure(_) | LayerKind::Sprite(_) | LayerKind::Symbol(_))).filter_map(|x| pose_frames(x, fps).last().copied()).max().unwrap_or(0))
+        .unwrap_or(0);
+    let owns_end = last >= others;
     let l = layer(st, sym, id)?;
     retime(l, fps, |fr| if fr >= end { fr + by } else { fr });
-    ensure_length(st, last + by + 1);
+    if owns_end {
+        let to = (n + by).max(last + by + 1).max(others + 1).max(1);
+        if let Some(r) = st.project.root_mut() {
+            r.duration = to as f64 / fps;
+        }
+    } else {
+        ensure_length(st, last + by + 1);
+    }
     Ok(())
 }
 

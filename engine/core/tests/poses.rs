@@ -74,3 +74,34 @@ fn a_drag_inside_a_tween_goes_to_its_pose_first() {
     assert_eq!(s.frame, 0, "the playhead went to the pose being changed");
     assert!((arm(&s, 0) - first).abs() > 10.0);
 }
+
+#[test]
+fn lengthening_then_shortening_a_pose_is_a_round_trip() {
+    // the bughunt (2026-11-24): grow then shrink left the animation a frame
+    // longer, the last pose held for two frames
+    let mut s = Session::new(Document::new(new_editor_project()));
+    for _ in 0..4 {
+        s.command(&json!({"op": "insert_frame"}));
+    }
+    s.command(&json!({"op": "select", "layer": "L2"}));
+    assert_eq!(frames(&s), [0, 1, 2, 3, 4]);
+    assert_eq!(s.frame_count(), 5);
+    s.command(&json!({"op": "frame", "i": 2}));
+    s.command(&json!({"op": "block_length", "frames": 2}));
+    assert_eq!(frames(&s), [0, 1, 2, 4, 5]);
+    assert_eq!(s.frame_count(), 6);
+    s.command(&json!({"op": "block_length", "frames": 1}));
+    assert_eq!(frames(&s), [0, 1, 2, 3, 4]);
+    assert_eq!(s.frame_count(), 5, "the frame is given back");
+    // a last pose that lasts several frames keeps its length both ways
+    s.command(&json!({"op": "frame", "i": 4}));
+    s.command(&json!({"op": "block_length", "frames": 3}));
+    assert_eq!(s.frame_count(), 7);
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "block_length", "frames": 3}));
+    assert_eq!(frames(&s), [0, 1, 4, 5, 6]);
+    assert_eq!(s.frame_count(), 9, "the last pose still lasts 3 frames");
+    s.command(&json!({"op": "block_length", "frames": 1}));
+    assert_eq!(frames(&s), [0, 1, 2, 3, 4]);
+    assert_eq!(s.frame_count(), 7);
+}

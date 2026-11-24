@@ -54,6 +54,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   Map<String, dynamic> _st = const {};
   final StageView _view = StageView();
   bool _fitted = false;
+  /// The view was zoomed or panned by hand since it was last fitted: a
+  /// rotation then keeps it as it is instead of fitting the stage again.
+  bool _viewMoved = false;
+  double _screenW = 0;
 
   ui.Image? _image;
   /// The stage area the picture was drawn for (stage units; in the camera's
@@ -275,7 +279,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   void _refresh(Map<String, dynamic>? st) {
     if (st == null) return;
     if (_soundPage && (st['selected']?['layer'] != _st['selected']?['layer'] || st['frame'] != _st['frame'] || st['frameSound'] == null)) _soundPage = false;
+    // another figure selected: once the finger is up, keep it clear of the card
+    if (st['selected']?['layer'] != null && st['selected']?['layer'] != _st['selected']?['layer']) _wantClear = true;
     setState(() => _st = st);
+    if (_wantClear) WidgetsBinding.instance.addPostFrameCallback((_) => _keepSelectionClear());
     final m = st['message'] as String? ?? '';
     if (m.isNotEmpty) _say(m);
   }
@@ -303,6 +310,53 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   // ---------------------------------------------------------------- drawing
 
+  /// A selected figure the floating Properties card would hide (an iPad held
+  /// upright, a narrow window): the view eases sideways so the figure sits in
+  /// the open part of the stage. Never while a finger is down (it would pull
+  /// the figure from under it) or while playing.
+  bool _wantClear = false;
+  Timer? _clearPan;
+
+  void _keepSelectionClear() {
+    if (!mounted || _pointers.isNotEmpty) return;
+    _wantClear = false;
+    final screen = MediaQuery.sizeOf(context);
+    final dock = (screen.width >= 1200 && screen.height >= 900) || Platform.environment['BARKFART_DOCK'] == '1';
+    if (!_panelOpen || _hidePanels || _playing || _fsNow || dock || _view.size.isEmpty) return;
+    final cardW = screen.shortestSide > 600 ? 360.0 : 320.0;
+    final open = _view.size.width - 8 - cardW; // the stage left of the card
+    if (open < 120) return;
+    double? x0, x1;
+    for (final h in ((_st['handles'] as List?) ?? const []).cast<List>()) {
+      if (h.length < 3 || ((h[2] as num).toInt() & 4) == 0) continue;
+      final x = _view.toScreen((h[0] as num).toDouble(), (h[1] as num).toDouble()).dx;
+      x0 = x0 == null ? x : math.min(x0, x);
+      x1 = x1 == null ? x : math.max(x1, x);
+    }
+    if (x0 == null || x1 == null || x1 <= open - 16) return;
+    // its middle to the middle of the open part (its left edge stays on screen)
+    var by = open / 2 - (x0 + x1) / 2;
+    if (x0 + by < 16) by = 16 - x0;
+    if (by.abs() < 4) return;
+    final from = _view.cx, to = _view.cx - by / _view.s;
+    _clearPan?.cancel();
+    final ms = kit.motion(context, 240).inMilliseconds;
+    if (ms == 0) {
+      setState(() => _view.cx = to);
+      return;
+    }
+    final sw = Stopwatch()..start();
+    _clearPan = Timer.periodic(const Duration(milliseconds: 16), (tm) {
+      final u = (sw.elapsedMilliseconds / ms).clamp(0.0, 1.0);
+      if (!mounted || _pointers.isNotEmpty) {
+        tm.cancel();
+        return;
+      }
+      setState(() => _view.cx = from + (to - from) * kit.kEase.transform(u));
+      if (u >= 1) tm.cancel();
+    });
+  }
+
   void _fit() {
     final cam = (_st['camera'] as List?)?.map((v) => (v as num).toDouble()).toList();
     final size = _view.size;
@@ -318,6 +372,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _view.cx = (minX + maxX) / 2;
     _view.cy = (minY + maxY) / 2;
     _fitted = true;
+    _viewMoved = false;
   }
 
   void _tick() {
@@ -488,6 +543,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         setState(() {
           _view.cx -= d.dx / _view.s;
           _view.cy += d.dy / _view.s;
+          _viewMoved = true;
         });
       }
     } else if (_pointers.length == 2) {
@@ -501,6 +557,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         final now = _view.toStage(mid);
         _view.cx += anchor.dx - now.dx;
         _view.cy += anchor.dy - now.dy;
+        _viewMoved = true;
       });
       _pinchDist = dist;
       _pinchMid = mid;
@@ -513,6 +570,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   void _up(PointerEvent ev) {
     if (!_pointers.containsKey(ev.pointer)) return;
     _pointers.remove(ev.pointer);
+    if (_pointers.isEmpty && _wantClear) WidgetsBinding.instance.addPostFrameCallback((_) => _keepSelectionClear());
     if (_pointers.isEmpty) {
       if (_oneFinger == 1) {
         _cmd({'op': ev is PointerCancelEvent ? 'cancel' : 'up'});
@@ -560,6 +618,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         final now = _view.toStage(ev.localPosition);
         _view.cx += anchor.dx - now.dx;
         _view.cy += anchor.dy - now.dy;
+        _viewMoved = true;
       });
     }
   }
@@ -963,16 +1022,27 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     return false;
   }
 
+  /// A question as the kit's sheet (REDESIGN B1): the last button is the
+  /// main one (blue); ones that throw work away read red.
   Future<String?> _ask(String title, String body, List<String> buttons) {
-    return showDialog<String>(
-      context: context,
-      builder: (c) => AlertDialog(
-        backgroundColor: cPanel,
-        title: Text(title, style: const TextStyle(color: cText, fontSize: 17)),
-        content: Text(body, style: const TextStyle(color: cSecondary)),
-        actions: [for (final b in buttons) TextButton(onPressed: () => Navigator.pop(c, b), child: Text(b))],
-      ),
-    );
+    const losing = {'Don\'t save', 'Discard', 'Delete'};
+    return kit.showSheet<String>(context, title: title, width: 420, children: (c) => [
+          kit.Hint(body),
+          Row(children: [
+            for (var i = 0; i < buttons.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              Expanded(
+                child: kit.WordButton(buttons[i],
+                    onTap: () => Navigator.pop(c, buttons[i]),
+                    primary: i == buttons.length - 1 && !losing.contains(buttons[i]),
+                    danger: losing.contains(buttons[i]),
+                    filled: i < buttons.length - 1 || losing.contains(buttons[i]),
+                    expand: true,
+                    height: 38),
+              ),
+            ],
+          ]),
+        ]);
   }
 
   Future<String?> _askName(String title, String initial) {
@@ -1650,9 +1720,18 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                     if (_arrows && !_playing) Positioned(left: _arrowsAt.dx, top: _arrowsAt.dy, child: _arrowsWindow()),
                     if (_magnifier && !_playing) Positioned(left: _magAt.dx, top: _magAt.dy, child: _magnifierWindow()),
                     // floating over the stage; docked, it is a column beside it (below)
-                    if (!_fsNow && _panelOpen && !_hidePanels && !dock) Positioned(top: 8, right: 8, bottom: 8, width: big ? 360 : 320, child: _propertiesCard()),
+                    // it slides in from its edge and back out (D37)
+                    if (!_fsNow && !dock)
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        bottom: 8,
+                        width: big ? 360 : 320,
+                        // while playing the card steps aside: the whole picture shows
+                        child: _slideIn(_panelOpen && !_hidePanels && !_playing ? KeyedSubtree(key: const ValueKey('props'), child: _propertiesCard()) : null, fromRight: true),
+                      ),
                     if (_st['building'] != null && _partsOpen && !_viewOptions && !_hidePanels) Positioned(top: 8, left: 8, bottom: 8, width: 220, child: _partsPanel()),
-                    if (_viewOptions) Positioned(top: 8, left: 8, bottom: 8, width: 330, child: _viewOptionsPanel()),
+                    Positioned(top: 8, left: 8, bottom: 8, width: 330, child: _slideIn(_viewOptions ? KeyedSubtree(key: const ValueKey('view'), child: _viewOptionsPanel()) : null, fromRight: false)),
                   ]),
                 ),
               ),
@@ -1671,14 +1750,37 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             // the figure editor puts its shape shelf where the timeline is (J2)
             child: _st['building'] != null
                 ? _shapeShelf()
-                : Column(children: [
-                    _controlBar(),
-                    if (_curvesOn && _layersOpen && !_playing) _curvesView() else _previewRow(),
-                    if (_layersOpen) _curvesOn && !_playing ? _curvesBar() : _framesBar(),
-                  ]),
+                // folding and unfolding ease the stage's edge along (D37)
+                : AnimatedSize(
+                    duration: kit.motion(context, 180),
+                    curve: kit.kEase,
+                    alignment: Alignment.bottomCenter,
+                    child: Column(children: [
+                      _controlBar(),
+                      if (_curvesOn && _layersOpen && !_playing) _curvesView() else _previewRow(),
+                      if (_layersOpen) _curvesOn && !_playing ? _curvesBar() : _framesBar(),
+                    ]),
+                  ),
           ),
         ]),
       ),
+    );
+  }
+
+  /// A floating panel coming and going (D37): it slides a little from its
+  /// edge and fades; nothing there lets touches through to the stage.
+  Widget _slideIn(Widget? child, {required bool fromRight}) {
+    return AnimatedSwitcher(
+      duration: kit.motion(context, 200),
+      reverseDuration: kit.motion(context, 140),
+      switchInCurve: kit.kEase,
+      switchOutCurve: Curves.easeInCubic,
+      layoutBuilder: (current, previous) => Stack(fit: StackFit.expand, children: [...previous, ?current]),
+      transitionBuilder: (c, a) => FadeTransition(
+        opacity: a,
+        child: SlideTransition(position: Tween(begin: Offset(fromRight ? 0.06 : -0.06, 0), end: Offset.zero).animate(a), child: c),
+      ),
+      child: child ?? const SizedBox.shrink(key: ValueKey('none')),
     );
   }
 
@@ -1719,7 +1821,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       barrierDismissible: true,
       barrierLabel: 'Projects',
       barrierColor: const Color(0x00000000),
-      transitionDuration: Duration.zero,
+      transitionDuration: kit.motion(context, 150),
       pageBuilder: (c, a1, a2) => Stack(children: [
         kit.Anchored(
           anchor: anchor,
@@ -1756,9 +1858,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   Widget _stage() {
     return LayoutBuilder(builder: (context, c) {
-      if (_view.size != c.biggest) {
+      // a rotation (or a window resize) fits the stage again, unless the view
+      // was zoomed or panned by hand; the timeline folding or a docked panel
+      // opening keeps the zoom (the stage stays put)
+      final screenW = MediaQuery.sizeOf(context).width;
+      final rotated = _screenW > 0 && (screenW - _screenW).abs() > 1;
+      _screenW = screenW;
+      if (_view.size != c.biggest || rotated) {
         _view.size = c.biggest;
-        if (!_fitted) _fit();
+        if (!_fitted || (rotated && !_viewMoved)) _fit();
       }
       return Listener(
         onPointerDown: (ev) {
@@ -1792,6 +1900,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                             _view.s = (_view.s * k).clamp(0.02, 40.0);
                             final c2 = _view.toStage(_view.size.center(Offset.zero));
                             _view.cx += c.dx - c2.dx;
+                            _viewMoved = true;
                             _view.cy += c.dy - c2.dy;
                           }),
                           child: Padding(padding: const EdgeInsets.all(8), child: Icon(icon, color: cText)),
@@ -2266,6 +2375,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   final ScrollController _stripScroll = ScrollController();
 
+  /// The layer names column's width: wide on big screens, 180 on a tablet
+  /// held upright (the bughunt: "Stickfigure" was cut at 140), 140 on a phone.
+  static double _namesW(BuildContext context) {
+    final s = MediaQuery.sizeOf(context);
+    return s.width >= 900 ? 210 : s.shortestSide > 600 ? 180 : 140;
+  }
+
   /// The timeline (REDESIGN §4, D16, D27): a names column, then the ruler in
   /// frames, the Preview row (every layer merged, tiled like a film strip at
   /// the picture's shape, not a box per frame) and, unfolded, one row per
@@ -2528,7 +2644,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     // Preview row each end in a divider (timeline board), so "Preview" sits
     // in a row of its own instead of under a tall empty space
     final names = Container(
-      width: MediaQuery.sizeOf(context).width >= 900 ? 210 : 140,
+      width: _namesW(context),
       decoration: const BoxDecoration(color: cPanel, border: Border(right: BorderSide(color: Color(0xFFE6E8EB)))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Container(height: rulerH, decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFE6E8EB))))),
@@ -2583,7 +2699,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [names, Expanded(child: area)]),
             if (empty)
               Positioned(
-                left: MediaQuery.sizeOf(context).width >= 900 ? 210 : 140,
+                left: _namesW(context),
                 right: 0,
                 top: yy - 2 * rowH,
                 height: 2 * rowH,
@@ -2680,7 +2796,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       return out;
     }
     final drag = _blockDrag != null && _blockDrag!.layer == r['id'] ? _blockDrag : null;
-    Widget bar(double x, double w, {bool strong = false, bool ghost = false}) => Container(
+    Widget bar(double x, double w, {bool strong = false, bool ghost = false}) => AnimatedContainer(
+          duration: kit.motion(context, 120),
           width: w,
           height: 26,
           decoration: BoxDecoration(
@@ -2887,7 +3004,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       barrierDismissible: true,
       barrierLabel: 'Join',
       barrierColor: const Color(0x00000000),
-      transitionDuration: Duration.zero,
+      transitionDuration: kit.motion(context, 150),
       pageBuilder: (c, a1, a2) => Stack(children: [
         kit.Anchored(
           anchor: anchor,
@@ -3027,8 +3144,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Text('$_fpsLabel fps', style: const TextStyle(color: cSecondary, fontSize: 13))),
           ),
           // G1: unfold the layer rows (folded: the ruler and Preview row only)
-          Transform.rotate(
-            angle: _layersOpen ? 0 : math.pi,
+          AnimatedRotation(
+            turns: _layersOpen ? 0 : 0.5,
+            duration: kit.motion(context, 180),
+            curve: kit.kEase,
             child: kit.IconTool('chevron', label: _layersOpen ? 'Fold the timeline' : 'Show the layers', onTap: () => setState(() => _layersOpen = !_layersOpen)),
           ),
         ]),
@@ -3095,7 +3214,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       barrierDismissible: true,
       barrierLabel: 'Add',
       barrierColor: const Color(0x00000000),
-      transitionDuration: Duration.zero,
+      transitionDuration: kit.motion(context, 150),
       pageBuilder: (c, a1, a2) => Stack(children: [
         kit.Anchored(
           anchor: anchor,
@@ -3155,7 +3274,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   Widget _curvesView() {
     final cv = _st['curves'] as Map?;
     final h = math.min(300.0, MediaQuery.sizeOf(context).height * 0.42);
-    final nameW = MediaQuery.sizeOf(context).width >= 900 ? 210.0 : 140.0;
+    final nameW = _namesW(context);
     if (cv == null) {
       return Container(
         height: 72,
@@ -3542,20 +3661,26 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       width: 64 + (leftHand ? pad.left : pad.right),
       padding: EdgeInsets.only(right: leftHand ? 0 : pad.right, left: leftHand ? pad.left : 0, top: 6, bottom: 6 + (_fsNow || _hidePanels ? pad.bottom : 0)),
       decoration: BoxDecoration(color: cPanel, border: Border(left: leftHand ? BorderSide.none : const BorderSide(color: cLine), right: leftHand ? const BorderSide(color: cLine) : BorderSide.none)),
-      child: Column(children: [
+      // too short a window (a phone in landscape, the timeline open): the
+      // rail scrolls rather than cutting off Delete and Hide the panels
+      child: LayoutBuilder(builder: (context, box) => SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints(minHeight: box.maxHeight), child: IntrinsicHeight(child: Column(children: [
         kit.RailButton('undo', label: 'Undo', onTap: !_playing && _st['canUndo'] == true ? () => _cmd({'op': 'undo'}) : null),
         const SizedBox(height: 4),
         kit.RailButton('redo', label: 'Redo', onTap: !_playing && _st['canRedo'] == true ? () => _cmd({'op': 'redo'}) : null),
         const SizedBox(height: 10),
-        kit.RailButton('props', label: 'Properties', pressed: _panelOpen && !_hidePanels, onTap: () => setState(() {
-              _hidePanels = false;
-              _panelOpen = !_panelOpen;
-            })),
+        kit.RailButton('props', label: 'Properties', pressed: _panelOpen && !_hidePanels, onTap: () {
+          setState(() {
+            _hidePanels = false;
+            _panelOpen = !_panelOpen;
+          });
+          // opened over the selected figure: ease it clear of the card
+          if (_panelOpen) WidgetsBinding.instance.addPostFrameCallback((_) => _keepSelectionClear());
+        }),
         const SizedBox(height: 4),
         kit.RailButton('bin', label: 'Delete', onTap: _deleteSelection),
         const Spacer(),
         kit.RailButton('full', label: _hidePanels ? 'Show the panels' : 'Hide the panels', pressed: _hidePanels, onTap: () => setState(() => _hidePanels = !_hidePanels)),
-      ]),
+      ]))))),
     );
   }
 
@@ -3795,7 +3920,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           rw.DSeg(const ['Legacy', 'Modern', 'Solid'], AppSettings.number('nodeStyle').clamp(0, 2), label: 'Joint style', onSelect: (i) => put('nodeStyle', i)),
           number('lineWidth', 'Line width', 1, 5, 1),
           const rw.DTitle('Saving'),
-          number('saveReminder', 'Save reminder (minutes, 0: off)', 0, 120, 1),
+          number('saveReminder', 'Save reminder, minutes', 0, 120, 1),
+          if (!nerd) const rw.DHint('A reminder after this many minutes of unsaved work; 0 turns it off.'),
         ]);
         final middle = card([
           const rw.DTitle('Editing'),
@@ -3804,7 +3930,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           ...toggle('stylus', 'Precise touches (stylus)', 'Joints have to be touched more exactly: for a stylus rather than a finger.'),
           ...toggle('haptics', 'Haptic feedback', 'A light tick when you grab a joint, on devices that have it.'),
           ...toggle('doubleTapMovieclip', 'Double-tap a figure to make a movieclip', 'Two quick taps on a joint ask whether to convert the figure.'),
-          ...toggle('doubleTapNone', 'Double-tap the stage for Select (figure editor)', 'Instead of fitting the view, while editing a figure.'),
+          ...toggle('doubleTapNone', 'Double-tap to select', 'In the figure editor, a double tap on the stage selects instead of fitting the view.'),
           ...toggle('nerd', 'Fewer explanations', 'Hides most help text once you know your way around.'),
         ]);
         final right = card([
@@ -3880,7 +4006,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       barrierDismissible: true,
       barrierLabel: 'Animation',
       barrierColor: const Color(0x00000000),
-      transitionDuration: Duration.zero,
+      transitionDuration: kit.motion(context, 150),
       pageBuilder: (c, a1, a2) => StatefulBuilder(builder: (c, set) {
         void cmd(Map<String, Object?> m) {
           _cmd(m);
@@ -6079,7 +6205,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     return [
       ...connectorTools,
       _title(root ? 'Main node' : 'Segment'),
-      _pair(_Btn('◀ Joint', onTap: () => _cmd({'op': 'cycle_joint', 'dir': -1})), _Btn('Joint ▶', onTap: () => _cmd({'op': 'cycle_joint', 'dir': 1}))),
+      _pair(_Btn('Previous joint', onTap: () => _cmd({'op': 'cycle_joint', 'dir': -1})), _Btn('Next joint', onTap: () => _cmd({'op': 'cycle_joint', 'dir': 1}))),
       _gap,
       if (!root) Text('Angle ${sel['angle']}° · length ${sel['length']}', style: const TextStyle(color: cSecondary, fontSize: 11)),
       if (!root) _gap,
@@ -6729,7 +6855,10 @@ class _Btn extends StatelessWidget {
     final on = enabled && onTap != null;
     final fg = !on ? cTag : accent ? cCard : danger ? cDanger : cAccent;
     final bg = accent ? (on ? cAccent : cTag) : danger ? const Color(0xFFFDECEE) : cControl;
-    return kit.Tap(
+    // drawn 38 (or 30) tall; touches 44 tall
+    return kit.HitPad(
+      dy: small ? 7 : 3,
+      child: kit.Tap(
       onTap: on ? onTap : null,
       minSize: 0,
       child: Container(
@@ -6743,6 +6872,7 @@ class _Btn extends StatelessWidget {
                 : Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: fg, fontSize: small ? 12 : 13, fontWeight: FontWeight.w700)),
           ),
         ),
+      ),
       ),
     );
   }
