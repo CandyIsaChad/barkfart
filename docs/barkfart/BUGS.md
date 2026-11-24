@@ -8,6 +8,18 @@
 
 **How the sizes were made.** This machine's screen is 1366x768, so the window manager caps any window above about 1299x699. iPad sizes are therefore emulated: 1180x820 = BARKFART_WINDOW=1006x699 plus script command `uiscale 0.852`; 820x1180 = BARKFART_WINDOW=480x690 plus `uiscale 0.585`. Shots come out at the true logical size (1181x821, 821x1180). The helper /tmp/claude-1000/-home-caleb-stick-nodes-barkfartEdition/bughunt/r.sh does this for you: `/tmp/claude-1000/-home-caleb-stick-nodes-barkfartEdition/bughunt/r.sh "<script>" ipadL|ipadP|844x390 [docsdir] [open file]`. Swipe coordinates in this file are logical (shot pixels); r.sh multiplies them by the scale before sending. Because of the emulation, a few results only hold for "UI size not 100%" (marked). Screenshots are in /tmp/claude-1000/-home-caleb-stick-nodes-barkfartEdition/bughunt/ (the named PNGs are single shots; mm.png is only a scratch montage and is overwritten).
 
+## The user's list (2026-11-24, on Linux; not started)
+
+1. A frame (pose block) can be lengthened but not shortened from its grips: the grips seem to move one way only. Both ends should drag both ways.
+2. Update the preview live while changing things in the timeline (dragging grips, moving blocks), not only when the finger lifts.
+3. More quality-of-life: drag and drop an existing keyframe anywhere in the same layer; tap a keyframe for a popover with options (copy, paste, …). The same for property keyframes (the animated values' rows).
+4. Double-tap selection (the box) should work over the Preview strip's area too, without changing the strip; the room to double-tap in is too small and slow.
+5. Double-tap to select doesn't work at all: it's only cosmetic.
+6. Tapping a layer (its row) should select the stick figure or thing it belongs to.
+7. Swipe a layer row to show options such as "Delete layer".
+8. Let the timeline area be resized, instead of its height following the number of layers (bad with more than 10).
+9. (Done) The "memory leak": measured, not a leak; the app stays at 50–70 MB. Slowness came from the laptop swapping, plus steady stutters from pictures and thumbnails drawn on the interface thread (15–40 ms each). Follow-up: draw them off the interface thread.
+
 ## Status (2026-11-24, after the hunt)
 
 Fixed and checked on the Linux build at iPad sizes (tests in brackets):
