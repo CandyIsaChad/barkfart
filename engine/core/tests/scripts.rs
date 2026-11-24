@@ -309,3 +309,30 @@ fn the_sample_scripts_run() {
         assert!(moved, "{name} changes {id}: {}", st["script"]);
     }
 }
+
+#[test]
+fn the_workshop_lists_plugins_where_they_are_used_and_their_code() {
+    // K3
+    let mut s = sliding();
+    let src = script("s9.lean", "return { fig = { rotate = { root = p.amount } } }");
+    let st = s.command(&json!({"op": "plugin_install", "name": "lean.luau", "source": src}));
+    assert_eq!(st["installed"], "s9.lean", "installing says which plugin the file was");
+    let st = s.command(&json!({"op": "workshop", "id": "s9.lean"}));
+    let me = st["workshop"]["plugins"].as_array().unwrap().iter().find(|p| p["id"] == "s9.lean").cloned().unwrap();
+    assert_eq!(me["kind"], "script");
+    assert!(me["uses"].as_array().unwrap().is_empty(), "not used yet");
+    let picked = &st["workshop"]["picked"];
+    assert_eq!(picked["source"], src);
+    assert_eq!(picked["targets"][1]["label"], "Strength");
+    assert_eq!(picked["settings"][0]["extra"]["min"], 0.0);
+    // used: a run on the figure
+    s.command(&json!({"op": "script_add", "id": "s9.lean", "from": 2, "to": 10}));
+    let st = s.command(&json!({"op": "workshop"}));
+    let me = st["workshop"]["plugins"].as_array().unwrap().iter().find(|p| p["id"] == "s9.lean").cloned().unwrap();
+    let uses = me["uses"].as_array().unwrap();
+    assert_eq!(uses.len(), 1);
+    assert_eq!(uses[0]["kind"], "script");
+    assert!(uses[0]["label"].as_str().unwrap().ends_with("frames 3 to 10"), "{}", uses[0]["label"]);
+    assert!(uses[0]["run"].is_string());
+    assert!(st["workshop"]["picked"].is_null(), "nothing picked");
+}

@@ -1152,12 +1152,41 @@ impl Session {
                 let name = c["name"].as_str().unwrap_or("plugin.luau").to_string();
                 match c["source"].as_str() {
                     Some(src) => match crate::plugins::install(src, &name) {
-                        Ok(def) => self.message = format!("{} {} is ready.", def.name, def.version),
+                        Ok(def) => {
+                            self.message = format!("{} {} is ready.", def.name, def.version);
+                            self.rev += 1;
+                            // which plugin the file was (the app keeps its file by it)
+                            let mut st = self.state();
+                            st["installed"] = json!(def.id);
+                            return st;
+                        }
                         Err(e) => self.message = e,
                     },
                     None => self.message = "There is no plugin in that file.".into(),
                 }
                 self.rev += 1;
+            }
+            "workshop" => {
+                // K3: every installed plugin with where it's used in this
+                // animation, and the picked one's page (its settings with
+                // their limits, what it moves, its code)
+                let p = self.project();
+                let list: Vec<J> = crate::plugins::list()
+                    .into_iter()
+                    .map(|x| {
+                        let uses = plugin_uses(p, &x.def.id);
+                        json!({"id": x.def.id, "name": x.def.name, "kind": x.def.kind.name(), "author": x.def.author, "version": x.def.version,
+                            "description": x.def.description, "off": x.off, "uses": uses})
+                    })
+                    .collect();
+                let picked = c["id"].as_str().and_then(crate::plugins::definition).map(|d| {
+                    json!({"id": d.id, "settings": plugin_settings(Some(&d), &[]),
+                        "targets": d.targets.iter().map(|t| json!({"name": t.name, "label": t.label.clone().unwrap_or_else(|| title_case(&t.name)), "kind": t.kind.name()})).collect::<Vec<_>>(),
+                        "source": crate::plugins::source(&d.id)})
+                });
+                let mut st = self.state();
+                st["workshop"] = json!({"plugins": list, "picked": picked});
+                return st;
             }
             "plugin_effect" => {
                 // K2: a plugin effect on the selected figure (add, change, remove)
@@ -4644,6 +4673,45 @@ fn modifier_json(i: usize, m: &Modifier, fps: f64) -> J {
                 "author": def.as_ref().and_then(|d| d.author.clone()), "missing": def.is_none(), "off": off, "enabled": m.enabled, "settings": settings})
         }
     }
+}
+
+/// K3: where a plugin is used in this animation: script runs, effects on
+/// layers (and groups), modifiers on values. Each: what to show, the layer,
+/// and the run (a script's).
+fn plugin_uses(p: &Project, id: &str) -> Vec<J> {
+    let Some(r) = p.root() else { return Vec::new() };
+    let fps = st_fps(p);
+    let name_of = |l: &Layer| l.name.clone().unwrap_or_else(|| l.id.clone());
+    let mut out = Vec::new();
+    let node = format!("plugin.{id}");
+    for l in r.layers.iter().rev() {
+        if let LayerKind::Script(sc) = &l.kind {
+            if sc.plugin == id {
+                let on = sc.targets.iter().find_map(|t| t.to.as_deref().and_then(|to| r.layer(to)).map(name_of));
+                for run in &sc.runs {
+                    let a = (run.start * fps).round() as i64 + 1;
+                    let b = (run.end * fps).round() as i64;
+                    let what = on.clone().unwrap_or_else(|| name_of(l));
+                    let label = if b <= a { format!("{what}, frame {a}") } else { format!("{what}, frames {a} to {b}") };
+                    out.push(json!({"label": label, "layer": l.id, "run": run.id, "kind": "script"}));
+                }
+            }
+        }
+        if l.effects.nodes.contains_key(&node) {
+            out.push(json!({"label": name_of(l), "layer": l.id, "kind": "effect"}));
+        }
+        for q in l.properties() {
+            if q.modifiers.iter().any(|m| matches!(&m.kind, ModifierKind::Plugin { id: x, .. } if x == id)) {
+                out.push(json!({"label": format!("{} › {}", name_of(l), value_label(l, &q.id)), "layer": l.id, "property": q.id, "kind": "modifier"}));
+            }
+        }
+    }
+    for g in &r.groups {
+        if g.effects.nodes.contains_key(&node) {
+            out.push(json!({"label": g.name, "group": g.id, "kind": "effect"}));
+        }
+    }
+    out
 }
 
 /// A run's shape for its block on the row: the script's first changed

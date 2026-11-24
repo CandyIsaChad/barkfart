@@ -72,6 +72,11 @@ pub fn list() -> Vec<Listed> {
     registry().list.iter().map(|x| Listed { def: x.def.clone(), off: x.off.clone() }).collect()
 }
 
+/// A plugin's code as it was installed (the Workshop's peek).
+pub fn source(id: &str) -> Option<String> {
+    registry().list.iter().find(|x| x.def.id == id).map(|x| x.source.clone())
+}
+
 pub fn definition(id: &str) -> Option<Definition> {
     registry().list.iter().find(|x| x.def.id == id).map(|x| x.def.clone())
 }

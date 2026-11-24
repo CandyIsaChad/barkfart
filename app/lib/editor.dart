@@ -17,6 +17,7 @@ import 'package:share_plus/share_plus.dart';
 
 import 'engine.dart';
 import 'files.dart';
+import 'workshop.dart';
 import 'ui/kit.dart' as kit;
 import 'ui/pictograms.dart';
 import 'ui/rows.dart' as rw;
@@ -136,7 +137,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     try {
       final dir = await pluginsDir();
       for (final f in dir.listSync().whereType<File>().where((f) => f.path.endsWith('.luau') || f.path.endsWith('.lua'))) {
-        _engine?.command({'op': 'plugin_install', 'name': f.uri.pathSegments.last, 'source': await f.readAsString()});
+        final st = _engine?.command({'op': 'plugin_install', 'name': f.uri.pathSegments.last, 'source': await f.readAsString()});
+        if (st?['installed'] case final String id) _pluginFiles[id] = f.path;
       }
     } catch (_) {}
     // the default stickfigure, for the figure editor's "Stock size" reference
@@ -1025,7 +1027,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// A question as the kit's sheet (REDESIGN B1): the last button is the
   /// main one (blue); ones that throw work away read red.
   Future<String?> _ask(String title, String body, List<String> buttons) {
-    bool lose(String b) => b == 'Don\'t save' || b == 'Discard' || b.startsWith('Delete') || b.startsWith('Clear');
+    bool lose(String b) => b == 'Don\'t save' || b == 'Discard' || b.startsWith('Delete') || b.startsWith('Clear') || b.startsWith('Remove');
     final losing = {for (final b in buttons) if (lose(b)) b};
     return kit.showSheet<String>(context, title: title, width: 420, children: (c) => [
           kit.Hint(body),
@@ -1199,13 +1201,17 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         case 'plugin':
           // scripted: install a plugin file (path)
           final path = w.sublist(1).join(' ');
-          _cmd({'op': 'plugin_install', 'name': path.split('/').last, 'source': await File(path).readAsString()});
+          final st = _cmd({'op': 'plugin_install', 'name': path.split('/').last, 'source': await File(path).readAsString()});
+          if (st?['installed'] case final String id) _pluginFiles[id] = path;
         case 'modadd':
           // scripted: a modifier on the selected value (kind [plugin id])
           _cmd({'op': 'modifier_add', 'property': _curveSel, 'kind': w[1], if (w.length > 2) 'id': w[2]});
           setState(() => _modOpen = (((_curveValue?['mods'] as List?) ?? const []).length) - 1);
         case 'modbrowser':
           setState(() => _modBrowser = true);
+        case 'workshop':
+          // scripted: the Workshop (optionally a plugin picked)
+          unawaited(_openWorkshop(picked: w.length > 1 ? w[1] : null));
         case 'swipe':
           // real touches through Flutter's gestures (window points):
           // swipe x1 y1 x2 y2 [hold ms before moving]; x1 y1 = x2 y2 is a tap
@@ -1842,7 +1848,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             width: w,
             padding: const EdgeInsets.all(6),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-              for (final (i, label) in const [(0, 'New animation'), (1, 'Your animations…'), (2, 'Save'), (3, 'Save as…'), (4, 'Settings')])
+              for (final (i, label) in const [(0, 'New animation'), (1, 'Your animations…'), (2, 'Save'), (3, 'Save as…'), (5, 'Workshop'), (4, 'Settings')])
                 kit.Tap(
                   onTap: () => Navigator.pop(c, i),
                   minSize: 0,
@@ -1864,6 +1870,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         await _saveAs();
       case 4:
         await _settingsDialog();
+      case 5:
+        await _openWorkshop();
     }
   }
 
@@ -4844,9 +4852,20 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 ]),
               ),
             ),
-          Padding(padding: const EdgeInsets.only(top: 8), child: kit.WordButton('Import a script…', onTap: () => Navigator.pop(c, ''), filled: true, expand: true, height: 38)),
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(children: [
+              Expanded(child: kit.WordButton('Import a script…', onTap: () => Navigator.pop(c, ''), filled: true, expand: true, height: 38)),
+              const SizedBox(width: 8),
+              Expanded(child: kit.WordButton('Workshop…', onTap: () => Navigator.pop(c, '\u0000workshop'), filled: true, expand: true, height: 38)),
+            ]),
+          ),
         ]);
     if (pick == null || !mounted) return;
+    if (pick == '\u0000workshop') {
+      await _openWorkshop();
+      return;
+    }
     if (pick.isEmpty) {
       await _importPlugin();
       return;
@@ -4991,24 +5010,143 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   /// K2: a plugin file in: checked and installed, then kept in Barkfart
   /// Plugins so it is there next time.
-  Future<void> _importPlugin() async {
+  /// Plugin id → its file in Barkfart Plugins (the Workshop shares it, and
+  /// switches a plugin back on from it).
+  final Map<String, String> _pluginFiles = {};
+
+  /// Import a plugin file: installed and kept in Barkfart Plugins. Returns
+  /// its id (null: nothing imported).
+  Future<String?> _importPlugin() async {
     List<PlatformFile> picked;
     try {
       picked = await FilePicker.pickFiles(dialogTitle: 'Import a plugin', type: FileType.custom, allowedExtensions: const ['luau', 'lua']);
     } catch (err) {
       _say('Could not open the file picker: $err');
-      return;
+      return null;
     }
     for (final f in picked.take(1)) {
       final source = utf8.decode(await f.readAsBytes(), allowMalformed: true);
       final st = _cmd({'op': 'plugin_install', 'name': f.name, 'source': source});
-      if ('${st?['message'] ?? ''}'.endsWith('is ready.')) {
+      if (st?['installed'] case final String id) {
         try {
-          await File('${(await pluginsDir()).path}/${f.name}').writeAsString(source);
+          final path = '${(await pluginsDir()).path}/${f.name}';
+          await File(path).writeAsString(source);
+          _pluginFiles[id] = path;
         } catch (_) {}
         // a new effect's tile gets its picture
         if (_fxBrowser) await _openFxBrowser();
+        return id;
       }
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------- the workshop
+
+  /// K3: the Workshop, a page for plugins. Add and Show close it and act here.
+  Future<void> _openWorkshop({String? picked}) async {
+    final a = await Navigator.of(context).push<WorkshopAction>(PageRouteBuilder<WorkshopAction>(
+      transitionDuration: kit.motion(context, 180),
+      reverseTransitionDuration: kit.motion(context, 140),
+      transitionsBuilder: (c, a, _, child) {
+        final e = CurvedAnimation(parent: a, curve: kit.kEase, reverseCurve: Curves.easeInCubic);
+        return FadeTransition(opacity: e, child: SlideTransition(position: Tween(begin: const Offset(0, 0.03), end: Offset.zero).animate(e), child: child));
+      },
+      pageBuilder: (c, a1, a2) => WorkshopPage(
+        cmd: _cmd,
+        import: _importPlugin,
+        reinstall: _reinstallPlugin,
+        remove: _removePlugin,
+        share: _sharePlugin,
+        files: _pluginFiles,
+        figureSelected: _sel != null && _st['building'] == null,
+        picked: picked,
+      ),
+    ));
+    if (a == null || !mounted) return;
+    switch (a) {
+      case WorkshopAdd(:final id, :final kind):
+        if (kind == 'script') {
+          _cmd({'op': 'script_add', 'id': id});
+          setState(() {
+            _frameSelected = false;
+            _panelOpen = true;
+            _hidePanels = false;
+            _layersOpen = true;
+          });
+        } else if (kind == 'effect') {
+          _cmd({'op': 'plugin_effect', 'id': id});
+          setState(() {
+            _panelOpen = true;
+            _hidePanels = false;
+          });
+          _jumpTo('Stickfigure Tools');
+        } else {
+          _cmd({'op': 'set', 'k': 'curves', 'v': true});
+          setState(() => _layersOpen = true);
+          _say('Pick a value in the graph, then + under Modifiers on its page.', light: true);
+        }
+      case WorkshopShow(:final use):
+        if (use['kind'] == 'script') {
+          setState(() => _layersOpen = true);
+          _pickScript('${use['layer']}', use['run'] as String?);
+        } else if (use['group'] != null) {
+          _cmd({'op': 'select', 'group': use['group']});
+          setState(() => _panelOpen = true);
+        } else {
+          _cmd({'op': 'select', 'layer': use['layer']});
+          setState(() {
+            _panelOpen = true;
+            _hidePanels = false;
+          });
+          if (use['kind'] == 'modifier') {
+            _cmd({'op': 'set', 'k': 'curves', 'v': true});
+            setState(() {
+              _layersOpen = true;
+              _curveSel = use['property'] as String?;
+            });
+          } else {
+            _jumpTo('Stickfigure Tools');
+          }
+        }
+    }
+  }
+
+  /// A switched-off plugin installed again from its file.
+  Future<void> _reinstallPlugin(String id) async {
+    final path = _pluginFiles[id];
+    if (path == null) return;
+    try {
+      final f = File(path);
+      _cmd({'op': 'plugin_install', 'name': f.uri.pathSegments.last, 'source': await f.readAsString()});
+    } catch (err) {
+      _say('Could not read the plugin\u2019s file: $err');
+    }
+  }
+
+  /// "Remove from Barkfart": uninstalled and its file deleted. Animations
+  /// that use it keep its settings and show it missing.
+  Future<void> _removePlugin(String id) async {
+    final name = (((_st['plugins'] as List?) ?? const []).cast<Map>().where((p) => p['id'] == id).firstOrNull?['name']) ?? id;
+    final ok = await _ask('Remove $name?', 'Animations that use it keep its settings and show it as missing until it\u2019s imported again.', ['Cancel', 'Remove']);
+    if (ok != 'Remove') return;
+    _cmd({'op': 'plugin_uninstall', 'id': id});
+    final path = _pluginFiles.remove(id);
+    if (path != null) {
+      try {
+        await File(path).delete();
+      } catch (_) {}
+    }
+  }
+
+  /// "Share the file…": the system share sheet with the plugin's .luau.
+  Future<void> _sharePlugin(String id, Rect from) async {
+    final path = _pluginFiles[id];
+    if (path == null) return;
+    try {
+      await SharePlus.instance.share(ShareParams(files: [XFile(path)], sharePositionOrigin: from.isEmpty ? null : from));
+    } catch (err) {
+      _say('Could not share: $err');
     }
   }
 

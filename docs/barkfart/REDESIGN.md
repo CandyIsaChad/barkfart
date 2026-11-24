@@ -785,7 +785,7 @@ Render the boards (docs/barkfart/mockups: `mkdir -p project preview && node boar
 ### K. Hardest, later
 Groups; the Luau plugin runtime (it needs the `mlua` crate, so it waits
 until a dependency fetch is approved); Script layers; emitters.
-- [ ] K3. The Workshop (the user, 2026-11-24: "make it its own dedicated
+- [x] K3. The Workshop (the user, 2026-11-24: "make it its own dedicated
   page? in the style of a workshop … You decide"). Decided: a run's or an
   effect's settings stay in Properties beside the stage; the Workshop is the
   page for the plugins themselves (the planned Plugins page): a shelf of
@@ -793,7 +793,15 @@ until a dependency fetch is approved); Script layers; emitters.
   saying where each is used or why it's off, and the picked one's page:
   what it moves, its settings, where it's used, a peek at its code, Share
   the file…, Add to this animation, Remove from Barkfart. Board:
-  mockups/workshop.mjs (sent 2026-11-24, waiting for the user's okay).
+  mockups/workshop.mjs (approved 2026-11-24: "Build it"). Built: app
+  lib/workshop.dart (wide: the shelf, the cards, the picked one's page;
+  upright: the kinds as a row and the page floating over the cards, with a
+  close), op `workshop` (every plugin with its uses; the picked one's
+  settings, targets and code), `plugin_install` returns `installed` (the
+  app keeps each plugin's file: Share the file…, Switch it on again).
+  Opened from Projects › Workshop and Add a script › Workshop…; Add and
+  Show close it and act in the editor; Remove asks, uninstalls and deletes
+  the file (animations keep its settings, shown missing).
 - [x] D37. Motion (the user, 2026-11-24: "UI element animations"). Motion
   answers something done, is short (80 to 200 ms), eases out
   (`kit.kEase`), and is off when the system asks for less motion
