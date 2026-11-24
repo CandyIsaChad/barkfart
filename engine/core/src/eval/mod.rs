@@ -103,6 +103,15 @@ pub fn evaluate_redirected(project: &Project, symbol_id: &str, t: f64, onion_onl
             if let Some(i) = ctx.root.children.iter().position(|o| matches!(o, Item::Group(g) if g.source == src)) {
                 let o = ctx.root.children.remove(i);
                 ctx.root.children.push(o);
+            } else {
+                // in a group (D33): it leaves the group's drawing to go above the bars
+                let found = ctx.root.children.iter_mut().find_map(|o| match o {
+                    Item::Group(g) => g.children.iter().position(|c| matches!(c, Item::Group(x) if x.source == src)).map(|i| g.children.remove(i)),
+                    _ => None,
+                });
+                if let Some(o) = found {
+                    ctx.root.children.push(o);
+                }
             }
         }
     }

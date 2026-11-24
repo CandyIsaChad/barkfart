@@ -5614,3 +5614,26 @@ fn a_picture_locked_to_a_turned_camera_moves_with_the_finger() {
     let big = corners(&st);
     assert!((big[0] - fx).abs() < 0.05 && (big[1] - fy).abs() < 0.05, "the opposite corner stays: {big:?} vs ({fx}, {fy})");
 }
+
+#[test]
+fn a_grouped_textfield_above_the_bars_still_draws_above_them() {
+    // D33: "above bars" lifts a textfield over the widescreen bars, in a group too
+    let mut s = session();
+    s.command(&json!({"op": "add_camera"}));
+    s.command(&json!({"op": "camera_fx", "widescreen": true}));
+    s.command(&json!({"op": "add_textfield"}));
+    let text = s.project().root().unwrap().layers.iter().find(|l| matches!(l.kind, barkfart_core::model::LayerKind::Text(_))).unwrap().id.clone();
+    {
+        let sym = s.project().root_symbol.clone();
+        let l = s.doc.project_mut().layer_mut(&sym, &text).unwrap();
+        if let barkfart_core::model::LayerKind::Text(t) = &mut l.kind {
+            t.above_bars = true;
+        }
+    }
+    s.command(&json!({"op": "group", "layers": [text, "L2"]}));
+    let p = s.project();
+    let scene = barkfart_core::eval::evaluate_with(p, &p.root_symbol, 0.0, false, true);
+    let last = scene.root.children.last().expect("something drawn");
+    let barkfart_core::eval::Item::Group(g) = last else { panic!("a group last") };
+    assert_eq!(g.source, format!("{}/{text}", p.root_symbol), "the textfield is drawn last, over the bars");
+}
