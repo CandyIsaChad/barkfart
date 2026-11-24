@@ -537,6 +537,10 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
     as one, a member can't go in front of layers outside it. Adding it means
     breaking the wrapper for that member.
   - Delete group takes its layers; figures joined to them are let go.
+  - Not yet: a grouped textfield with "above bars" stays under the
+    widescreen bars (the letterbox step looks only at top-level layers).
+  - Grouping selects the new group; the group ops act on the selected group
+    when no `group` is given.
 
 ## 7. Build order (easiest to hardest, nested)
 

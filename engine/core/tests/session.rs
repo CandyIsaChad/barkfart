@@ -2083,6 +2083,10 @@ fn toggle_rows() -> Vec<(&'static str, Option<Value>, Value, Value)> {
         ("connector reversed", Some(json!([{"op": "@connector"}])), json!({"op": "connector_set", "reversed": true}), json!({"op": "connector_set", "reversed": false})),
         ("connector percent", Some(json!([{"op": "@connector"}])), json!({"op": "connector_set", "percent": 0.3}), json!({"op": "connector_set", "percent": 0.5})),
         ("camera lock kept while off", Some(json!([{"op": "camera", "zoom": 1.5, "rotation": 10}, {"op": "camera_lock", "layer": "L2", "on": true}])), json!({"op": "camera_lock", "layer": "L2", "on": false}), json!({"op": "camera_lock", "layer": "L2", "on": true})),
+        // groups (D33): grouping selects the group, so these act on it
+        ("group opacity", Some(json!({"op": "group", "layers": ["L2"]})), json!({"op": "group_set", "opacity": 0.5}), json!({"op": "group_set", "opacity": 1.0})),
+        ("group glow amount", Some(json!({"op": "group", "layers": ["L2"]})), json!({"op": "filter", "glowAmount": 0.7}), json!({"op": "filter", "glowAmount": 0.0})),
+        ("group blur kept while off", Some(json!([{"op": "group", "layers": ["L2"]}, {"op": "filter", "blur": 6}])), json!({"op": "filter", "blur": 0}), json!({"op": "filter", "blur": 6})),
     ]
 }
 
@@ -2202,6 +2206,9 @@ fn every_command_undoes_and_redoes_exactly() {
         json!({"op": "each", "label": "Flip figures", "cmd": {"op": "flip_figure", "h": true}}), json!({"op": "easing", "v": "hold", "block": true}),
         json!({"op": "move_fx", "kind": "wiggle", "on": true}), json!({"op": "stop_animating", "property": "L2/opacity"}),
         json!({"op": "add_time"}), json!({"op": "blend", "v": "MULTIPLY"}), json!({"op": "delete_pose"}), json!({"op": "let_go_here"}), json!({"op": "easing", "v": "bounce", "block": true}), json!({"op": "move_fx", "kind": "swing", "on": true, "amount": 20}),
+        // M9 and K (D33): several figures' poses, groups and their effects
+        json!({"op": "paste_poses"}), json!({"op": "group"}), json!({"op": "group_set", "opacity": 0.5, "name": "Crowd"}), json!({"op": "group_order", "forward": true}),
+        json!({"op": "ungroup"}), json!({"op": "delete_group"}), json!({"op": "filter", "glow": 0xffc83dffu32, "glowAmount": 1.0, "_group": true}),
     ];
     let text = |s: &Session| codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
     let mut failures = Vec::new();
@@ -2227,7 +2234,18 @@ fn every_command_undoes_and_redoes_exactly() {
         if op == "segment" && c["ownColor"] == json!(false) {
             s.command(&json!({"op": "segment", "color": 0xff0000ffu32}));
         }
+        // a group to act on (grouping selects it), with a figure in front to pass
+        if ["group_set", "group_order", "ungroup", "delete_group"].contains(&op) || c.get("_group").is_some() {
+            s.command(&json!({"op": "add_figure", "kind": "ball"}));
+            s.command(&json!({"op": "group", "layers": ["L2"]}));
+        }
         match op {
+            // the first frame's poses, copied, to paste on this one
+            "paste_poses" => {
+                s.command(&json!({"op": "frame", "i": 0}));
+                s.command(&json!({"op": "copy_poses"}));
+                s.command(&json!({"op": "frame", "i": 1}));
+            }
             // a figure in front to step past; a camera that is not where it starts
             "layer_order" => {
                 s.command(&json!({"op": "add_figure", "kind": "ball"}));
@@ -5522,4 +5540,77 @@ fn main_joints_only_shows_the_joints_used_by_joins_at_that_moment() {
     s.command(&json!({"op": "select", "layer": ball}));
     assert_eq!(l2(&s, 0), vec!["hip".to_string()], "not joined yet on frame 1");
     assert_eq!(l2(&s, 3), vec!["armR2".to_string(), "hip".to_string()], "joined at the hand from frame 3");
+}
+
+#[test]
+fn a_selected_group_gives_way_and_its_movieclip_keeps_every_member() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata/legacy/synthetic/picture.png");
+    let mut s = two_poses();
+    let st = s.import("picture.png", &std::fs::read(path).unwrap());
+    let pic = st["rows"].as_array().unwrap().iter().find(|r| r["kind"] == "picture").unwrap()["id"].as_str().unwrap().to_string();
+    let fig = st["rows"].as_array().unwrap().iter().find(|r| r["kind"] == "figure").unwrap()["id"].as_str().unwrap().to_string();
+    let st = s.command(&json!({"op": "group", "layers": [pic, fig], "name": "Scene"}));
+    let gid = st["groups"][0]["id"].as_str().unwrap().to_string();
+    // anything else selected since wins over the group's page
+    s.command(&json!({"op": "select", "group": gid}));
+    let st = s.command(&json!({"op": "cycle_figure", "dir": 1}));
+    assert!(!st["selected"].is_null());
+    assert!(st["group"].is_null(), "the figure's page, not the group's");
+    s.command(&json!({"op": "select", "group": gid}));
+    let st = s.command(&json!({"op": "add_figure", "kind": "ball"}));
+    if !st["selected"].is_null() {
+        assert!(st["group"].is_null());
+    }
+    // Make movieclip from the group: the picture goes in too
+    let layers = |s: &Session| s.project().root().unwrap().layers.iter().map(|l| l.id.clone()).collect::<Vec<_>>();
+    let st = s.command(&json!({"op": "to_movieclip", "group": gid}));
+    assert_eq!(st["undo"], "Convert to movieclip");
+    let now = layers(&s);
+    assert!(!now.contains(&pic) && !now.contains(&fig), "both went into the clip: {now:?}");
+    assert_eq!(st["groups"], json!([]), "the clip takes the group's place");
+    let clip = s.project().root().unwrap().layers.iter().find(|l| matches!(l.kind, barkfart_core::model::LayerKind::Symbol(_))).expect("a movieclip");
+    assert_eq!(clip.name.as_deref(), Some("Scene clip"));
+}
+
+#[test]
+fn a_picture_locked_to_a_turned_camera_moves_with_the_finger() {
+    // a backdrop locked to a zoomed, turned camera: dragging inside its box
+    // moves its box by the finger's own distance, and a corner scales it
+    // about the opposite corner
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata/legacy/synthetic/picture.png");
+    let mut s = two_poses();
+    let st = s.import("picture.png", &std::fs::read(path).unwrap());
+    let pic = st["rows"].as_array().unwrap().iter().find(|r| r["kind"] == "picture").unwrap()["id"].as_str().unwrap().to_string();
+    s.command(&json!({"op": "add_camera"}));
+    s.command(&json!({"op": "camera", "zoom": 2.0, "rotation": 30.0}));
+    s.command(&json!({"op": "mode", "v": "figure"}));
+    s.command(&json!({"op": "camera_lock", "layer": pic, "on": true}));
+    s.command(&json!({"op": "select", "layer": pic, "node": ""}));
+    let st = s.command(&json!({"op": "picture", "scale": 30.0}));
+    assert_eq!(st["picture"]["cameraLocked"], true);
+    let corners = |st: &Value| -> Vec<f64> { st["picture"]["box"].as_array().expect("a box").iter().map(|v| v.as_f64().unwrap()).collect() };
+    let b = corners(&st);
+    let hs = st["handles"].as_array().unwrap().clone();
+    let free = |x: f64, y: f64| !hs.iter().any(|h| (h[0].as_f64().unwrap() - x).hypot(h[1].as_f64().unwrap() - y) < 25.0) && (0..4).all(|i| (b[i * 2] - x).hypot(b[i * 2 + 1] - y) > 25.0);
+    let (mx, my) = (1..20)
+        .flat_map(|u| (1..20).map(move |v| (u as f64 / 20.0, v as f64 / 20.0)))
+        .map(|(u, v)| (b[0] + (b[2] - b[0]) * u + (b[6] - b[0]) * v, b[1] + (b[3] - b[1]) * u + (b[7] - b[1]) * v))
+        .find(|(x, y)| free(*x, *y))
+        .expect("somewhere inside with no joint");
+    s.command(&json!({"op": "down", "x": mx, "y": my, "r": 20}));
+    s.command(&json!({"op": "move", "x": mx + 40.0, "y": my - 10.0}));
+    let st = s.command(&json!({"op": "up"}));
+    assert_eq!(st["undo"], "Move picture");
+    let moved = corners(&st);
+    for i in 0..4 {
+        assert!((moved[i * 2] - b[i * 2] - 40.0).abs() < 0.05 && (moved[i * 2 + 1] - b[i * 2 + 1] + 10.0).abs() < 0.05, "{moved:?} vs {b:?}");
+    }
+    let (fx, fy) = (moved[0], moved[1]);
+    let (cx, cy) = (moved[4], moved[5]);
+    s.command(&json!({"op": "down", "x": cx, "y": cy, "r": 20}));
+    s.command(&json!({"op": "move", "x": fx + (cx - fx) * 1.5, "y": fy + (cy - fy) * 1.5}));
+    let st = s.command(&json!({"op": "up"}));
+    assert_eq!(st["undo"], "Scale picture");
+    let big = corners(&st);
+    assert!((big[0] - fx).abs() < 0.05 && (big[1] - fy).abs() < 0.05, "the opposite corner stays: {big:?} vs ({fx}, {fy})");
 }

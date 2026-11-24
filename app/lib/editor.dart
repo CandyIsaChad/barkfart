@@ -3956,10 +3956,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           ? null
           : () async {
               final ok = await _ask('Make a movieclip?', 'Everything in ${g['name']} becomes one movieclip that plays its animation in a loop, in its place. It can be broken apart again.', ['Cancel', 'Make movieclip']);
-              if (ok != 'Make movieclip') return;
-              _cmd({'op': 'select_many', 'layers': [for (final m in members) m['id']]});
-              if (members.length == 1) _cmd({'op': 'select', 'layer': members.first['id']});
-              _cmd({'op': 'to_movieclip'});
+              if (ok == 'Make movieclip') _cmd({'op': 'to_movieclip', 'group': gid});
             }),
       rw.DHint('In it: ${members.map((m) => m['name']).join(', ')}.'),
     ];

@@ -314,7 +314,9 @@ impl Session {
             }
         }
         if let Some(g) = &self.selected_group {
-            if !self.project().root().is_some_and(|r| r.groups.iter().any(|x| x.id == *g)) {
+            // anything else selected since (a new figure, a cycle, a paste) wins
+            let other = self.selected.is_some() || self.selected_text.is_some() || !self.multi.is_empty();
+            if other || !self.project().root().is_some_and(|r| r.groups.iter().any(|x| x.id == *g)) {
                 self.selected_group = None;
             }
         }
@@ -373,6 +375,23 @@ impl Session {
         let LayerKind::Text(tl) = &l.kind else { return false };
         let mut r = Resolver::new(p);
         r.b(&l.shown, t) && text_hit(tl, l, &mut r, t, x, y, radius, &self.fonts)
+    }
+
+    /// A move on the stage as a change of the layer's own x and y: through
+    /// the inverse of its parent chain (a picture locked to a zoomed or
+    /// turned camera moves with the finger, not at the camera's rate).
+    fn to_parent(&self, layer: &str, dx: f32, dy: f32, t: f64) -> (f32, f32) {
+        let p = self.project();
+        let Some((s, l)) = p.root().and_then(|s| s.layer(layer).map(|l| (s, l))) else { return (dx, dy) };
+        let parent = eval::layer_stage(p, s, l, t).mul(&eval::local_transform(p, l, t).inverse());
+        let inv = parent.inverse();
+        let (ox, oy) = (inv.map_x(0.0, 0.0), inv.map_y(0.0, 0.0));
+        let (x, y) = (inv.map_x(dx as f64, dy as f64) - ox, inv.map_y(dx as f64, dy as f64) - oy);
+        if x.is_finite() && y.is_finite() {
+            (x as f32, y as f32)
+        } else {
+            (dx, dy)
+        }
     }
 
     /// A press on the selected picture (Picture board): near a corner of its
@@ -676,10 +695,11 @@ impl Session {
                     self.gesture = Gesture::Picture { layer: layer.clone(), x: x0, y: y0, tx, ty, slop, started: true };
                 }
                 let ed = self.tools.editor.clone();
+                let (dx, dy) = self.to_parent(&layer, x - x0, y - y0, t);
                 let ids = self.project().root().and_then(|s| s.layer(&layer)).map(|l| (l.transform.x.id.clone(), l.transform.y.id.clone()));
                 if let Some((xi, yi)) = ids {
-                    let _ = ed.change_in(&mut self.doc.state, &xi, Value::F(tx + (x - x0)), t);
-                    let _ = ed.change_in(&mut self.doc.state, &yi, Value::F(ty + (y - y0)), t);
+                    let _ = ed.change_in(&mut self.doc.state, &xi, Value::F(tx + dx), t);
+                    let _ = ed.change_in(&mut self.doc.state, &yi, Value::F(ty + dy), t);
                 }
                 self.rev += 1;
             }
@@ -696,8 +716,9 @@ impl Session {
                 if let Some([xi, yi, sxi, syi]) = ids {
                     // the origin moves so the held-still corner stays where it was
                     let (nx, ny) = (c.0 - (c.0 - o.0) * k, c.1 - (c.1 - o.1) * k);
-                    let _ = ed.change_in(&mut self.doc.state, &xi, Value::F(tx + (nx - o.0)), t);
-                    let _ = ed.change_in(&mut self.doc.state, &yi, Value::F(ty + (ny - o.1)), t);
+                    let (dx, dy) = self.to_parent(&layer, nx - o.0, ny - o.1, t);
+                    let _ = ed.change_in(&mut self.doc.state, &xi, Value::F(tx + dx), t);
+                    let _ = ed.change_in(&mut self.doc.state, &yi, Value::F(ty + dy), t);
                     let _ = ed.change_in(&mut self.doc.state, &sxi, Value::F(sx * k), t);
                     let _ = ed.change_in(&mut self.doc.state, &syi, Value::F(sy * k), t);
                 }
@@ -2339,29 +2360,33 @@ impl Session {
                         0 | 1 => String::new(),
                         _ => "Grouped. They now sit together in the layer list.".into(),
                     };
-                    let _ = gid;
+                    // the new group is selected: its page opens
+                    self.selected = None;
+                    self.selected_text = None;
+                    self.multi.clear();
+                    self.selected_group = Some(gid);
                 }
             }
             "group_order" => {
-                if let Some(gid) = c["group"].as_str().map(str::to_string) {
+                if let Some(gid) = c["group"].as_str().map(str::to_string).or_else(|| self.selected_group.clone()) {
                     let fwd = b("forward");
                     self.step(if fwd { "Bring group forward" } else { "Send group back" }, |s| crate::edit::group_ops::move_group(s, &sym, &gid, fwd));
                 }
             }
             "ungroup" => {
-                if let Some(gid) = c["group"].as_str().map(str::to_string) {
+                if let Some(gid) = c["group"].as_str().map(str::to_string).or_else(|| self.selected_group.clone()) {
                     self.step("Ungroup", |s| crate::edit::group_ops::ungroup(s, &sym, &gid));
                 }
             }
             "delete_group" => {
-                if let Some(gid) = c["group"].as_str().map(str::to_string) {
+                if let Some(gid) = c["group"].as_str().map(str::to_string).or_else(|| self.selected_group.clone()) {
                     if self.step("Delete group", |s| crate::edit::group_ops::delete(s, &sym, &gid)).is_some() {
                         self.validate();
                     }
                 }
             }
             "group_set" => {
-                if let Some(gid) = c["group"].as_str().map(str::to_string) {
+                if let Some(gid) = c["group"].as_str().map(str::to_string).or_else(|| self.selected_group.clone()) {
                     let (name, opacity, open) = (c["name"].as_str().map(str::to_string), c["opacity"].as_f64().map(|v| v as f32), c["open"].as_bool());
                     // opening and closing the folder row is not an edit to undo
                     if name.is_none() && opacity.is_none() && open.is_some() {
@@ -2471,10 +2496,19 @@ impl Session {
             "to_movieclip" => {
                 // the selected figure and the figures joined to it become a movieclip
                 // that plays their animation in a loop, in their place
-                if let Some(l) = self.sel_layer() {
-                    let p = self.project();
+                // a group (its page): every member, pictures and text too
+                let from_group: Option<(Vec<String>, String)> = c["group"].as_str().and_then(|gid| {
+                    let r = self.project().root()?;
+                    let g = r.groups.iter().find(|g| g.id == gid)?;
+                    Some((r.layers.iter().filter(|l| l.group.as_deref() == Some(gid)).map(|l| l.id.clone()).collect(), g.name.clone()))
+                });
+                let start = match from_group {
+                    Some((ids, name)) => ids.first().cloned().map(|first| (first, ids, Some(name))),
                     // several selected (the multi-select board): all of them
-                    let mut set = if self.multi.len() > 1 { self.multi.clone() } else { vec![l.clone()] };
+                    None => self.sel_layer().map(|l| (l.clone(), if self.multi.len() > 1 { self.multi.clone() } else { vec![l] }, None)),
+                };
+                if let Some((l, mut set, group_name)) = start {
+                    let p = self.project();
                     let mut i = 0;
                     while i < set.len() {
                         let cur = set[i].clone();
@@ -2487,10 +2521,11 @@ impl Session {
                         }
                         i += 1;
                     }
-                    let name = p.root().and_then(|r| r.layer(&l)).and_then(|x| x.name.clone()).unwrap_or_else(|| "Movieclip".into());
+                    let name = group_name.or_else(|| p.root().and_then(|r| r.layer(&l)).and_then(|x| x.name.clone())).unwrap_or_else(|| "Movieclip".into());
                     let order: Vec<String> = p.root().map(|r| r.layers.iter().filter(|x| set.contains(&x.id)).map(|x| x.id.clone()).collect()).unwrap_or_default();
                     if self.step("Convert to movieclip", |s| crate::edit::symbol_ops::convert_to_symbol(s, &sym, &order, &format!("{name} clip")).map(|_| ())).is_some() {
                         self.selected = None;
+                        self.selected_group = None;
                         self.multi.clear();
                         self.validate();
                     } else if self.message.is_empty() {
@@ -3567,17 +3602,18 @@ impl Session {
                 "onionBefore": p.view.onion_before, "onionAfter": p.view.onion_after, "onionFront": p.view.onion_in_front,
             },
             "pose": self.pose_clip.is_some(), "posesCopied": self.poses_clip.len(),
-            "group": self.selected_group.as_ref().and_then(|gid| {
+            "group": self.selected_group.as_ref().filter(|_| self.selected.is_none() && self.selected_text.is_none() && self.multi.is_empty()).and_then(|gid| {
                 let r = p.root()?;
                 let g = r.groups.iter().find(|x| x.id == *gid)?;
                 let members: Vec<&std::sync::Arc<Layer>> = r.layers.iter().rev().filter(|l| l.group.as_deref() == Some(gid.as_str())).collect();
                 Some(json!({"id": g.id, "name": g.name, "opacity": round2(g.opacity), "open": g.open,
-                    "effects": g.effects.chain().into_iter().map(|e| e.ty.clone()).collect::<Vec<_>>(),
+                    // the effects that are on (a switched-off one keeps its settings, silent)
+                    "effects": group_on(p, gid),
                     "filters": crate::edit::filters::group_state(p, &p.root_symbol, gid),
                     "members": members.iter().map(|l| json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone())})).collect::<Vec<_>>()}))
             }),
             "groups": p.root().map(|r| r.groups.iter().map(|g| json!({
-                "id": g.id, "name": g.name, "opacity": round2(g.opacity), "open": g.open, "effects": g.effects.nodes.len(),
+                "id": g.id, "name": g.name, "opacity": round2(g.opacity), "open": g.open, "effects": group_on(p, &g.id).len(),
                 "members": r.layers.iter().rev().filter(|l| l.group.as_deref() == Some(g.id.as_str())).map(|l| l.id.clone()).collect::<Vec<_>>(),
             })).collect::<Vec<_>>()).unwrap_or_default(),
             "joining": self.joining.is_some(),
@@ -4086,6 +4122,11 @@ fn draw_segment(s: &mut crate::edit::State, sym: &str, layer: &str, from: &str, 
         n.color.value = Value::C(Color::rgba8888(0x1a1a1aff));
     }
     Ok(id)
+}
+
+/// A group's effects that are on, by kind (K / D33).
+fn group_on(p: &Project, gid: &str) -> Vec<String> {
+    crate::edit::filters::group_state(p, &p.root_symbol, gid)["on"].as_object().map(|m| m.iter().filter(|(_, v)| v.as_bool() == Some(true)).map(|(k, _)| k.clone()).collect()).unwrap_or_default()
 }
 
 /// While a segment is drawn from `from` to the stage point (x, y): its length
