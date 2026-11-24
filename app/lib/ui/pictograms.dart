@@ -212,6 +212,8 @@ const _strokeIcons = <String, List<_Shape>>{
   'text': [_P(r'M5.5 6h13M12 6v13M9.5 19h5', dashed: false)],
   // D34: the timeline as curves (a curve through a key)
   'curves': [_P(r'M3 18c4 0 5-12 9-12s5 12 9 12', dashed: false), _C(12.0, 6.0, 1.6, dashed: false)],
+  // a script layer (K2c): braces
+  'script': [_P(r'M8.5 5.5C6.5 5.5 6.5 7 6.5 9s-1.5 3-2.5 3c1 0 2.5 1 2.5 3s0 3.5 2 3.5', dashed: false), _P(r'M15.5 5.5c2 0 2 1.5 2 3.5s1.5 3 2.5 3c-1 0-2.5 1-2.5 3s0 3.5-2 3.5', dashed: false)],
   'undo': [_P(r'M8.5 5.5 4.5 9.5l4 4', dashed: false), _P(r'M4.5 9.5H14a5.5 5.5 0 0 1 0 11h-3', dashed: false)],
   'wiggle': [_P(r'M3 12l2.2-4 2.6 8 2.6-9 2.6 10 2.6-9 2.6 8L20.5 12', dashed: false)],
   'x': [_P(r'M7 7l10 10M17 7 7 17', dashed: false)],

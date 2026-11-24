@@ -795,7 +795,13 @@ until a dependency fetch is approved); Script layers; emitters.
   button-sized taps dip to 95%; toasts rise in; a block's highlight fades;
   the fold chevron turns. Nothing moves by itself, and playback and
   scrubbing stay instant (the timeline snaps when play starts or stops).
-- [ ] K2c. Script layers (SCRIPTING.md "Script layers"). Engine done
+- [x] K2c. Script layers (SCRIPTING.md "Script layers"). The app (2026-11-24,
+  the board approved): + › Script (installed scripts, Import a script…);
+  the Script row (runs with their trace; tap one for the Script page, drag
+  its ends, hold and slide it); the Script page as on the board, plus New
+  run here / Delete this run; target pickers (a figure; a value, grouped
+  by layer). Samples to import: docs/barkfart/plugins (Sway, Breathe,
+  Pulse; tested in core/tests/scripts.rs). Engine done
   2026-11-24: `LayerKind::Script` (plugin, settings, targets, runs with
   seed, Replace, Keep the last frame, keyable Mix), `bf.script` with
   `start` / `step`, targets `bf.figure()` and `bf.value()`. The user asked

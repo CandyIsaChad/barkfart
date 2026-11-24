@@ -1025,7 +1025,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// A question as the kit's sheet (REDESIGN B1): the last button is the
   /// main one (blue); ones that throw work away read red.
   Future<String?> _ask(String title, String body, List<String> buttons) {
-    const losing = {'Don\'t save', 'Discard', 'Delete'};
+    bool lose(String b) => b == 'Don\'t save' || b == 'Discard' || b.startsWith('Delete') || b.startsWith('Clear');
+    final losing = {for (final b in buttons) if (lose(b)) b};
     return kit.showSheet<String>(context, title: title, width: 420, children: (c) => [
           kit.Hint(body),
           Row(children: [
@@ -1605,6 +1606,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (_st['building'] != null) return _sel != null && _sel!['root'] != true ? const ['Shape Tools', 'Segment Tools', 'Figure editor'] : const ['Figure editor'];
     if (_st['mode'] == 'camera') return const ['Camera Tools'];
     if (_soundPage && _st['frameSound'] != null) return const ['Sound Tools'];
+    // K2c: a script layer's row or run
+    if (_st['script'] != null) return const ['Script'];
     if (_frameSelected) return const ['Frame Tools'];
     if (_st['textfield'] != null) return const ['Textfield Tools'];
     if (_st['movieclip'] != null) return const ['Movieclip Tools'];
@@ -1629,6 +1632,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         return _pictureTools(_st['picture'] as Map);
       case 'Group Tools' when _st['group'] != null:
         return _groupTools(_st['group'] as Map);
+      case 'Script' when _st['script'] != null:
+        return _scriptTools(_st['script'] as Map);
       case 'Value' when _curveValue != null:
         return _valueTools(_curveValue!);
       case 'Nothing selected':
@@ -2402,7 +2407,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     // K: a folded group hides its members' rows
     final folded = {for (final r in allRows) if (r['kind'] == 'group' && r['open'] == false) r['id']};
     final rows = folded.isEmpty ? allRows : allRows.where((r) => !folded.contains(r['group'])).toList();
-    final selLayer = _sel?['layer'] ?? (_st['group'] as Map?)?['id'];
+    final selLayer = _sel?['layer'] ?? (_st['group'] as Map?)?['id'] ?? (_st['script'] as Map?)?['id'];
     final showPreview = AppSettings.values['previewRow'] != false;
     final top = rulerH + (showPreview ? stripH + gap : 0);
     // H3: a layer's animated values as thin rows under it, when opened
@@ -2591,7 +2596,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     // then each layer front first with its icon, name and eye
     Widget name(Map r) {
       final on = r['visible'] != false, selected = r['id'] == selLayer || ((_st['multi'] as List?)?.any((m) => (m as Map)['id'] == r['id']) ?? false);
-      const icons = {'figure': 'figure', 'picture': 'picture', 'text': 'text', 'movieclip': 'clip', 'camera': 'camera', 'sound': 'sound', 'group': 'folder'};
+      const icons = {'figure': 'figure', 'picture': 'picture', 'text': 'text', 'movieclip': 'clip', 'camera': 'camera', 'sound': 'sound', 'group': 'folder', 'script': 'script'};
       final isGroup = r['kind'] == 'group';
       final row = Container(
         height: rowH,
@@ -2619,11 +2624,23 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           Pictogram(icons[r['kind']] ?? 'figure', size: 20, color: selected ? cAccent : cInk2b),
           const SizedBox(width: 6),
           const SizedBox(width: 4),
-          Expanded(child: Text('${r['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: selected ? cAccent : on ? cText : cSecondary, fontSize: 15, fontWeight: selected ? FontWeight.w700 : FontWeight.w400))),
+          Expanded(
+            child: Text.rich(
+              TextSpan(children: [
+                TextSpan(text: '${r['name']}'),
+                // K2c: a script's row says what it moves
+                if (r['kind'] == 'script' && r['sub'] != null) TextSpan(text: '  ${r['sub']}', style: const TextStyle(color: cSecondary, fontSize: 12, fontWeight: FontWeight.w400)),
+              ]),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: selected ? cAccent : on ? cText : cSecondary, fontSize: 15, fontWeight: selected ? FontWeight.w700 : FontWeight.w400),
+            ),
+          ),
           Pictogram('eye', size: 18, color: on ? const Color(0xFF9AA0A8) : const Color(0xFFD5D8DD)),
         ]),
       );
       if (isGroup && !_playing) return GestureDetector(onTap: () => _cmd({'op': 'select', 'group': r['id']}), child: row);
+      if (r['kind'] == 'script' && !_playing) return GestureDetector(onTap: () => _pickScript('${r['id']}', null), child: row);
       if (r['kind'] != 'figure' || _playing) return row;
       // G4: swipe a row (right-click on Linux) for Duplicate and Delete
       void pick() => _cmd({'op': 'select', 'layer': r['id']});
@@ -2766,6 +2783,77 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           ),
         ),
       ));
+      return out;
+    }
+    // K2c: a script row is its runs, each a block with a trace of what it
+    // does; the picked one has grips at both ends (Script board)
+    if (r['kind'] == 'script') {
+      final picked = (_st['script'] as Map?)?['id'] == r['id'] ? (_st['script'] as Map)['run'] : null;
+      final sdrag = _blockDrag != null && _blockDrag!.layer == r['id'] ? _blockDrag : null;
+      for (final run in ((r['runs'] as List?) ?? const []).cast<List>()) {
+        final a = (run[0] as num).toInt(), len = (run[1] as num).toInt(), rid = '${run[2]}';
+        final trace = ((run[3] as List?) ?? const []).map((v) => (v as num?)?.toDouble()).toList();
+        final sel = rid == picked;
+        final dragged = sdrag != null && sdrag.run == rid;
+        final x = left + a * cell + 1, w = math.max(10.0, len * cell - 2);
+        Widget grip(bool atStart) => Positioned(
+              left: atStart ? 0 : null,
+              right: atStart ? null : 0,
+              top: 0,
+              bottom: 0,
+              width: 14,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onHorizontalDragStart: (_) => setState(() => _blockDrag = _BlockDrag('${r['id']}', a, len, cell, edge: atStart ? 2 : 0, run: rid)),
+                onHorizontalDragUpdate: (d) {
+                  if (_blockDrag != null) setState(() => _blockDrag!.dx += d.delta.dx);
+                },
+                onHorizontalDragEnd: (_) => _endBlockDrag(),
+                child: Center(child: Container(width: 4, height: 14, decoration: BoxDecoration(color: cAccent, borderRadius: BorderRadius.circular(2)))),
+              ),
+            );
+        final block = AnimatedContainer(
+          duration: kit.motion(context, 120),
+          width: w,
+          height: 26,
+          decoration: BoxDecoration(
+            color: sel ? const Color(0xFFE4EEFA) : const Color(0xFFEEF0F3),
+            borderRadius: BorderRadius.circular(5),
+            border: Border.all(color: sel ? cAccent : const Color(0xFFDCDFE4), width: sel ? 2 : 1),
+          ),
+          child: CustomPaint(painter: _TracePainter(trace, sel ? cAccent : const Color(0xFF8A9099), missing: r['missing'] == true || r['error'] != null)),
+        );
+        out.add(Positioned(
+          left: x,
+          top: y + (rowH - 26) / 2,
+          child: _playing
+              ? block
+              : Opacity(
+                  opacity: dragged ? 0 : 1,
+                  child: GestureDetector(
+                    onTapUp: (_) => _pickScript('${r['id']}', rid),
+                    // hold and slide: the run moves (its length stays)
+                    onLongPressStart: (_) {
+                      _pickScript('${r['id']}', rid);
+                      setState(() => _blockDrag = _BlockDrag('${r['id']}', a, len, cell, edge: 1, run: rid));
+                    },
+                    onLongPressMoveUpdate: (d) {
+                      if (_blockDrag != null) setState(() => _blockDrag!.dx = d.offsetFromOrigin.dx);
+                    },
+                    onLongPressEnd: (_) => _endBlockDrag(),
+                    child: SizedBox(width: w, height: 26, child: Stack(children: [block, if (sel) grip(true), if (sel) grip(false)])),
+                  ),
+                ),
+        ));
+      }
+      if (sdrag != null) {
+        final (st, len) = sdrag.preview(allowStart0: true);
+        out.add(Positioned(
+          left: left + st * cell + 1,
+          top: y + (rowH - 26) / 2,
+          child: IgnorePointer(child: Container(width: math.max(10.0, len * cell - 2), height: 26, decoration: BoxDecoration(color: const Color(0x4DE4EEFA), borderRadius: BorderRadius.circular(5), border: Border.all(color: cAccent, width: 2)))),
+        ));
+      }
       return out;
     }
     // M5: a sound row is its clips, with the waveform
@@ -3082,6 +3170,16 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final d = _blockDrag;
     if (d == null) return;
     setState(() => _blockDrag = null);
+    // K2c: a script's run (frames from, to; a move keeps its length)
+    if (d.run != null) {
+      final (st, len) = d.preview(allowStart0: true);
+      if (d.edge == 1) {
+        if (st != d.start) _cmd({'op': 'script_run', 'layer': d.layer, 'run': d.run, 'from': st, 'move': true});
+      } else if (st != d.start || len != d.length) {
+        _cmd({'op': 'script_run', 'layer': d.layer, 'run': d.run, 'from': st, 'to': st + len});
+      }
+      return;
+    }
     final (st, len) = d.preview();
     _cmd({'op': 'frame', 'i': d.start});
     if (d.edge == 0) {
@@ -3212,6 +3310,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         setState(() => _libType = 1);
         _figurePicker(movieclip: true);
       }),
+      // K2c: a script that moves figures or values (sway, breathing, physics)
+      ('script', 'Script', _scriptPicker),
       // planned (K): shown as on the board, not yet usable
       ('folder', 'Group', null),
     ];
@@ -3774,6 +3874,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         'Figure editor' => 'Figure Tools',
         'Selection' => '${((_st['multi'] as List?) ?? const []).length} figures',
         'Group Tools' => '',
+        'Script' => '',
         'Value' => '',
         'Nothing selected' => '',
         _ => section,
@@ -3813,6 +3914,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         );
       case 'Picture Tools' when _st['picture'] != null:
         return ('Delete picture', () => _cmd({'op': 'delete_here'}), null);
+      case 'Script' when _st['script'] != null:
+        return ('Delete script', () => _cmd({'op': 'script_delete'}), null);
       case 'Group Tools' when _st['group'] != null:
         final g = _st['group'] as Map;
         return (
@@ -4595,6 +4698,168 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     return [for (final d in rows) rw.renderDesc(d)];
   }
 
+  // ---------------------------------------------------------------- script page
+
+  /// K2c: a script layer's row or one of its runs: the Script page.
+  void _pickScript(String layer, String? run) {
+    if (_playing) return;
+    _cmd({'op': 'script_pick', 'layer': layer, 'run': ?run});
+    setState(() {
+      _frameSelected = false;
+      _panelOpen = true;
+      _hidePanels = false;
+    });
+  }
+
+  /// A plugin's settings as rows (modifiers on a value, scripts): numbers with
+  /// both limits are sliders, others steppers; toggles tick; choices cycle.
+  List<rw.Desc> _pluginSettingRows(List settings, void Function(Map<String, Object?> props) set) {
+    return [
+      for (final p in settings.cast<Map>())
+        switch (p['kind']) {
+          'number' || 'angle' => () {
+              final x = (p['extra'] as Map?) ?? const {};
+              final lo = (x['min'] as num?)?.toDouble(), hi = (x['max'] as num?)?.toDouble();
+              final v = ((p['value'] as num?) ?? 0).toDouble();
+              final step = ((x['step'] as num?) ?? (p['kind'] == 'angle' ? 5 : (lo != null && hi != null ? (hi - lo) / 20 : 1))).toDouble();
+              final text = step >= 1 && v == v.roundToDouble() ? '${v.round()}' : v.toStringAsFixed(2);
+              if (lo != null && hi != null && hi > lo) {
+                return rw.DSlider('${p['label']}', text, ((v - lo) / (hi - lo)).clamp(0.0, 1.0), onChanged: (f) {
+                  var y = lo + f * (hi - lo);
+                  if (x['step'] != null) y = (y / step).round() * step;
+                  set({p['name'] as String: double.parse(y.toStringAsFixed(4))});
+                });
+              }
+              double clampTo(double y) => y.clamp(lo ?? -1e9, hi ?? 1e9);
+              return rw.DStep('${p['label']}', text, onMinus: () => set({p['name'] as String: clampTo(v - step)}), onPlus: () => set({p['name'] as String: clampTo(v + step)}));
+            }(),
+          'toggle' => rw.DTick('${p['label']}', p['value'] == true, onChanged: (v) => set({p['name'] as String: v})),
+          'choice' => () {
+              final opts = (((p['extra'] as Map?)?['options'] as List?) ?? const []).cast<String>();
+              final now = opts.indexOf('${p['value']}');
+              return rw.DLink('${p['label']}', '${p['value']}', onTap: opts.isEmpty ? null : () => set({p['name'] as String: opts[(now + 1) % opts.length]}));
+            }(),
+          _ => rw.DInfo('${p['label']}', '${p['value']}'),
+        },
+    ];
+  }
+
+  /// The Script page (Script board): what it moves, its settings, the picked
+  /// run (how it mixes in, Bake, a new seed). "Delete script" is pinned.
+  List<Widget> _scriptTools(Map sc) {
+    final lid = sc['id'];
+    final runs = ((sc['runs'] as List?) ?? const []).cast<Map>();
+    final run = runs.where((r) => r['id'] == sc['run']).firstOrNull;
+    void setRun(Map<String, Object?> m) => _cmd({'op': 'script_run', 'layer': lid, 'run': run?['id'], ...m});
+    final mix = ((run?['mix'] as num?) ?? 1).toDouble();
+    final rows = <rw.Desc>[
+      rw.DName('${sc['name']}', link: sc['author'] == null ? null : 'by ${sc['author']}'),
+      if (sc['missing'] == true)
+        rw.DHint('Missing plugin: ${sc['plugin']} ${sc['version'] ?? ''}. Import it to run this script; its settings are kept.'.replaceAll(' .', '.'))
+      else if (sc['error'] != null)
+        rw.DHint('${sc['error']} Import the plugin again to switch it back on.')
+      else if (sc['description'] != null && AppSettings.flag('nerd') != true)
+        rw.DHint('${sc['description']}'),
+      const rw.DTitle('Moves'),
+      for (final t in ((sc['targets'] as List?) ?? const []).cast<Map>())
+        rw.DLink('${t['label']}', '${t['toName'] ?? 'Pick…'}', onTap: () => _pickTarget(sc, t)),
+      if (((sc['settings'] as List?) ?? const []).isNotEmpty) ...[
+        const rw.DTitle('Settings'),
+        ..._pluginSettingRows(sc['settings'] as List, (props) => _cmd({'op': 'script_set', 'layer': lid, 'props': props})),
+      ],
+      if (run != null) ...[
+        const rw.DTitle('This run'),
+        rw.DHint(run['frames'] == 1
+            ? 'Frame ${(run['from'] as num) + 1}, with its own seed. Drag the block\u2019s ends to change it.'
+            : 'Frames ${(run['from'] as num) + 1} to ${(run['from'] as num) + (run['frames'] as num)}, with its own seed. Drag the block\u2019s ends to change them.'),
+        rw.DSlider('Mix', '${(mix * 100).round()}%', mix, onChanged: (x) => setRun({'mix': (x * 100).round() / 100})),
+        rw.DTick('Replaces the keys', run['replace'] == true, onChanged: (v) => setRun({'replace': v})),
+        rw.DTick('Keeps the last frame', run['keep'] == true, onChanged: (v) => setRun({'keep': v})),
+        rw.DButtons('Bake to keys', sc['missing'] == true || sc['error'] != null
+            ? null
+            : () {
+                _cmd({'op': 'script_bake', 'layer': lid, 'run': run['id']});
+                kit.showToast(context, 'The run is keys now.', light: true, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
+              }, b: 'New seed', onB: () => setRun({'newSeed': true})),
+      ],
+      rw.DButtons('New run here', () => _cmd({'op': 'script_run_add', 'layer': lid, 'frame': _frame}),
+          b: 'Delete this run', onB: run == null || runs.length < 2 ? null : () => _cmd({'op': 'script_run_remove', 'layer': lid, 'run': run['id']})),
+    ];
+    return [for (final d in rows) rw.renderDesc(d)];
+  }
+
+  /// What a script target moves: a figure, or a value (grouped by layer).
+  Future<void> _pickTarget(Map sc, Map t) async {
+    final figure = t['kind'] == 'figure';
+    final list = ((figure ? sc['figures'] : sc['values']) as List? ?? const []).cast<Map>();
+    final pick = await kit.showSheet<String>(context, title: figure ? 'Which figure?' : 'Which value?', width: 380, children: (c) {
+      Widget item(Map v) => kit.Tap(
+            minSize: 0,
+            onTap: () => Navigator.pop(c, '${v['id']}'),
+            child: Container(
+              height: 40,
+              alignment: Alignment.centerLeft,
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              decoration: BoxDecoration(color: v['id'] == t['to'] ? cSelected : null, borderRadius: BorderRadius.circular(8)),
+              child: Text('${v['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: kit.ink(15, v['id'] == t['to'] ? FontWeight.w700 : FontWeight.w400, v['id'] == t['to'] ? cAccent : cText)),
+            ),
+          );
+      final out = <Widget>[];
+      if (list.isEmpty) out.add(kit.Hint(figure ? 'There are no stick figures in this animation yet.' : 'Nothing here can be changed by a script.'));
+      String? group;
+      for (final v in list) {
+        if (!figure && v['group'] != group) {
+          group = '${v['group']}';
+          out.add(Padding(padding: const EdgeInsets.only(top: 8, bottom: 2), child: Text(group, style: kit.ink(13, FontWeight.w700, cTitle))));
+        }
+        out.add(item(v));
+      }
+      if (t['to'] != null) out.add(Padding(padding: const EdgeInsets.only(top: 8), child: kit.WordButton('Nothing', onTap: () => Navigator.pop(c, ''), filled: true, expand: true, height: 38)));
+      return out;
+    });
+    if (pick == null) return;
+    _cmd({'op': 'script_set', 'layer': sc['id'], 'target': {'name': t['name'], 'to': pick.isEmpty ? null : pick}});
+  }
+
+  /// "+ › Script": the installed scripts, and Import… (K2c).
+  Future<void> _scriptPicker() async {
+    final scripts = ((_st['plugins'] as List?) ?? const []).cast<Map>().where((p) => p['kind'] == 'script').toList();
+    final pick = await kit.showSheet<String>(context, title: 'Add a script', width: 400, children: (c) => [
+          kit.Hint(scripts.isEmpty ? 'No scripts yet. A script is a plugin (a .luau file) that moves figures or values: sway, breathing, simple physics.' : 'It runs from this frame to the end; drag its block to change that. It moves the selected figure.'),
+          for (final p in scripts)
+            kit.Tap(
+              minSize: 0,
+              onTap: p['off'] != null ? null : () => Navigator.pop(c, '${p['id']}'),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                child: Row(children: [
+                  Pictogram('script', size: 20, color: p['off'] != null ? cTag : cAccent),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('${p['name']}', style: kit.ink(15, FontWeight.w700, p['off'] != null ? cSecondary : cText)),
+                      Text(p['off'] != null ? 'Switched off: ${p['off']}' : [if (p['author'] != null) 'by ${p['author']}', p['version']].join(' · '), maxLines: 2, overflow: TextOverflow.ellipsis, style: kit.ink(12, FontWeight.w400, cSecondary)),
+                    ]),
+                  ),
+                ]),
+              ),
+            ),
+          Padding(padding: const EdgeInsets.only(top: 8), child: kit.WordButton('Import a script…', onTap: () => Navigator.pop(c, ''), filled: true, expand: true, height: 38)),
+        ]);
+    if (pick == null || !mounted) return;
+    if (pick.isEmpty) {
+      await _importPlugin();
+      return;
+    }
+    _cmd({'op': 'script_add', 'id': pick});
+    setState(() {
+      _frameSelected = false;
+      _panelOpen = true;
+      _hidePanels = false;
+      _layersOpen = true;
+    });
+  }
+
   // ---------------------------------------------------------------- value page
 
   // D36 (the graph-mods boards): the selected value's modifiers, applied top
@@ -4625,24 +4890,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           ];
         case 'plugin':
           return [
-            for (final p in ((m['settings'] as List?) ?? const []).cast<Map>())
-              switch (p['kind']) {
-                'number' || 'angle' => () {
-                    final x = (p['extra'] as Map?) ?? const {};
-                    final step = ((x['step'] as num?) ?? (p['kind'] == 'angle' ? 5 : 1)).toDouble();
-                    final v = ((p['value'] as num?) ?? 0).toDouble();
-                    double clampTo(double y) => y.clamp(((x['min'] as num?) ?? -1e9).toDouble(), ((x['max'] as num?) ?? 1e9).toDouble());
-                    return rw.DStep('${p['label']}', step >= 1 && v == v.roundToDouble() ? '${v.round()}' : v.toStringAsFixed(2),
-                        onMinus: () => set(i, {'props': {p['name']: clampTo(v - step)}}), onPlus: () => set(i, {'props': {p['name']: clampTo(v + step)}}));
-                  }(),
-                'toggle' => rw.DTick('${p['label']}', p['value'] == true, onChanged: (v) => set(i, {'props': {p['name']: v}})),
-                'choice' => () {
-                    final opts = (((p['extra'] as Map?)?['options'] as List?) ?? const []).cast<String>();
-                    final now = opts.indexOf('${p['value']}');
-                    return rw.DLink('${p['label']}', '${p['value']}', onTap: opts.isEmpty ? null : () => set(i, {'props': {p['name']: opts[(now + 1) % opts.length]}}));
-                  }(),
-                _ => rw.DInfo('${p['label']}', '${p['value']}'),
-              },
+            ..._pluginSettingRows((m['settings'] as List?) ?? const [], (props) => set(i, {'props': props})),
             if (m['off'] != null) rw.DHint('${m['off']} Import the plugin again to switch it back on.'),
           ];
         default:
@@ -4752,7 +5000,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       return;
     }
     for (final f in picked.take(1)) {
-      final source = String.fromCharCodes(await f.readAsBytes());
+      final source = utf8.decode(await f.readAsBytes(), allowMalformed: true);
       final st = _cmd({'op': 'plugin_install', 'name': f.name, 'source': source});
       if ('${st?['message'] ?? ''}'.endsWith('is ready.')) {
         try {
@@ -7104,21 +7352,75 @@ class _BoxPainter extends CustomPainter {
 /// A block being changed (G3): its end grip (edge 0), held and slid (1), or
 /// its start grip (2), which moves where it starts and keeps where it ends.
 class _BlockDrag {
-  _BlockDrag(this.layer, this.start, this.length, this.cell, {this.edge = 0});
+  _BlockDrag(this.layer, this.start, this.length, this.cell, {this.edge = 0, this.run});
   final String layer;
   final int start, length, edge;
   final double cell;
+  /// K2c: the script run being dragged (null: a pose).
+  final String? run;
   double dx = 0;
 
-  /// Where the pose would be now: (first frame, length).
-  (int, int) preview() {
+  /// Where the pose would be now: (first frame, length). A pose never moves
+  /// onto the first frame (every figure keeps its first pose there); a
+  /// script's run may (`allowStart0`).
+  (int, int) preview({bool allowStart0 = false}) {
     final by = (dx / cell).round();
+    final lo = allowStart0 ? 0 : 1;
     return switch (edge) {
       0 => (start, math.max(1, length + by)),
-      1 => (math.max(1, start + by), length),
-      _ => (math.max(1, math.min(start + length - 1, start + by)), start + length - math.max(1, math.min(start + length - 1, start + by))),
+      1 => (math.max(lo, start + by), length),
+      _ => (math.max(lo, math.min(start + length - 1, start + by)), start + length - math.max(lo, math.min(start + length - 1, start + by))),
     };
   }
+}
+
+/// A script run's trace in its block: what the script does over the run (its
+/// first changed value), scaled to the block; dashed when it can't run.
+class _TracePainter extends CustomPainter {
+  _TracePainter(this.values, this.color, {this.missing = false});
+  final List<double?> values;
+  final Color color;
+  final bool missing;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final pen = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6
+      ..strokeCap = StrokeCap.round
+      ..color = color;
+    final ys = values.whereType<double>().toList();
+    if (missing || ys.length < 2) {
+      // nothing worked out: a flat dashed line
+      for (var x = 8.0; x < size.width - 8; x += 8) {
+        canvas.drawLine(Offset(x, size.height / 2), Offset(math.min(x + 4, size.width - 8), size.height / 2), pen);
+      }
+      return;
+    }
+    final lo = ys.reduce(math.min), hi = ys.reduce(math.max);
+    final span = hi - lo < 1e-6 ? 1.0 : hi - lo;
+    final path = Path();
+    var started = false;
+    for (var i = 0; i < values.length; i++) {
+      final v = values[i];
+      if (v == null) {
+        started = false;
+        continue;
+      }
+      final x = 8 + (size.width - 16) * (values.length == 1 ? 0.5 : i / (values.length - 1));
+      final y = size.height - 6 - (size.height - 12) * ((v - lo) / span);
+      if (started) {
+        path.lineTo(x, y);
+      } else {
+        path.moveTo(x, y);
+        started = true;
+      }
+    }
+    canvas.drawPath(path, pen);
+  }
+
+  @override
+  bool shouldRepaint(_TracePainter o) => o.values != values || o.color != color || o.missing != missing;
 }
 
 /// The ruler, the merged Preview row and the rows' lines (REDESIGN §4, D16).

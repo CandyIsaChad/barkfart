@@ -287,3 +287,25 @@ fn a_failing_script_is_switched_off_and_lets_values_through() {
     let row = st["rows"].as_array().unwrap().iter().find(|r| r["kind"] == "script").cloned().unwrap();
     assert_eq!(row["missing"], true);
 }
+
+#[test]
+fn the_sample_scripts_run() {
+    // docs/barkfart/plugins: the samples users can import
+    for name in ["sway", "breathe", "pulse"] {
+        let mut s = sliding();
+        let src = std::fs::read_to_string(format!("{}/../../docs/barkfart/plugins/{name}.luau", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        let st = s.command(&json!({"op": "plugin_install", "name": format!("{name}.luau"), "source": src}));
+        let id = st["plugins"].as_array().unwrap().iter().find(|p| p["id"] == format!("barkfart.{name}")).unwrap_or_else(|| panic!("{name}: {}", st["message"]))["id"].as_str().unwrap().to_string();
+        let st = s.command(&json!({"op": "script_add", "id": id, "from": 0, "to": 16}));
+        if name == "pulse" {
+            // a value target: the figure's height on the stage
+            s.command(&json!({"op": "script_set", "target": {"name": "value", "to": "L2/y"}}));
+        }
+        let st2 = s.state();
+        assert!(st2["script"]["error"].is_null(), "{name}: {}", st2["script"]["error"]);
+        let p = s.project();
+        let id = if name == "sway" { root_rotation_id(p) } else { "L2/y".to_string() };
+        let moved = (0..16).any(|f| (value(p, &id, f as f64, true) - value(p, &id, f as f64, false)).abs() > 1e-3);
+        assert!(moved, "{name} changes {id}: {}", st["script"]);
+    }
+}
