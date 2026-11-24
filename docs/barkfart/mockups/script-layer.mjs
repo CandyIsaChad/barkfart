@@ -33,6 +33,9 @@ html = html.replace(nameRow.replace('<div class="nrow on"', '<div class="nrow"')
 // nor any of Hero's poses (the base board's selected block and its grips)
 html = html.replace(/<span class="hd"[^>]*><\/span>/g, '').replaceAll('class="blk sel"', 'class="blk"');
 
+// offstage is a quiet grey since 2026-11-24 (no checkerboard)
+html = html.replace(/\.checker\{[^}]*\}/, '.checker{background-color:#E9EBEE}');
+
 // ---- the timeline: two runs, each a block with a trace of what it does ----
 function run(a, b, seed, sel) {
   const left = NAME_W + 1 + (a - 1) * CELL, width = (b - a + 1) * CELL - 2;
@@ -59,12 +62,14 @@ const tick = (label, on) => `<div class="prow"><span>${label}</span><svg viewBox
 const slider = (label, value, f) => `<div class="prow"><span>${label}</span><b>${value}</b></div><div class="slider"><span style="width:${f * 100}%"></span></div>`;
 const link = (label, value) => `<div class="prow"><span>${label}</span><b>${value} ${svg(14, 14, '<path d="m9 6 6 6-6 6"/>', ` stroke="${C.ink2}" stroke-width="2.2"`)}</b></div>`;
 const title = (t) => `<div class="sect s2"><h2 class="title">${t}</h2></div>`;
-let panel = `<section class="panel" aria-label="Script" style="left:900px;top:48px;width:372px;height:500px;padding-bottom:0">`;
+let panel = `<section class="panel" aria-label="Script" style="left:900px;top:44px;width:372px;height:536px;padding-bottom:0">`;
 panel += `<div style="position:absolute;inset:10px 14px 52px 14px;overflow:hidden">`;
 panel += `<div class="prow" style="height:30px"><b style="font-size:15px">Cape sway</b><span style="font-size:12px;color:${C.ink2}">by yeah</span></div>`;
-panel += title('Moves') + link('Cape', 'Hero');
+// a figure target, and a value target: any number that can be keyed (a
+// segment's length, an effect's or a plugin effect's setting)
+panel += title('Moves') + link('Cape', 'Hero') + link('Glow', 'Hero › Glow strength');
 panel += title('Settings') + slider('Stiffness', '0.40', 0.4);
-panel += title('This run') + `<p class="phint">Frames 3 to 11, its own seed. Drag the block's ends to change them.</p>` + slider('Mix', '100%', 1) + tick('Replaces the keys', false) + tick('Keeps the last frame', false);
+panel += title('This run') + `<p class="phint">Frames 3 to 11, with its own seed. Drag the block's ends to change them.</p>` + slider('Mix', '100%', 1) + tick('Replaces the keys', false) + tick('Keeps the last frame', false);
 panel += `<div class="pair" style="margin-top:6px"><button type="button" class="wb">Bake to keys</button><button type="button" class="wb">New seed</button></div>`;
 panel += `</div><span class="pfade" style="bottom:52px;height:24px"></span>`;
 panel += `<div class="pfoot"><button type="button" class="rall">Delete script</button></div></section>`;
