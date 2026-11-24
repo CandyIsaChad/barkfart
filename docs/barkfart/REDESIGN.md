@@ -785,6 +785,15 @@ Render the boards (docs/barkfart/mockups: `mkdir -p project preview && node boar
 ### K. Hardest, later
 Groups; the Luau plugin runtime (it needs the `mlua` crate, so it waits
 until a dependency fetch is approved); Script layers; emitters.
+- [ ] K3. The Workshop (the user, 2026-11-24: "make it its own dedicated
+  page? in the style of a workshop … You decide"). Decided: a run's or an
+  effect's settings stay in Properties beside the stage; the Workshop is the
+  page for the plugins themselves (the planned Plugins page): a shelf of
+  kinds (Everything, Scripts, Effects, Modifiers, Switched off), cards
+  saying where each is used or why it's off, and the picked one's page:
+  what it moves, its settings, where it's used, a peek at its code, Share
+  the file…, Add to this animation, Remove from Barkfart. Board:
+  mockups/workshop.mjs (sent 2026-11-24, waiting for the user's okay).
 - [x] D37. Motion (the user, 2026-11-24: "UI element animations"). Motion
   answers something done, is short (80 to 200 ms), eases out
   (`kit.kEase`), and is off when the system asks for less motion

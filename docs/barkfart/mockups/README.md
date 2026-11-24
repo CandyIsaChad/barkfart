@@ -9,6 +9,8 @@ These scripts draw the redesign boards (REDESIGN.md) as static HTML.
   `graph-mods` (a value with a modifier) and `graph-mods-add`.
 - `node script-layer.mjs` writes the Script layer board (`script`), built on
   the timeline board.
+- `node workshop.mjs` writes the Workshop board (`workshop`, iPad landscape,
+  1180 x 820), built on the Settings board's page.
 
 Both write `project/*.dc.html` (for the claude.ai design canvas) and
 `preview/*.html` (to open in a browser). They need no packages.
