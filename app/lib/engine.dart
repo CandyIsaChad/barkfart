@@ -257,6 +257,18 @@ class Engine {
     return px;
   }
 
+  /// K: a folded group's preview strip: the stage at time t through the
+  /// camera with only the group's members showing; null when it's gone.
+  Uint8List? renderGroup(String id, double t, int w, int h) {
+    final out = calloc<Uint8>(w * h * 4);
+    final k = id.toNativeUtf8();
+    final r = _lib.lookupFunction<_LayerC, _LayerD>('bf_render_group')(_handle, k, t, w, h, out);
+    calloc.free(k);
+    final px = r == 0 ? Uint8List.fromList(out.asTypedList(w * h * 4)) : null;
+    calloc.free(out);
+    return px;
+  }
+
   /// H2: the selected figure alone with a filter command applied to a copy
   /// (`json`, or "{}"), fitted into w x h; null without a selected figure.
   Uint8List? renderEffectPreview(String json, int w, int h) {

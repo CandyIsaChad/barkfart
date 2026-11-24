@@ -1964,6 +1964,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   final Map<int, ui.Image> _thumbs = {};
   final Set<int> _thumbDirty = {};
   int _thumbRev = -1;
+  // K: a folded group's row is a preview strip of its members merged, by
+  // group and frame; only folded groups are drawn (open, its members' own
+  // rows show the same)
+  final Map<String, Map<int, ui.Image>> _groupThumbs = {};
+  final Set<String> _groupDirty = {};
+
+  Iterable<String> get _foldedGroups => ((_st['rows'] as List?) ?? const []).cast<Map>().where((r) => r['kind'] == 'group' && r['open'] == false).map((r) => '${r['id']}');
 
   /// After a change: during a drag only the current frame's picture is stale.
   void _thumbsChanged(String op) {
@@ -1973,12 +1980,19 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (rev == _thumbRev && !whole) return;
     _thumbRev = rev;
     if (op == 'move' || op == 'down') return;
+    final folded = _foldedGroups.toList();
     if (op == 'up') {
       _thumbDirty.add(_frame);
+      for (final g in folded) {
+        _groupDirty.add('$g@$_frame');
+      }
       return;
     }
     for (var i = 0; i < _frames; i++) {
       _thumbDirty.add(i);
+      for (final g in folded) {
+        _groupDirty.add('$g@$i');
+      }
     }
     _thumbs.keys.where((k) => k >= _frames).toList().forEach((k) => _thumbs.remove(k)?.dispose());
   }
@@ -2049,7 +2063,27 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// Draws one stale frame picture (nearest the current frame first).
   void _thumbTick() {
     final e = _engine;
-    if (e == null || _thumbDirty.isEmpty || _playing || _oneFinger == 1 || _st.isEmpty) return;
+    if (e == null || _playing || _oneFinger == 1 || _st.isEmpty) return;
+    // groups just folded get their strip; groups opened or gone drop theirs
+    final folded = _foldedGroups.toSet();
+    for (final g in _groupThumbs.keys.where((g) => !folded.contains(g)).toList()) {
+      for (final img in _groupThumbs.remove(g)!.values) {
+        img.dispose();
+      }
+    }
+    _groupDirty.removeWhere((k) => !folded.contains(k.substring(0, k.lastIndexOf('@'))));
+    for (final g in folded) {
+      if (!_groupThumbs.containsKey(g)) {
+        _groupThumbs[g] = {};
+        for (var i = 0; i < _frames; i++) {
+          _groupDirty.add('$g@$i');
+        }
+      }
+    }
+    if (_thumbDirty.isEmpty) {
+      _groupThumbTick(e);
+      return;
+    }
     final i = _thumbDirty.reduce((a, b) => (a - _frame).abs() <= (b - _frame).abs() ? a : b);
     _thumbDirty.remove(i);
     if (i >= _frames) return;
@@ -2062,6 +2096,33 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       setState(() {
         _thumbs.remove(i)?.dispose();
         _thumbs[i] = img;
+      });
+    });
+  }
+
+  /// Draws one stale picture of a folded group's strip (nearest the current
+  /// frame first), the same framing as the Preview row.
+  void _groupThumbTick(Engine e) {
+    if (_groupDirty.isEmpty) return;
+    int frameOf(String k) => int.parse(k.substring(k.lastIndexOf('@') + 1));
+    final k = _groupDirty.reduce((a, b) => (frameOf(a) - _frame).abs() <= (frameOf(b) - _frame).abs() ? a : b);
+    _groupDirty.remove(k);
+    final g = k.substring(0, k.lastIndexOf('@')), i = frameOf(k);
+    if (i >= _frames) return;
+    final sw = (_st['w'] as num).toDouble(), sh = (_st['h'] as num).toDouble();
+    final w = (120 * math.min(_dpr, 2.0)).round(), h = (w * sh / sw).round();
+    final px = e.renderGroup(g, i / _fps, w, h);
+    if (px == null) return;
+    ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, (img) {
+      if (!mounted) return;
+      final m = _groupThumbs[g];
+      if (m == null) {
+        img.dispose();
+        return;
+      }
+      setState(() {
+        m.remove(i)?.dispose();
+        m[i] = img;
       });
     });
   }
@@ -2203,6 +2264,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               lines: [for (final y in ys) y + rowH, for (final (_, _, y) in props) y + propH],
               bands: [for (final (_, _, y) in props) (y, propH)],
               aspect: aspect.toDouble(), thumbs: _thumbs,
+              groupStrips: [
+                for (var k = 0; k < rows.length; k++)
+                  if (rows[k]['kind'] == 'group' && rows[k]['open'] == false) (ys[k] + 2, rowH - 5, _groupThumbs['${rows[k]['id']}'] ?? const <int, ui.Image>{}),
+              ],
             ),
           ),
         ),
@@ -2390,14 +2455,18 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       );
     }
 
+    // the names column on the rail grey; the blank cell by the ruler and the
+    // Preview row each end in a divider (timeline board), so "Preview" sits
+    // in a row of its own instead of under a tall empty space
     final names = Container(
       width: MediaQuery.sizeOf(context).width >= 900 ? 210 : 140,
-      decoration: const BoxDecoration(border: Border(right: BorderSide(color: Color(0xFFE6E8EB)))),
+      decoration: const BoxDecoration(color: cPanel, border: Border(right: BorderSide(color: Color(0xFFE6E8EB)))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        const SizedBox(height: rulerH),
+        Container(height: rulerH, decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFE6E8EB))))),
         if (showPreview)
-          SizedBox(
+          Container(
             height: stripH + gap,
+            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFDADDE2)))),
             child: Padding(
               padding: const EdgeInsets.only(left: 36, right: 4),
               child: Row(children: [
@@ -2467,6 +2536,22 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final out = <Widget>[];
     // K: a group's row is a thin bar over the whole animation with a tick at
     // every member's pose (Group board); tapping it selects the group
+    if (r['kind'] == 'group' && r['open'] == false) {
+      // folded: the painter draws its merged strip; this takes the tap and
+      // rings it when the group is selected
+      out.add(Positioned(
+        left: left,
+        top: y + 2,
+        width: _frames * cell,
+        height: rowH - 5,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _cmd({'op': 'select', 'group': r['id']}),
+          child: selectedRow ? Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(5), border: Border.all(color: cAccent, width: 2))) : const SizedBox.expand(),
+        ),
+      ));
+      return out;
+    }
     if (r['kind'] == 'group') {
       final ticks = ((r['ticks'] as List?) ?? const []).cast<num>();
       final w = _frames * cell;
@@ -6218,7 +6303,9 @@ class _BlockDrag {
 
 /// The ruler, the merged Preview row and the rows' lines (REDESIGN §4, D16).
 class _TimelinePainter extends CustomPainter {
-  _TimelinePainter({required this.frames, required this.cell, required this.left, required this.fps, required this.cur, required this.rulerH, required this.stripH, required this.lines, required this.bands, required this.aspect, required this.thumbs});
+  _TimelinePainter({required this.frames, required this.cell, required this.left, required this.fps, required this.cur, required this.rulerH, required this.stripH, required this.lines, required this.bands, required this.aspect, required this.thumbs, this.groupStrips = const []});
+  /// K: folded groups' rows: (top, height, pictures by frame)
+  final List<(double, double, Map<int, ui.Image>)> groupStrips;
   final int frames, fps, cur;
   final double cell, left, rulerH, stripH, aspect;
   final List<double> lines;
@@ -6245,30 +6332,10 @@ class _TimelinePainter extends CustomPainter {
     }
     // the Preview row: one strip, tiles at the picture's shape, each showing
     // the moment under its middle
-    if (stripH > 0) {
-      final r = RRect.fromRectAndRadius(Rect.fromLTWH(left, rulerH + 2, frames * cell, stripH - 4), const Radius.circular(5));
-      canvas.save();
-      canvas.clipRRect(r);
-      canvas.drawRRect(r, Paint()..color = cCard);
-      final th = stripH - 4, tw = math.max(8.0, (th * aspect).roundToDouble());
-      for (var x = 0.0; x < frames * cell; x += tw) {
-        final i = ((x + tw / 2) / cell).floor().clamp(0, frames - 1);
-        final img = thumbs[i];
-        final dst = Rect.fromLTWH(left + x, rulerH + 2, tw - 1, th);
-        if (img != null) {
-          // cover: the picture's middle, cropped to the tile
-          final iw = img.width.toDouble(), ih = img.height.toDouble();
-          final k = math.max(dst.width / iw, dst.height / ih);
-          final sw = dst.width / k, sh = dst.height / k;
-          canvas.drawImageRect(img, Rect.fromLTWH((iw - sw) / 2, (ih - sh) / 2, sw, sh), dst, Paint()..filterQuality = FilterQuality.medium);
-        }
-        canvas.drawRect(Rect.fromLTWH(left + x + tw - 1, rulerH + 2, 1, th), Paint()..color = cCard);
-      }
-      canvas.restore();
-      canvas.drawRRect(r, Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1
-        ..color = cLine);
+    if (stripH > 0) _strip(canvas, rulerH + 2, stripH - 4, thumbs);
+    // K: a folded group's row: the same strip, its members merged
+    for (final (y, h, pics) in groupStrips) {
+      _strip(canvas, y, h, pics);
     }
     // property rows: a paler band; every row: a faint line under it
     for (final (y, h) in bands) {
@@ -6276,6 +6343,36 @@ class _TimelinePainter extends CustomPainter {
     }
     for (final y in lines) {
       canvas.drawRect(Rect.fromLTWH(0, y - 1, size.width, 1), Paint()..color = const Color(0xFFEEF0F2));
+    }
+  }
+
+  /// One film strip at `top`, `th` tall: tiles at the picture's shape, each
+  /// showing the moment under its middle.
+  void _strip(Canvas canvas, double top, double th, Map<int, ui.Image> thumbs) {
+    {
+      final r = RRect.fromRectAndRadius(Rect.fromLTWH(left, top, frames * cell, th), const Radius.circular(5));
+      canvas.save();
+      canvas.clipRRect(r);
+      canvas.drawRRect(r, Paint()..color = cCard);
+      final tw = math.max(8.0, (th * aspect).roundToDouble());
+      for (var x = 0.0; x < frames * cell; x += tw) {
+        final i = ((x + tw / 2) / cell).floor().clamp(0, frames - 1);
+        final img = thumbs[i];
+        final dst = Rect.fromLTWH(left + x, top, tw - 1, th);
+        if (img != null) {
+          // cover: the picture's middle, cropped to the tile
+          final iw = img.width.toDouble(), ih = img.height.toDouble();
+          final k = math.max(dst.width / iw, dst.height / ih);
+          final sw = dst.width / k, sh = dst.height / k;
+          canvas.drawImageRect(img, Rect.fromLTWH((iw - sw) / 2, (ih - sh) / 2, sw, sh), dst, Paint()..filterQuality = FilterQuality.medium);
+        }
+        canvas.drawRect(Rect.fromLTWH(left + x + tw - 1, top, 1, th), Paint()..color = cCard);
+      }
+      canvas.restore();
+      canvas.drawRRect(r, Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..color = cLine);
     }
   }
 

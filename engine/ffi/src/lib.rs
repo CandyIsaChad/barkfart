@@ -967,6 +967,37 @@ pub extern "C" fn bf_render_layer(e: *const Engine, id: *const c_char, t: f64, w
     }
 }
 
+/// A group's preview strip (K): the stage at time t through the camera, as
+/// the Preview row draws it, with only the group's members showing. 0 on
+/// success, 2 when the group is gone.
+#[no_mangle]
+pub extern "C" fn bf_render_group(e: *const Engine, id: *const c_char, t: f64, w: u32, h: u32, out: *mut u8) -> i32 {
+    if e.is_null() || out.is_null() || w == 0 || h == 0 || w > 2048 || h > 2048 {
+        return 1;
+    }
+    // SAFETY: live handle
+    let engine = unsafe { &*e };
+    let Some(id) = cstr(id) else { return 1 };
+    let Some(s) = engine.session.as_ref() else { return 2 };
+    let r = catch_unwind(AssertUnwindSafe(|| {
+        let p = s.group_alone(&id)?;
+        let scene = eval::evaluate_with(&p, &p.root_symbol, t, false, true);
+        let list = tess::layered(&scene, Some(&engine.glyphs));
+        let (sw, sh) = (p.settings.width as f32, p.settings.height as f32);
+        let bg = p.settings.background;
+        let view = View { x0: -sw / 2.0, y0: -sh / 2.0, x1: sw / 2.0, y1: sh / 2.0, background: [bg.r, bg.g, bg.b, bg.a] };
+        Some(engine.renderer.render(&list, w, h, view))
+    }));
+    match r {
+        Ok(Some(px)) => {
+            // SAFETY: caller provides w * h * 4 bytes
+            unsafe { std::ptr::copy_nonoverlapping(px.as_ptr(), out, px.len()) };
+            0
+        }
+        _ => 2,
+    }
+}
+
 /// The effects browser's tiles (H2): the selected figure alone, as on this
 /// frame, with `json` (a filter command, or {} for none) applied to a copy,
 /// fitted into w x h with transparency around it. 0 on success, 2 when

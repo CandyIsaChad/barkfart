@@ -5637,3 +5637,19 @@ fn a_grouped_textfield_above_the_bars_still_draws_above_them() {
     let barkfart_core::eval::Item::Group(g) = last else { panic!("a group last") };
     assert_eq!(g.source, format!("{}/{text}", p.root_symbol), "the textfield is drawn last, over the bars");
 }
+
+#[test]
+fn a_folded_groups_strip_shows_only_its_members() {
+    // K: the folded group row's merged strip draws the group's layers alone
+    let mut s = session();
+    s.command(&json!({"op": "add_figure", "kind": "ball"}));
+    let ball = s.project().root().unwrap().layers.iter().filter(|l| l.as_figure().is_some()).map(|l| l.id.clone()).last().unwrap();
+    let st = s.command(&json!({"op": "group", "layers": ["L2"]}));
+    let gid = st["groups"][0]["id"].as_str().unwrap().to_string();
+    let p = s.group_alone(&gid).expect("the group");
+    let r = p.root().unwrap();
+    assert!(r.layer("L2").unwrap().visible);
+    assert!(!r.layer(&ball).unwrap().visible, "the ball is not in the group");
+    assert!(s.project().root().unwrap().layer(&ball).unwrap().visible, "the project itself is untouched");
+    assert!(s.group_alone("nope").is_none());
+}

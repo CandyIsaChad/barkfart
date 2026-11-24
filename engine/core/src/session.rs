@@ -261,6 +261,25 @@ impl Session {
         Some(p)
     }
 
+    /// K: a group's row in the timeline is a preview strip of its members
+    /// merged: the project with every other drawn layer hidden (the camera,
+    /// joins and the group's own opacity and effects as they are). None when
+    /// there is no such group.
+    pub fn group_alone(&self, gid: &str) -> Option<Project> {
+        let mut p = self.project().clone();
+        let root = p.root_mut()?;
+        if !root.groups.iter().any(|g| g.id == gid) {
+            return None;
+        }
+        for l in root.layers.iter_mut() {
+            let draws = !matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_));
+            if draws && l.group.as_deref() != Some(gid) && l.visible {
+                std::sync::Arc::make_mut(l).visible = false;
+            }
+        }
+        Some(p)
+    }
+
     /// H2: the selected figure alone, as on this frame, with a filter command
     /// applied to a copy (the effects browser's tile previews). None without
     /// a selected figure. The copy is never part of the project or its history.

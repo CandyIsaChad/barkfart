@@ -712,7 +712,9 @@ until a dependency fetch is approved); Script layers; emitters.
 - [x] K1. Groups (D33): engine (`group`, `ungroup`, `group_set`,
   `group_order`, `delete_group`; `select` with `group`), the folder row
   with its chevron and the members 20 in, the summary bar with a tick at
-  every member pose, the Group page (name and Rename, opacity, Send back /
+  every member pose while open, and folded, a preview strip of its members
+  merged (the user, 2026-11-24: only when folded, since open its members'
+  rows already show the same; `bf_render_group`), the Group page (name and Rename, opacity, Send back /
   Bring forward, Ungroup, Make movieclip, "Delete group" pinned) and Group
   on the several-selected page. Group effects: the effects browser aims at
   the selected group (`filter` with a group selected, static values; no
