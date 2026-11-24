@@ -156,22 +156,47 @@ impl Host {
             _ => Ok(VmState::Continue),
         });
         let api = bf_api(&lua).map_err(|e| ScriptError::Load(e.to_string()))?;
+        // one plugin can't break the API for the others
+        api.set_readonly(true);
         lua.register_module("@barkfart", api).map_err(|e| ScriptError::Load(e.to_string()))?;
+        // "same picture everywhere": no hidden random state that depends on
+        // the order frames are drawn in (plugins get a seeded t.random)
+        let setup = || -> mlua::Result<()> {
+            let math: Table = lua.globals().get("math")?;
+            math.set("random", Value::Nil)?;
+            math.set("randomseed", Value::Nil)?;
+            Ok(())
+        };
+        setup().map_err(|e| ScriptError::Load(e.to_string()))?;
         // read-only globals: plugins can't change the libraries or each other
         lua.sandbox(true).map_err(|e| ScriptError::Load(e.to_string()))?;
         Ok(Host { lua, deadline })
     }
 
+    /// Runs `f` with a time budget. A call inside another keeps the earlier
+    /// deadline if that comes first, and puts it back afterwards.
     fn budget<T>(&self, d: Duration, f: impl FnOnce() -> mlua::Result<T>) -> Result<T, ScriptError> {
-        self.deadline.set(Some(Instant::now() + d));
+        let prev = self.deadline.get();
+        let mine = Instant::now() + d;
+        self.deadline.set(Some(prev.map_or(mine, |p| p.min(mine))));
         let r = f();
-        self.deadline.set(None);
+        self.deadline.set(prev);
         r.map_err(classify)
     }
 
     /// Runs a plugin's code and checks what it returns.
     pub fn load(&self, source: &str, chunk_name: &str) -> Result<Plugin, ScriptError> {
-        let v: Value = self.budget(LOAD_BUDGET, || self.lua.load(source).set_name(chunk_name).eval()).map_err(|e| match e {
+        // each plugin has its own globals (reads fall through to the
+        // libraries), so one plugin's names never reach another's
+        let env = (|| -> mlua::Result<Table> {
+            let env = self.lua.create_table()?;
+            let meta = self.lua.create_table()?;
+            meta.set("__index", self.lua.globals())?;
+            env.set_metatable(Some(meta))?;
+            Ok(env)
+        })()
+        .map_err(|e| ScriptError::Load(e.to_string()))?;
+        let v: Value = self.budget(LOAD_BUDGET, || self.lua.load(source).set_name(chunk_name).set_environment(env).eval()).map_err(|e| match e {
             ScriptError::Runtime(m) => ScriptError::Load(m),
             other => other,
         })?;
@@ -188,7 +213,8 @@ impl Host {
     /// A modifier's driven value: `value(v, p, t)`, where `v.value` is the
     /// keyed value at t and `v:at(frame)` the keyed value at another frame
     /// (`sample`). The result must be a number.
-    pub fn modifier_value(&self, plugin: &Plugin, value: f64, props: &[(String, PropValue)], t: Time, sample: &dyn Fn(f64) -> f64) -> Result<f64, ScriptError> {
+    /// `seed_key` tells apart the values the plugin drives (the property's id).
+    pub fn modifier_value(&self, plugin: &Plugin, seed_key: &str, value: f64, props: &[(String, PropValue)], t: Time, sample: &dyn Fn(f64) -> f64) -> Result<f64, ScriptError> {
         let f: Function = plugin.table.get("value").map_err(|e| ScriptError::Invalid(e.to_string()))?;
         self.budget(CALL_BUDGET, || {
             self.lua.scope(|scope| {
@@ -200,6 +226,20 @@ impl Host {
                 tt.set("frame", t.frame)?;
                 tt.set("seconds", t.seconds)?;
                 tt.set("fps", t.fps)?;
+                // t.random(): the same numbers for the same plugin, value and
+                // frame, in whatever order frames are drawn
+                let state = Cell::new(seed(&plugin.def.id, seed_key, t.frame));
+                tt.set(
+                    "random",
+                    scope.create_function(move |_, (a, b): (Option<f64>, Option<f64>)| {
+                        let u = next_random(&state);
+                        Ok(match (a, b) {
+                            (Some(a), Some(b)) => a + (b - a) * u,
+                            (Some(b), None) => b * u,
+                            _ => u,
+                        })
+                    })?,
+                )?;
                 let out: Value = f.call((v, p, tt))?;
                 match out {
                     Value::Number(n) => Ok(n),
@@ -209,6 +249,26 @@ impl Host {
             })
         })
     }
+}
+
+/// A seed from the plugin, the value it drives and the frame (FNV-1a).
+fn seed(id: &str, key: &str, frame: f64) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in id.bytes().chain([0]).chain(key.bytes()).chain([0]).chain(frame.to_bits().to_le_bytes()) {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h | 1
+}
+
+/// xorshift64*: a number in [0, 1).
+fn next_random(state: &Cell<u64>) -> f64 {
+    let mut x = state.get();
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    state.set(x);
+    (x.wrapping_mul(0x2545F4914F6CDD1D) >> 11) as f64 / (1u64 << 53) as f64
 }
 
 /// Sorts mlua's errors into the kinds the app reports.
