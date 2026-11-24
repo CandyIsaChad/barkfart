@@ -4,13 +4,16 @@
 
 use super::scene::{Diagnostic, DiagnosticKind};
 use crate::model::*;
+use super::scripts::{Driven, LayerOut};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 const MAX_LINK_DEPTH: usize = 256;
 /// Cap on link and delay-follow lookups per resolver (delayed chains fan out).
 pub const RESOLVE_BUDGET: usize = 200_000;
 
 pub struct Resolver<'p> {
+    project: &'p Project,
     index: HashMap<&'p str, &'p Property>,
     memo: HashMap<(String, u64), Value>,
     visiting: HashSet<(String, u64)>,
@@ -24,6 +27,10 @@ pub struct Resolver<'p> {
     wrap: Option<(f64, f64, f64)>,
     /// Frames per second, for plugin modifiers' `t` (K2).
     fps: f64,
+    /// K2: the values script layers change (None: none, or a resolver that
+    /// reads the keyed motion only, as scripts themselves do).
+    scripts: Option<Arc<Driven>>,
+    script_out: HashMap<usize, Arc<LayerOut>>,
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -39,7 +46,17 @@ fn wrap_of(project: &Project) -> Option<(f64, f64, f64)> {
 
 impl<'p> Resolver<'p> {
     pub fn new(project: &'p Project) -> Resolver<'p> {
+        let mut r = Resolver::plain(project);
+        r.scripts = super::scripts::driven(project);
+        r
+    }
+
+    /// A resolver that leaves script layers out: keys and modifiers only.
+    pub fn plain(project: &'p Project) -> Resolver<'p> {
         Resolver {
+            project,
+            scripts: None,
+            script_out: HashMap::new(),
             index: project.property_index(),
             memo: HashMap::new(),
             visiting: HashSet::new(),
@@ -179,6 +196,29 @@ impl<'p> Resolver<'p> {
                         }
                     }
                 }
+            }
+        }
+        // K2: script layers, on top of keys and modifiers
+        if let Some(d) = &self.scripts {
+            if let Some(ls) = d.by_prop.get(&p.id) {
+                let d = d.clone();
+                let mut x = ValueType::to_scalar(&v);
+                for &li in ls.clone().iter() {
+                    let out = match self.script_out.get(&li) {
+                        Some(o) => o.clone(),
+                        None => {
+                            let (sym, layer) = &d.layers[li];
+                            let o = super::scripts::layer_out(self.project, sym, layer);
+                            if o.missing {
+                                self.diag(DiagnosticKind::MissingRef, format!("script:{layer}"));
+                            }
+                            self.script_out.insert(li, o.clone());
+                            o
+                        }
+                    };
+                    x = out.apply(&p.id, x, t * self.fps);
+                }
+                v = p.ty.from_scalar(x, &v);
             }
         }
         self.sanitize(p, v)

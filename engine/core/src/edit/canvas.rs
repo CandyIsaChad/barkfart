@@ -369,7 +369,7 @@ impl CanvasTools {
         let moves: Vec<(String, f32, String, f32)> = root_symbol(p)
             .layers
             .iter()
-            .filter(|l| l.parent.is_none() && !l.locked && !matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_)))
+            .filter(|l| l.parent.is_none() && !l.locked && !matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_) | LayerKind::Script(_)))
             .map(|l| (l.transform.x.id.clone(), r.f(&l.transform.x, t) + dx, l.transform.y.id.clone(), r.f(&l.transform.y, t) + dy))
             .collect();
         let ed = self.editor.clone();

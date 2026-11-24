@@ -3,8 +3,8 @@
 Status: the runtime is built (2026-11-24, `engine/script`, mlua 0.12.3 with
 Luau 0.748, MIT): the sandbox, the time budget and memory cap, the
 `@barkfart` API's constructors, plugin definitions read into typed props, and
-calling a modifier's `value(v, p, t)`. Modifiers on a value (D36) and
-effects are built; effects take WGSL for now (GLSL needs one more crate,
+calling a modifier's `value(v, p, t)`. Modifiers on a value (D36),
+effects and Script layers (in the engine; REDESIGN K2c) are built; effects take WGSL for now (GLSL needs one more crate,
 `pp-rs`, waiting for the user's okay). An effect's shader defines
 `fn effect(uv: vec2<f32>, u: Props) -> vec4<f32>`: `uv` runs 0..1 from the
 top left, `layer(uv)` is the layer's colour (premultiplied), and `u` holds

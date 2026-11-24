@@ -783,6 +783,25 @@ Render the boards (docs/barkfart/mockups: `mkdir -p project preview && node boar
 ### K. Hardest, later
 Groups; the Luau plugin runtime (it needs the `mlua` crate, so it waits
 until a dependency fetch is approved); Script layers; emitters.
+- [ ] K2c. Script layers (SCRIPTING.md "Script layers"). Engine done
+  2026-11-24: `LayerKind::Script` (plugin, settings, targets, runs with
+  seed, Replace, Keep the last frame, keyable Mix), `bf.script` with
+  `start` / `step`, targets `bf.figure()` and `bf.value()`. The user asked
+  (2026-11-24) that scripts reach effect and plugin-effect settings too: a
+  value target is any keyable number (segment angle or length, position,
+  opacity, an effect's or plugin effect's setting), picked from one list;
+  colours and choices are left out. The output is applied in the Resolver
+  after keys and modifiers, so the stage, joins and the canvas agree;
+  scripts read the keyed motion only (never each other). Runs step once
+  per frame at the project rate, are cached per thread until the project
+  or the installed plugins change, and are deterministic. Ops
+  `script_add`, `script_pick`, `script_set`, `script_run`,
+  `script_run_add`, `script_run_remove`, `script_bake`, `script_delete`;
+  state `rows[].runs` (with a trace) and `script` (the page). Tests:
+  core/tests/scripts.rs, script/tests/runtime.rs. Board:
+  mockups/script-layer.mjs (`script`); its Moves section needs a value
+  target row ("Glow › Strength") before the app's page is built. Not yet:
+  `t.key`, emitters (`t.spawn`), colour targets.
 - [x] K2b. Plugin effects: WGSL shaders run over the layer as one more
   effect pass (the renderer compiles each plugin once per install; a
   shader that doesn't compile switches the plugin off with the compiler's

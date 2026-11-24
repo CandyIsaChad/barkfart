@@ -4,7 +4,7 @@
 //! A plugin that fails (too slow, too much memory, an error) is switched off
 //! with its message; installing it again switches it back on.
 
-use barkfart_script::{Definition, Host, Kind, Plugin, PropKind, PropValue, Time};
+use barkfart_script::{Definition, Host, Kind, Moved, Plugin, PropKind, PropValue, Run, Seen, Time};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -57,6 +57,17 @@ pub fn uninstall(id: &str) {
     r.generation += 1;
 }
 
+/// Goes up whenever the installed plugins change (so worked-out script runs
+/// are done again).
+pub fn generation() -> u64 {
+    registry().generation
+}
+
+/// Why an installed plugin was switched off (None: it runs, or isn't installed).
+pub fn off(id: &str) -> Option<String> {
+    registry().list.iter().find(|x| x.def.id == id).and_then(|x| x.off.clone())
+}
+
 pub fn list() -> Vec<Listed> {
     registry().list.iter().map(|x| Listed { def: x.def.clone(), off: x.off.clone() }).collect()
 }
@@ -88,6 +99,56 @@ fn switch_off(id: &str, why: String) {
     }
 }
 
+/// A plugin's settings as it receives them: the plugin's defaults fill any it
+/// doesn't have; ones it no longer knows are left out.
+pub fn fill_props(def: &Definition, props: &[(String, PropValue)]) -> Vec<(String, PropValue)> {
+    def.props.iter().map(|d| (d.name.clone(), props.iter().find(|(n, _)| *n == d.name).map(|(_, v)| v.clone()).unwrap_or_else(|| default_value(&d.kind)))).collect()
+}
+
+/// Runs `f` with this thread's runtime and plugin `id`, compiling the
+/// installed plugins first if the list changed. None when it isn't loaded.
+fn with_plugin<T>(generation: u64, id: &str, f: impl FnOnce(&Host, &Plugin) -> T) -> Option<T> {
+    LOADED.with(|cell| {
+        let mut c = cell.borrow_mut();
+        if c.as_ref().is_none_or(|x| x.0 != generation) {
+            let host = Host::new().ok()?;
+            let sources: Vec<(String, String)> = registry().list.iter().map(|x| (x.def.id.clone(), x.source.clone())).collect();
+            let mut loaded = HashMap::new();
+            for (pid, src) in sources {
+                if let Ok(p) = host.load(&src, &pid) {
+                    loaded.insert(pid, p);
+                }
+            }
+            *c = Some((generation, host, loaded));
+        }
+        let (_, host, loaded) = c.as_ref()?;
+        let plugin = loaded.get(id)?;
+        Some(f(host, plugin))
+    })
+}
+
+/// A script layer's run (K2): what the script asks of its targets on each
+/// frame. Err: why it can't run (it is then switched off if it failed).
+pub fn run_script(id: &str, props: &[(String, PropValue)], seed: u64, fps: f64, first_frame: i64, scene: &[Vec<(String, Seen)>]) -> Result<Vec<Vec<(String, Moved)>>, String> {
+    let generation = {
+        let r = registry();
+        let Some(x) = r.list.iter().find(|x| x.def.id == id) else { return Err("That plugin isn't installed.".into()) };
+        if let Some(why) = &x.off {
+            return Err(why.clone());
+        }
+        if x.def.kind != Kind::Script {
+            return Err(format!("{} isn't a script.", x.def.name));
+        }
+        r.generation
+    };
+    let outcome = with_plugin(generation, id, |host, plugin| host.script_run(plugin, &Run { seed, props, fps, first_frame, scene })).ok_or_else(|| "The plugin couldn't be loaded.".to_string())?;
+    outcome.map_err(|e| {
+        let why = e.to_string();
+        switch_off(id, why.clone());
+        why
+    })
+}
+
 /// A prop's starting value, as the plugin receives it (a choice by its name).
 pub fn default_value(kind: &PropKind) -> PropValue {
     match kind {
@@ -113,24 +174,8 @@ pub fn modify(id: &str, key: &str, v: f64, props: &[(String, PropValue)], t: Tim
         }
         (r.generation, x.def.clone())
     };
-    let props: Vec<(String, PropValue)> = def.props.iter().map(|d| (d.name.clone(), props.iter().find(|(n, _)| *n == d.name).map(|(_, v)| v.clone()).unwrap_or_else(|| default_value(&d.kind)))).collect();
-    let outcome = LOADED.with(|cell| {
-        let mut c = cell.borrow_mut();
-        if c.as_ref().is_none_or(|x| x.0 != generation) {
-            let host = Host::new().ok()?;
-            let sources: Vec<(String, String)> = registry().list.iter().map(|x| (x.def.id.clone(), x.source.clone())).collect();
-            let mut loaded = HashMap::new();
-            for (pid, src) in sources {
-                if let Ok(p) = host.load(&src, &pid) {
-                    loaded.insert(pid, p);
-                }
-            }
-            *c = Some((generation, host, loaded));
-        }
-        let (_, host, loaded) = c.as_ref()?;
-        let plugin = loaded.get(id)?;
-        Some(host.modifier_value(plugin, key, v, &props, t, sample))
-    })?;
+    let props = fill_props(&def, props);
+    let outcome = with_plugin(generation, id, |host, plugin| host.modifier_value(plugin, key, v, &props, t, sample))?;
     match outcome {
         Ok(x) if x.is_finite() => Some(x),
         Ok(_) => {

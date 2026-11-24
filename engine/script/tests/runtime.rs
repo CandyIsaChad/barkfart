@@ -123,3 +123,104 @@ fn randomness_is_the_same_whatever_order_frames_are_drawn_in() {
     assert!(forward.iter().all(|v| v.abs() <= 2.0));
     assert_ne!(at(3.0, "L1/x"), at(3.0, "L1/y"), "each value gets its own numbers");
 }
+
+const CAPE: &str = r#"
+local bf = require("@barkfart")
+return bf.script {
+	id = "yeah.cape", name = "Cape sway", version = "1.0.0", author = "yeah",
+	targets = { cape = bf.figure(), glow = bf.value { label = "Glow" } },
+	props = { stiffness = bf.number { default = 0.4, min = 0, max = 1 } },
+	start = function(s)
+		s.swing, s.speed = 0, 0
+	end,
+	step = function(s, p, t, scene)
+		local push = -scene.cape.velocity.x * t.dt * 0.05
+		s.speed = (s.speed + push - s.swing * p.stiffness) * 0.9
+		s.swing += s.speed
+		return {
+			cape = { rotate = { root = s.swing, arm = t.random(-1, 1) }, move = { y = t.elapsed } },
+			glow = scene.glow + 1,
+		}
+	end,
+}
+"#;
+
+fn cape_scene(frames: usize) -> Vec<Vec<(String, Seen)>> {
+    (0..frames)
+        .map(|k| {
+            vec![
+                ("cape".to_string(), Seen::Figure { x: k as f64 * 10.0, y: 0.0, rotation: 0.0, vx: 300.0, vy: 0.0, joints: vec![("root".into(), 0.0, 0.0, 0.0)] }),
+                ("glow".to_string(), Seen::Value(k as f64)),
+            ]
+        })
+        .collect()
+}
+
+#[test]
+fn a_script_runs_forward_with_its_own_state() {
+    let host = Host::new().unwrap();
+    let p = host.load(CAPE, "cape").unwrap();
+    assert_eq!(p.def.kind, Kind::Script);
+    let names: Vec<(&str, TargetKind)> = p.def.targets.iter().map(|t| (t.name.as_str(), t.kind)).collect();
+    assert_eq!(names, [("cape", TargetKind::Figure), ("glow", TargetKind::Value)]);
+    let scene = cape_scene(20);
+    let props = [("stiffness".to_string(), PropValue::Number(0.4))];
+    let out = host.script_run(&p, &Run { seed: 1, props: &props, fps: 24.0, first_frame: 5, scene: &scene }).unwrap();
+    assert_eq!(out.len(), 20);
+    // the state carries over: the swing builds up from 0 and doesn't stay put
+    let swing: Vec<f64> = out.iter().map(|f| f[0].1.rotate.iter().find(|r| r.0 == "root").unwrap().1).collect();
+    assert!(swing[0] < 0.0 && swing[3] < swing[0], "{swing:?}");
+    assert!(swing.windows(2).any(|w| w[1] > w[0]), "it swings back: {swing:?}");
+    // t.elapsed starts at 0 on the block's first frame; values see the scene
+    assert_eq!(out[0][0].1.y, Some(0.0));
+    assert!((out[12][0].1.y.unwrap() - 0.5).abs() < 1e-9);
+    assert_eq!(out[7][1].1.value, Some(8.0));
+}
+
+#[test]
+fn a_run_is_repeatable_and_each_seed_differs() {
+    let host = Host::new().unwrap();
+    let p = host.load(CAPE, "cape").unwrap();
+    let scene = cape_scene(10);
+    let props = [("stiffness".to_string(), PropValue::Number(0.4))];
+    let arm = |seed: u64| -> Vec<f64> {
+        let out = host.script_run(&p, &Run { seed, props: &props, fps: 24.0, first_frame: 0, scene: &scene }).unwrap();
+        out.iter().map(|f| f[0].1.rotate.iter().find(|r| r.0 == "arm").unwrap().1).collect()
+    };
+    assert_eq!(arm(7), arm(7));
+    // another host, same numbers
+    let host2 = Host::new().unwrap();
+    let p2 = host2.load(CAPE, "cape").unwrap();
+    let again = host2.script_run(&p2, &Run { seed: 7, props: &props, fps: 24.0, first_frame: 0, scene: &scene }).unwrap();
+    assert_eq!(arm(7), again.iter().map(|f| f[0].1.rotate.iter().find(|r| r.0 == "arm").unwrap().1).collect::<Vec<_>>());
+    assert_ne!(arm(7), arm(8));
+}
+
+#[test]
+fn a_runaway_script_is_stopped() {
+    let host = Host::new().unwrap();
+    let src = r#"
+local bf = require("@barkfart")
+return bf.script { id = "x.loop", version = "1", targets = { a = bf.value() },
+	step = function(s, p, t) while true do end end }
+"#;
+    let p = host.load(src, "loop").unwrap();
+    let scene = vec![vec![("a".to_string(), Seen::Value(0.0))]; 3];
+    let at = Instant::now();
+    assert_eq!(host.script_run(&p, &Run { seed: 1, props: &[], fps: 24.0, first_frame: 0, scene: &scene }).err(), Some(ScriptError::TooSlow));
+    assert!(at.elapsed().as_millis() < 500);
+    // and a wrong answer is told plainly
+    let src = r#"
+local bf = require("@barkfart")
+return bf.script { id = "x.bad", version = "1", targets = { a = bf.value() },
+	step = function() return { a = "lots" } end }
+"#;
+    let p = host.load(src, "bad").unwrap();
+    match host.script_run(&p, &Run { seed: 1, props: &[], fps: 24.0, first_frame: 0, scene: &scene }) {
+        Err(ScriptError::Runtime(m)) => assert!(m.contains("a must be a number"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+    // a script without targets or step isn't one
+    assert!(matches!(host.load("local bf = require('@barkfart') return bf.script { id = 'x.y', version = '1', step = function() end }", "n"), Err(ScriptError::Invalid(_))));
+    assert!(matches!(host.load("local bf = require('@barkfart') return bf.script { id = 'x.y', version = '1', targets = { a = bf.value() } }", "n"), Err(ScriptError::Invalid(_))));
+}

@@ -207,29 +207,50 @@ fn parse_modifier(m: &Obj) -> R<Modifier> {
         },
         "link" => ModifierKind::Link { source: req(m, "source")?.into(), scale: f(m, "scale", 1.0)?, offset: f(m, "offset", 0.0)? },
         // K2: a plugin modifier; its settings are kept whether or not it's installed
-        "plugin" => {
-            let mut props = Vec::new();
-            if let Some(J::Object(pm)) = m.get("props") {
-                for (k, v) in pm {
-                    use barkfart_script::PropValue as P;
-                    let pv = match v {
-                        J::Bool(b) => P::Toggle(*b),
-                        J::String(t) => P::Text(t.clone()),
-                        J::Number(n) => P::Number(n.as_f64().unwrap_or(0.0)),
-                        J::Array(a) if a.len() == 4 => P::Colour([0, 1, 2, 3].map(|i| a[i].as_f64().unwrap_or(1.0) as f32)),
-                        J::Array(a) if a.len() == 2 => P::Point(a[0].as_f64().unwrap_or(0.0), a[1].as_f64().unwrap_or(0.0)),
-                        _ => return err(format!("plugin setting {k}")),
-                    };
-                    props.push((k.clone(), pv));
-                }
-            }
-            ModifierKind::Plugin { id: req(m, "id")?.into(), version: str_(m, "version")?.unwrap_or("").into(), props }
-        }
+        "plugin" => ModifierKind::Plugin { id: req(m, "id")?.into(), version: str_(m, "version")?.unwrap_or("").into(), props: plugin_props(m)? },
         other => return err(format!("unknown modifier {other}")),
     };
     let mut md = Modifier::new(kind);
     md.enabled = b(m, "enabled", true)?;
     Ok(md)
+}
+
+/// A plugin's settings (K2), kept whether or not it's installed.
+fn plugin_props(m: &Obj) -> R<Vec<(String, barkfart_script::PropValue)>> {
+    let mut props = Vec::new();
+    if let Some(J::Object(pm)) = m.get("props") {
+        for (k, v) in pm {
+            use barkfart_script::PropValue as P;
+            let pv = match v {
+                J::Bool(b) => P::Toggle(*b),
+                J::String(t) => P::Text(t.clone()),
+                J::Number(n) => P::Number(n.as_f64().unwrap_or(0.0)),
+                J::Array(a) if a.len() == 4 => P::Colour([0, 1, 2, 3].map(|i| a[i].as_f64().unwrap_or(1.0) as f32)),
+                J::Array(a) if a.len() == 2 => P::Point(a[0].as_f64().unwrap_or(0.0), a[1].as_f64().unwrap_or(0.0)),
+                _ => return err(format!("plugin setting {k}")),
+            };
+            props.push((k.clone(), pv));
+        }
+    }
+    Ok(props)
+}
+
+fn plugin_props_json(props: &[(String, barkfart_script::PropValue)]) -> Json {
+    let mut pm = JObj::new();
+    for (k, v) in props {
+        use barkfart_script::PropValue as P;
+        pm.put(
+            k,
+            match v {
+                P::Number(n) => json::f64(*n),
+                P::Toggle(b) => Json::Bool(*b),
+                P::Text(t) => json::s(t),
+                P::Colour(c) => Json::List(c.iter().map(|x| json::f32(*x)).collect()),
+                P::Point(x, y) => Json::List(vec![json::f64(*x), json::f64(*y)]),
+            },
+        );
+    }
+    pm.done()
 }
 
 fn scope(m: &Obj) -> R<Scope> {
@@ -444,6 +465,24 @@ fn layer(m: &Obj) -> R<Layer> {
             l
         }
         "ADJUSTMENT" => Layer::adjustment(id, name),
+        "SCRIPT" => {
+            let mut sc = ScriptLayer { plugin: req(m, "plugin")?.into(), version: str_(m, "version")?.unwrap_or("").into(), props: plugin_props(m)?, targets: Vec::new(), runs: Vec::new() };
+            for o in list(m, "targets")? {
+                let tm = as_map(o, "script target")?;
+                let kind = barkfart_script::TargetKind::from_name(req(tm, "kind")?).ok_or_else(|| FormatError("script target kind".into()))?;
+                sc.targets.push(ScriptTarget { name: req(tm, "name")?.into(), kind, to: str_(tm, "to")?.map(Into::into) });
+            }
+            for o in list(m, "runs")? {
+                let rm = as_map(o, "script run")?;
+                let mut r = ScriptRun::new(id, req(rm, "id")?, d(rm, "start", 0.0)?, d(rm, "end", 0.0)?, i(rm, "seed", 1)? as u32);
+                r.replace = b(rm, "replace", false)?;
+                r.keep = b(rm, "keep", false)?;
+                read_prop(rm, "mix", &mut r.mix)?;
+                sc.runs.push(r);
+            }
+            sc.runs.sort_by(|a, b| a.start.total_cmp(&b.start));
+            Layer::script(id, name, sc)
+        }
         "AUDIO" => {
             let mut l = Layer::audio(id, name);
             let LayerKind::Audio(clips) = &mut l.kind else { unreachable!() };
@@ -801,21 +840,7 @@ fn modifier_json(md: &Modifier) -> Json {
             m.put("type", json::s("link")).put("source", json::s(source)).put("scale", json::f32(*scale)).put("offset", json::f32(*offset));
         }
         ModifierKind::Plugin { id, version, props } => {
-            let mut pm = JObj::new();
-            for (k, v) in props {
-                use barkfart_script::PropValue as P;
-                pm.put(
-                    k,
-                    match v {
-                        P::Number(n) => json::f64(*n),
-                        P::Toggle(b) => Json::Bool(*b),
-                        P::Text(t) => json::s(t),
-                        P::Colour(c) => Json::List(c.iter().map(|x| json::f32(*x)).collect()),
-                        P::Point(x, y) => Json::List(vec![json::f64(*x), json::f64(*y)]),
-                    },
-                );
-            }
-            m.put("type", json::s("plugin")).put("id", json::s(id)).put("version", json::s(version)).put("props", pm.done());
+            m.put("type", json::s("plugin")).put("id", json::s(id)).put("version", json::s(version)).put("props", plugin_props_json(props));
         }
     }
     m.put("enabled", Json::Bool(md.enabled));
@@ -1135,6 +1160,38 @@ fn layer_json(l: &Layer) -> Json {
             }
         }
         LayerKind::Adjustment => {}
+        LayerKind::Script(sc) => {
+            let targets = sc
+                .targets
+                .iter()
+                .map(|tg| {
+                    let mut tm = JObj::new();
+                    tm.put("name", json::s(&tg.name)).put("kind", json::s(tg.kind.name())).put("to", json::opt(&tg.to));
+                    tm.done()
+                })
+                .collect();
+            let runs = sc
+                .runs
+                .iter()
+                .map(|r| {
+                    let mut rm = JObj::new();
+                    rm.put("id", json::s(&r.id)).put("start", json::f64(r.start)).put("end", json::f64(r.end)).put("seed", json::int(r.seed as i64));
+                    if r.replace {
+                        rm.put("replace", Json::Bool(true));
+                    }
+                    if r.keep {
+                        rm.put("keep", Json::Bool(true));
+                    }
+                    rm.put("mix", prop_json(&r.mix, false));
+                    rm.done()
+                })
+                .collect();
+            m.put("plugin", json::s(&sc.plugin))
+                .put("version", json::s(&sc.version))
+                .put("props", plugin_props_json(&sc.props))
+                .put("targets", Json::List(targets))
+                .put("runs", Json::List(runs));
+        }
     }
     m.done()
 }

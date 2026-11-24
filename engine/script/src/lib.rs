@@ -80,6 +80,84 @@ pub struct Definition {
     pub props: Vec<Prop>,
     /// An effect's shader.
     pub shader: Option<Shader>,
+    /// A script's targets: what it moves, picked by the user in Properties
+    /// (sorted by name, like props).
+    pub targets: Vec<Target>,
+}
+
+/// One thing a script moves (SCRIPTING.md "Targets, not names").
+#[derive(Clone, Debug, PartialEq)]
+pub struct Target {
+    pub name: String,
+    pub kind: TargetKind,
+    pub label: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TargetKind {
+    /// A stickfigure: the script turns its joints and moves it.
+    Figure,
+    /// Any value that can be keyed (a segment's length, an effect's
+    /// strength, a plugin effect's setting): the script changes the number.
+    Value,
+}
+
+impl TargetKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            TargetKind::Figure => "figure",
+            TargetKind::Value => "value",
+        }
+    }
+
+    pub fn from_name(s: &str) -> Option<TargetKind> {
+        match s {
+            "figure" => Some(TargetKind::Figure),
+            "value" => Some(TargetKind::Value),
+            _ => None,
+        }
+    }
+}
+
+/// What a script sees of one target on a frame (`scene.<name>`): the keyed
+/// motion, before any script, so scripts never read each other's output.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Seen {
+    Figure {
+        /// The main joint on the stage.
+        x: f64,
+        y: f64,
+        /// Its turn on the stage, in degrees.
+        rotation: f64,
+        /// How fast the main joint moves, per second (0 on a still figure).
+        vx: f64,
+        vy: f64,
+        /// Each joint by its name: on the stage, and its turn there.
+        joints: Vec<(String, f64, f64, f64)>,
+    },
+    Value(f64),
+}
+
+/// What a script asked of one target on one frame.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Moved {
+    /// Joints by name, in degrees.
+    pub rotate: Vec<(String, f64)>,
+    pub x: Option<f64>,
+    pub y: Option<f64>,
+    /// A value target's number.
+    pub value: Option<f64>,
+}
+
+/// One run of a script (a block on its row).
+pub struct Run<'a> {
+    pub seed: u64,
+    pub props: &'a [(String, PropValue)],
+    pub fps: f64,
+    /// The project frame the run starts on (0-based).
+    pub first_frame: i64,
+    /// What each target looks like on each of the run's frames.
+    pub scene: &'a [Vec<(String, Seen)>],
 }
 
 /// An effect's shader (SCRIPTING.md "The shader"): WGSL text that defines
@@ -137,6 +215,8 @@ pub enum PropValue {
 
 const LOAD_BUDGET: Duration = Duration::from_millis(200);
 const CALL_BUDGET: Duration = Duration::from_millis(5);
+/// A whole script run, every frame of it.
+const RUN_BUDGET: Duration = Duration::from_millis(2000);
 /// The memory one runtime may hold.
 pub const MEMORY_CAP: usize = 32 * 1024 * 1024;
 const OVER_TIME: &str = "barkfart: over the time budget";
@@ -216,6 +296,12 @@ impl Host {
         if def.kind == Kind::Modifier && !matches!(table.get::<Value>("value"), Ok(Value::Function(_))) {
             return Err(ScriptError::Invalid("a modifier needs value = function(v, p, t) ... end".into()));
         }
+        if def.kind == Kind::Script && !matches!(table.get::<Value>("step"), Ok(Value::Function(_))) {
+            return Err(ScriptError::Invalid("a script needs step = function(s, p, t, scene) ... end".into()));
+        }
+        if def.kind == Kind::Script && !matches!(table.get::<Value>("start"), Ok(Value::Function(_)) | Ok(Value::Nil)) {
+            return Err(ScriptError::Invalid("start must be a function(s, p, t, scene)".into()));
+        }
         Ok(Plugin { def, table })
     }
 
@@ -258,6 +344,139 @@ impl Host {
             })
         })
     }
+}
+
+impl Host {
+    /// Runs a script over one block (SCRIPTING.md "Script layers"): `start`
+    /// on the first frame, then `step` on every frame in order, with one
+    /// state table `s` kept across them. `t.random` is seeded by the run, so
+    /// the same run always gives the same result. Returns what the script
+    /// asked of each target on each frame.
+    pub fn script_run(&self, plugin: &Plugin, run: &Run) -> Result<Vec<Vec<(String, Moved)>>, ScriptError> {
+        let step: Function = plugin.table.get("step").map_err(|e| ScriptError::Invalid(e.to_string()))?;
+        let start: Option<Function> = plugin.table.get("start").ok();
+        let targets = plugin.def.targets.clone();
+        let prev = self.deadline.get();
+        let run_end = Instant::now() + RUN_BUDGET;
+        let fps = if run.fps > 0.0 { run.fps } else { 30.0 };
+        let r = self.lua.scope(|scope| {
+            let state = Cell::new(seed(&plugin.def.id, "run", run.seed as f64));
+            let random = scope.create_function(move |_, (a, b): (Option<f64>, Option<f64>)| {
+                let u = next_random(&state);
+                Ok(match (a, b) {
+                    (Some(a), Some(b)) => a + (b - a) * u,
+                    (Some(b), None) => b * u,
+                    _ => u,
+                })
+            })?;
+            let s = self.lua.create_table()?;
+            let p = props_table(&self.lua, run.props)?;
+            let mut out = Vec::with_capacity(run.scene.len());
+            for (k, seen) in run.scene.iter().enumerate() {
+                let frame = (run.first_frame + k as i64) as f64;
+                let tt = self.lua.create_table()?;
+                tt.set("frame", frame)?;
+                tt.set("seconds", frame / fps)?;
+                tt.set("fps", fps)?;
+                tt.set("dt", 1.0 / fps)?;
+                tt.set("elapsed", k as f64 / fps)?;
+                tt.set("random", &random)?;
+                let sc = scene_table(&self.lua, seen)?;
+                let call = |f: &Function| -> mlua::Result<Value> {
+                    self.deadline.set(Some(run_end.min(Instant::now() + CALL_BUDGET)));
+                    f.call((&s, &p, &tt, &sc))
+                };
+                if k == 0 {
+                    if let Some(f) = &start {
+                        call(f)?;
+                    }
+                }
+                let v = call(&step)?;
+                out.push(moved(&v, &targets)?);
+            }
+            Ok(out)
+        });
+        self.deadline.set(prev);
+        r.map_err(classify)
+    }
+}
+
+fn scene_table(lua: &Lua, seen: &[(String, Seen)]) -> mlua::Result<Table> {
+    let sc = lua.create_table()?;
+    for (name, x) in seen {
+        match x {
+            Seen::Value(v) => sc.set(name.as_str(), *v)?,
+            Seen::Figure { x, y, rotation, vx, vy, joints } => {
+                let t = lua.create_table()?;
+                t.set("x", *x)?;
+                t.set("y", *y)?;
+                t.set("rotation", *rotation)?;
+                let v = lua.create_table()?;
+                v.set("x", *vx)?;
+                v.set("y", *vy)?;
+                t.set("velocity", v)?;
+                let js = lua.create_table()?;
+                for (n, jx, jy, ja) in joints {
+                    let j = lua.create_table()?;
+                    j.set("x", *jx)?;
+                    j.set("y", *jy)?;
+                    j.set("rotation", *ja)?;
+                    js.set(n.as_str(), j)?;
+                }
+                t.set("joints", js)?;
+                sc.set(name.as_str(), t)?;
+            }
+        }
+    }
+    Ok(sc)
+}
+
+fn number(v: &Value, what: &str) -> mlua::Result<f64> {
+    match v {
+        Value::Number(n) => Ok(*n),
+        Value::Integer(i) => Ok(*i as f64),
+        other => Err(mlua::Error::runtime(format!("{what} must be a number, not {}", other.type_name()))),
+    }
+}
+
+/// Reads what `step` returned: `{ cape = { rotate = { root = 5 }, move = { x = 2 } }, glow = 0.4 }`.
+fn moved(v: &Value, targets: &[Target]) -> mlua::Result<Vec<(String, Moved)>> {
+    let t = match v {
+        Value::Nil => return Ok(Vec::new()),
+        Value::Table(t) => t,
+        other => return Err(mlua::Error::runtime(format!("step must return a table (or nothing), not {}", other.type_name()))),
+    };
+    let mut out = Vec::new();
+    for tg in targets {
+        let v: Value = t.get(tg.name.as_str())?;
+        if v.is_nil() {
+            continue;
+        }
+        let mut m = Moved::default();
+        match tg.kind {
+            TargetKind::Value => m.value = Some(number(&v, &tg.name)?),
+            TargetKind::Figure => {
+                let Value::Table(ft) = v else {
+                    return Err(mlua::Error::runtime(format!("{} must be a table like {{ rotate = {{ root = 10 }} }}", tg.name)));
+                };
+                if let Value::Table(rt) = ft.get::<Value>("rotate")? {
+                    for pair in rt.pairs::<String, Value>() {
+                        let (joint, a) = pair?;
+                        m.rotate.push((joint.clone(), number(&a, &format!("{}.rotate.{joint}", tg.name))?));
+                    }
+                    m.rotate.sort_by(|a, b| a.0.cmp(&b.0));
+                }
+                if let Value::Table(mt) = ft.get::<Value>("move")? {
+                    let x: Value = mt.get("x")?;
+                    let y: Value = mt.get("y")?;
+                    m.x = if x.is_nil() { None } else { Some(number(&x, &format!("{}.move.x", tg.name))?) };
+                    m.y = if y.is_nil() { None } else { Some(number(&y, &format!("{}.move.y", tg.name))?) };
+                }
+            }
+        }
+        out.push((tg.name.clone(), m));
+    }
+    Ok(out)
 }
 
 /// A seed from the plugin, the value it drives and the frame (FNV-1a).
@@ -384,7 +603,7 @@ fn bf_api(lua: &Lua) -> mlua::Result<Table> {
             })?,
         )?;
     }
-    for target in ["figure", "source"] {
+    for target in ["figure", "value", "source"] {
         bf.set(
             target,
             lua.create_function(move |lua, t: Option<Table>| {
@@ -478,6 +697,22 @@ fn definition(t: &Table) -> Result<Definition, ScriptError> {
         },
         _ => None,
     };
+    let mut targets = Vec::new();
+    if let Ok(Value::Table(tt)) = t.get::<Value>("targets") {
+        for pair in tt.pairs::<String, Table>() {
+            let (name, x) = pair.map_err(|e| ScriptError::Invalid(format!("targets: {e}")))?;
+            let kind = match text(&x, "__target").as_deref() {
+                Some("figure") => TargetKind::Figure,
+                Some("value") => TargetKind::Value,
+                _ => return Err(ScriptError::Invalid(format!("targets.{name}: use bf.figure() or bf.value()"))),
+            };
+            targets.push(Target { name, kind, label: text(&x, "label") });
+        }
+    }
+    targets.sort_by(|a, b| a.name.cmp(&b.name));
+    if kind == Kind::Script && targets.is_empty() {
+        return Err(ScriptError::Invalid("a script needs targets = { name = bf.figure() } (or bf.value())".into()));
+    }
     if kind == Kind::Effect && shader.is_none() {
         return Err(ScriptError::Invalid("an effect needs shader = bf.wgsl(\"...\")".into()));
     }
@@ -488,5 +723,5 @@ fn definition(t: &Table) -> Result<Definition, ScriptError> {
         return Err(ScriptError::Invalid("an effect's settings can't be text (a shader has no use for it)".into()));
     }
     Ok(Definition {
-        shader, name: text(t, "name").filter(|s| !s.trim().is_empty()).unwrap_or_else(|| id.clone()), version: need("version")?, id, kind, author: text(t, "author"), description: text(t, "description"), props })
+        shader, targets, name: text(t, "name").filter(|s| !s.trim().is_empty()).unwrap_or_else(|| id.clone()), version: need("version")?, id, kind, author: text(t, "author"), description: text(t, "description"), props })
 }

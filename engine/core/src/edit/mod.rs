@@ -11,6 +11,7 @@ pub mod frame_ops;
 pub mod group_ops;
 pub mod join_ops;
 pub mod layer_ops;
+pub mod script_ops;
 pub mod symbol_ops;
 pub mod camera_ops;
 pub mod canvas;

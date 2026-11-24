@@ -1478,6 +1478,57 @@ pub enum LayerKind {
     Adjustment,
     Audio(Vec<Clip>),
     Camera(CameraLayer),
+    /// K2 (SCRIPTING.md "Script layers"): a plugin that moves other layers
+    /// and values. Never drawn itself.
+    Script(ScriptLayer),
+}
+
+/// A Script layer: the plugin it runs, its settings, what it moves, and its
+/// runs (the blocks on its row).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScriptLayer {
+    pub plugin: String,
+    /// The plugin's version when it was put in.
+    pub version: String,
+    pub props: Vec<(String, barkfart_script::PropValue)>,
+    pub targets: Vec<ScriptTarget>,
+    /// Sorted by start; they don't overlap.
+    pub runs: Vec<ScriptRun>,
+}
+
+/// One of the script's targets, and what the user picked for it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScriptTarget {
+    pub name: String,
+    pub kind: barkfart_script::TargetKind,
+    /// A figure target: the figure layer's id. A value target: the
+    /// value's property id. None: not picked yet.
+    pub to: Option<String>,
+}
+
+/// One run: a block on the script's row. The script starts on its first
+/// frame and stops after its last.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScriptRun {
+    pub id: String,
+    /// Seconds; `end` is where the block stops (its last frame + one frame).
+    pub start: f64,
+    pub end: f64,
+    /// Its own random numbers: a copied block gets a new one.
+    pub seed: u32,
+    /// "Replaces the keys" (off: added on top of them).
+    pub replace: bool,
+    /// "Keeps the last frame": the result holds after the block (until the
+    /// next run on the row).
+    pub keep: bool,
+    /// How much of the script shows, 0 to 1; can be keyed.
+    pub mix: Property,
+}
+
+impl ScriptRun {
+    pub fn new(layer_id: &str, id: &str, start: f64, end: f64, seed: u32) -> ScriptRun {
+        ScriptRun { id: id.into(), start, end, seed, replace: false, keep: false, mix: Property::float(format!("{layer_id}/run/{id}/mix"), 1.0) }
+    }
 }
 
 impl LayerKind {
@@ -1490,6 +1541,7 @@ impl LayerKind {
             LayerKind::Adjustment => "ADJUSTMENT",
             LayerKind::Audio(_) => "AUDIO",
             LayerKind::Camera(_) => "CAMERA",
+            LayerKind::Script(_) => "SCRIPT",
         }
     }
 }
@@ -1623,6 +1675,10 @@ impl Layer {
         Layer::base(id, name, LayerKind::Audio(Vec::new()))
     }
 
+    pub fn script(id: &str, name: Option<&str>, script: ScriptLayer) -> Layer {
+        Layer::base(id, name, LayerKind::Script(script))
+    }
+
     pub fn camera(id: &str, name: Option<&str>) -> Layer {
         Layer::base(
             id,
@@ -1686,6 +1742,7 @@ impl Layer {
                 }
             }
             LayerKind::Camera(c) => out.extend([&c.x, &c.y, &c.zoom, &c.rotation, &c.background, &c.background2, &c.delay, &c.repeat_back, &c.repeat_times, &c.silence, &c.slow_motion, &c.bg_expand, &c.widescreen, &c.wobble_xy, &c.wobble_rot, &c.wobble_speed, &c.wobble_no_zoom, &c.auto_cam, &c.auto_cam_end, &c.repeat_tween]),
+            LayerKind::Script(sc) => out.extend(sc.runs.iter().map(|r| &r.mix)),
         }
         out
     }
@@ -1726,6 +1783,7 @@ impl Layer {
                 }
             }
             LayerKind::Camera(c) => out.extend([&mut c.x, &mut c.y, &mut c.zoom, &mut c.rotation, &mut c.background, &mut c.background2, &mut c.delay, &mut c.repeat_back, &mut c.repeat_times, &mut c.silence, &mut c.slow_motion, &mut c.bg_expand, &mut c.widescreen, &mut c.wobble_xy, &mut c.wobble_rot, &mut c.wobble_speed, &mut c.wobble_no_zoom, &mut c.auto_cam, &mut c.auto_cam_end, &mut c.repeat_tween]),
+            LayerKind::Script(sc) => out.extend(sc.runs.iter_mut().map(|r| &mut r.mix)),
         }
         out
     }

@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 /// Whether a layer may be in a group.
 pub fn groupable(l: &Layer) -> bool {
-    !matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_) | LayerKind::Adjustment)
+    !matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_) | LayerKind::Adjustment | LayerKind::Script(_))
 }
 
 /// Makes every symbol keep the group rules: memberships only of groupable
@@ -158,7 +158,7 @@ pub fn move_group(st: &mut State, sym: &str, gid: &str, forward: bool) -> EditRe
     let s = symbol(st, sym)?;
     let at: Vec<usize> = (0..s.layers.len()).filter(|&i| s.layers[i].group.as_deref() == Some(gid)).collect();
     let (Some(&a), Some(&b)) = (at.first(), at.last()) else { return fail("There is no such group.") };
-    let draws = |l: &Layer| !matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_));
+    let draws = |l: &Layer| !matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_) | LayerKind::Script(_));
     // the neighbour to pass: one drawn layer, or a whole other group
     let span = |i: usize| -> (usize, usize) {
         match s.layers[i].group.clone() {

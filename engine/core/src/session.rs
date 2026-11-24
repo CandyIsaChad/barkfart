@@ -67,6 +67,9 @@ pub struct Session {
     pub selected_text: Option<String>,
     /// K: the selected group (its folder row was tapped; the Group page).
     pub selected_group: Option<String>,
+    /// K2: the selected script layer (its row was tapped; the Script page)
+    /// and the run picked on it.
+    pub selected_script: Option<(String, Option<String>)>,
     pub onion: bool,
     /// Every drag stretches (the Drag: Stretch switch); otherwise only stretchy segments do.
     pub stretch_all: bool,
@@ -230,7 +233,7 @@ impl Session {
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
         let main_root = doc.project().root_symbol.clone();
-        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, selected_group: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, stock: None, size_ref: true, mirror: false, curves: false, curve_shown: Default::default(), draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, poses_clip: Vec::new(), multi: Vec::new(), copy_edit: None, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, selected_group: None, selected_script: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, stock: None, size_ref: true, mirror: false, curves: false, curve_shown: Default::default(), draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, poses_clip: Vec::new(), multi: Vec::new(), copy_edit: None, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -306,7 +309,7 @@ impl Session {
             return None;
         }
         for l in root.layers.iter_mut() {
-            let draws = !matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_));
+            let draws = !matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_) | LayerKind::Script(_));
             if draws && l.group.as_deref() != Some(gid) && l.visible {
                 std::sync::Arc::make_mut(l).visible = false;
             }
@@ -368,6 +371,18 @@ impl Session {
             });
             if !ok {
                 self.selected = None;
+            }
+        }
+        if let Some((l, run)) = self.selected_script.clone() {
+            // anything else selected since wins; a deleted run is let go of
+            let other = self.selected.is_some() || self.selected_text.is_some() || !self.multi.is_empty() || self.selected_group.is_some();
+            match self.project().root().and_then(|r| r.layer(&l)).map(|x| &x.kind) {
+                Some(LayerKind::Script(sc)) if !other => {
+                    if run.as_ref().is_some_and(|rid| !sc.runs.iter().any(|x| &x.id == rid)) {
+                        self.selected_script = Some((l, None));
+                    }
+                }
+                _ => self.selected_script = None,
             }
         }
         if let Some(g) = &self.selected_group {
@@ -1152,6 +1167,95 @@ impl Session {
                     self.curve_shown.insert(pid);
                 }
             }
+            "script_add" => {
+                // K2: a Script layer running an installed script plugin, from
+                // this frame to the end; its figures start on the selected one
+                let Some(pid) = c["id"].as_str().map(str::to_string) else { return self.state() };
+                let n = self.frame_count() as i64;
+                let from = c["from"].as_i64().unwrap_or(self.frame as i64);
+                let to = c["to"].as_i64().unwrap_or(n).max(from + 1);
+                let fig = self.sel_layer();
+                if let Some(id) = self.step("Add script", |s| crate::edit::script_ops::add(s, &sym, &pid, fig.as_deref(), from, to)) {
+                    let run = self.project().root().and_then(|r| r.layer(&id)).and_then(|l| match &l.kind {
+                        LayerKind::Script(sc) => sc.runs.first().map(|x| x.id.clone()),
+                        _ => None,
+                    });
+                    self.selected = None;
+                    self.selected_text = None;
+                    self.selected_group = None;
+                    self.multi.clear();
+                    self.selected_script = Some((id, run));
+                }
+            }
+            "script_pick" => {
+                // a script's row or one of its runs: the Script page
+                let Some(l) = c["layer"].as_str().map(str::to_string) else { return self.state() };
+                if matches!(self.project().root().and_then(|r| r.layer(&l)).map(|x| &x.kind), Some(LayerKind::Script(_))) {
+                    self.selected = None;
+                    self.selected_text = None;
+                    self.selected_group = None;
+                    self.multi.clear();
+                    self.selected_script = Some((l, c["run"].as_str().map(str::to_string)));
+                    self.rev += 1;
+                }
+            }
+            "script_set" | "script_run" | "script_run_add" | "script_run_remove" | "script_bake" | "script_delete" => {
+                let Some((l, picked)) = c["layer"].as_str().map(|x| (x.to_string(), None)).or_else(|| self.selected_script.clone()) else { return self.state() };
+                let run = c["run"].as_str().map(str::to_string).or(picked);
+                let c2 = c.clone();
+                match op {
+                    "script_set" => {
+                        let label = if c.get("target").is_some() { "Script target" } else { "Script" };
+                        self.step(label, |s| {
+                            if let Some(v) = c2["visible"].as_bool() {
+                                if let Some(x) = s.project.layer_mut(&sym, &l) {
+                                    x.visible = v;
+                                }
+                            }
+                            crate::edit::script_ops::set(s, &sym, &l, &c2)
+                        });
+                    }
+                    "script_run" => {
+                        if let Some(run) = run {
+                            let label = if c.get("from").is_some() || c.get("to").is_some() { "Move run" } else { "Script run" };
+                            self.step(label, |s| crate::edit::script_ops::run_set(s, &sym, &l, &run, &c2));
+                        }
+                    }
+                    "script_run_add" => {
+                        let frame = c["frame"].as_i64().unwrap_or(self.frame as i64);
+                        let len = c["len"].as_i64().unwrap_or(12);
+                        if let Some(rid) = self.step("Add run", |s| crate::edit::script_ops::run_add(s, &sym, &l, frame, len)) {
+                            self.selected_script = Some((l, Some(rid)));
+                        }
+                    }
+                    "script_run_remove" => {
+                        if let Some(run) = run {
+                            self.step("Delete run", |s| crate::edit::script_ops::run_remove(s, &sym, &l, &run));
+                        }
+                    }
+                    "script_bake" => {
+                        if let Some(run) = run {
+                            if self.step("Bake to keys", |s| crate::edit::script_ops::bake(s, &sym, &l, &run)).is_some() {
+                                self.message = "Baked. The run is keys now; the script's other runs stay.".into();
+                            }
+                        }
+                    }
+                    _ => {
+                        let gone = self.step("Delete script", |s| {
+                            let Some(sy) = s.project.symbol_mut(&sym) else { return crate::edit::fail("no symbol") };
+                            let n = sy.layers.len();
+                            sy.layers.retain(|x| x.id != l || !matches!(x.kind, LayerKind::Script(_)));
+                            if sy.layers.len() == n {
+                                return crate::edit::fail("That isn't a script layer.");
+                            }
+                            Ok(())
+                        });
+                        if gone.is_some() {
+                            self.selected_script = None;
+                        }
+                    }
+                }
+            }
             "modifier_set" | "modifier_remove" => {
                 // one modifier of a value (`index`, in the order they apply)
                 let Some(pid) = c["property"].as_str().map(str::to_string) else { return self.state() };
@@ -1194,22 +1298,8 @@ impl Session {
                             }
                         }
                         ModifierKind::Plugin { props, .. } => {
-                            if let Some(J::Object(set)) = c2.get("props") {
-                                use barkfart_script::PropValue as P;
-                                for (k, v) in set {
-                                    let pv = match v {
-                                        J::Bool(b) => P::Toggle(*b),
-                                        J::String(t) => P::Text(t.clone()),
-                                        J::Number(n) => P::Number(n.as_f64().unwrap_or(0.0)),
-                                        J::Array(a) if a.len() == 4 => P::Colour([0, 1, 2, 3].map(|i| a[i].as_f64().unwrap_or(1.0) as f32)),
-                                        J::Array(a) if a.len() == 2 => P::Point(a[0].as_f64().unwrap_or(0.0), a[1].as_f64().unwrap_or(0.0)),
-                                        _ => continue,
-                                    };
-                                    match props.iter_mut().find(|(n, _)| n == k) {
-                                        Some(slot) => slot.1 = pv,
-                                        None => props.push((k.clone(), pv)),
-                                    }
-                                }
+                            if let Some(set) = c2.get("props") {
+                                crate::edit::script_ops::merge_props(props, set);
                             }
                         }
                         _ => {}
@@ -1515,6 +1605,7 @@ impl Session {
                 let l = c["layer"].as_str().map(str::to_string);
                 self.multi.clear();
                 self.selected_text = None;
+                self.selected_script = None;
                 // K: a group's folder row selects the group (the Group page)
                 self.selected_group = c["group"].as_str().filter(|g| self.project().root().is_some_and(|r| r.groups.iter().any(|x| x.id == *g))).map(str::to_string);
                 self.selected = match l {
@@ -3614,6 +3705,76 @@ impl Session {
         Some(json!({"layer": lid, "name": fig, "channels": channels, "addable": addable}))
     }
 
+    /// K2: the Script page for the selected script layer: what it moves (and
+    /// what each target could be), its settings, its runs, the picked run.
+    fn script_state(&self, p: &Project) -> Option<J> {
+        use barkfart_script::TargetKind;
+        let (lid, picked) = self.selected_script.as_ref()?;
+        let r = p.root()?;
+        let l = r.layer(lid)?;
+        let LayerKind::Script(sc) = &l.kind else { return None };
+        let def = crate::plugins::definition(&sc.plugin);
+        let out = crate::eval::scripts::layer_out(p, &r.id, lid);
+        let fps = st_fps(p);
+        let name_of = |x: &Layer| x.name.clone().unwrap_or_else(|| x.id.clone());
+        let figures: Vec<J> = r.layers.iter().rev().filter(|x| x.as_figure().is_some()).map(|x| json!({"id": x.id, "name": name_of(x)})).collect();
+        // the numbers a value target can be: each layer's, front first
+        let mut values: Vec<J> = Vec::new();
+        for x in r.layers.iter().rev() {
+            if matches!(x.kind, LayerKind::Script(_) | LayerKind::Audio(_)) {
+                continue;
+            }
+            let group = name_of(x);
+            let tr = &x.transform;
+            let mut cands: Vec<(&Property, String)> = vec![(&tr.x, "Position x".into()), (&tr.y, "Position y".into()), (&tr.rotation, "Turn".into()), (&tr.scale_x, "Scale x".into()), (&tr.scale_y, "Scale y".into()), (&x.opacity, "Opacity".into())];
+            if let Some(f) = x.as_figure() {
+                for (i, n) in f.nodes().iter().enumerate().skip(1) {
+                    let part = part_label(n, i);
+                    for (q, what) in [(&n.rotation, "angle"), (&n.length, "length"), (&n.thickness, "thickness"), (&n.scale, "scale")] {
+                        cands.push((q, format!("{part} {what}")));
+                    }
+                }
+            }
+            for e in x.effects.nodes.values() {
+                for q in std::iter::once(&e.mix).chain(e.params.values()) {
+                    cands.push((q, prop_label(x, &q.id)));
+                }
+            }
+            for (q, label) in cands {
+                if crate::eval::scripts::drivable(q) {
+                    values.push(json!({"id": q.id, "name": label, "group": group}));
+                }
+            }
+        }
+        let label_of = |kind: TargetKind, to: &str| -> Option<String> {
+            match kind {
+                TargetKind::Figure => r.layer(to).map(name_of),
+                TargetKind::Value => r.layers.iter().find(|x| x.properties().iter().any(|q| q.id == to)).map(|x| format!("{} › {}", name_of(x), value_label(x, to))),
+            }
+        };
+        let targets: Vec<J> = sc
+            .targets
+            .iter()
+            .map(|t| {
+                let label = def.as_ref().and_then(|d| d.targets.iter().find(|x| x.name == t.name)).and_then(|x| x.label.clone()).unwrap_or_else(|| title_case(&t.name));
+                json!({"name": t.name, "label": label, "kind": t.kind.name(), "to": t.to, "toName": t.to.as_deref().and_then(|to| label_of(t.kind, to))})
+            })
+            .collect();
+        let runs: Vec<J> = sc
+            .runs
+            .iter()
+            .map(|x| {
+                let a = (x.start * fps).round() as i64;
+                json!({"id": x.id, "from": a, "frames": ((x.end * fps).round() as i64 - a).max(1), "replace": x.replace, "keep": x.keep, "mix": round2(x.mix.key_value(x.start).f()), "mixKeyed": !x.mix.track.is_empty(), "mixId": x.mix.id, "seed": x.seed})
+            })
+            .collect();
+        let run = picked.clone().filter(|id| sc.runs.iter().any(|x| &x.id == id)).or_else(|| sc.runs.first().map(|x| x.id.clone()));
+        Some(json!({"id": l.id, "name": name_of(l), "plugin": sc.plugin, "version": sc.version, "visible": l.visible,
+            "author": def.as_ref().and_then(|d| d.author.clone()), "description": def.as_ref().and_then(|d| d.description.clone()),
+            "missing": def.is_none(), "error": out.error.clone().or_else(|| crate::plugins::off(&sc.plugin)),
+            "targets": targets, "figures": figures, "values": values, "settings": plugin_settings(def.as_ref(), &sc.props), "runs": runs, "run": run}))
+    }
+
     /// Everything the app draws besides the picture.
     pub fn state(&self) -> J {
         let p = self.project();
@@ -3927,6 +4088,22 @@ impl Session {
                                 .collect();
                             return json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| "Sound".into()), "kind": "sound", "visible": l.visible, "clips": list, "blocks": [], "on": [], "props": []});
                         }
+                        // K2: a script row is its runs: [first frame, frames, id, trace]
+                        if let LayerKind::Script(sc) = &l.kind {
+                            let sub = sc.targets.iter().find(|x| x.kind == barkfart_script::TargetKind::Figure).and_then(|x| x.to.as_deref()).and_then(|id| s.layer(id)).map(|x| x.name.clone().unwrap_or_else(|| x.id.clone()));
+                            let out = crate::eval::scripts::layer_out(p, &s.id, &l.id);
+                            let runs: Vec<J> = sc
+                                .runs
+                                .iter()
+                                .map(|r| {
+                                    let a = (r.start * fps).round() as i64;
+                                    let len = ((r.end * fps).round() as i64 - a).max(1);
+                                    json!([a, len, r.id, out.runs.iter().find(|x| x.run == r.id).map(script_trace).unwrap_or_default()])
+                                })
+                                .collect();
+                            return json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| "Script".into()), "kind": "script", "visible": l.visible, "sub": sub, "runs": runs,
+                                "missing": out.missing, "error": out.error, "clips": [], "blocks": [], "on": [], "props": [], "group": null});
+                        }
                         let mut starts = crate::edit::block_ops::pose_frames(l, fps);
                         // M5: the camera is keyed on every frame; its row shows where
                         // the view changes, so equal neighbours read as one block
@@ -4077,6 +4254,7 @@ impl Session {
             "curves": self.curves_state(p),
             // K2: the installed plugins
             "plugins": crate::plugins::list().into_iter().map(|x| json!({"id": x.def.id, "name": x.def.name, "version": x.def.version, "author": x.def.author, "kind": x.def.kind.name(), "off": x.off})).collect::<Vec<_>>(),
+            "script": self.script_state(p),
             "group": self.selected_group.as_ref().filter(|_| self.selected.is_none() && self.selected_text.is_none() && self.multi.is_empty()).and_then(|gid| {
                 let r = p.root()?;
                 let g = r.groups.iter().find(|x| x.id == *gid)?;
@@ -4415,40 +4593,83 @@ fn modifier_json(i: usize, m: &Modifier, fps: f64) -> J {
         ModifierKind::DelayFollow { .. } => json!({"index": i, "kind": "follow", "name": "Follow", "enabled": m.enabled}),
         ModifierKind::Link { .. } => json!({"index": i, "kind": "link", "name": "Link", "enabled": m.enabled}),
         ModifierKind::Plugin { id, version, props } => {
-            use barkfart_script::{PropKind as K, PropValue as P};
             let def = crate::plugins::definition(id);
             let off = crate::plugins::list().into_iter().find(|x| x.def.id == *id).and_then(|x| x.off);
-            let value = |v: &P| match v {
-                P::Number(n) => json!(n),
-                P::Toggle(b) => json!(b),
-                P::Text(t) => json!(t),
-                P::Colour(c) => json!(c),
-                P::Point(x, y) => json!([x, y]),
-            };
-            let settings: Vec<J> = match &def {
-                Some(d) => d
-                    .props
-                    .iter()
-                    .map(|pd| {
-                        let now = props.iter().find(|(n, _)| *n == pd.name).map(|(_, v)| v.clone()).unwrap_or_else(|| crate::plugins::default_value(&pd.kind));
-                        let (kind, extra) = match &pd.kind {
-                            K::Number { min, max, step, .. } => ("number", json!({"min": min, "max": max, "step": step})),
-                            K::Angle { .. } => ("angle", json!({})),
-                            K::Toggle { .. } => ("toggle", json!({})),
-                            K::Colour { .. } => ("colour", json!({})),
-                            K::Choice { options, .. } => ("choice", json!({"options": options})),
-                            K::Text { .. } => ("text", json!({})),
-                            K::Point { .. } => ("point", json!({})),
-                        };
-                        json!({"name": pd.name, "label": pd.label.clone().unwrap_or_else(|| pd.name.clone()), "kind": kind, "value": value(&now), "extra": extra})
-                    })
-                    .collect(),
-                None => Vec::new(),
-            };
+            let settings = plugin_settings(def.as_ref(), props);
             json!({"index": i, "kind": "plugin", "id": id, "version": version, "name": def.as_ref().map(|d| d.name.clone()).unwrap_or_else(|| id.clone()),
                 "author": def.as_ref().and_then(|d| d.author.clone()), "missing": def.is_none(), "off": off, "enabled": m.enabled, "settings": settings})
         }
     }
+}
+
+/// A run's shape for its block on the row: the script's first changed
+/// value on each frame (null where it left it alone), at most 240 points.
+fn script_trace(r: &crate::eval::scripts::RunOut) -> Vec<J> {
+    let mut ids: Vec<&String> = r.values.keys().collect();
+    ids.sort();
+    let Some(vals) = ids.first().and_then(|id| r.values.get(*id)) else { return Vec::new() };
+    let step = (vals.len() as f64 / 240.0).max(1.0);
+    (0..vals.len().min(240)).map(|i| vals[((i as f64 * step) as usize).min(vals.len() - 1)]).map(|v| if v.is_finite() { json!(round2(v as f32)) } else { J::Null }).collect()
+}
+
+/// A value's name on the Script page (a segment's, an effect setting's).
+fn value_label(l: &Layer, id: &str) -> String {
+    let tr = &l.transform;
+    for (q, n) in [(&tr.x, "Position x"), (&tr.y, "Position y"), (&tr.rotation, "Turn"), (&tr.scale_x, "Scale x"), (&tr.scale_y, "Scale y"), (&l.opacity, "Opacity")] {
+        if q.id == id {
+            return n.into();
+        }
+    }
+    if let Some(f) = l.as_figure() {
+        for (i, n) in f.nodes().iter().enumerate() {
+            for (q, what) in [(&n.rotation, "angle"), (&n.length, "length"), (&n.thickness, "thickness"), (&n.scale, "scale")] {
+                if q.id == id {
+                    return format!("{} {what}", part_label(n, i));
+                }
+            }
+        }
+    }
+    prop_label(l, id)
+}
+
+/// "cape" → "Cape", "left_arm" → "Left arm".
+fn title_case(s: &str) -> String {
+    let s = s.replace('_', " ");
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        None => String::new(),
+    }
+}
+
+/// A plugin's settings as Properties shows them: each with its kind, value
+/// and limits (none when the plugin isn't installed).
+fn plugin_settings(def: Option<&barkfart_script::Definition>, props: &[(String, barkfart_script::PropValue)]) -> Vec<J> {
+    use barkfart_script::{PropKind as K, PropValue as P};
+    let value = |v: &P| match v {
+        P::Number(n) => json!(n),
+        P::Toggle(b) => json!(b),
+        P::Text(t) => json!(t),
+        P::Colour(c) => json!(c),
+        P::Point(x, y) => json!([x, y]),
+    };
+    let Some(d) = def else { return Vec::new() };
+    d.props
+        .iter()
+        .map(|pd| {
+            let now = props.iter().find(|(n, _)| *n == pd.name).map(|(_, v)| v.clone()).unwrap_or_else(|| crate::plugins::default_value(&pd.kind));
+            let (kind, extra) = match &pd.kind {
+                K::Number { min, max, step, .. } => ("number", json!({"min": min, "max": max, "step": step})),
+                K::Angle { .. } => ("angle", json!({})),
+                K::Toggle { .. } => ("toggle", json!({})),
+                K::Colour { .. } => ("colour", json!({})),
+                K::Choice { options, .. } => ("choice", json!({"options": options})),
+                K::Text { .. } => ("text", json!({})),
+                K::Point { .. } => ("point", json!({})),
+            };
+            json!({"name": pd.name, "label": pd.label.clone().unwrap_or_else(|| pd.name.clone()), "kind": kind, "value": value(&now), "extra": extra})
+        })
+        .collect()
 }
 
 /// A figure's piece as the Parts list names it: its shape and place.
@@ -4850,7 +5071,7 @@ fn move_among_drawn(st: &mut crate::edit::State, sym: &str, id: &str, forward: b
     let block: std::collections::HashSet<String> = layer_ops::with_joined(s, id).into_iter().collect();
     let (inb, rest): (Vec<_>, Vec<_>) = s.layers.iter().cloned().partition(|l| block.contains(&l.id));
     let before = s.layers.iter().take_while(|l| !block.contains(&l.id)).count().min(rest.len());
-    let draws = |l: &std::sync::Arc<Layer>| !matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_));
+    let draws = |l: &std::sync::Arc<Layer>| !matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_) | LayerKind::Script(_));
     let to = if forward { rest[before..].iter().position(draws).map(|k| before + k + 1) } else { rest[..before].iter().rposition(draws) };
     let Some(to) = to else { return Ok(()) };
     let mut out: Vec<_> = rest[..to].to_vec();

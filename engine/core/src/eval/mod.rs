@@ -6,6 +6,7 @@ pub mod affine;
 pub mod pose;
 pub mod resolve;
 pub mod scene;
+pub mod scripts;
 
 pub use affine::Affine;
 pub use pose::FigurePose;
@@ -329,7 +330,7 @@ fn eval_symbol<'p>(ctx: &mut Ctx<'p>, w: Work<'p>, stack: &mut Vec<Work<'p>>, on
         if !l.visible || (onion_only && !l.onion) {
             continue;
         }
-        if matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_)) {
+        if matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_) | LayerKind::Script(_)) {
             continue;
         }
         let adjustment = matches!(l.kind, LayerKind::Adjustment);
