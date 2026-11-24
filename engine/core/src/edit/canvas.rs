@@ -146,8 +146,16 @@ fn root_symbol(p: &Project) -> &Symbol {
 }
 
 /// Joints of a figure that other layers are joined to.
-pub fn join_anchors(s: &Symbol, figure: &str) -> std::collections::HashSet<String> {
-    s.layers.iter().filter(|l| l.parent.as_deref() == Some(figure)).filter_map(|l| l.parent_node.clone()).collect()
+/// The joints of `figure` other figures are joined to at time t (joins over
+/// time, D32: a switch on a later frame counts from that frame on).
+pub fn join_anchors(s: &Symbol, figure: &str, t: f64) -> std::collections::HashSet<String> {
+    s.layers
+        .iter()
+        .filter_map(|l| match l.parent_at(t) {
+            (Some(p), Some(n), _) if p == figure => Some(n.to_string()),
+            _ => None,
+        })
+        .collect()
 }
 
 impl CanvasTools {
@@ -201,7 +209,7 @@ impl CanvasTools {
             }
             let v = self.view_with(p, l, t, &mut r);
             let pose = FigurePose::compute(f, t, &mut r);
-            let anchors = if self.main_nodes_only && self.active_figure.as_deref() != Some(&l.id) { Some(join_anchors(s, &l.id)) } else { None };
+            let anchors = if self.main_nodes_only && self.active_figure.as_deref() != Some(&l.id) { Some(join_anchors(s, &l.id, t)) } else { None };
             for (i, n) in f.nodes().iter().enumerate() {
                 if n.is_static && !self.show_static {
                     continue;
@@ -315,10 +323,13 @@ impl CanvasTools {
             if !across_joins {
                 continue;
             }
+            // joined at time t (D32: joins over time)
             let hl = s.layer(&h.layer).expect("layer");
-            if h.root && hl.parent.as_deref() == Some(layer) && hl.parent_node.as_deref() == Some(node) {
+            let (hp, hn, _) = hl.parent_at(t);
+            let (fp, fnode, _) = fl.parent_at(t);
+            if h.root && hp == Some(layer) && hn == Some(node) {
                 out.push(h);
-            } else if n.parent.is_none() && fl.parent.as_deref() == Some(h.layer.as_str()) && fl.parent_node.as_deref() == Some(h.node.as_str()) {
+            } else if n.parent.is_none() && fp == Some(h.layer.as_str()) && fnode == Some(h.node.as_str()) {
                 out.push(h);
             }
         }

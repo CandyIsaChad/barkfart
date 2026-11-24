@@ -521,8 +521,8 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
   - The timeline shows a grey chain where a figure joins and a red broken
     chain where it lets go; tapping one says what it is, with Let go / Join
     elsewhere (or Join again), and changes show a light toast with Undo.
-  - Not yet: the canvas's "main joints only" and the join-anchor handles
-    still read the static join.
+  - The canvas's "main joints only" and the joints linked across joins
+    read the join at the current frame too (2026-11-24).
 - **D33. Groups (K).** A group is a record in its symbol and a `group` id on
   each member (not a member list, so deleting or copying layers can't leave
   stale ids). One level only. Members sit next to each other in row order,

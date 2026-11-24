@@ -5500,3 +5500,26 @@ fn a_group_takes_effects_with_static_values() {
     assert_ne!(st["group"]["filters"]["on"]["glow"], true);
     assert!(s.project().root().unwrap().groups[0].effects.is_empty(), "two undos: as before");
 }
+
+#[test]
+fn main_joints_only_shows_the_joints_used_by_joins_at_that_moment() {
+    // D32: with "Only main joints", a figure shows its main joint and the
+    // joints others are joined to now, not the join it will make later
+    let mut s = animated();
+    s.command(&json!({"op": "add_figure", "kind": "ball"}));
+    let ball = s.project().root().unwrap().layers.iter().filter(|l| l.as_figure().is_some()).map(|l| l.id.clone()).last().unwrap();
+    s.command(&json!({"op": "frame", "i": 2}));
+    s.command(&json!({"op": "select", "layer": ball}));
+    s.command(&json!({"op": "join_here", "layer": "L2", "node": "armR2"}));
+    s.command(&json!({"op": "set", "k": "mainonly", "v": true}));
+    // the ball selected: L2 shows only its main joint, and the hand from frame 2 on
+    let l2 = |s: &Session, f: i32| -> Vec<String> {
+        let t = f as f64 / s.project().settings.fps as f64;
+        let mut v: Vec<String> = s.tools.handles(s.project(), t).into_iter().filter(|h| h.layer == "L2").map(|h| h.node).collect();
+        v.sort();
+        v
+    };
+    s.command(&json!({"op": "select", "layer": ball}));
+    assert_eq!(l2(&s, 0), vec!["hip".to_string()], "not joined yet on frame 1");
+    assert_eq!(l2(&s, 3), vec!["armR2".to_string(), "hip".to_string()], "joined at the hand from frame 3");
+}
