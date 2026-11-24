@@ -56,6 +56,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   bool _fitted = false;
 
   ui.Image? _image;
+  /// The stage area the picture was drawn for (stage units; in the camera's
+  /// own units while playing): it is drawn there, so a resize or a pan shows
+  /// it in place, never stretched, until the next picture.
+  Rect _imageRect = Rect.zero;
+  bool _imageCamera = false;
   bool _imageOwned = true;
   /// The editor state the shown picture was drawn from: handles and the
   /// camera frame use it, so they move together with the figure.
@@ -384,7 +389,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       final cached = _frameCache[fi];
       if (cached != null) {
         _drawn = key;
-        if (!identical(cached, _image)) setState(() => _setImage(cached, owned: false));
+        if (!identical(cached, _image)) {
+          setState(() {
+            _setImage(cached, owned: false);
+            _imageRect = Rect.fromLTRB(x0, y0, x1, y1);
+            _imageCamera = true;
+          });
+        }
         return;
       }
     }
@@ -408,6 +419,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       }
       setState(() {
         _setImage(img, owned: !keep);
+        _imageRect = Rect.fromLTRB(x0, y0, x1, y1);
+        _imageCamera = camera;
         _engineMs = ms;
       });
       if (Platform.environment['BARKFART_TRACE'] != null) debugPrint('picture ${w}x$h engine ${ms.toStringAsFixed(1)} ms, total ${sw.elapsedMicroseconds / 1000} ms${camera ? ' (cached ${_frameCache.length})' : ''}');
@@ -1122,6 +1135,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           setState(() => _modOpen = (((_curveValue?['mods'] as List?) ?? const []).length) - 1);
         case 'modbrowser':
           setState(() => _modBrowser = true);
+        case 'swipe':
+          // real touches through Flutter's gestures (window points):
+          // swipe x1 y1 x2 y2 [hold ms before moving]; x1 y1 = x2 y2 is a tap
+          final v = [for (final x in w.sublist(1)) double.parse(x)];
+          await _realSwipe(Offset(v[0], v[1]), Offset(v[2], v[3]), holdMs: v.length > 4 ? v[4].round() : 0);
         case 'pan':
           final from = Offset(_view.size.width - 30, _view.size.height - 30);
           await _fakeDrag(from, from + Offset(double.parse(w[1]), double.parse(w[2])));
@@ -1309,6 +1327,28 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       }
       await Future<void>.delayed(const Duration(milliseconds: 120));
     }
+  }
+
+  /// Scripted: one finger down at `a`, held `holdMs`, moved to `b` in small
+  /// steps and lifted, sent as real touch events (the gesture arena decides).
+  Future<void> _realSwipe(Offset a, Offset b, {int holdMs = 0}) async {
+    final g = GestureBinding.instance;
+    const id = 913, kind = PointerDeviceKind.touch;
+    g.handlePointerEvent(PointerDownEvent(pointer: id, position: a, kind: kind));
+    if (holdMs > 0) await Future<void>.delayed(Duration(milliseconds: holdMs));
+    const steps = 14;
+    var at = a;
+    if (b != a) {
+      for (var i = 1; i <= steps; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 16));
+        final next = Offset.lerp(a, b, i / steps)!;
+        g.handlePointerEvent(PointerMoveEvent(pointer: id, position: next, delta: next - at, kind: kind));
+        at = next;
+      }
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 16));
+    g.handlePointerEvent(PointerUpEvent(pointer: id, position: b, kind: kind));
+    await Future<void>.delayed(const Duration(milliseconds: 50));
   }
 
   Future<void> _fakeDrag(Offset from, Offset to) async {
@@ -1673,8 +1713,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   /// "Projects": the animation's file actions, until the Projects screen (E2).
   Future<void> _projectsMenu() async {
-    final box = _projectsKey.currentContext?.findRenderObject() as RenderBox?;
-    final at = box == null ? const Offset(8, 44) : box.localToGlobal(Offset(0, box.size.height + 4));
+    final anchor = kit.Anchored.rectOf(_projectsKey) ?? const Rect.fromLTWH(8, 4, 80, 36);
     final pick = await showGeneralDialog<int>(
       context: context,
       barrierDismissible: true,
@@ -1682,11 +1721,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       barrierColor: const Color(0x00000000),
       transitionDuration: Duration.zero,
       pageBuilder: (c, a1, a2) => Stack(children: [
-        Positioned(
-          left: at.dx,
-          top: at.dy,
-          child: kit.PanelCard(
-            width: 220,
+        kit.Anchored(
+          anchor: anchor,
+          width: 220,
+          below: true,
+          card: (w) => kit.PanelCard(
+            width: w,
             padding: const EdgeInsets.all(6),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
               for (final (i, label) in const [(0, 'New animation'), (1, 'Your animations…'), (2, 'Save'), (3, 'Save as…'), (4, 'Settings')])
@@ -1731,7 +1771,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         onPointerSignal: _scroll,
         child: ClipRect(
           child: Stack(fit: StackFit.expand, children: [
-            if (_image != null) RawImage(image: _image, fit: BoxFit.fill, filterQuality: FilterQuality.low),
+            if (_image != null) CustomPaint(painter: _StagePicture(_image!, _imageRect, _imageCamera, _view, Size(((_st['w'] as num?) ?? 16).toDouble(), ((_st['h'] as num?) ?? 9).toDouble()))),
             CustomPaint(painter: _Overlay(_pictureSt ?? _st, _view, _playing)),
             if (AppSettings.flag('zoomButtons') && !_playing)
               Positioned(
@@ -2294,7 +2334,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             ),
           ),
         ),
-        // the ruler and the Preview row: the whole moment (Frame page); hold to copy
+        // the ruler and the Preview row: the whole moment (Frame page); hold to
+        // copy; slide along it to scrub (the rows below still scroll)
         Positioned(
           left: 0,
           top: 0,
@@ -2304,6 +2345,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             behavior: HitTestBehavior.opaque,
             onTapUp: (d) => frameTap(frameAt(d.localPosition.dx)),
             onLongPressStart: _playing ? null : (d) => _copyPopup(frameAt(d.localPosition.dx)),
+            onHorizontalDragStart: (d) {
+              if (_playing) _togglePlay();
+              _scrubTo(frameAt(d.localPosition.dx));
+            },
+            onHorizontalDragUpdate: (d) => _scrubTo(frameAt(_scrubEdge(d.localPosition.dx, cell))),
           ),
         ),
         if (showPreview)
@@ -2646,7 +2692,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         );
     for (final b in (r['blocks'] as List? ?? const [])) {
       final st = (b[0] as num).toInt(), len = (b[1] as num).toInt();
-      if (drag != null && drag.start == st) continue; // drawn where it is going
+      // the block being dragged is drawn where it is going (below); it stays
+      // here unseen, because its grip or long press is what's dragging
+      final dragged = drag != null && drag.start == st;
       // only the frames the layer is on
       var a = st, z = st + len - 1;
       while (a <= z && on.elementAtOrNull(a) == false) {
@@ -2730,7 +2778,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         top: y + (rowH - 26) / 2,
         child: _playing
             ? Stack(children: [bar(x, w), ...pics])
-            : GestureDetector(
+            : Opacity(
+                opacity: dragged ? 0 : 1,
+                child: GestureDetector(
                 onTapUp: (d) => select(d.localPosition.dx),
                 onLongPressStart: figure && st > 0
                     ? (d) {
@@ -2748,7 +2798,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                   if (strong && figure && st > 0) grip(true),
                   if (strong && figure) grip(false),
                 ]),
-              ),
+              )),
       ));
     }
     // I2: joins over time: a grey chain where it joins, a red broken chain
@@ -2830,9 +2880,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// A chain marker tapped (I2): what it is, and Let go / Join elsewhere (a
   /// join) or Join again (a let-go). Each change is one step with an Undo toast.
   Future<void> _joinPopover(Map r, int f, String? to, String? from, GlobalKey key) async {
-    final box = key.currentContext?.findRenderObject() as RenderBox?;
-    final at = box == null ? const Offset(200, 300) : box.localToGlobal(Offset.zero);
-    final screen = MediaQuery.sizeOf(context);
+    final anchor = kit.Anchored.rectOf(key) ?? const Rect.fromLTWH(200, 300, 18, 18);
     final name = '${r['name']}';
     final pick = await showGeneralDialog<int>(
       context: context,
@@ -2841,11 +2889,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       barrierColor: const Color(0x00000000),
       transitionDuration: Duration.zero,
       pageBuilder: (c, a1, a2) => Stack(children: [
-        Positioned(
-          left: math.min(at.dx, screen.width - 290),
-          bottom: screen.height - at.dy + 6,
-          child: kit.PanelCard(
-            width: 280,
+        kit.Anchored(
+          anchor: anchor,
+          width: 280,
+          card: (w) => kit.PanelCard(
+            width: w,
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               Text(to != null ? '$name is joined to $to from frame ${f + 1}.' : '$name lets go of ${from ?? 'its figure'} at frame ${f + 1}.', style: const TextStyle(color: cText, fontSize: 14)),
               const SizedBox(height: 8),
@@ -2882,6 +2930,28 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       if (!mounted) return;
       kit.showToast(context, '$name joins $from again at frame ${f + 1}', light: true, icon: 'chain', action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
     }
+  }
+
+  /// Scrubbing: the playhead follows the finger along the ruler (a command
+  /// only when the frame changes).
+  void _scrubTo(int i) {
+    if (i != _frame) _cmd({'op': 'frame', 'i': i});
+  }
+
+  /// Near either end of the visible frames, scrubbing scrolls them along:
+  /// returns the finger's place in the timeline after any scroll.
+  double _scrubEdge(double x, double cell) {
+    if (!_stripScroll.hasClients) return x;
+    final pos = _stripScroll.position;
+    final inView = x - pos.pixels;
+    var by = 0.0;
+    if (inView < 28) by = -cell / 2;
+    if (inView > pos.viewportDimension - 28) by = cell / 2;
+    if (by == 0) return x;
+    final before = pos.pixels;
+    final to = (before + by).clamp(pos.minScrollExtent, pos.maxScrollExtent);
+    _stripScroll.jumpTo(to);
+    return x + (to - before);
   }
 
   /// A grip or a held block let go: the new length, start, or place.
@@ -3003,9 +3073,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// The "+" menu (REDESIGN §4): everything that can be added, in one place.
   /// It replaces Library Tools.
   Future<void> _addMenu() async {
-    final box = _addKey.currentContext?.findRenderObject() as RenderBox?;
     final screen = MediaQuery.sizeOf(context);
-    final at = box == null ? Offset(8, screen.height - 48) : box.localToGlobal(Offset.zero);
+    final anchor = kit.Anchored.rectOf(_addKey) ?? Rect.fromLTWH(8, screen.height - 48, 36, 36);
     final items = <(String, String, VoidCallback?)>[
       ('figure', 'Stick figure', () {
         setState(() => _libType = 0);
@@ -3028,11 +3097,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       barrierColor: const Color(0x00000000),
       transitionDuration: Duration.zero,
       pageBuilder: (c, a1, a2) => Stack(children: [
-        Positioned(
-          left: at.dx,
-          bottom: screen.height - at.dy + 6,
-          child: kit.PanelCard(
-            width: 250,
+        kit.Anchored(
+          anchor: anchor,
+          width: 250,
+          card: (w) => kit.PanelCard(
+            width: w,
             padding: const EdgeInsets.all(6),
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               for (var i = 0; i < items.length; i++) ...[
@@ -3804,9 +3873,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// The Animation popover (REDESIGN §8), from the toolbar's "fps": every
   /// setting of the old Animation Tools, as rows.
   Future<void> _animationPopover() async {
-    final box = _fpsKey.currentContext?.findRenderObject() as RenderBox?;
     final screen = MediaQuery.sizeOf(context);
-    final at = box == null ? Offset(screen.width - 12, screen.height - 90) : box.localToGlobal(Offset(box.size.width, 0));
+    final anchor = kit.Anchored.rectOf(_fpsKey) ?? Rect.fromLTWH(screen.width - 80, screen.height - 90, 70, 32);
     await showGeneralDialog<void>(
       context: context,
       barrierDismissible: true,
@@ -3843,11 +3911,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               : 'Each frame shows for 1/${_fps.round()} s. Tweening on adds in-between pictures; your poses stay the same.'),
         ];
         return Stack(children: [
-          Positioned(
-            right: screen.width - at.dx,
-            bottom: screen.height - at.dy + 6,
-            child: kit.PanelCard(
-              width: 320,
+          kit.Anchored(
+            anchor: anchor,
+            width: 320,
+            alignRight: true,
+            card: (w) => kit.PanelCard(
+              width: w,
               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [for (final d in rows) rw.renderDesc(d)]),
             ),
           ),
@@ -6174,20 +6243,34 @@ class _MagPainter extends CustomPainter {
   bool shouldRepaint(_MagPainter o) => o.img != img || o.handles != handles || o.x0 != x0 || o.y1 != y1 || o.k != k;
 }
 
-ui.Image? _checkerTile;
+/// The stage's picture, drawn over the stage area it was made for (a stale
+/// picture after a resize or pan stays in place and in proportion).
+class _StagePicture extends CustomPainter {
+  final ui.Image img;
+  final Rect rect;
+  final bool camera;
+  final StageView v;
+  final Size shot;
+  _StagePicture(this.img, this.rect, this.camera, this.v, this.shot);
 
-/// The offstage checkerboard as a repeating shader (one 16 x 16 tile, made once).
-Shader _checker() {
-  if (_checkerTile == null) {
-    final rec = ui.PictureRecorder();
-    final c = Canvas(rec);
-    const a = Color(0xE66C6F74), b = Color(0xE6606368);
-    c.drawRect(const Rect.fromLTWH(0, 0, 16, 16), Paint()..color = a);
-    c.drawRect(const Rect.fromLTWH(0, 0, 8, 8), Paint()..color = b);
-    c.drawRect(const Rect.fromLTWH(8, 8, 8, 8), Paint()..color = b);
-    _checkerTile = rec.endRecording().toImageSync(16, 16);
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Rect dest;
+    if (camera) {
+      // the shot fitted into the stage area
+      final k = math.min(size.width / shot.width, size.height / shot.height);
+      final c = size.center(Offset.zero);
+      dest = Rect.fromLTRB(c.dx + rect.left * k, c.dy + rect.top * k, c.dx + rect.right * k, c.dy + rect.bottom * k);
+    } else {
+      dest = Rect.fromPoints(v.toScreen(rect.left, rect.top), v.toScreen(rect.right, rect.bottom));
+    }
+    if (dest.isEmpty || !dest.isFinite) return;
+    canvas.drawImageRect(img, Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()), dest, Paint()..filterQuality = FilterQuality.low);
   }
-  return ImageShader(_checkerTile!, TileMode.repeated, TileMode.repeated, Matrix4.identity().storage);
+
+  // the view changes in place: always repaint (one image draw)
+  @override
+  bool shouldRepaint(_StagePicture o) => true;
 }
 
 class _Overlay extends CustomPainter {
@@ -6226,14 +6309,15 @@ class _Overlay extends CustomPainter {
         }
         frame.close();
       }
-      // offstage is the checkerboard (REDESIGN §3); slightly see-through so
-      // figures standing offstage still show
+      // offstage: a quiet grey veil, see-through so figures standing offstage
+      // still show (the user, 2026-11-24: no checkerboard); the shot reads as
+      // a sheet on it, and moving the camera moves the sheet
       final outside = Path.combine(PathOperation.difference, Path()..addRect(Offset.zero & size), frame);
-      canvas.drawPath(outside, Paint()..shader = _checker());
+      canvas.drawPath(outside, Paint()..color = const Color(0xB8E2E5E9));
       canvas.drawPath(frame, Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1
-        ..color = const Color(0x66000000));
+        ..color = const Color(0xFFB9BEC6));
     }
     // camera mode: the camera's frame in blue with square corner handles, and
     // the chosen guide inside it (Camera board)

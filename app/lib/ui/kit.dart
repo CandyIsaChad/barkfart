@@ -2,6 +2,7 @@
 // control, drawn from the tokens. Every tappable thing has a 44 pt hit area,
 // even where the drawn control is smaller.
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:material_ui/material_ui.dart' show Material, MaterialType, Tooltip;
@@ -463,6 +464,47 @@ class PanelCard extends StatelessWidget {
             : BoxDecoration(color: cCard, borderRadius: BorderRadius.circular(16), boxShadow: _shadowCard),
         child: Material(type: MaterialType.transparency, child: DefaultTextStyle(style: ink(), child: child)),
       );
+}
+
+/// A popover card by its anchor (a rect on screen, e.g. the button that
+/// opened it): on the side with more room (above unless `below`), never past
+/// the screen's edges or its safe area, scrolling when taller than the room.
+/// Use it as a child of the popover's Stack. `card` gets the width to use.
+class Anchored extends StatelessWidget {
+  const Anchored({super.key, required this.anchor, required this.width, required this.card, this.alignRight = false, this.below = false, this.gap = 6});
+  final Rect anchor;
+  final double width, gap;
+  final bool alignRight, below;
+  final Widget Function(double width) card;
+
+  /// The global rect of the widget with this key (null: not laid out).
+  static Rect? rectOf(GlobalKey key) {
+    final box = key.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return null;
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    final screen = mq.size, pad = mq.padding;
+    const margin = 8.0;
+    final top = pad.top + margin, bottom = screen.height - pad.bottom - margin;
+    final roomAbove = anchor.top - gap - top, roomBelow = bottom - anchor.bottom - gap;
+    final goAbove = below ? roomBelow < 160 && roomAbove > roomBelow : roomAbove >= 160 || roomAbove >= roomBelow;
+    final room = math.max(96.0, goAbove ? roomAbove : roomBelow);
+    final w = math.min(width, screen.width - pad.left - pad.right - 2 * margin);
+    final left = (alignRight ? anchor.right - w : anchor.left).clamp(pad.left + margin, math.max(pad.left + margin, screen.width - pad.right - margin - w)).toDouble();
+    return Positioned(
+      left: left,
+      top: goAbove ? null : math.min(anchor.bottom + gap, bottom - 96),
+      bottom: goAbove ? screen.height - math.max(anchor.top - gap, top + 96) : null,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: room, maxWidth: w),
+        child: SingleChildScrollView(child: card(w)),
+      ),
+    );
+  }
 }
 
 /// Yellow hint bubble, the original's friendly voice.

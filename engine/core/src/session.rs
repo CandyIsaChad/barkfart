@@ -70,6 +70,9 @@ pub struct Session {
     /// K2: the selected script layer (its row was tapped; the Script page)
     /// and the run picked on it.
     pub selected_script: Option<(String, Option<String>)>,
+    /// The time a stage drag keys at: the pose under the playhead (its first
+    /// frame), not the playhead itself (the user, 2026-11-24).
+    drag_t: Option<f64>,
     pub onion: bool,
     /// Every drag stretches (the Drag: Stretch switch); otherwise only stretchy segments do.
     pub stretch_all: bool,
@@ -233,7 +236,7 @@ impl Session {
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
         let main_root = doc.project().root_symbol.clone();
-        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, selected_group: None, selected_script: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, stock: None, size_ref: true, mirror: false, curves: false, curve_shown: Default::default(), draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, poses_clip: Vec::new(), multi: Vec::new(), copy_edit: None, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, selected_group: None, selected_script: None, drag_t: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, stock: None, size_ref: true, mirror: false, curves: false, curve_shown: Default::default(), draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, poses_clip: Vec::new(), multi: Vec::new(), copy_edit: None, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -351,6 +354,33 @@ impl Session {
 
     pub fn time(&self) -> f64 {
         frame_ops::time(&self.doc.state, self.frame)
+    }
+
+    /// Where a drag on `layer` keys: a frame inside a pose (not its first)
+    /// changes that pose, so the drag keys on the pose's own frame; "New
+    /// pose" is how to start another (the user, 2026-11-24). A pose that
+    /// tweens into the next shows an in-between here, not the pose itself,
+    /// so the playhead goes to the pose first and the joint stays under the
+    /// finger; a held pose (or the last) is changed where it is.
+    fn pose_edit_time(&mut self, layer: &str) -> f64 {
+        let t = self.time();
+        if self.building.is_some() {
+            return t;
+        }
+        let fps = st_fps(self.project());
+        let Some(l) = self.project().root().and_then(|s| s.layer(layer)) else { return t };
+        if matches!(l.kind, LayerKind::Camera(_)) {
+            return t;
+        }
+        let Some((start, next)) = crate::edit::block_ops::block_at(l, fps, self.frame) else { return t };
+        if start == self.frame {
+            return t;
+        }
+        let tweens = next.is_some() && crate::edit::block_ops::pose_props_of(l).iter().any(|q| q.track.keys().iter().any(|k| (k.time * fps).round() as i32 == start && k.interp != Interp::Hold));
+        if tweens {
+            self.frame = start;
+        }
+        frame_ops::time(&self.doc.state, start)
     }
 
     pub fn frame_count(&self) -> i32 {
@@ -718,6 +748,8 @@ impl Session {
                     if (x - x0).hypot(y - y0) < slop {
                         return;
                     }
+                    self.drag_t = Some(self.pose_edit_time(&hit.layer));
+                    let t = self.drag_t.unwrap_or(t);
                     let stretchy = self.project().root().and_then(|s| s.layer(&hit.layer)).and_then(|l| l.as_figure()).and_then(|f| f.node(&hit.node)).is_some_and(|n| n.stretchy);
                     self.tools.stretch = self.stretch_all || stretchy;
                     self.doc.begin(if hit.root { "Move figure" } else { "Pose node" });
@@ -725,6 +757,7 @@ impl Session {
                     self.tools.begin(&mut self.doc, &hit, x0, y0, t);
                     self.gesture = Gesture::Handle { hit, x: x0, y: y0, slop, started: true };
                 }
+                let t = self.drag_t.unwrap_or(t);
                 if let Err(e) = self.tools.move_to(&mut self.doc, x, y, t) {
                     self.message = e.0;
                 }
@@ -820,6 +853,7 @@ impl Session {
     }
 
     fn end_gesture(&mut self, cancel: bool) {
+        self.drag_t = None;
         match std::mem::replace(&mut self.gesture, Gesture::None) {
             Gesture::None => return,
             Gesture::Handle { hit, x, y, started, .. } => {

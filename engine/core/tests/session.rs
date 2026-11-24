@@ -4735,12 +4735,32 @@ fn a_figure_keyed_on_some_frames_only_stays_that_way() {
     s.command(&json!({"op": "frame", "i": 1}));
     s.command(&json!({"op": "camera", "zoom": 1.5}));
     assert_eq!(rot(&s), vec![0, 3], "the camera edit did not key the figure");
-    // posing it on frame 2 keys all of it there, and nothing on frame 3
+    // posing it on frame 2 changes the pose it is in (frame 1's), not a new
+    // one (the user, 2026-11-24); it tweens there, so the playhead goes to it
     let st = s.command(&json!({"op": "state"}));
     let (x, y) = handle(&st, 6);
     s.command(&json!({"op": "down", "x": x, "y": y, "r": 20}));
     s.command(&json!({"op": "move", "x": x + 30.0, "y": y}));
     s.command(&json!({"op": "up"}));
+    assert_eq!(s.frame, 0);
+    {
+        let p = s.project();
+        let f = p.root().unwrap().layer("L2").unwrap().as_figure().unwrap();
+        for n in f.nodes() {
+            assert_eq!(keyed_frames_of(&n.rotation, fps), vec![0, 3], "{}: no new pose", n.id);
+        }
+    }
+    // "New pose" on frame 2 starts one: posing there keys all of it there,
+    // and nothing on frame 3
+    s.command(&json!({"op": "frame", "i": 1}));
+    s.command(&json!({"op": "select", "layer": "L2"}));
+    s.command(&json!({"op": "new_pose"}));
+    let st = s.command(&json!({"op": "state"}));
+    let (x, y) = handle(&st, 6);
+    s.command(&json!({"op": "down", "x": x, "y": y, "r": 20}));
+    s.command(&json!({"op": "move", "x": x + 30.0, "y": y}));
+    s.command(&json!({"op": "up"}));
+    assert_eq!(s.frame, 1);
     let p = s.project();
     let l = p.root().unwrap().layer("L2").unwrap();
     let f = l.as_figure().unwrap();

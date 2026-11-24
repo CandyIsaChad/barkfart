@@ -57,7 +57,7 @@ manners**. "Different and familiar":
 | line | #DADDE2 | dividers |
 | field | #EEF0F3 | field and word-button fill |
 | hint | #FFD98C | hint bubbles |
-| checker | #6C6F74 / #606368, 16 px | offstage |
+| offstage | #E2E5E9 at 72%, the shot edged #B9BEC6 | offstage (no checkerboard since 2026-11-24) |
 | tween/hold blocks | #EEF0F3 fill, #DCDFE4 edge | quiet, never coloured by type |
 
 - **Type:** Open Sans 400, 600 and 700.
@@ -92,7 +92,8 @@ Undo, Redo, **Properties** (sliders), Delete, and Hide panels at the bottom.
 The colour swatch is **not** here; it moved into Properties.
 
 ### Stage
-A white stage on the checkerboard. On the stage:
+A white stage on a quiet grey pasteboard (the checkerboard went, the user
+2026-11-24: moving the camera showed it over the stage). On the stage:
 - the motion path of the selected joint: red, with one dot per in-between
   frame and key rings labelled with frame numbers;
 - onion skin in blue;
@@ -667,7 +668,8 @@ and tests are never weakened.
 - [x] B6. The Settings screen.
 
 ### C. The editor shell (frames are still snapshots)
-- [x] C1. Checkerboard offstage.
+- [x] C1. Offstage: a see-through grey veil (was a checkerboard until
+  2026-11-24).
 - [x] C2. Top bar: Projects, View and Export words, the project name, the
   unsaved dot.
 - [x] C3. Left rail: the mode pictograms.
