@@ -1209,14 +1209,32 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           setState(() => _modOpen = (((_curveValue?['mods'] as List?) ?? const []).length) - 1);
         case 'modbrowser':
           setState(() => _modBrowser = true);
+        case 'iconshot':
+          // scripted: the app icon (iconshot <png> <size>): the engine's own
+          // render of the stock figure on a tile
+          final size = int.parse(w[2]);
+          final fig = await _starterFigureImage((size * 0.56).round(), (size * 0.8).round());
+          final rec = ui.PictureRecorder();
+          final cv = Canvas(rec);
+          final tile = RRect.fromRectAndRadius(Rect.fromLTWH(size * 0.04, size * 0.04, size * 0.92, size * 0.92), Radius.circular(size * 0.2));
+          cv.drawRRect(tile.shift(Offset(0, size * 0.012)), Paint()..color = const Color(0x33000000)..maskFilter = MaskFilter.blur(BlurStyle.normal, size * 0.012));
+          cv.drawRRect(tile, Paint()..shader = ui.Gradient.linear(Offset(0, size * 0.04), Offset(0, size * 0.96), const [Color(0xFFF7F9FC), Color(0xFFDCE6F2)]));
+          if (fig != null) {
+            final dst = Rect.fromCenter(center: Offset(size / 2, size * 0.5), width: size * 0.56, height: size * 0.8);
+            cv.drawImageRect(fig, Rect.fromLTWH(0, 0, fig.width.toDouble(), fig.height.toDouble()), dst, Paint()..filterQuality = FilterQuality.high);
+          }
+          final img = await rec.endRecording().toImage(size, size);
+          final png = await img.toByteData(format: ui.ImageByteFormat.png);
+          if (png != null) await File(w[1]).writeAsBytes(png.buffer.asUint8List());
         case 'workshop':
           // scripted: the Workshop (optionally a plugin picked)
           unawaited(_openWorkshop(picked: w.length > 1 ? w[1] : null));
-        case 'swipe':
+        case 'swipe' || 'mswipe':
           // real touches through Flutter's gestures (window points):
-          // swipe x1 y1 x2 y2 [hold ms before moving]; x1 y1 = x2 y2 is a tap
+          // swipe x1 y1 x2 y2 [hold ms before moving]; x1 y1 = x2 y2 is a tap.
+          // mswipe: the same with the mouse's left button
           final v = [for (final x in w.sublist(1)) double.parse(x)];
-          await _realSwipe(Offset(v[0], v[1]), Offset(v[2], v[3]), holdMs: v.length > 4 ? v[4].round() : 0);
+          await _realSwipe(Offset(v[0], v[1]), Offset(v[2], v[3]), holdMs: v.length > 4 ? v[4].round() : 0, mouse: w[0] == 'mswipe');
         case 'pan':
           final from = Offset(_view.size.width - 30, _view.size.height - 30);
           await _fakeDrag(from, from + Offset(double.parse(w[1]), double.parse(w[2])));
@@ -1408,10 +1426,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   /// Scripted: one finger down at `a`, held `holdMs`, moved to `b` in small
   /// steps and lifted, sent as real touch events (the gesture arena decides).
-  Future<void> _realSwipe(Offset a, Offset b, {int holdMs = 0}) async {
+  Future<void> _realSwipe(Offset a, Offset b, {int holdMs = 0, bool mouse = false}) async {
     final g = GestureBinding.instance;
-    const id = 913, kind = PointerDeviceKind.touch;
-    g.handlePointerEvent(PointerDownEvent(pointer: id, position: a, kind: kind));
+    const id = 913;
+    final kind = mouse ? PointerDeviceKind.mouse : PointerDeviceKind.touch;
+    final buttons = mouse ? kPrimaryButton : 0;
+    g.handlePointerEvent(PointerDownEvent(pointer: id, position: a, kind: kind, buttons: buttons));
     if (holdMs > 0) await Future<void>.delayed(Duration(milliseconds: holdMs));
     const steps = 14;
     var at = a;
@@ -1419,7 +1439,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       for (var i = 1; i <= steps; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 16));
         final next = Offset.lerp(a, b, i / steps)!;
-        g.handlePointerEvent(PointerMoveEvent(pointer: id, position: next, delta: next - at, kind: kind));
+        g.handlePointerEvent(PointerMoveEvent(pointer: id, position: next, delta: next - at, kind: kind, buttons: buttons));
         at = next;
       }
     }

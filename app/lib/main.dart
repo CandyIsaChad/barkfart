@@ -1,6 +1,7 @@
 // Barkfart: Flutter interface over the Rust engine (engine/ffi).
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/foundation.dart' show LicenseRegistry, LicenseEntryWithLineBreaks;
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/services.dart';
 
 import 'dart:io';
@@ -8,6 +9,13 @@ import 'dart:io';
 import 'editor.dart';
 import 'files.dart';
 import 'ui/gallery.dart';
+
+/// Every pointer drags scrolling things, like a finger.
+class _AnyPointer extends MaterialScrollBehavior {
+  const _AnyPointer();
+  @override
+  Set<PointerDeviceKind> get dragDevices => PointerDeviceKind.values.toSet();
+}
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,6 +35,9 @@ class BarkfartApp extends StatelessWidget {
     return MaterialApp(
       title: 'Barkfart',
       debugShowCheckedModeBanner: false,
+      // a mouse (or pen, or trackpad) drags lists and the timeline as a
+      // finger does: on a laptop the app works by mouse, no keyboard needed
+      scrollBehavior: const _AnyPointer(),
       theme: ThemeData(fontFamily: 'NotoSans', brightness: Brightness.light, colorSchemeSeed: cAccent, useMaterial3: true, scaffoldBackgroundColor: cPanel, dialogTheme: const DialogThemeData(backgroundColor: cCard)),
       home: Platform.environment['BARKFART_GALLERY'] != null
           ? Gallery(shotKey: appShot, sections: Platform.environment['BARKFART_GALLERY'] == 'page' ? [('A page from descriptors', pageSheet())] : [('Pictograms', pictogramSheet()), ('Kit', kitSheet())], onReady: Platform.environment['BARKFART_GALLERY'] == 'sheet' ? openSheetAndToast : null)
