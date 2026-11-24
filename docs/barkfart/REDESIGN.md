@@ -794,7 +794,7 @@ until a dependency fetch is approved); Script layers; emitters.
   and the Properties tabs slide their card; a tick draws itself in;
   button-sized taps dip to 95%; toasts rise in; a block's highlight fades;
   the fold chevron turns. Nothing moves by itself, and playback and
-  scrubbing stay instant.
+  scrubbing stay instant (the timeline snaps when play starts or stops).
 - [ ] K2c. Script layers (SCRIPTING.md "Script layers"). Engine done
   2026-11-24: `LayerKind::Script` (plugin, settings, targets, runs with
   seed, Replace, Keep the last frame, keyable Mix), `bf.script` with

@@ -1689,9 +1689,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (c != null && !_showTabs) Scrollable.ensureVisible(c, duration: const Duration(milliseconds: 200), alignment: 0);
   }
 
+  /// Whether the last build was while playing (the timeline's fold easing
+  /// is skipped when playback starts or stops).
+  bool _sizedPlaying = false;
+
   @override
   Widget build(BuildContext context) {
     _dpr = MediaQuery.devicePixelRatioOf(context);
+    if (_playing != _sizedPlaying) WidgetsBinding.instance.addPostFrameCallback((_) => _sizedPlaying = _playing);
     if (_fatal.isNotEmpty) {
       return Scaffold(backgroundColor: cSurround, body: Center(child: Text(_fatal, style: const TextStyle(color: cText))));
     }
@@ -1752,7 +1757,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 ? _shapeShelf()
                 // folding and unfolding ease the stage's edge along (D37)
                 : AnimatedSize(
-                    duration: kit.motion(context, 180),
+                    // playing starting or stopping snaps (playback stays instant)
+                    duration: _playing != _sizedPlaying ? Duration.zero : kit.motion(context, 180),
                     curve: kit.kEase,
                     alignment: Alignment.bottomCenter,
                     child: Column(children: [
@@ -6285,7 +6291,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   Widget _label(String s) => Padding(padding: const EdgeInsets.only(top: 2, bottom: 4), child: Text(s, style: const TextStyle(color: cText, fontSize: 13)));
 
-  Widget _pair(Widget a, Widget b) => Row(children: [Expanded(child: a), const SizedBox(width: 6), Expanded(child: b)]);
+  // the row passes touches a little above and below it to its buttons (a row
+  // alone turns away touches outside itself): 44 pt touches, 38 pt drawn
+  Widget _pair(Widget a, Widget b) => kit.HitPad(dy: 3, child: Row(children: [Expanded(child: a), const SizedBox(width: 6), Expanded(child: b)]));
 
   Widget _stepper(String label, String value, VoidCallback minus, VoidCallback plus) => kit.StepRow(label, value, onMinus: minus, onPlus: plus);
 }

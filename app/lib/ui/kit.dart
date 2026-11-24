@@ -509,11 +509,15 @@ class ButtonPair extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(top: 2, bottom: 6),
-        child: Row(children: [
-          // the boards' word buttons: 36 tall, 14 pt
-          Expanded(child: WordButton(a, onTap: onA, filled: true, expand: true, height: 36, size: 14)),
-          if (b != null) ...[const SizedBox(width: 8), Expanded(child: WordButton(b!, onTap: onB, filled: !primaryB, primary: primaryB, expand: true, height: 36, size: 14))],
-        ]),
+        // touches in the padding reach the buttons
+        child: HitPad(
+          dy: 6,
+          child: Row(children: [
+            // the boards' word buttons: 36 tall, 14 pt
+            Expanded(child: WordButton(a, onTap: onA, filled: true, expand: true, height: 36, size: 14)),
+            if (b != null) ...[const SizedBox(width: 8), Expanded(child: WordButton(b!, onTap: onB, filled: !primaryB, primary: primaryB, expand: true, height: 36, size: 14))],
+          ]),
+        ),
       );
 }
 

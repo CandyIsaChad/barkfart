@@ -16,11 +16,11 @@ Fixed and checked on the Linux build at iPad sizes (tests in brackets):
 - "Playing" card over the stage: the card steps aside while playing.
 - No refit on rotation: a new screen width fits the stage again unless the view was zoomed or panned by hand (the timeline folding or a docked panel keeps the zoom).
 - Popovers off their button at UI size below 100%: the anchor is measured in the overlay's own (scaled) space.
-- Right rail clipped at phone size: it scrolls.
+- Right rail clipped at phone size: it scrolls (checked at 844x390: a swipe up on the rail brings Delete and Hide the panels into view).
 - "Save changes?" alert: every `_ask` question is the kit sheet (last button blue, Don't save red).
 - Emoji arrows: "Previous joint" / "Next joint".
 - Imported figures stacking: they step aside from a figure already there (test `placing.rs`).
-- Card buttons under 44 pt: they keep their look and take touches 44 pt tall (`kit.HitPad`).
+- Card buttons under 44 pt: they keep their look and take touches a few points beyond their edges (`kit.HitPad` on the button and on its row; a row alone turns away touches outside itself). Checked at 1180x820: a tap 2 pt below Flip sideways flips, 2 pt above Send back sends back.
 - Settings labels: shorter labels, details in the hint; a long value gives way, never the label.
 - Names column: 180 pt on a tablet held upright.
 - Question 1 (grow then shrink): a figure whose last pose ends the animation moves the end with its poses both ways, so it's a round trip (test `lengthening_then_shortening_a_pose_is_a_round_trip`).
