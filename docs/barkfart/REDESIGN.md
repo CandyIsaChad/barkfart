@@ -770,6 +770,14 @@ until a dependency fetch is approved); Script layers; emitters.
   5 ms) and a 32 MB cap, `require("@barkfart")`, definitions read into typed
   props, and modifier calls. Next: modifiers in projects (a ModifierKind
   that names a plugin; Missing-plugin rows), then the app's Plugins page.
+  Board (mockups/graph-editor.mjs, `graph-mods`, `graph-mods-add`; sent
+  for approval 2026-11-24): in Curves, a value with modifiers draws its
+  result solid and its keys' curve faint and dashed (keys stay draggable
+  on it) and gets a small wave on its row; Properties shows the value's
+  page with "Modifiers +" (cards in the order applied, each with its
+  settings and an eye; a missing plugin orange, its settings kept); "+"
+  opens a browser like the effects one: Yours (plugins), Built in (Wiggle,
+  Swing, Loop, Follow, Link), Import….
 - [x] K1. Groups (D33): engine (`group`, `ungroup`, `group_set`,
   `group_order`, `delete_group`; `select` with `group`), the folder row
   with its chevron and the members 20 in, the summary bar with a tick at
