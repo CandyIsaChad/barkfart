@@ -523,6 +523,36 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
     elsewhere (or Join again), and changes show a light toast with Undo.
   - The canvas's "main joints only" and the joints linked across joins
     read the join at the current frame too (2026-11-24).
+- **D34. Automatic easing and handle types** (the user, 2026-11-24:
+  "automatic easing… replacing the linear easing as the default, similar to
+  Blender. We'll also add handle types").
+  - A new interpolation, Smooth: a curve through the poses (per channel for
+    colours). Each key has a handle type: Settle (auto-clamped, the default:
+    smooth, flat at the ends and on a turning point, never past the keys
+    either side), Swing (auto: may swing past a pose), Sharp (vector:
+    straight to the neighbours), and Free / Aligned (handles kept on the key;
+    switching to them freezes the current shape).
+  - Automatic handles reach a third of the way to each neighbour, so those
+    segments are plain Hermite curves; stored handles are solved for time.
+  - The default lives in the project (`tween_interp`): the app's new
+    animations and their starter figure tween Smooth; Stick Nodes files and
+    the reference starter stay Linear, so imports play as they were made.
+    Hold, Linear and the eased curves (slow end, slow both, bounce) are
+    unchanged.
+  - The Pose page gets Auto as a fifth ease, first (the board has four), and
+    "Tween into it" means Auto. With Auto, a "Through this pose" row picks
+    Settle, Swing or Sharp. Free and Aligned need a graph to drag handles in.
+  - Under Smooth, a key added where there was none reshapes the curve a
+    little (Linear never did): poses are keyed for the whole figure, so this
+    only happens where a pose is made.
+  - Graph (decided 2026-11-24: yes, after a board). Free and Aligned
+    handles are only useful with somewhere to drag them, so the timeline
+    gets a Curves toggle next to FX: the rows become the selected figure's
+    animated values (an eye each) drawn as curves on the same frames, keys
+    as dots, the selected key with its two handles and a "Frame N, V"
+    readout, a held stretch shaded, and the bottom bar holding the key's
+    handle type and Fit. Board: mockups/graph-editor.mjs. Not built until
+    the user has seen it.
 - **D33. Groups (K).** A group is a record in its symbol and a `group` id on
   each member (not a member list, so deleting or copying layers can't leave
   stale ids). One level only. Members sit next to each other in row order,

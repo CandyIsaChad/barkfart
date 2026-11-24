@@ -156,10 +156,13 @@ pub fn new_editor_project_with(name: &str, figure: &[u8]) -> Project {
     }
     match crate::import::import_file(&mut p, name, figure) {
         Ok(_) => {
-            // the starter figure can be reset to how it came (D7b)
+            // the starter figure can be reset to how it came (D7b), and it
+            // tweens as a new animation does (D34)
             if let Some(r) = p.root_mut() {
                 for l in r.layers.iter_mut() {
-                    std::sync::Arc::make_mut(l).capture_base();
+                    let l = std::sync::Arc::make_mut(l);
+                    l.capture_base();
+                    smooth_tweens(l);
                 }
             }
             p
@@ -175,14 +178,34 @@ pub fn new_editor_project() -> Project {
     // the original's stage
     p.settings.width = 1920;
     p.settings.height = 1080;
+    // D34: the app's new animations tween smoothly (Stick Nodes files and the
+    // reference starter keep Linear)
+    p.settings.tween_interp = Interp::Smooth;
     if let Some(r) = p.root_mut() {
         r.duration = 0.1;
         // the starter figure can be reset to how it came (D7b)
         for l in r.layers.iter_mut() {
-            std::sync::Arc::make_mut(l).capture_base();
+            let l = std::sync::Arc::make_mut(l);
+            l.capture_base();
+            smooth_tweens(l);
         }
     }
     p
+}
+
+/// D34: a layer's tweening keys (Linear, on a number or colour) become
+/// Smooth: what a new animation's figures start with.
+pub fn smooth_tweens(l: &mut Layer) {
+    for q in l.properties_mut() {
+        if !q.ty.continuous() || !q.track.keys().iter().any(|k| k.interp == Interp::Linear) {
+            continue;
+        }
+        let keys: Vec<Key> = q.track.keys().iter().map(|k| if k.interp == Interp::Linear { Key { interp: Interp::Smooth, ..*k } } else { *k }).collect();
+        q.track.clear();
+        for k in keys {
+            q.track.put(k);
+        }
+    }
 }
 
 impl Session {
@@ -191,6 +214,8 @@ impl Session {
         let mut tools = CanvasTools::default();
         tools.layer_handles = true;
         tools.key_scope = KeyScope::Figure;
+        // D34: a key on an empty track tweens as the project's tweens do
+        tools.editor.default_interp = doc.project().settings.tween_interp;
         let frame = doc.project().view.frame.max(0);
         let mut doc = doc;
         // repair keys that drifted off their frames (older Barkfart builds)
@@ -1025,6 +1050,8 @@ impl Session {
                 let v = c["v"].as_str().unwrap_or("linear").to_string();
                 let (interp, ease) = match v.as_str() {
                     "hold" => (Interp::Hold, Ease::LINEAR),
+                    // D34: the curve through the poses (the app's default)
+                    "auto" => (Interp::Smooth, Ease::LINEAR),
                     "smooth" => (Interp::Bezier, Ease::new(0.42, 0.0, 0.58, 1.0)),
                     "in" => (Interp::Bezier, Ease::new(0.42, 0.0, 1.0, 1.0)),
                     "out" => (Interp::Bezier, Ease::new(0.0, 0.0, 0.58, 1.0)),
@@ -1045,6 +1072,26 @@ impl Session {
                 } else {
                     let ed = self.tools.editor.clone();
                     self.step("Easing", |s| ed.set_interp_in(s, &sel, interp, ease));
+                }
+            }
+            "handles" => {
+                // D34: the handles of the pose's keys (like "easing": a frame,
+                // the selected figure's pose under the playhead, or this frame)
+                let Some(handle) = c["v"].as_str().and_then(HandleType::from_name) else {
+                    self.message = "Unknown handle type.".into();
+                    return self.state();
+                };
+                let fps_now = st_fps(self.project());
+                let block_start = (c["block"].as_bool() == Some(true))
+                    .then(|| self.sel_layer().and_then(|l| crate::edit::block_ops::block_at(self.project().root()?.layer(&l)?, fps_now, self.frame).map(|(st, _)| st)))
+                    .flatten();
+                let at = c["frame"].as_i64().map(|f| f as f64 / fps_now).or(block_start.map(|f| f as f64 / fps_now)).unwrap_or(t);
+                let sel = self.keys_at(at, self.sel_layer().as_deref());
+                if sel.is_empty() {
+                    self.message = "Nothing is keyed on this frame.".into();
+                } else {
+                    let ed = self.tools.editor.clone();
+                    self.step("Handles", |s| ed.set_handles_in(s, &sel, handle));
                 }
             }
             "delete_here" => {
@@ -1139,7 +1186,7 @@ impl Session {
                     "onion_before" => self.doc.project_mut().view.onion_before = (c["v"].as_i64().unwrap_or(1) as i32).clamp(0, 3),
                     "onion_after" => self.doc.project_mut().view.onion_after = (c["v"].as_i64().unwrap_or(1) as i32).clamp(0, 3),
                     "onion_front" => self.doc.project_mut().view.onion_in_front = b("v"),
-                    "tween_new" => self.tools.editor.default_interp = if b("v") { Interp::Linear } else { Interp::Hold },
+                    "tween_new" => self.tools.editor.default_interp = if b("v") { self.project().settings.tween_interp } else { Interp::Hold },
                     "keying" => self.keying = b("v"),
                     "path" => self.motion_path = b("v"),
                     "sizeref" => self.size_ref = b("v"),
@@ -1568,6 +1615,9 @@ impl Session {
                     };
                     l.name = Some(if kind == "stickman" { format!("Figure {n}") } else { format!("{name} {n}") });
                     l.capture_base();
+                    if s.project.settings.tween_interp == Interp::Smooth {
+                        smooth_tweens(&mut l);
+                    }
                     // offset so it does not sit exactly on the last one
                     // side by side: left, right, further left, further right ...
                     let k = (n as i32) / 2;
@@ -2189,6 +2239,7 @@ impl Session {
                     }).flatten();
                     let made = self.step("Paste stickfigure", |s| {
                         let sym2 = s.project.root_symbol.clone();
+                        let tw = s.project.settings.tween_interp;
                         let here = |s: &crate::edit::State, id: &str| s.project.root().and_then(|r| r.layer(id)).map(|x| Resolver::new(&s.project).b(&x.shown, t));
                         let same = clip.iter().all(|l| here(s, &l.id) == Some(false));
                         if same {
@@ -2196,7 +2247,7 @@ impl Session {
                                 let vals: Vec<(String, Value)> = l.properties().iter().filter(|q| !q.track.is_empty()).map(|q| (q.id.clone(), q.key_value(t_copy))).collect();
                                 for (pid, v) in vals {
                                     if let Some(q) = s.project.property_mut(&pid) {
-                                        let interp = if matches!(v, Value::B(_)) { Interp::Hold } else { crate::edit::editor::interp_at(q, t, Interp::Linear) };
+                                        let interp = if matches!(v, Value::B(_)) { Interp::Hold } else { crate::edit::editor::interp_at(q, t, tw) };
                                         q.track.put(Key::new(t, v, interp));
                                     }
                                 }
@@ -3238,13 +3289,15 @@ impl Session {
                         "ease": key.map(|k| match k.interp {
                             Interp::Hold => "hold",
                             Interp::Linear => "linear",
-                            _ if k.ease == Ease::new(0.42, 0.0, 0.58, 1.0) => "smooth",
+                            Interp::Smooth => "auto",
                             _ if k.ease == Ease::new(0.42, 0.0, 1.0, 1.0) => "in",
                             _ if k.ease == Ease::new(0.0, 0.0, 0.58, 1.0) => "out",
                             _ if k.ease.kind == EaseKind::BounceOut => "bounce",
                             _ => "custom",
                         }),
                         "here": start == fr,
+                        // D34: the pose's handles (the Smooth curve's shape here)
+                        "handles": key.map(|k| k.handle.name()),
                     })
                 })
             };
@@ -3919,6 +3972,8 @@ fn st_fps(p: &Project) -> f64 {
 pub fn anchor_poses(st: &mut crate::edit::State) {
     let n = frame_ops::frame_count(st);
     let fps = st_fps(&st.project);
+    // D34: a pose's first keys move as the project's tweens do
+    let tw = st.project.settings.tween_interp;
     let sym = st.project.root_symbol.clone();
     let ids: Vec<String> = st.project.root().map(|s| s.layers.iter().map(|l| l.id.clone()).collect()).unwrap_or_default();
     for id in ids {
@@ -3942,7 +3997,7 @@ pub fn anchor_poses(st: &mut crate::edit::State) {
         frames.sort_unstable();
         frames.dedup();
         for q in ps {
-            key_at(q, &frames, fps);
+            key_at(q, &frames, fps, tw);
         }
     }
 }
@@ -3986,23 +4041,25 @@ fn prop_label(l: &Layer, id: &str) -> String {
 /// frame, like "Do not tween").
 pub fn key_whole_frame(st: &mut crate::edit::State, frame: i32) {
     let fps = st_fps(&st.project);
+    let tw = st.project.settings.tween_interp;
     let sym = st.project.root_symbol.clone();
     let ids: Vec<String> = st.project.root().map(|s| s.layers.iter().map(|l| l.id.clone()).collect()).unwrap_or_default();
     for id in ids {
         let Some(l) = st.project.layer_mut(&sym, &id) else { continue };
         for q in crate::edit::block_ops::pose_props(l) {
-            key_at(q, &[frame as i64], fps);
+            key_at(q, &[frame as i64], fps, tw);
         }
     }
 }
 
-/// Keys a property on the given frames where it has no key (its value there).
-fn key_at(q: &mut Property, frames: &[i64], fps: f64) {
+/// Keys a property on the given frames where it has no key (its value
+/// there); a track's first key tweens as `tween` (the project's, D34).
+fn key_at(q: &mut Property, frames: &[i64], fps: f64, tween: Interp) {
     for &i in frames {
         let t = i as f64 / fps;
         if q.track.index_of(t).is_err() {
             let v = q.key_value(t);
-            let interp = crate::edit::editor::interp_at(q, t, Interp::Linear);
+            let interp = crate::edit::editor::interp_at(q, t, tween);
             q.track.put(Key::new(t, v, interp));
         }
     }

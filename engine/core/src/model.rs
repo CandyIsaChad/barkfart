@@ -220,6 +220,49 @@ pub enum Interp {
     Hold,
     Linear,
     Bezier,
+    /// D34: a smooth curve through the keys, shaped by each key's handles
+    /// (`HandleType`), so motion flows through a pose instead of turning on it.
+    Smooth,
+}
+
+/// D34: how a key's handles are made, for the Smooth segments either side of
+/// it. The automatic kinds are worked out from the neighbouring keys every
+/// time; Free and Aligned keep the handles stored on the key.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HandleType {
+    /// Smooth, but never past the keys either side: flat on a turning point
+    /// and at the first and last key.
+    #[default]
+    AutoClamped,
+    /// Smooth, and free to swing a little past a turning point.
+    Auto,
+    /// Straight towards the key on each side (sharp corners).
+    Vector,
+    /// Each handle where it was put.
+    Free,
+    /// Where they were put, but always in one line through the key.
+    Aligned,
+}
+
+impl HandleType {
+    pub fn name(self) -> &'static str {
+        match self {
+            HandleType::AutoClamped => "auto_clamped",
+            HandleType::Auto => "auto",
+            HandleType::Vector => "vector",
+            HandleType::Free => "free",
+            HandleType::Aligned => "aligned",
+        }
+    }
+
+    pub fn from_name(s: &str) -> Option<HandleType> {
+        [HandleType::AutoClamped, HandleType::Auto, HandleType::Vector, HandleType::Free, HandleType::Aligned].into_iter().find(|h| h.name() == s)
+    }
+
+    /// Free and Aligned keep their handles on the key.
+    pub fn stored(self) -> bool {
+        matches!(self, HandleType::Free | HandleType::Aligned)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -368,11 +411,37 @@ pub struct Key {
     pub value: Value,
     pub interp: Interp,
     pub ease: Ease,
+    /// D34: the handles for the Smooth segments either side of this key.
+    pub handle: HandleType,
+    /// Free and Aligned: the left and right handles as (seconds, value)
+    /// offsets from the key (left: seconds <= 0; right: seconds >= 0).
+    pub lh: (f64, f64),
+    pub rh: (f64, f64),
 }
 
 impl Key {
     pub fn new(time: f64, value: Value, interp: Interp) -> Key {
-        Key { time, value, interp, ease: Ease::LINEAR }
+        Key { time, value, interp, ease: Ease::LINEAR, handle: HandleType::AutoClamped, lh: (0.0, 0.0), rh: (0.0, 0.0) }
+    }
+}
+
+/// A value's numbers, for the Smooth curve: one for a number, four for a
+/// colour (each channel gets its own curve), none for a switch.
+fn channels(v: &Value) -> ([f64; 4], usize) {
+    match v {
+        Value::F(x) => ([*x as f64, 0.0, 0.0, 0.0], 1),
+        Value::D(x) => ([*x, 0.0, 0.0, 0.0], 1),
+        Value::C(c) => ([c.r as f64, c.g as f64, c.b as f64, c.a as f64], 4),
+        Value::B(_) => ([0.0; 4], 0),
+    }
+}
+
+fn from_channels(like: &Value, c: [f64; 4]) -> Value {
+    match like {
+        Value::F(_) => Value::F(c[0] as f32),
+        Value::D(_) => Value::D(c[0]),
+        Value::C(_) => Value::C(Color::new(c[0] as f32, c[1] as f32, c[2] as f32, c[3] as f32)),
+        Value::B(b) => Value::B(*b),
     }
 }
 
@@ -457,8 +526,135 @@ impl Track {
                 let u = ((t - a.time) / (b.time - a.time)) as f32;
                 self.ty.lerp(&a.value, &b.value, a.ease.apply(u))
             }
+            Interp::Smooth => self.smooth(hi - 1, t),
         }
     }
+
+    /// D34: the slope (value per second) of channel `c` at key `i` on its
+    /// `right` (or left) side, for its handle type.
+    fn slope(&self, i: usize, c: usize, right: bool) -> f64 {
+        let k = &self.keys;
+        let v = |j: usize| channels(&k[j].value).0[c];
+        let d = |j: usize| {
+            // the straight slope from key j to key j + 1
+            let dt = k[j + 1].time - k[j].time;
+            if dt > 0.0 {
+                (v(j + 1) - v(j)) / dt
+            } else {
+                0.0
+            }
+        };
+        let n = k.len();
+        let (left_d, right_d) = (if i > 0 { Some(d(i - 1)) } else { None }, if i + 1 < n { Some(d(i)) } else { None });
+        match k[i].handle {
+            HandleType::Vector => {
+                if right {
+                    right_d.unwrap_or(0.0)
+                } else {
+                    left_d.unwrap_or(0.0)
+                }
+            }
+            HandleType::Free | HandleType::Aligned => {
+                let (dt, dv) = if right { k[i].rh } else { k[i].lh };
+                let dv = if c == 0 { dv } else { 0.0 };
+                if dt.abs() > 1e-12 {
+                    dv / dt
+                } else {
+                    0.0
+                }
+            }
+            HandleType::Auto | HandleType::AutoClamped => {
+                // the first and last key settle (flat handles)
+                let (Some(dl), Some(dr)) = (left_d, right_d) else { return 0.0 };
+                let span = k[i + 1].time - k[i - 1].time;
+                let m = if span > 0.0 { (v(i + 1) - v(i - 1)) / span } else { 0.0 };
+                if k[i].handle == HandleType::Auto {
+                    return m;
+                }
+                // clamped: flat on a turning point, and never steeper than
+                // three times either side's straight slope (no overshoot)
+                if dl * dr <= 0.0 {
+                    return 0.0;
+                }
+                let cap = 3.0 * dl.abs().min(dr.abs());
+                m.clamp(-cap, cap)
+            }
+        }
+    }
+
+    /// D34: a Smooth segment from key `i` to key `i + 1` at time t: a cubic
+    /// per channel. Automatic handles reach a third of the way along, so the
+    /// curve is a plain Hermite in time; stored handles (Free, Aligned) are
+    /// solved for the time they cross.
+    fn smooth(&self, i: usize, t: f64) -> Value {
+        let (a, b) = (&self.keys[i], &self.keys[i + 1]);
+        let h = b.time - a.time;
+        if !(h > 0.0) {
+            return a.value;
+        }
+        let (va, n) = channels(&a.value);
+        let (vb, _) = channels(&b.value);
+        if n == 0 {
+            return a.value;
+        }
+        // where along the curve t is: the handles' time offsets, kept inside the segment
+        let x1 = if a.handle.stored() { a.rh.0.clamp(0.0, h) } else { h / 3.0 };
+        let x2 = if b.handle.stored() { h + b.lh.0.clamp(-h, 0.0) } else { h - h / 3.0 };
+        let x = t - a.time;
+        let u = if (x1 - h / 3.0).abs() < 1e-12 && (x2 - 2.0 * h / 3.0).abs() < 1e-12 {
+            x / h
+        } else {
+            bezier_solve(x1, x2, h, x)
+        };
+        let mut out = [0.0; 4];
+        for c in 0..n {
+            // control values from the slopes and the handles' time reach
+            let y1 = va[c] + self.slope(i, c, true) * x1;
+            let y2 = vb[c] - self.slope(i + 1, c, false) * (h - x2);
+            let w = 1.0 - u;
+            out[c] = w * w * w * va[c] + 3.0 * w * w * u * y1 + 3.0 * w * u * u * y2 + u * u * u * vb[c];
+        }
+        from_channels(&a.value, out)
+    }
+
+    /// D34: the handles a key has now, as (seconds, value) offsets for its
+    /// first channel; what switching it to Free or Aligned keeps.
+    pub fn handles_at(&self, i: usize) -> ((f64, f64), (f64, f64)) {
+        let k = &self.keys;
+        let lt = if i > 0 { -(k[i].time - k[i - 1].time) / 3.0 } else { 0.0 };
+        let rt = if i + 1 < k.len() { (k[i + 1].time - k[i].time) / 3.0 } else { 0.0 };
+        ((lt, self.slope(i, 0, false) * lt), (rt, self.slope(i, 0, true) * rt))
+    }
+}
+
+/// The curve parameter u where a cubic from 0 to h, with control points at
+/// x1 and x2, crosses x (Newton steps, bisection if they stray).
+fn bezier_solve(x1: f64, x2: f64, h: f64, x: f64) -> f64 {
+    let bx = |u: f64| {
+        let w = 1.0 - u;
+        3.0 * w * w * u * x1 + 3.0 * w * u * u * x2 + u * u * u * h
+    };
+    let dbx = |u: f64| {
+        let w = 1.0 - u;
+        3.0 * w * w * x1 + 6.0 * w * u * (x2 - x1) + 3.0 * u * u * (h - x2)
+    };
+    let (mut lo, mut hi) = (0.0f64, 1.0f64);
+    let mut u = (x / h).clamp(0.0, 1.0);
+    for _ in 0..40 {
+        let f = bx(u) - x;
+        if f.abs() < 1e-10 * h.max(1.0) {
+            return u;
+        }
+        if f > 0.0 {
+            hi = u;
+        } else {
+            lo = u;
+        }
+        let d = dbx(u);
+        let next = if d.abs() > 1e-12 { u - f / d } else { (lo + hi) / 2.0 };
+        u = if next > lo && next < hi { next } else { (lo + hi) / 2.0 };
+    }
+    u
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1645,13 +1841,16 @@ pub struct Settings {
     pub loop_tween: bool,
     /// Text drawn small at the top right of exported pictures (None: off).
     pub watermark: Option<(String, Color)>,
+    /// D34: how new tweens move: Smooth (the app's new animations) or Linear
+    /// (Stick Nodes files and the reference starter).
+    pub tween_interp: Interp,
 }
 
 pub const DEFAULT_TWEENED_FRAMES: i32 = 5;
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { fps: 30.0, width: 1280, height: 720, background: Color::WHITE, letterbox: 0.0, tweening: false, tweened_frames: DEFAULT_TWEENED_FRAMES, loop_tween: false, watermark: None }
+        Settings { fps: 30.0, width: 1280, height: 720, background: Color::WHITE, letterbox: 0.0, tweening: false, tweened_frames: DEFAULT_TWEENED_FRAMES, loop_tween: false, watermark: None, tween_interp: Interp::Linear }
     }
 }
 

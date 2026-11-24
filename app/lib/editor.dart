@@ -4081,13 +4081,22 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final ease = pose['ease'] as String? ?? 'linear';
     final hold = ease == 'hold';
     void easing(String v) => _cmd({'op': 'easing', 'v': v, 'frame': start});
-    // the board's four: even, slow end, slow both ends, bounce ("in": slow
-    // start, from older files, shows as even)
-    const eases = ['linear', 'out', 'smooth', 'bounce'];
+    // D34: Auto (the curve through the poses) first, then the board's four:
+    // even, slow end, slow both ends, bounce ("in": slow start, from older
+    // files, shows as even)
+    const eases = ['auto', 'linear', 'out', 'smooth', 'bounce'];
+    // the handles: how the curve meets this pose (Free and Aligned need a
+    // graph to drag them in, so they don't show here)
+    const handles = ['auto_clamped', 'auto', 'vector'];
+    final handle = handles.indexOf('${pose['handles'] ?? 'auto_clamped'}');
     final rows = <rw.Desc>[
       rw.DInfo(sel['name'] as String? ?? 'Figure', len == 1 ? 'frame ${start + 1}' : last ? 'frame ${start + 1} to the end' : 'frames ${start + 1} to ${start + len}'),
-      rw.DSeg(const ['Hold until the next pose', 'Tween into it'], hold ? 0 : 1, onSelect: (i) => easing(i == 0 ? 'hold' : 'linear')),
-      rw.DEase(math.max(0, eases.indexOf(ease)), enabled: !hold, onSelect: (i) => easing(eases[i])),
+      rw.DSeg(const ['Hold until the next pose', 'Tween into it'], hold ? 0 : 1, onSelect: (i) => easing(i == 0 ? 'hold' : 'auto')),
+      rw.DEase(math.max(0, eases.indexOf(ease == 'in' ? 'linear' : ease)), enabled: !hold, onSelect: (i) => easing(eases[i])),
+      if (ease == 'auto') ...[
+        rw.DSeg(const ['Settle', 'Swing', 'Sharp'], handle, label: 'Through this pose', onSelect: (i) => _cmd({'op': 'handles', 'v': handles[i], 'frame': start})),
+        if (handle < 0) const rw.DHint('This pose has handles set by hand.'),
+      ],
       rw.DStep('Length in frames', '$len',
           onMinus: !last && len > 1 ? () => _cmd({'op': 'block_length', 'frames': len - 1}) : null,
           onPlus: () => _cmd({'op': 'block_length', 'frames': len + 1})),

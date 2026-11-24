@@ -229,7 +229,7 @@ pub fn speed_elapsed(speed: &Property, t: f64, r: &mut Resolver) -> f64 {
     if tr.is_empty() && speed.modifiers.is_empty() {
         return speed.value.d() * t;
     }
-    if !speed.modifiers.is_empty() || tr.keys().iter().any(|k| k.interp == Interp::Bezier) {
+    if !speed.modifiers.is_empty() || tr.keys().iter().any(|k| matches!(k.interp, Interp::Bezier | Interp::Smooth)) {
         let steps = MAX_STEPS.min(1f64.max((t.abs() / STEP).ceil())) as i32;
         let h = t / steps as f64;
         let mut sum = 0.0;

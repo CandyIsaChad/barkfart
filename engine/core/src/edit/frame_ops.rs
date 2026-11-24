@@ -162,7 +162,9 @@ pub fn set_tween(ed: &Editor, st: &mut State, frame: i32, tween: bool) -> EditRe
     if sel.is_empty() {
         return Ok(());
     }
-    ed.set_interp_in(st, &sel, if tween { Interp::Linear } else { Interp::Hold }, Ease::LINEAR)
+    // D34: tweening again moves as the project's tweens do
+    let tw = st.project.settings.tween_interp;
+    ed.set_interp_in(st, &sel, if tween { tw } else { Interp::Hold }, Ease::LINEAR)
 }
 
 /// Frame delay and repeat (camera properties) belong to one frame; tweened

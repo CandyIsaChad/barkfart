@@ -411,22 +411,55 @@ fn the_ik_stickfigure_bends_by_smart_stretch() {
 
 #[test]
 fn tweened_motion_is_smooth_between_frames() {
-    // three frames, the figure moving right on each; sampled at 60 a second
-    let mut s = two_poses();
-    s.command(&json!({"op": "frame", "i": 1}));
-    s.command(&json!({"op": "insert_frame"}));
-    let (x, y) = handle(&s.state(), 0);
-    s.command(&json!({"op": "down", "x": x, "y": y, "r": 20}));
-    s.command(&json!({"op": "move", "x": x + 120.0, "y": y}));
-    s.command(&json!({"op": "up"}));
-    let p = s.project();
-    let l = p.root().unwrap().layer("L2").unwrap();
-    let mut r = barkfart_core::eval::Resolver::new(p);
-    let xs: Vec<f32> = (0..=12).map(|i| r.f(&l.transform.x, i as f64 / 60.0)).collect();
-    for w in xs.windows(3) {
-        let (a, b) = (w[1] - w[0], w[2] - w[1]);
-        assert!(b > 0.0 && (a - b).abs() < 1e-3, "even steps while tweening: {xs:?}");
+    // three frames, the figure moving right on each; sampled at 60 a second.
+    // Linear tweens (as Stick Nodes files have) take even steps; Smooth ones
+    // (D34, the app's default) keep moving with no jump in speed
+    for linear in [true, false] {
+        let mut s = two_poses();
+        if linear {
+            pin_linear(&mut s);
+        }
+        s.command(&json!({"op": "frame", "i": 1}));
+        s.command(&json!({"op": "insert_frame"}));
+        let (x, y) = handle(&s.state(), 0);
+        s.command(&json!({"op": "down", "x": x, "y": y, "r": 20}));
+        s.command(&json!({"op": "move", "x": x + 120.0, "y": y}));
+        s.command(&json!({"op": "up"}));
+        let p = s.project();
+        let l = p.root().unwrap().layer("L2").unwrap();
+        let mut r = barkfart_core::eval::Resolver::new(p);
+        let xs: Vec<f32> = (0..=12).map(|i| r.f(&l.transform.x, i as f64 / 60.0)).collect();
+        let most = xs.windows(2).map(|w| w[1] - w[0]).fold(0.0f32, f32::max);
+        for w in xs.windows(3) {
+            let (a, b) = (w[1] - w[0], w[2] - w[1]);
+            if linear {
+                assert!(b > 0.0 && (a - b).abs() < 1e-3, "even steps while tweening: {xs:?}");
+            } else {
+                assert!(b > 0.0 && (a - b).abs() < 0.45 * most, "smooth steps, no jump at a frame: {xs:?}");
+            }
+        }
     }
+}
+
+/// A project whose tweens are Linear, as a Stick Nodes file's are (D34):
+/// for tests about linear in-betweens.
+fn pin_linear(s: &mut Session) {
+    use barkfart_core::model::{Interp, Key};
+    let p = s.doc.project_mut();
+    p.settings.tween_interp = Interp::Linear;
+    let sym = p.root_symbol.clone();
+    let ids: Vec<String> = p.root().unwrap().layers.iter().map(|l| l.id.clone()).collect();
+    for id in ids {
+        let l = p.layer_mut(&sym, &id).unwrap();
+        for q in l.properties_mut() {
+            let keys: Vec<Key> = q.track.keys().iter().map(|k| if k.interp == Interp::Smooth { Key { interp: Interp::Linear, ..*k } } else { *k }).collect();
+            q.track.clear();
+            for k in keys {
+                q.track.put(k);
+            }
+        }
+    }
+    s.tools.editor.default_interp = Interp::Linear;
 }
 
 /// Inserting frames shifts later keys by 1/fps; float error used to leave a
@@ -2793,7 +2826,7 @@ fn tween_colours_off_and_on_keeps_every_colour_key_as_it_was() {
         for (id, (interp, ease)) in ids.iter().zip(kinds) {
             let n = f.node_mut(id).unwrap();
             n.own_color = true;
-            n.color.track.put(Key { time: 0.0, value: red, interp, ease });
+            n.color.track.put(Key { ease, ..Key::new(0.0, red, interp) });
             n.color.track.put(Key::new(1.0 / fps, blue, Interp::Linear));
         }
     }

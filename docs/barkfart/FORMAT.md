@@ -35,6 +35,13 @@ re-encoding, so autosave stays cheap. `formatVersion` is 1. These rules keep eve
   scale x, scale y at the switch in the frame before it). Files without it
   keep their one join (`parent`) for the whole animation, the default.
 
+- **Smooth keys and handles** (2026-11-24, D34): a key's interpolation may
+  be `"S"` (Smooth). A key whose handle type isn't the automatic default
+  ends with an object: `{"h": "auto" | "vector" | "free" | "aligned"}`, and
+  for free and aligned `"l"` and `"r"`, each `[seconds, value]` from the key.
+  `settings.tweenInterp: "smooth"` says how new tweens move (absent:
+  linear). Files without these are unchanged.
+
 - **Symbol `groups` and layer `group`** (2026-11-24, D33): a symbol may
   list groups, each `id` (a `G` id), `name`, `opacity` (a plain number),
   `open` (its folder row) and optional `effects` (an effect stack, static

@@ -134,7 +134,9 @@ class DEase extends Desc {
   final int selected;
   final ValueChanged<int>? onSelect;
   final bool enabled;
-  static const names = ['Even', 'Slow end', 'Slow both ends', 'Bounce'];
+  /// D34: Auto (the curve through the poses, the default) first, then the
+  /// round 10 board's four
+  static const names = ['Auto', 'Even', 'Slow end', 'Slow both ends', 'Bounce'];
 }
 
 /// Any widget, for rows not (yet) described by data. It can carry a
@@ -219,7 +221,7 @@ Widget renderDesc(Desc d) {
         height: 46,
         child: Row(children: [
           Expanded(child: Text('Ease', style: ink(14))),
-          for (var i = 0; i < 4; i++)
+          for (var i = 0; i < DEase.names.length; i++)
             Padding(
               padding: const EdgeInsets.only(left: 6),
               child: Tap(
@@ -393,12 +395,21 @@ class _EasePainter extends CustomPainter {
     canvas.translate((size.width - 24) / 2, (size.height - 24) / 2);
     canvas.scale(24 / 32);
     final p = Path()..moveTo(5, 27);
+    final colour = on ? cAccent : cSecondary;
     switch (i) {
       case 0:
-        p.lineTo(27, 5);
+        // Auto: a curve that flows through the middle pose without turning on it
+        p
+          ..cubicTo(10, 27, 12, 18, 16, 16)
+          ..cubicTo(20, 14, 22, 5, 27, 5);
+        for (final o in const [Offset(5, 27), Offset(16, 16), Offset(27, 5)]) {
+          canvas.drawCircle(o, 2.4, Paint()..color = colour);
+        }
       case 1:
-        p.cubicTo(10, 12, 16, 5, 27, 5);
+        p.lineTo(27, 5);
       case 2:
+        p.cubicTo(10, 12, 16, 5, 27, 5);
+      case 3:
         p.cubicTo(17, 27, 15, 5, 27, 5);
       default:
         p
@@ -410,7 +421,7 @@ class _EasePainter extends CustomPainter {
     canvas.drawPath(
         p,
         Paint()
-          ..color = on ? cAccent : cSecondary
+          ..color = colour
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2.2
           ..strokeCap = StrokeCap.round

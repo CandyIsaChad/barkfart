@@ -147,6 +147,7 @@ fn fill_prop(m: &Obj, p: &mut Property) -> R<()> {
         let interp = match k.get(2).and_then(J::as_str) {
             Some("H") => Interp::Hold,
             Some("B") => Interp::Bezier,
+            Some("S") => Interp::Smooth,
             _ => Interp::Linear,
         };
         let mut ease = Ease::LINEAR;
@@ -161,7 +162,17 @@ fn fill_prop(m: &Obj, p: &mut Property) -> R<()> {
         if !p.ty.checked(&v) {
             return err("key value type");
         }
-        p.track.put(Key { time, value: v, interp, ease });
+        let mut key = Key { ease, ..Key::new(time, v, interp) };
+        // D34: handles other than automatic-clamped, as a last {h, l, r}
+        if let Some(J::Object(hm)) = k.last() {
+            if let Some(h) = hm.get("h").and_then(J::as_str).and_then(HandleType::from_name) {
+                key.handle = h;
+            }
+            let pair = |n: &str| -> (f64, f64) { hm.get(n).and_then(J::as_array).map(|a| (a.first().and_then(J::as_f64).unwrap_or(0.0), a.get(1).and_then(J::as_f64).unwrap_or(0.0))).unwrap_or((0.0, 0.0)) };
+            key.lh = pair("l");
+            key.rh = pair("r");
+        }
+        p.track.put(key);
     }
     for mo in list(m, "m")? {
         let mm = as_map(mo, "modifier")?;
@@ -568,6 +579,10 @@ pub fn decode(json: &str) -> R<Project> {
         p.settings.tweening = b(s, "tweening", false)?;
         p.settings.tweened_frames = i(s, "tweenedFrames", DEFAULT_TWEENED_FRAMES)?.clamp(0, 8);
         p.settings.loop_tween = b(s, "loopTween", false)?;
+        // D34 (written only when not Linear)
+        if str_(s, "tweenInterp")? == Some("smooth") {
+            p.settings.tween_interp = Interp::Smooth;
+        }
         if let Some(t) = str_(s, "watermark")? {
             let c = str_(s, "watermarkColor")?.and_then(|h| u32::from_str_radix(h.trim_start_matches('#'), 16).ok()).map(Color::rgba8888).unwrap_or(Color::rgba8888(0xff3b30ff));
             p.settings.watermark = Some((t.to_string(), c));
@@ -708,12 +723,22 @@ fn prop_json(p: &Property, with_type: bool) -> Json {
                     Interp::Hold => "H",
                     Interp::Linear => "L",
                     Interp::Bezier => "B",
+                    Interp::Smooth => "S",
                 })];
                 if k.interp == Interp::Bezier {
                     km.extend([json::f32(k.ease.x1), json::f32(k.ease.y1), json::f32(k.ease.x2), json::f32(k.ease.y2)]);
                     if k.ease.kind != EaseKind::Cubic {
                         km.push(json::s(k.ease.kind.name()));
                     }
+                }
+                // D34: handles, only when not the automatic default
+                if k.handle != HandleType::AutoClamped {
+                    let mut hm = JObj::new();
+                    hm.put("h", json::s(k.handle.name()));
+                    if k.handle.stored() {
+                        hm.put("l", Json::List(vec![json::f64(k.lh.0), json::f64(k.lh.1)])).put("r", Json::List(vec![json::f64(k.rh.0), json::f64(k.rh.1)]));
+                    }
+                    km.push(hm.done());
                 }
                 Json::List(km)
             })
@@ -1134,6 +1159,9 @@ pub fn encode(p: &Project) -> String {
     }
     if st.loop_tween {
         s.put("loopTween", Json::Bool(true));
+    }
+    if st.tween_interp == Interp::Smooth {
+        s.put("tweenInterp", json::s("smooth"));
     }
     if let Some((t, c)) = &st.watermark {
         s.put("watermark", json::s(t)).put("watermarkColor", json::s(&format!("#{:08x}", c.to_rgba8888())));

@@ -214,5 +214,7 @@ pub fn set_tweening(ed: &Editor, st: &mut State, sym: &str, id: &str, tween: boo
     if sel.is_empty() {
         return Ok(());
     }
-    ed.set_interp_in(st, &sel, if tween { Interp::Linear } else { Interp::Hold }, Ease::LINEAR)
+    // D34: tweening again moves as the project's tweens do
+    let tw = st.project.settings.tween_interp;
+    ed.set_interp_in(st, &sel, if tween { tw } else { Interp::Hold }, Ease::LINEAR)
 }

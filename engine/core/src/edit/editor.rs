@@ -236,6 +236,29 @@ impl Editor {
         d.edit("Easing", |s| self.set_interp_in(s, sel, interp, ease))
     }
 
+    /// D34: the handle type of the keys in `sel`. Free and Aligned start
+    /// from the handles the keys have now, so nothing moves.
+    pub fn set_handles_in(&self, s: &mut State, sel: &[KeyRef], handle: HandleType) -> EditResult<()> {
+        for (id, times) in group(sel) {
+            let p = prop(s, &id)?;
+            if !p.ty.continuous() {
+                continue;
+            }
+            let out: Vec<Key> = (0..p.track.len())
+                .map(|i| {
+                    let k = p.track.keys()[i];
+                    if !times.contains(&k.time) {
+                        return k;
+                    }
+                    let (lh, rh) = if handle.stored() && !k.handle.stored() { p.track.handles_at(i) } else { (k.lh, k.rh) };
+                    Key { handle, lh, rh, ..k }
+                })
+                .collect();
+            set_keys(p, out)?;
+        }
+        Ok(())
+    }
+
     pub fn set_interp_in(&self, s: &mut State, sel: &[KeyRef], interp: Interp, ease: Ease) -> EditResult<()> {
         for (id, times) in group(sel) {
             let p = prop(s, &id)?;

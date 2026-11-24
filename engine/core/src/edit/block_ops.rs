@@ -114,13 +114,14 @@ fn ensure_length(st: &mut State, frames: i32) {
 pub fn new_pose(st: &mut State, sym: &str, id: &str, frame: i32) -> EditResult<()> {
     let fps = fps(st);
     let t = frame as f64 / fps;
+    let tw = st.project.settings.tween_interp;
     let l = layer(st, sym, id)?;
     if pose_frames(l, fps).contains(&frame) {
         return fail("There is a pose on this frame already.");
     }
     for q in pose_props(l) {
         let v = q.key_value(t);
-        let interp = crate::edit::editor::interp_at(q, t, Interp::Linear);
+        let interp = crate::edit::editor::interp_at(q, t, tw);
         q.track.put(Key::new(t, v, interp));
     }
     Ok(())
