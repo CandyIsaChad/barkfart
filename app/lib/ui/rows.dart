@@ -121,9 +121,14 @@ class DDanger extends Desc {
 /// An effect the layer has (round 10 board): a pale card with its name, a
 /// small "animated" tag when part of it changes over time, and an eye.
 class DFx extends Desc {
-  const DFx(this.name, {this.tag, this.shown = true, this.open = false, this.onTap, this.onEye, this.onRemove});
+  const DFx(this.name, {this.tag, this.note, this.missing = false, this.shown = true, this.open = false, this.onTap, this.onEye, this.onRemove});
   final String name;
+  /// What of it is animated (with the key diamond).
   final String? tag;
+  /// A plain line beside the name ("by yeah").
+  final String? note;
+  /// A plugin that isn't installed (the States board's orange row).
+  final bool missing;
   final bool shown, open;
   final VoidCallback? onTap, onEye, onRemove;
 }
@@ -190,7 +195,7 @@ Widget renderDesc(Desc d) {
           actions: [if (d.onRemove != null) SwipeAction('Remove', d.onRemove!, danger: true)],
           child: Container(
             height: 40,
-            decoration: BoxDecoration(color: d.open ? cSelected : cControl, borderRadius: BorderRadius.circular(10)),
+            decoration: BoxDecoration(color: d.missing ? const Color(0xFFFFF4E5) : d.open ? cSelected : cControl, borderRadius: BorderRadius.circular(10)),
             padding: const EdgeInsets.only(left: 12, right: 2),
             child: Row(children: [
               Expanded(
@@ -202,6 +207,10 @@ Widget renderDesc(Desc d) {
                     alignment: Alignment.centerLeft,
                     child: Row(children: [
                       Text(d.name, style: ink(14, FontWeight.w600, d.shown ? cText : cSecondary)),
+                      if (d.note != null) ...[
+                        const SizedBox(width: 8),
+                        Flexible(child: Text(d.note!, maxLines: 1, overflow: TextOverflow.ellipsis, style: ink(12, FontWeight.w400, cSecondary))),
+                      ],
                       if (d.tag != null) ...[
                         const SizedBox(width: 10),
                         Transform.rotate(angle: 0.785398, child: Container(width: 7, height: 7, decoration: BoxDecoration(border: Border.all(color: cAccent, width: 1.6), borderRadius: BorderRadius.circular(1)))),

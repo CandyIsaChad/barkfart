@@ -589,6 +589,14 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
   memory or fails is switched off with its message until it is installed
   again. Plugin settings are static for now (one value for the whole
   animation), as group effects are.
+  - Built 2026-11-24: in Curves, the selected value's page in Properties
+    (its modifiers as cards with their settings, an eye, swipe to remove;
+    missing or switched-off ones orange), "+" opens the Modifiers browser
+    (Yours, Built in: Wiggle, Swing, Loop; Import… takes a .luau file and
+    keeps it in Barkfart Plugins, installed again at every start). The
+    graph draws the result solid and the keys' curve faint and dashed, and
+    marks the value's row. Not yet: Follow and Link; checking that Luau
+    builds for iOS (it compiles C++; untested until the next iOS build).
 - **D33. Groups (K).** A group is a record in its symbol and a `group` id on
   each member (not a member list, so deleting or copying layers can't leave
   stale ids). One level only. Members sit next to each other in row order,

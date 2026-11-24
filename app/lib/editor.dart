@@ -123,6 +123,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   Future<void> _start() async {
+    // K2: the plugins installed before (quietly: a broken one is listed off)
+    try {
+      final dir = await pluginsDir();
+      for (final f in dir.listSync().whereType<File>().where((f) => f.path.endsWith('.luau') || f.path.endsWith('.lua'))) {
+        _engine?.command({'op': 'plugin_install', 'name': f.uri.pathSegments.last, 'source': await f.readAsString()});
+      }
+    } catch (_) {}
     // the default stickfigure, for the figure editor's "Stock size" reference
     try {
       final bytes = (await rootBundle.load('assets/stock/figures/Stickfigure.nodes')).buffer.asUint8List();
@@ -1105,6 +1112,16 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             await Future<void>.delayed(const Duration(milliseconds: 16));
             _move(PointerMoveEvent(pointer: 78, position: from + Offset(double.parse(w[2]), double.parse(w[3])) * (i / 8)));
           }
+        case 'plugin':
+          // scripted: install a plugin file (path)
+          final path = w.sublist(1).join(' ');
+          _cmd({'op': 'plugin_install', 'name': path.split('/').last, 'source': await File(path).readAsString()});
+        case 'modadd':
+          // scripted: a modifier on the selected value (kind [plugin id])
+          _cmd({'op': 'modifier_add', 'property': _curveSel, 'kind': w[1], if (w.length > 2) 'id': w[2]});
+          setState(() => _modOpen = (((_curveValue?['mods'] as List?) ?? const []).length) - 1);
+        case 'modbrowser':
+          setState(() => _modBrowser = true);
         case 'pan':
           final from = Offset(_view.size.width - 30, _view.size.height - 30);
           await _fakeDrag(from, from + Offset(double.parse(w[1]), double.parse(w[2])));
@@ -1483,6 +1500,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (_st['movieclip'] != null) return const ['Movieclip Tools'];
     if (_st['picture'] != null) return const ['Picture Tools'];
     if (_st['group'] != null) return const ['Group Tools'];
+    // D36: in Curves, the selected value's page (its modifiers)
+    if (_curvesOn && _curveValue != null) return const ['Value'];
     final sel = _sel;
     if (_st['multi'] != null) return const ['Selection'];
     if (sel != null) return const ['Stickfigure Tools', 'Segment Tools', 'Pose'];
@@ -1500,6 +1519,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         return _pictureTools(_st['picture'] as Map);
       case 'Group Tools' when _st['group'] != null:
         return _groupTools(_st['group'] as Map);
+      case 'Value' when _curveValue != null:
+        return _valueTools(_curveValue!);
       case 'Nothing selected':
         return [
           for (final d in <rw.Desc>[
@@ -3105,6 +3126,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             ),
             const SizedBox(width: 8),
             Expanded(child: Text('${c['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: picked ? cAccent : on ? cText : cSecondary, fontWeight: picked ? FontWeight.w600 : FontWeight.w400))),
+            // D36: a value with modifiers
+            if (((c['mods'] as List?) ?? const []).isNotEmpty) const Padding(padding: EdgeInsets.only(left: 2), child: Icon(Icons.waves, size: 14, color: cAccent)),
             kit.Tap(
               label: on ? 'Hide ${c['name']}' : 'Show ${c['name']}',
               minSize: 26,
@@ -3473,6 +3496,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// selected. It floats over the stage on the right.
   Widget _propertiesCard({bool docked = false}) {
     if (_fxBrowser && (_sel != null || _st['multi'] != null) && !_playing) return kit.PanelCard(docked: docked, padding: EdgeInsets.zero, child: _effectsBrowser());
+    if (_modBrowser && _curvesOn && _curveValue != null && !_playing) return kit.PanelCard(docked: docked, padding: EdgeInsets.zero, child: _modifierBrowser(_curveValue!));
     final names = _sections();
     if (names.length == 1 && names.first == 'Nothing selected' && !docked) {
       return Align(
@@ -3550,6 +3574,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         'Figure editor' => 'Figure Tools',
         'Selection' => '${((_st['multi'] as List?) ?? const []).length} figures',
         'Group Tools' => '',
+        'Value' => '',
         'Nothing selected' => '',
         _ => section,
       };
@@ -4367,6 +4392,173 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       rw.DHint('In it: ${members.map((m) => m['name']).join(', ')}.'),
     ];
     return [for (final d in rows) rw.renderDesc(d)];
+  }
+
+  // ---------------------------------------------------------------- value page
+
+  // D36 (the graph-mods boards): the selected value's modifiers, applied top
+  // to bottom after its keys; "+" opens a browser like the effects one.
+  bool _modBrowser = false;
+  int? _modOpen; // the modifier whose settings show
+  String _modSearch = '';
+  Map? get _curveValue => _curvesOn ? _curveChannels.where((c) => c['id'] == _curveSel).firstOrNull : null;
+
+  List<Widget> _valueTools(Map c) {
+    final id = c['id'];
+    final mods = ((c['mods'] as List?) ?? const []).cast<Map>();
+    void set(int i, Map<String, Object?> m) => _cmd({'op': 'modifier_set', 'property': id, 'index': i, ...m});
+    List<rw.Desc> settings(Map m) {
+      final i = (m['index'] as num).toInt();
+      num n(String k, num d) => (m[k] as num?) ?? d;
+      switch (m['kind']) {
+        case 'wiggle' || 'swing':
+          return [
+            rw.DStep(m['kind'] == 'swing' ? 'Swing' : 'Amount', n('amount', 0).toStringAsFixed(1), onMinus: () => set(i, {'amount': math.max(0, n('amount', 0) - 1)}), onPlus: () => set(i, {'amount': n('amount', 0) + 1})),
+            rw.DStep('Speed', n('speed', 1).toStringAsFixed(2), onMinus: () => set(i, {'speed': math.max(0.05, n('speed', 1) - 0.25)}), onPlus: () => set(i, {'speed': n('speed', 1) + 0.25})),
+          ];
+        case 'loop':
+          return [
+            rw.DStep('From frame', '${n('start', 0).round() + 1}', onMinus: () => set(i, {'start': math.max(0, n('start', 0) - 1)}), onPlus: () => set(i, {'start': n('start', 0) + 1})),
+            rw.DStep('To frame', '${n('end', 1).round() + 1}', onMinus: () => set(i, {'end': math.max(n('start', 0) + 1, n('end', 1) - 1)}), onPlus: () => set(i, {'end': n('end', 1) + 1})),
+            rw.DTick('Back and forth', m['pingPong'] == true, onChanged: (v) => set(i, {'pingPong': v})),
+          ];
+        case 'plugin':
+          return [
+            for (final p in ((m['settings'] as List?) ?? const []).cast<Map>())
+              switch (p['kind']) {
+                'number' || 'angle' => () {
+                    final x = (p['extra'] as Map?) ?? const {};
+                    final step = ((x['step'] as num?) ?? (p['kind'] == 'angle' ? 5 : 1)).toDouble();
+                    final v = ((p['value'] as num?) ?? 0).toDouble();
+                    double clampTo(double y) => y.clamp(((x['min'] as num?) ?? -1e9).toDouble(), ((x['max'] as num?) ?? 1e9).toDouble());
+                    return rw.DStep('${p['label']}', step >= 1 && v == v.roundToDouble() ? '${v.round()}' : v.toStringAsFixed(2),
+                        onMinus: () => set(i, {'props': {p['name']: clampTo(v - step)}}), onPlus: () => set(i, {'props': {p['name']: clampTo(v + step)}}));
+                  }(),
+                'toggle' => rw.DTick('${p['label']}', p['value'] == true, onChanged: (v) => set(i, {'props': {p['name']: v}})),
+                'choice' => () {
+                    final opts = (((p['extra'] as Map?)?['options'] as List?) ?? const []).cast<String>();
+                    final now = opts.indexOf('${p['value']}');
+                    return rw.DLink('${p['label']}', '${p['value']}', onTap: opts.isEmpty ? null : () => set(i, {'props': {p['name']: opts[(now + 1) % opts.length]}}));
+                  }(),
+                _ => rw.DInfo('${p['label']}', '${p['value']}'),
+              },
+            if (m['off'] != null) rw.DHint('${m['off']} Import the plugin again to switch it back on.'),
+          ];
+        default:
+          return const [];
+      }
+    }
+
+    final keys = ((c['keys'] as List?) ?? const []).length;
+    final rows = <rw.Desc>[
+      rw.DInfo('${c['name']}', keys == 1 ? '1 key' : '$keys keys'),
+      rw.DTitle('Modifiers', onAdd: () => setState(() => _modBrowser = true), addLabel: 'Add a modifier'),
+      if (mods.isEmpty) const rw.DHint('A modifier changes this value on top of its keys: a wiggle, a swing, a loop, or a plugin of yours.'),
+      for (final m in mods) ...[
+        rw.DFx(
+          m['missing'] == true ? 'Missing: ${m['name']} ${m['version'] ?? ''}'.trim() : '${m['name']}',
+          note: m['author'] != null ? 'by ${m['author']}' : null,
+          missing: m['missing'] == true || m['off'] != null,
+          shown: m['enabled'] != false,
+          open: _modOpen == m['index'],
+          onTap: () => setState(() => _modOpen = _modOpen == m['index'] ? null : (m['index'] as num).toInt()),
+          onEye: () => set((m['index'] as num).toInt(), {'enabled': m['enabled'] == false}),
+          onRemove: () => _cmd({'op': 'modifier_remove', 'property': id, 'index': m['index']}),
+        ),
+        if (_modOpen == m['index'] && m['missing'] != true) ...settings(m),
+      ],
+      if (mods.any((m) => m['missing'] == true)) const rw.DHint('A missing plugin does nothing until it is imported again; its settings are kept.'),
+      if (mods.isNotEmpty) const rw.DHint('Applied top to bottom, after the keys. Swipe one to remove it.'),
+    ];
+    return [for (final d in rows) rw.renderDesc(d)];
+  }
+
+  /// The Modifiers browser (graph-mods-add board): Yours (plugins), Built
+  /// in, Import….
+  Widget _modifierBrowser(Map c) {
+    final q = _modSearch.toLowerCase();
+    bool match(String s) => q.isEmpty || s.toLowerCase().contains(q);
+    void pick(Map<String, Object?> cmd) {
+      _cmd({'op': 'modifier_add', 'property': c['id'], ...cmd});
+      setState(() {
+        _modBrowser = false;
+        _modSearch = '';
+        _modOpen = ((((_curveValue?['mods'] as List?) ?? const []).length) - 1);
+      });
+    }
+
+    Widget tile(String label, Widget glyph, VoidCallback? onTap, {String? sub}) => Opacity(
+          opacity: onTap == null ? 0.4 : 1,
+          child: kit.Tap(
+            label: label,
+            minSize: 0,
+            onTap: onTap,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(height: 58, alignment: Alignment.center, decoration: BoxDecoration(color: cCard, borderRadius: BorderRadius.circular(8), border: Border.all(color: cLine)), child: glyph),
+              const SizedBox(height: 3),
+              Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 12)),
+              if (sub != null) Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cSecondary, fontSize: 11)),
+            ]),
+          ),
+        );
+    Widget grid(List<Widget> tiles) => GridView.count(crossAxisCount: 3, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), mainAxisSpacing: 10, crossAxisSpacing: 8, childAspectRatio: 1.05, children: tiles);
+    Widget title(String t) => Padding(padding: const EdgeInsets.only(top: 12, bottom: 6), child: Text(t, textAlign: TextAlign.center, style: const TextStyle(color: cTitle, fontSize: 15, fontWeight: FontWeight.w700)));
+    final plugins = ((_st['plugins'] as List?) ?? const []).cast<Map>().where((p) => p['kind'] == 'modifier').toList();
+    final yours = [
+      for (final p in plugins)
+        if (match('${p['name']}'))
+          tile('${p['name']}', const Icon(Icons.functions, size: 28, color: cAccent), p['off'] != null ? null : () => pick({'kind': 'plugin', 'id': p['id']}), sub: p['author'] != null ? 'by ${p['author']}' : null),
+    ];
+    final built = [
+      for (final (k, l, icon) in _fxMovement)
+        if (match(l)) tile(l, Pictogram(icon, size: 30, color: cAccent, stroke: 1.8), k == 'wiggle' || k == 'swing' || k == 'loop' ? () => pick({'kind': k}) : null),
+    ];
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(6, 8, 10, 0),
+        child: Row(children: [
+          Flexible(child: kit.WordButton('‹ ${c['name']}', onTap: () => setState(() => _modBrowser = false))),
+          const Spacer(),
+          kit.WordButton('Import…', onTap: _importPlugin),
+        ]),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
+        child: TextField(
+          style: const TextStyle(color: cText, fontSize: 14),
+          decoration: InputDecoration(isDense: true, filled: true, fillColor: cControl, hintText: 'Search modifiers', prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF8A9099)), contentPadding: const EdgeInsets.symmetric(vertical: 10), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none)),
+          onChanged: (v) => setState(() => _modSearch = v),
+        ),
+      ),
+      Expanded(
+        child: ListView(padding: const EdgeInsets.fromLTRB(14, 0, 14, 16), children: [
+          if (yours.isNotEmpty) ...[title('Yours'), grid(yours)],
+          if (built.isNotEmpty) ...[title('Built in'), grid(built), if (q.isEmpty) const kit.Hint('Follow and Link come later.')],
+          const Padding(padding: EdgeInsets.only(top: 10), child: Text('A modifier changes this value on top of its keys. Plugins come in as files: Import… takes a .luau file.', style: TextStyle(color: cSecondary, fontSize: 12))),
+        ]),
+      ),
+    ]);
+  }
+
+  /// K2: a plugin file in: checked and installed, then kept in Barkfart
+  /// Plugins so it is there next time.
+  Future<void> _importPlugin() async {
+    List<PlatformFile> picked;
+    try {
+      picked = await FilePicker.pickFiles(dialogTitle: 'Import a plugin', type: FileType.custom, allowedExtensions: const ['luau', 'lua']);
+    } catch (err) {
+      _say('Could not open the file picker: $err');
+      return;
+    }
+    for (final f in picked.take(1)) {
+      final source = String.fromCharCodes(await f.readAsBytes());
+      final st = _cmd({'op': 'plugin_install', 'name': f.name, 'source': source});
+      if ('${st?['message'] ?? ''}'.endsWith('is ready.')) {
+        try {
+          await File('${(await pluginsDir()).path}/${f.name}').writeAsString(source);
+        } catch (_) {}
+      }
+    }
   }
 
   /// D35: name a part (empty: back to its shape and place).
@@ -7003,6 +7195,9 @@ class _CurveGeom {
       for (final k in (c['keys'] as List).cast<List>()) {
         vs.add((k[1] as num).toDouble());
       }
+      for (final q in ((c['result'] as List?) ?? const []).cast<List>()) {
+        vs.add((q[1] as num).toDouble());
+      }
       for (final sg in (c['segs'] as List).cast<List>()) {
         if (sg[0] == 'c') vs.addAll([(sg[2] as num).toDouble(), (sg[4] as num).toDouble()]);
         if (sg[0] == 's') vs.addAll([for (final q in (sg[1] as List).cast<List>()) (q[1] as num).toDouble()]);
@@ -7137,7 +7332,28 @@ class _CurvesPainter extends CustomPainter {
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
         ..color = picked ? colour : colour.withValues(alpha: 0.55);
-      canvas.drawPath(g.fitted(c) && !picked ? _dashed(path) : path, pen);
+      final result = ((c['result'] as List?) ?? const []).cast<List>();
+      if (result.isNotEmpty) {
+        // D36: the keys' own curve faint and dashed (the keys stay on it),
+        // what the modifiers make of it solid
+        canvas.drawPath(_dashed(path), Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.6
+          ..color = colour.withValues(alpha: 0.38));
+        final r = Path();
+        var lastY = 0.0;
+        for (final (j, q) in result.indexed) {
+          final o = Offset(g.xOf((q[0] as num).toDouble()), g.yOf(c, (q[1] as num).toDouble()));
+          j == 0 ? r.moveTo(math.min(0, o.dx), o.dy) : r.lineTo(o.dx, o.dy);
+          if (j == 0) r.lineTo(o.dx, o.dy);
+          lastY = o.dy;
+        }
+        // after the last frame it holds, as the keys do
+        r.lineTo(w, lastY);
+        canvas.drawPath(r, pen);
+      } else {
+        canvas.drawPath(g.fitted(c) && !picked ? _dashed(path) : path, pen);
+      }
       for (final k in (c['keys'] as List).cast<List>()) {
         final f = (k[0] as num).toDouble();
         if (picked && f == keyFrame) continue;

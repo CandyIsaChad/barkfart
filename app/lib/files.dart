@@ -19,6 +19,13 @@ Future<Directory> projectsDir() async {
   return d;
 }
 
+/// K2: installed plugins (.luau files), loaded when the app starts.
+Future<Directory> pluginsDir() async {
+  final d = Directory('${(await _docs()).path}/Barkfart Plugins');
+  await d.create(recursive: true);
+  return d;
+}
+
 Future<Directory> pastSavesDir() async {
   final d = Directory('${(await projectsDir()).path}/Past saves');
   await d.create(recursive: true);
