@@ -1,6 +1,10 @@
 # Scripting (proposal)
 
-Status: proposal, nothing built yet. Barkfart gets plugins written in Luau,
+Status: the runtime is built (2026-11-24, `engine/script`, mlua 0.12.3 with
+Luau 0.748, MIT): the sandbox, the time budget and memory cap, the
+`@barkfart` API's constructors, plugin definitions read into typed props, and
+calling a modifier's `value(v, p, t)`. Hooking plugins into projects and the
+app comes next, modifiers first. The rest is still a proposal. Barkfart gets plugins written in Luau,
 the sandboxed Lua dialect, so people can add their own effects, property
 drivers, tools and panels. LuaJIT is out, because iOS forbids executable
 memory, and Luau's interpreter is fast enough without it.

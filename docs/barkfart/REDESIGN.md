@@ -764,6 +764,12 @@ Render the boards (docs/barkfart/mockups: `mkdir -p project preview && node boar
 ### K. Hardest, later
 Groups; the Luau plugin runtime (it needs the `mlua` crate, so it waits
 until a dependency fetch is approved); Script layers; emitters.
+- [x] K2a. The Luau runtime (SCRIPTING.md; the user approved fetching mlua
+  2026-11-24): `engine/script` with the sandbox (safe libraries only,
+  read-only globals), a time budget per call (loading 200 ms, a modifier
+  5 ms) and a 32 MB cap, `require("@barkfart")`, definitions read into typed
+  props, and modifier calls. Next: modifiers in projects (a ModifierKind
+  that names a plugin; Missing-plugin rows), then the app's Plugins page.
 - [x] K1. Groups (D33): engine (`group`, `ungroup`, `group_set`,
   `group_order`, `delete_group`; `select` with `group`), the folder row
   with its chevron and the members 20 in, the summary bar with a tick at
