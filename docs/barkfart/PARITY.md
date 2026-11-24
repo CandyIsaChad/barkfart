@@ -123,9 +123,9 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [ ] **Polyfill Precise mode** (since 4.2.4): Easier node picking, view/adjust polynode order
 - [x] **Smart-Stretch** (since 2.4.8): Stretching a node proportionally squashes/stretches its static child detail nodes *Barkfart: stretching a smart-stretch joint reshapes its static details (rule fitted to the original's own files).*
 - [x] **Smart-stretch changes** (since 2.5.1–2.5.2): Children need not be stretchy; ignores non-stretchy children *Barkfart: details need not be stretchy; moving nodes stop it.*
-- [~] **Do not smart-stretch** (since 2.5.2): Exclude a node/branch from smart-stretch *Barkfart: honoured; set only by import (no creation UI).*
+- [x] **Do not smart-stretch** (since 2.5.2): Exclude a node/branch from smart-stretch *Barkfart: honoured; the figure editor's Segment page sets it ("Keeps its length in a smart stretch").*
 - [ ] **Test smart-stretch** (since ≤2.4.9 / keep 3.0.0): Preview smart-stretch in creation; option to keep the test changes
-- [ ] **Smart-stretch advanced options** (since 4.2.0): Extra options enabling IK-style rigs with connectors
+- [x] **Smart-stretch advanced options** (since 4.2.0): Extra options enabling IK-style rigs with connectors *Barkfart: the figure editor's Segment page: Smart stretch, Keeps its length, Stretches by its own amount with its amount (negative: the other way); a test rebuilds the stock IK rig this way and matches the original.*
 - [~] **Connectors** (since 4.2.0): Segment that always stays attached between two nodes, with draggable midpoint *Barkfart: imported and exported; not drawn as connectors.*
 - [ ] **Connector direction indicators** (since 4.2.4): Visual cue for connector direction
 - [~] **Modify Branch** (since 2.3.7): Mass-edit a node and all children: static, thickness, length, colors (replace), draw order *Barkfart: core: static, thickness, colour, shape, length scale for a whole branch.*
@@ -140,7 +140,7 @@ Our own additions wait in ADDITIONS.md until this list is done.
 - [ ] **Node copy/paste/delete quick buttons** (since 3.2.2): In Creation Quick Resize Tools
 - [ ] **Show only non-static nodes / show draw order** (since ≤4.0.0): Creation view toggles (moved to View Options in 4.0.0)
 - [ ] **Stickfigure auto-save** (since 3.3.0): Creation auto-saves every 5 min, with history browser (disable in settings)
-- [ ] **Default IK figure** (since 4.2.0): Ships a sample IK-rigged default stickfigure
+- [x] **Default IK figure** (since 4.2.0): Ships a sample IK-rigged default stickfigure *Barkfart: Stock › Stickfigure (IK).*
 - [x] **Node limit per figure** (since 2.3.6): Limits rose over time: 384 (2.3.6), 400 (4.0.2) *Barkfart: no fixed limit (scene budget only).*
 - [ ] **Name/ID on selection** (since 4.0.0): Optional brief display of figure name/ID
 

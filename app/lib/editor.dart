@@ -4949,6 +4949,17 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       const rw.DTitle('Movement'),
       rw.DTick('Show motion path', _opts['path'] == true, onChanged: _setMotionPath),
       rw.DTick('Is stretchy', sel['stretchy'] == true, onChanged: (v) => _cmd({'op': 'node', 'stretchy': v}), changed: ch('stretchy'), reset: reset('stretchy', onOff(d['stretchy']), {'op': 'node', 'stretchy': d['stretchy']})),
+      // IK rigs (smart stretch): set up in the figure editor
+      if (_st['building'] != null) ...[
+        rw.DTick('Smart stretch', sel['smart'] == true, onChanged: (v) => seg({'smart': v})),
+        rw.DTick('Keeps its length in a smart stretch', sel['noSmart'] == true, onChanged: (v) => seg({'noSmart': v})),
+        rw.DTick('Stretches by its own amount', sel['stretchReset'] == true, onChanged: (v) => seg({'stretchReset': v})),
+        if (sel['stretchReset'] == true)
+          rw.DStep('Stretch amount', '×${((sel['stretchMultiplier'] as num?) ?? 1).toStringAsFixed(2)}',
+              onMinus: () => seg({'stretchMultiplier': ((sel['stretchMultiplier'] as num?) ?? 1) - 0.25}),
+              onPlus: () => seg({'stretchMultiplier': ((sel['stretchMultiplier'] as num?) ?? 1) + 0.25})),
+        const rw.DHint('With smart stretch, the still parts under a stretchy segment stretch along with it. A connector under it makes an IK limb: pull its end and the joint between bends. Stock › Stickfigure (IK) is built this way.'),
+      ],
       rw.DTick('Lock node', sel['pinned'] == true, onChanged: (v) => _cmd({'op': 'pin', 'v': v})),
       rw.DTick('Drag lock', sel['dragLock'] == true, onChanged: (v) => _cmd({'op': 'node', 'dragLock': v})),
       rw.DSeg(const ['None', 'Absolute', 'Relative'], lock, label: 'Angle lock', onSelect: (i) => seg({'angleLock': i})),

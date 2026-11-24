@@ -193,3 +193,53 @@ fn parts_can_be_named_and_the_graph_uses_the_names() {
     s.command(&json!({"op": "undo"}));
     assert_eq!(channel(&s.state(), &id)["name"], "Right forearm angle");
 }
+
+/// IK rigs (PARITY: smart-stretch advanced options): the stock IK figure's
+/// smart-stretch settings, cleared and set again through the Segment page's
+/// controls, stretch its leg exactly as the original does.
+#[test]
+fn an_ik_rig_can_be_set_up_from_the_segment_page() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../app/assets/stock/figures/Stickfigure (IK).nodes");
+    let Ok(bytes) = std::fs::read(path) else { return };
+    let mut s = Session::new(Document::new(barkfart_core::session::new_editor_project_with("ik.nodes", &bytes)));
+    let lid = s.project().root().unwrap().layers.iter().find(|l| l.as_figure().is_some()).unwrap().id.clone();
+    let reach = |s: &Session| {
+        let f = s.project().root().unwrap().layer(&lid).unwrap().as_figure().unwrap();
+        barkfart_core::edit::canvas::connector_smart_stretch(f, f.index_of("n30").unwrap(), 176.7)
+    };
+    let truth = reach(&s).expect("an IK leg");
+    // what the rig is made of
+    let rig: Vec<(String, bool, bool, Option<f32>)> = {
+        let f = s.project().root().unwrap().layer(&lid).unwrap().as_figure().unwrap();
+        f.nodes().iter().filter(|n| n.parent.is_some()).map(|n| (n.id.clone(), n.smart_stretch, n.no_smart_stretch, barkfart_core::eval::pose::stretch_reset(n))).filter(|r| r.1 || r.2 || r.3.is_some()).collect()
+    };
+    assert!(rig.iter().any(|r| r.3.is_some()), "the rig has a part that stretches by its own amount: {rig:?}");
+    // clear it all
+    for (id, ..) in &rig {
+        s.command(&json!({"op": "select", "layer": lid, "node": id}));
+        s.command(&json!({"op": "segment", "smart": false, "noSmart": false, "stretchReset": false}));
+    }
+    assert_ne!(reach(&s), Some(truth.clone()), "without its settings the leg stretches differently");
+    // and set it up again, as someone would on the Segment page
+    for (id, smart, no_smart, reset) in &rig {
+        let st = s.command(&json!({"op": "select", "layer": lid, "node": id}));
+        let _ = st;
+        let mut c = json!({"op": "segment", "smart": smart, "noSmart": no_smart, "stretchReset": reset.is_some()});
+        if let Some(m) = reset {
+            c["stretchMultiplier"] = json!(m);
+        }
+        let st = s.command(&c);
+        assert_eq!(st["selected"]["smart"], *smart);
+        assert_eq!(st["selected"]["noSmart"], *no_smart);
+        assert_eq!(st["selected"]["stretchReset"], reset.is_some());
+        if let Some(m) = reset {
+            assert!((st["selected"]["stretchMultiplier"].as_f64().unwrap() as f32 - m).abs() < 1e-4, "{} vs {m} ({})", st["selected"]["stretchMultiplier"], st["message"]);
+        }
+    }
+    let (len, sets) = reach(&s).expect("an IK leg again");
+    assert!((len - truth.0).abs() < 1e-3);
+    for ((a, x), (b, y)) in sets.iter().zip(&truth.1) {
+        assert_eq!(a, b);
+        assert!((x - y).abs() < 1e-3, "{a}: {x} vs {y}");
+    }
+}

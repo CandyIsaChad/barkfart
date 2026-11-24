@@ -2124,6 +2124,25 @@ impl Session {
                         if let Some(v) = c2["smart"].as_bool() {
                             node.smart_stretch = v;
                         }
+                        // IK rigs (Stick Nodes' smart-stretch options): a part that
+                        // keeps its length in a smart stretch, and one that stretches
+                        // by its own amount (the "reset stretch impulse")
+                        if let Some(v) = c2["noSmart"].as_bool() {
+                            node.no_smart_stretch = v;
+                        }
+                        if let Some(v) = c2["stretchReset"].as_bool() {
+                            if v {
+                                node.legacy_extras.insert("L.smartStretchResetImpulse".into(), "i:1".into());
+                                node.legacy_extras.entry("L.smartStretchMultiplier".into()).or_insert_with(|| "f:1.0".into());
+                            } else {
+                                node.legacy_extras.insert("L.smartStretchResetImpulse".into(), "i:0".into());
+                            }
+                        }
+                        if let Some(v) = c2["stretchMultiplier"].as_f64() {
+                            // negative: it stretches the other way (the stock IK rig uses -1)
+                            let m = (v as f32).clamp(-20.0, 20.0);
+                            node.legacy_extras.insert("L.smartStretchMultiplier".into(), format!("f:{}", crate::json::java_float(m)));
+                        }
                         // the rest of the original's Segment Tools
                         if let Some(v) = c2["gradient"].as_bool() {
                             node.gradient = v;
@@ -3537,7 +3556,9 @@ impl Session {
                 // D35: the part as the Parts list and the graph name it, and whether it was named
                 "partName": part_label(node, f.index_of(n).unwrap_or(0)), "partNamed": node.name.is_some(),
                 "root": node.parent.is_none(), "static": node.is_static, "pinned": node.pinned,
-                "smart": node.smart_stretch, "shape": shape_name(node.shape),
+                "smart": node.smart_stretch, "noSmart": node.no_smart_stretch,
+                "stretchReset": crate::eval::pose::stretch_reset(node).is_some(), "stretchMultiplier": crate::eval::pose::stretch_reset(node).unwrap_or(1.0),
+                "shape": shape_name(node.shape),
                 "thickness": r.f(&node.thickness, t), "color": color_of(&mut r, &node.color, t),
                 "angle": round2(r.f(&node.rotation, t)), "length": round2(r.f(&node.length, t)), "restLength": round2(node.rest_length),
                 "gradient": node.gradient, "gradientColor": color_of(&mut r, &node.gradient_color, t), "gradientReverse": node.gradient_reverse, "gradientSideways": node.gradient_sideways,
