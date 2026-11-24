@@ -28,9 +28,14 @@ const HOLD = new Set([9]);
 const CH = [
   { name: 'Right hand angle', unit: '°', colour: '#D9482B', on: true, sel: true, keys: [[1, 20], [5, 72], [9, 138], [15, 58], [20, 16]] },
   { name: 'Right elbow angle', unit: '°', colour: '#2E8B57', on: true, keys: [[1, -8], [5, 34], [9, 96], [15, 40], [20, -8]] },
-  { name: 'Body across', unit: '', colour: '#2D63E0', on: false, keys: [[1, 0], [5, -20], [9, 35], [15, 35], [20, 0]] },
-  { name: 'Body height', unit: '', colour: '#9A6BD0', on: false, keys: [[1, 0], [5, 4], [9, -6], [15, -6], [20, 0]] },
+  // not in degrees: drawn scaled to fit (dashed), the scale at the left stays the selected one's
+  { name: 'Right hand length', unit: '', colour: '#C28A00', on: true, fit: [92, 132], keys: [[1, 100], [5, 100], [9, 128], [15, 128], [20, 100]] },
+  { name: 'Main joint x', unit: '', colour: '#2D63E0', on: false, keys: [[1, 0], [5, -20], [9, 35], [15, 35], [20, 0]] },
+  { name: 'Main joint y', unit: '', colour: '#9A6BD0', on: false, keys: [[1, 0], [5, 4], [9, -6], [15, -6], [20, 0]] },
 ];
+// colours have no single height: a band of the colour over time, keys as dots
+const BAND = { name: 'Shirt colour', keys: [[1, '#9B1C2E'], [9, '#9B1C2E'], [15, '#2160A8'], [20, '#2160A8']] };
+const fitted = (c) => (c.fit ? c.keys.map(([f, v]) => [f, VMIN + ((v - c.fit[0]) / (c.fit[1] - c.fit[0])) * (VMAX - VMIN)]) : c.keys);
 function slope(k, i) {
   if (i === 0 || i === k.length - 1) return 0;
   const dl = (k[i][1] - k[i - 1][1]) / (k[i][0] - k[i - 1][0]);
@@ -70,10 +75,13 @@ let s = `<section class="tl" aria-label="Timeline, showing curves" style="top:${
 // names: the figure, then its animated values with a colour and an eye
 s += `<div class="names" style="top:${TB}px;width:${NAME_W}px;height:${TL_H - TB - BAR}px">`;
 s += `<div class="rh" style="height:${RU}px"></div>`;
-s += `<div class="nrow" style="height:32px"><div class="nin" style="padding-left:12px"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="${C.ink2b}" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="4.6" r="2.4"/><path d="M12 7v7M12 14l-4 6M12 14l4 6M7 10h10"/></svg><span style="font-weight:600">Hero</span><span class="sub">4 animated</span></div></div>`;
+s += `<div class="nrow" style="height:32px"><div class="nin" style="padding-left:12px"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="${C.ink2b}" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="4.6" r="2.4"/><path d="M12 7v7M12 14l-4 6M12 14l4 6M7 10h10"/></svg><span style="font-weight:600">Hero</span><span class="sub">6 animated</span></div></div>`;
 for (const c of CH) {
   s += `<div class="nrow${c.sel ? ' on' : ''}" style="height:30px;font-size:13px"><div class="nin" style="padding-left:16px"><span style="width:10px;height:10px;border-radius:50%;background:${c.on ? c.colour : '#fff'};box-shadow:inset 0 0 0 2px ${c.colour};flex:none"></span><span style="${c.on ? '' : `color:${C.ink2}`}">${c.name}</span><button type="button" class="eye" aria-label="${c.on ? 'Hide' : 'Show'} ${c.name}">${eye(c.on)}</button></div></div>`;
 }
+s += `<div class="nrow" style="height:30px;font-size:13px"><div class="nin" style="padding-left:16px"><span style="width:10px;height:10px;border-radius:3px;background:linear-gradient(90deg,#9B1C2E,#2160A8);flex:none"></span><span>${BAND.name}</span><button type="button" class="eye" aria-label="Hide ${BAND.name}">${eye(true)}</button></div></div>`;
+// importing a value: the figure's numbers and colours not animated yet
+s += `<div class="nrow" style="height:30px;font-size:13px;box-shadow:none"><button type="button" class="nin" style="padding-left:14px;color:${C.blue};font-weight:600" aria-expanded="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="${C.blue}" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add a value…</button></div>`;
 s += `</div>`;
 // ruler (frames), playhead pill
 s += `<div class="ruler" style="left:${NAME_W}px;top:${TB}px;height:${RU}px;width:${1344 - NAME_W}px">`;
@@ -95,18 +103,26 @@ for (const v of [150, 90, 30, -30 + 0]) {
 }
 // frame columns, faint; the held stretch shaded
 g += `<rect x="${X(9)}" y="${GRAPH_TOP}" width="${X(15) - X(9)}" height="${GRAPH_H}" fill="#F6F7F9"/>`;
-g += `<text x="${(X(9) + X(15)) / 2}" y="${GRAPH_TOP + GRAPH_H - 8}" text-anchor="middle" font-family="Open Sans, sans-serif" font-size="11" fill="#9AA0A8">holds</text>`;
+g += `<text x="${(X(9) + X(15)) / 2}" y="${GRAPH_TOP + 14}" text-anchor="middle" font-family="Open Sans, sans-serif" font-size="11" fill="#9AA0A8">holds</text>`;
 // the playhead
 g += `<line x1="${X(CUR)}" x2="${X(CUR)}" y1="${GRAPH_TOP}" y2="${GRAPH_TOP + GRAPH_H}" stroke="#8DB8E8" stroke-width="1.5"/>`;
 // curves: hidden ones not drawn; the selected one on top and stronger
 for (const c of [...CH].filter((c) => c.on).sort((a, b) => (a.sel ? 1 : 0) - (b.sel ? 1 : 0))) {
-  g += `<path d="${curvePath(c.keys)}" fill="none" stroke="${c.colour}" stroke-width="${c.sel ? 2.6 : 1.8}" stroke-opacity="${c.sel ? 1 : 0.55}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  g += `<path d="${curvePath(fitted(c))}" fill="none" stroke="${c.colour}" stroke-width="${c.sel ? 2.6 : 1.8}" stroke-opacity="${c.sel ? 1 : 0.55}"${c.fit ? ' stroke-dasharray="7 5"' : ''} stroke-linecap="round" stroke-linejoin="round"/>`;
+}
+g += `<text x="1334" y="${GRAPH_TOP + 14}" text-anchor="end" font-family="Open Sans, sans-serif" font-size="11" fill="#9AA0A8">dashed: scaled to fit</text>`;
+// the colour band along the foot of the graph
+{
+  const by = GRAPH_TOP + GRAPH_H - 22, bx0 = X(1), bx1 = X(FRAMES);
+  g += `<defs><linearGradient id="band" x1="${bx0}" x2="${bx1}" gradientUnits="userSpaceOnUse">${BAND.keys.map(([f, c]) => `<stop offset="${r1(((X(f) - bx0) / (bx1 - bx0)) * 100)}%" stop-color="${c}"/>`).join('')}</linearGradient></defs>`;
+  g += `<rect x="${bx0}" y="${by}" width="${bx1 - bx0}" height="12" rx="6" fill="url(#band)"/>`;
+  for (const [f] of BAND.keys) g += `<circle cx="${r1(X(f))}" cy="${by + 6}" r="4.5" fill="#fff" stroke="#4A4F57" stroke-width="1.6"/>`;
 }
 // keys: dots; the selected key (frame 5 of the right hand) with its handles
 const SEL = { ch: 0, i: 1 };
 for (const [ci, c] of CH.entries()) {
   if (!c.on) continue;
-  for (const [i, [f, v]] of c.keys.entries()) {
+  for (const [i, [f, v]] of fitted(c).entries()) {
     if (ci === SEL.ch && i === SEL.i) continue;
     g += `<circle cx="${r1(X(f))}" cy="${r1(Y(v))}" r="${c.sel ? 5 : 4}" fill="#fff" stroke="${c.colour}" stroke-opacity="${c.sel ? 1 : 0.6}" stroke-width="2"/>`;
   }
@@ -130,13 +146,19 @@ const hbtn = (label, on) => `<button type="button" role="radio" aria-checked="${
 s += `<div class="bar" style="height:${BAR}px"><span style="font-size:13px;color:${C.ink2};margin-right:8px">Handles</span>`;
 s += `<span role="radiogroup" aria-label="Handles of the selected key" style="display:flex;gap:2px;background:${C.field};border-radius:9px;padding:2px">${hbtn('Settle', false)}${hbtn('Swing', false)}${hbtn('Sharp', false)}${hbtn('Free', false)}${hbtn('Aligned', true)}</span>`;
 s += `<span class="bw"><button type="button">Fit</button><button type="button">New pose</button></span></div>`;
+const mi = (label, sub) => `<button type="button" class="mi" style="height:34px;font-size:14px">${label}${sub ? `<span style="margin-left:auto;font-size:12px;color:${C.ink2}">${sub}</span>` : ''}</button>`;
+const mh = (t) => `<div style="padding:8px 10px 2px;font-size:12px;font-weight:700;color:#CC1736">${t}</div>`;
 s += `</section>`;
+// the list opens upward from its row, over the stage (page coordinates)
+const ADD_ROW_Y = TL_TOP + TB + RU + 32 + 30 * (CH.length + 1);
+const MENU_H = 296;
+const menu = `<div class="menu" role="menu" aria-label="Add a value" style="left:150px;top:${ADD_ROW_Y - MENU_H - 4}px;width:240px;height:${MENU_H}px">${mh('Right hand')}${mi('Thickness', '24')}${mi('Scale', '1.00')}${mi('Outline colour', '')}${mh('Hero')}${mi('Opacity', '100%')}${mi('Glow amount', '0.70')}<div style="padding:6px 10px 4px;font-size:12px;color:${C.ink2};line-height:1.35">Keyed on this frame, so its curve starts here. Choices like shape or blend stay on their pages.</div></div>`;
 
 // swap the timeline and drop the properties panel (the curves need the room)
 const tlStart = html.indexOf('<section class="tl"');
 const panelStart = html.indexOf('<section class="panel"');
 const end = html.lastIndexOf('</div></body>');
-html = html.slice(0, tlStart) + s + html.slice(end);
+html = html.slice(0, tlStart) + s + menu + html.slice(end);
 html = html.replace(/<section class="panel"[\s\S]*?<\/section>/, '');
 void panelStart;
 

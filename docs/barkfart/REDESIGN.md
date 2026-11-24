@@ -555,8 +555,13 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
     animated values (an eye each) drawn as curves on the same frames, keys
     as dots, the selected key with its two handles and a "Frame N, V"
     readout, a held stretch shaded, and the bottom bar holding the key's
-    handle type and Fit. Board: mockups/graph-editor.mjs. Not built until
-    the user has seen it.
+    handle type and Fit. Board: mockups/graph-editor.mjs (approved
+    2026-11-24, with these from the user: lengths as curves too; an "Add a
+    value…" list of the figure's numbers and colours not animated yet,
+    keyed on this frame; the main joint's x and y). Values in other units
+    than the selected curve's are drawn dashed, scaled to fit; colours are
+    a band of the colour over time. Choices and switches stay on their
+    pages (a curve for a choice could only ever jump).
 - **D33. Groups (K).** A group is a record in its symbol and a `group` id on
   each member (not a member list, so deleting or copying layers can't leave
   stale ids). One level only. Members sit next to each other in row order,
