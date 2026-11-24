@@ -206,6 +206,25 @@ fn parse_modifier(m: &Obj) -> R<Modifier> {
             offset: f(m, "offset", 0.0)?,
         },
         "link" => ModifierKind::Link { source: req(m, "source")?.into(), scale: f(m, "scale", 1.0)?, offset: f(m, "offset", 0.0)? },
+        // K2: a plugin modifier; its settings are kept whether or not it's installed
+        "plugin" => {
+            let mut props = Vec::new();
+            if let Some(J::Object(pm)) = m.get("props") {
+                for (k, v) in pm {
+                    use barkfart_script::PropValue as P;
+                    let pv = match v {
+                        J::Bool(b) => P::Toggle(*b),
+                        J::String(t) => P::Text(t.clone()),
+                        J::Number(n) => P::Number(n.as_f64().unwrap_or(0.0)),
+                        J::Array(a) if a.len() == 4 => P::Colour([0, 1, 2, 3].map(|i| a[i].as_f64().unwrap_or(1.0) as f32)),
+                        J::Array(a) if a.len() == 2 => P::Point(a[0].as_f64().unwrap_or(0.0), a[1].as_f64().unwrap_or(0.0)),
+                        _ => return err(format!("plugin setting {k}")),
+                    };
+                    props.push((k.clone(), pv));
+                }
+            }
+            ModifierKind::Plugin { id: req(m, "id")?.into(), version: str_(m, "version")?.unwrap_or("").into(), props }
+        }
         other => return err(format!("unknown modifier {other}")),
     };
     let mut md = Modifier::new(kind);
@@ -780,6 +799,23 @@ fn modifier_json(md: &Modifier) -> Json {
         }
         ModifierKind::Link { source, scale, offset } => {
             m.put("type", json::s("link")).put("source", json::s(source)).put("scale", json::f32(*scale)).put("offset", json::f32(*offset));
+        }
+        ModifierKind::Plugin { id, version, props } => {
+            let mut pm = JObj::new();
+            for (k, v) in props {
+                use barkfart_script::PropValue as P;
+                pm.put(
+                    k,
+                    match v {
+                        P::Number(n) => json::f64(*n),
+                        P::Toggle(b) => Json::Bool(*b),
+                        P::Text(t) => json::s(t),
+                        P::Colour(c) => Json::List(c.iter().map(|x| json::f32(*x)).collect()),
+                        P::Point(x, y) => Json::List(vec![json::f64(*x), json::f64(*y)]),
+                    },
+                );
+            }
+            m.put("type", json::s("plugin")).put("id", json::s(id)).put("version", json::s(version)).put("props", pm.done());
         }
     }
     m.put("enabled", Json::Bool(md.enabled));

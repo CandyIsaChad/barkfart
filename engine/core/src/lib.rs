@@ -20,6 +20,7 @@ pub mod import;
 pub mod json;
 pub mod legacy;
 pub mod model;
+pub mod plugins;
 pub mod session;
 pub mod tess;
 pub mod timing;

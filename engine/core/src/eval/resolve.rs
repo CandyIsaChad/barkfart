@@ -22,6 +22,8 @@ pub struct Resolver<'p> {
     /// their value at frame 1; a repeat with "use frame tweening properties"
     /// blends into the frame it jumps to. (from, to, target time)
     wrap: Option<(f64, f64, f64)>,
+    /// Frames per second, for plugin modifiers' `t` (K2).
+    fps: f64,
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -45,6 +47,7 @@ impl<'p> Resolver<'p> {
             resolves: 0,
             budget_reported: false,
             wrap: wrap_of(project),
+            fps: if project.settings.fps > 0.0 { project.settings.fps as f64 } else { 30.0 },
             diagnostics: Vec::new(),
         }
     }
@@ -152,6 +155,30 @@ impl<'p> Resolver<'p> {
                     v = self.follow(p, v, source, t - delay, *scale, *offset);
                 }
                 ModifierKind::Loop { .. } => {}
+                ModifierKind::Plugin { id, props, .. } => {
+                    // K2: numbers only; v:at(frame) reads the keys (nothing re-enters)
+                    let n = match v {
+                        Value::F(x) => x as f64,
+                        Value::D(x) => x,
+                        _ => continue,
+                    };
+                    let fps = self.fps;
+                    let sample = |frame: f64| p.key_value(frame / fps).f() as f64;
+                    let time = barkfart_script::Time { frame: t * fps, seconds: t, fps };
+                    match crate::plugins::modify(id, &p.id, n, props, time, &sample) {
+                        Some(x) => {
+                            v = match v {
+                                Value::D(_) => Value::D(x),
+                                _ => Value::F(x as f32),
+                            }
+                        }
+                        None => {
+                            if crate::plugins::definition(id).is_none() {
+                                self.diag(DiagnosticKind::MissingRef, format!("plugin:{id}"));
+                            }
+                        }
+                    }
+                }
             }
         }
         self.sanitize(p, v)

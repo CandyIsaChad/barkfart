@@ -578,6 +578,17 @@ Delete, as Procreate's layers do. On the Segment page, the swipe reveals
   Nodes figure file has no place for it, so a figure saved as .nodes loses
   its names.
 
+- **D36. Modifiers on a value** (the graph-mods boards, approved
+  2026-11-24). A value's modifiers apply after its keys, top to bottom:
+  the built-in Wiggle, Swing and Loop (Follow and Link need a value to
+  follow, so they come later) and plugin modifiers. Plugins are installed
+  for the whole app (one list, every project and export sees the same);
+  a project names a plugin by id and keeps its settings, so a missing
+  plugin does nothing (the value passes through), shows orange, and comes
+  back when imported again. A plugin that runs too long, uses too much
+  memory or fails is switched off with its message until it is installed
+  again. Plugin settings are static for now (one value for the whole
+  animation), as group effects are.
 - **D33. Groups (K).** A group is a record in its symbol and a `group` id on
   each member (not a member list, so deleting or copying layers can't leave
   stale ids). One level only. Members sit next to each other in row order,

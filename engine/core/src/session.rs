@@ -1084,6 +1084,126 @@ impl Session {
                     self.step("Easing", |s| ed.set_interp_in(s, &sel, interp, ease));
                 }
             }
+            "plugin_install" => {
+                // K2: a plugin file's text; checked, then installed for the
+                // whole app (not an undo step: it's not part of the project)
+                let name = c["name"].as_str().unwrap_or("plugin.luau").to_string();
+                match c["source"].as_str() {
+                    Some(src) => match crate::plugins::install(src, &name) {
+                        Ok(def) => self.message = format!("{} {} is ready.", def.name, def.version),
+                        Err(e) => self.message = e,
+                    },
+                    None => self.message = "There is no plugin in that file.".into(),
+                }
+                self.rev += 1;
+            }
+            "plugin_uninstall" => {
+                if let Some(id) = c["id"].as_str() {
+                    crate::plugins::uninstall(id);
+                    self.rev += 1;
+                }
+            }
+            "modifier_add" => {
+                // K2 (the Modifiers browser): a built-in (wiggle, swing, loop) or
+                // a plugin modifier on one value, with a useful start; one step
+                let Some(pid) = c["property"].as_str().map(str::to_string) else { return self.state() };
+                let kind = c["kind"].as_str().unwrap_or("").to_string();
+                let plugin = c["id"].as_str().map(str::to_string);
+                let fps = st_fps(self.project());
+                let duration = self.project().root().map(|r| r.duration).unwrap_or(1.0);
+                let made = self.step("Add modifier", |s| {
+                    let Some(q) = s.project.property_mut(&pid) else { return crate::edit::fail("no such value") };
+                    if !q.ty.continuous() || q.ty == ValueType::Color {
+                        return crate::edit::fail("Modifiers change numbers; this value isn't one.");
+                    }
+                    let big = if q.ty == ValueType::Angle { 15.0 } else { 10.0 };
+                    let seed = q.id.bytes().fold(7i32, |h, b| h.wrapping_mul(31).wrapping_add(b as i32)) & 0xffff;
+                    let mk = match kind.as_str() {
+                        "wiggle" => ModifierKind::Wiggle { frequency: 2.0, amplitude: big, seed, octaves: 2 },
+                        "swing" => ModifierKind::Sine { frequency: 1.0, amplitude: big, phase: 0.0 },
+                        "loop" => ModifierKind::Loop { mode: LoopMode::Cycle, start: 0.0, end: (duration).max(1.0 / fps) },
+                        "plugin" => {
+                            let Some(id) = plugin.as_deref() else { return crate::edit::fail("Which plugin?") };
+                            let Some(def) = crate::plugins::definition(id) else { return crate::edit::fail("That plugin isn't installed.") };
+                            if def.kind != barkfart_script::Kind::Modifier {
+                                return crate::edit::fail(format!("{} isn't a modifier.", def.name));
+                            }
+                            let props = def.props.iter().map(|d| (d.name.clone(), crate::plugins::default_value(&d.kind))).collect();
+                            ModifierKind::Plugin { id: def.id, version: def.version, props }
+                        }
+                        other => return crate::edit::fail(format!("unknown modifier {other}")),
+                    };
+                    q.add_modifier(Modifier::new(mk)).map_err(crate::edit::EditError)
+                });
+                if made.is_some() {
+                    self.curve_shown.insert(pid);
+                }
+            }
+            "modifier_set" | "modifier_remove" => {
+                // one modifier of a value (`index`, in the order they apply)
+                let Some(pid) = c["property"].as_str().map(str::to_string) else { return self.state() };
+                let i = c["index"].as_u64().unwrap_or(0) as usize;
+                let remove = op == "modifier_remove";
+                let c2 = c.clone();
+                let fps = st_fps(self.project());
+                self.step(if remove { "Remove modifier" } else { "Modifier" }, move |s| {
+                    let Some(q) = s.project.property_mut(&pid) else { return crate::edit::fail("no such value") };
+                    if i >= q.modifiers.len() {
+                        return crate::edit::fail("no such modifier");
+                    }
+                    if remove {
+                        q.modifiers.remove(i);
+                        return Ok(());
+                    }
+                    let m = &mut q.modifiers[i];
+                    if let Some(on) = c2["enabled"].as_bool() {
+                        m.enabled = on;
+                    }
+                    let num = |k: &str| c2[k].as_f64();
+                    match &mut m.kind {
+                        ModifierKind::Wiggle { frequency, amplitude, .. } | ModifierKind::Sine { frequency, amplitude, .. } => {
+                            if let Some(v) = num("amount") {
+                                *amplitude = v.max(0.0) as f32;
+                            }
+                            if let Some(v) = num("speed") {
+                                *frequency = v.clamp(0.01, 60.0) as f32;
+                            }
+                        }
+                        ModifierKind::Loop { start, end, mode } => {
+                            if let Some(v) = num("start") {
+                                *start = (v / fps).max(0.0);
+                            }
+                            if let Some(v) = num("end") {
+                                *end = (v / fps).max(*start + 1.0 / fps);
+                            }
+                            if let Some(pp) = c2["pingPong"].as_bool() {
+                                *mode = if pp { LoopMode::PingPong } else { LoopMode::Cycle };
+                            }
+                        }
+                        ModifierKind::Plugin { props, .. } => {
+                            if let Some(J::Object(set)) = c2.get("props") {
+                                use barkfart_script::PropValue as P;
+                                for (k, v) in set {
+                                    let pv = match v {
+                                        J::Bool(b) => P::Toggle(*b),
+                                        J::String(t) => P::Text(t.clone()),
+                                        J::Number(n) => P::Number(n.as_f64().unwrap_or(0.0)),
+                                        J::Array(a) if a.len() == 4 => P::Colour([0, 1, 2, 3].map(|i| a[i].as_f64().unwrap_or(1.0) as f32)),
+                                        J::Array(a) if a.len() == 2 => P::Point(a[0].as_f64().unwrap_or(0.0), a[1].as_f64().unwrap_or(0.0)),
+                                        _ => continue,
+                                    };
+                                    match props.iter_mut().find(|(n, _)| n == k) {
+                                        Some(slot) => slot.1 = pv,
+                                        None => props.push((k.clone(), pv)),
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    Ok(())
+                });
+            }
             "rename_part" => {
                 // D35: a part's own name (empty: back to its shape and place)
                 let layer = self.building.clone().or_else(|| self.sel_layer());
@@ -3413,7 +3533,7 @@ impl Session {
                 continue;
             }
             let keys = q.track.keys();
-            let changes = keys.windows(2).any(|w| w[0].value != w[1].value);
+            let changes = keys.windows(2).any(|w| w[0].value != w[1].value) || !q.modifiers.is_empty();
             let focus = node == sel_node;
             if !changes && !self.curve_shown.contains(&q.id) {
                 // what "Add a value…" offers: the selected joint's values and the figure's own
@@ -3463,7 +3583,20 @@ impl Session {
                     })
                     .collect()
             };
-            channels.push(json!({"id": q.id, "name": name, "group": group, "unit": unit, "node": node, "focus": focus || (sel_node == root && node == root), "keys": ks, "segs": segs}));
+            // K2: its modifiers (in the order they apply), and what they make
+            // of it, sampled (the graph draws the keys' curve faint under it)
+            let mods: Vec<J> = q.modifiers.iter().enumerate().map(|(i, m)| modifier_json(i, m, fps)).collect();
+            let result: Vec<J> = if q.modifiers.iter().any(|m| m.enabled) && !colour {
+                let frames = (p.root().map(|r| r.duration).unwrap_or(0.0) * fps).round().max(1.0) as i32;
+                let mut r = Resolver::new(p);
+                (0..frames.min(2000) * 4).map(|j| {
+                    let f = j as f64 / 4.0;
+                    json!([f, r.resolve(q, f / fps).f()])
+                }).collect()
+            } else {
+                Vec::new()
+            };
+            channels.push(json!({"id": q.id, "name": name, "group": group, "unit": unit, "node": node, "focus": focus || (sel_node == root && node == root), "keys": ks, "segs": segs, "mods": mods, "result": result}));
         }
         Some(json!({"layer": lid, "name": fig, "channels": channels, "addable": addable}))
     }
@@ -3928,6 +4061,8 @@ impl Session {
             },
             "pose": self.pose_clip.is_some(), "posesCopied": self.poses_clip.len(),
             "curves": self.curves_state(p),
+            // K2: the installed plugins
+            "plugins": crate::plugins::list().into_iter().map(|x| json!({"id": x.def.id, "name": x.def.name, "version": x.def.version, "author": x.def.author, "kind": x.def.kind.name(), "off": x.off})).collect::<Vec<_>>(),
             "group": self.selected_group.as_ref().filter(|_| self.selected.is_none() && self.selected_text.is_none() && self.multi.is_empty()).and_then(|gid| {
                 let r = p.root()?;
                 let g = r.groups.iter().find(|x| x.id == *gid)?;
@@ -4252,6 +4387,52 @@ pub fn anchor_poses(st: &mut crate::edit::State) {
         frames.dedup();
         for q in ps {
             key_at(q, &frames, fps, tw);
+        }
+    }
+}
+
+/// K2: one modifier for the app: kind, name, on, its settings; a plugin's
+/// settings with their kinds from its definition (missing: kept as they are).
+fn modifier_json(i: usize, m: &Modifier, fps: f64) -> J {
+    match &m.kind {
+        ModifierKind::Wiggle { frequency, amplitude, .. } => json!({"index": i, "kind": "wiggle", "name": "Wiggle", "enabled": m.enabled, "amount": amplitude, "speed": frequency}),
+        ModifierKind::Sine { frequency, amplitude, .. } => json!({"index": i, "kind": "swing", "name": "Swing", "enabled": m.enabled, "amount": amplitude, "speed": frequency}),
+        ModifierKind::Loop { mode, start, end } => json!({"index": i, "kind": "loop", "name": "Loop", "enabled": m.enabled, "start": (start * fps).round(), "end": (end * fps).round(), "pingPong": *mode == LoopMode::PingPong}),
+        ModifierKind::DelayFollow { .. } => json!({"index": i, "kind": "follow", "name": "Follow", "enabled": m.enabled}),
+        ModifierKind::Link { .. } => json!({"index": i, "kind": "link", "name": "Link", "enabled": m.enabled}),
+        ModifierKind::Plugin { id, version, props } => {
+            use barkfart_script::{PropKind as K, PropValue as P};
+            let def = crate::plugins::definition(id);
+            let off = crate::plugins::list().into_iter().find(|x| x.def.id == *id).and_then(|x| x.off);
+            let value = |v: &P| match v {
+                P::Number(n) => json!(n),
+                P::Toggle(b) => json!(b),
+                P::Text(t) => json!(t),
+                P::Colour(c) => json!(c),
+                P::Point(x, y) => json!([x, y]),
+            };
+            let settings: Vec<J> = match &def {
+                Some(d) => d
+                    .props
+                    .iter()
+                    .map(|pd| {
+                        let now = props.iter().find(|(n, _)| *n == pd.name).map(|(_, v)| v.clone()).unwrap_or_else(|| crate::plugins::default_value(&pd.kind));
+                        let (kind, extra) = match &pd.kind {
+                            K::Number { min, max, step, .. } => ("number", json!({"min": min, "max": max, "step": step})),
+                            K::Angle { .. } => ("angle", json!({})),
+                            K::Toggle { .. } => ("toggle", json!({})),
+                            K::Colour { .. } => ("colour", json!({})),
+                            K::Choice { options, .. } => ("choice", json!({"options": options})),
+                            K::Text { .. } => ("text", json!({})),
+                            K::Point { .. } => ("point", json!({})),
+                        };
+                        json!({"name": pd.name, "label": pd.label.clone().unwrap_or_else(|| pd.name.clone()), "kind": kind, "value": value(&now), "extra": extra})
+                    })
+                    .collect(),
+                None => Vec::new(),
+            };
+            json!({"index": i, "kind": "plugin", "id": id, "version": version, "name": def.as_ref().map(|d| d.name.clone()).unwrap_or_else(|| id.clone()),
+                "author": def.as_ref().and_then(|d| d.author.clone()), "missing": def.is_none(), "off": off, "enabled": m.enabled, "settings": settings})
         }
     }
 }

@@ -699,6 +699,10 @@ pub enum ModifierKind {
     DelayFollow { source: String, delay: f64, scale: f32, offset: f32 },
     /// source(t) * scale + offset.
     Link { source: String, scale: f32, offset: f32 },
+    /// K2: a plugin modifier (SCRIPTING.md): its id, the version it was
+    /// added with, and its settings by name (a choice by its option's name).
+    /// Missing or switched off, the value passes through unchanged.
+    Plugin { id: String, version: String, props: Vec<(String, barkfart_script::PropValue)> },
 }
 
 #[derive(Clone, Debug, PartialEq)]

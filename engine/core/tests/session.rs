@@ -2120,6 +2120,8 @@ fn toggle_rows() -> Vec<(&'static str, Option<Value>, Value, Value)> {
         ("group opacity", Some(json!({"op": "group", "layers": ["L2"]})), json!({"op": "group_set", "opacity": 0.5}), json!({"op": "group_set", "opacity": 1.0})),
         ("group glow amount", Some(json!({"op": "group", "layers": ["L2"]})), json!({"op": "filter", "glowAmount": 0.7}), json!({"op": "filter", "glowAmount": 0.0})),
         ("group blur kept while off", Some(json!([{"op": "group", "layers": ["L2"]}, {"op": "filter", "blur": 6}])), json!({"op": "filter", "blur": 0}), json!({"op": "filter", "blur": 6})),
+        // K2: a value's modifier switched off and on
+        ("value swing", Some(json!({"op": "modifier_add", "property": "L2/armR1/rotation", "kind": "swing"})), json!({"op": "modifier_set", "property": "L2/armR1/rotation", "index": 0, "enabled": false}), json!({"op": "modifier_set", "property": "L2/armR1/rotation", "index": 0, "enabled": true})),
     ]
 }
 
@@ -2244,6 +2246,8 @@ fn every_command_undoes_and_redoes_exactly() {
         json!({"op": "ungroup"}), json!({"op": "delete_group"}), json!({"op": "filter", "glow": 0xffc83dffu32, "glowAmount": 1.0, "_group": true}),
         // D34: the graph's one-value handles and Add a value
         json!({"op": "handles", "v": "vector", "frame": 1, "property": "L2/armR1/rotation"}), json!({"op": "curve_add", "property": "L2/opacity"}),
+        // K2: a value's modifiers
+        json!({"op": "modifier_add", "property": "L2/armR1/rotation", "kind": "wiggle"}),
     ];
     let text = |s: &Session| codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
     let mut failures = Vec::new();
