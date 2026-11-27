@@ -1420,6 +1420,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           // mswipe: the same with the mouse's left button
           final v = [for (final x in w.sublist(1)) double.parse(x)];
           await _realSwipe(Offset(v[0], v[1]), Offset(v[2], v[3]), holdMs: v.length > 4 ? v[4].round() : 0, mouse: w[0] == 'mswipe');
+        case 'pinch':
+          // real two-finger touches: pinch x y fromGap toGap (window points)
+          final v = [for (final x in w.sublist(1)) double.parse(x)];
+          await _realPinch(Offset(v[0], v[1]), v[2], v[3]);
+          debugPrint('script: zoom ${_cellW.toStringAsFixed(1)} curveScroll ${_curveScroll.toStringAsFixed(1)} frame $_frame');
         case 'pan':
           final from = Offset(_view.size.width - 30, _view.size.height - 30);
           await _fakeDrag(from, from + Offset(double.parse(w[1]), double.parse(w[2])));
@@ -1632,6 +1637,27 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   /// Scripted: one finger down at `a`, held `holdMs`, moved to `b` in small
   /// steps and lifted, sent as real touch events (the gesture arena decides).
+  Future<void> _realPinch(Offset c, double from, double to) async {
+    final g = GestureBinding.instance;
+    Offset at(int side, double gap) => c + Offset(side * gap / 2, 0);
+    for (final (id, side) in [(921, -1), (922, 1)]) {
+      g.handlePointerEvent(PointerDownEvent(pointer: id, position: at(side, from), kind: PointerDeviceKind.touch, buttons: kTouchContact));
+    }
+    const steps = 14;
+    for (var i = 1; i <= steps; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+      final gap = from + (to - from) * i / steps;
+      for (final (id, side) in [(921, -1), (922, 1)]) {
+        g.handlePointerEvent(PointerMoveEvent(pointer: id, position: at(side, gap), kind: PointerDeviceKind.touch, buttons: kTouchContact));
+      }
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 16));
+    for (final (id, side) in [(921, -1), (922, 1)]) {
+      g.handlePointerEvent(PointerUpEvent(pointer: id, position: at(side, to), kind: PointerDeviceKind.touch));
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  }
+
   Future<void> _realSwipe(Offset a, Offset b, {int holdMs = 0, bool mouse = false}) async {
     final g = GestureBinding.instance;
     const id = 913;
@@ -5585,6 +5611,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   String? _curveDrag; // key, left, right or scroll
   Offset _curveFrom = Offset.zero;
   double _curveScrollFrom = 0;
+  Offset? _curveDownAt; // where the finger went down (a drag starts there, not past the slop)
+  int _curvePointers = 0;
+  double? _curvePinchCell; // the zoom when a pinch began
+  double _curvePinchAnchor = 0; // the frame under the pinch
   _CurveGeom? _curveGeom;
 
   static const _curveColours = [Color(0xFFD9482B), Color(0xFF2E8B57), Color(0xFFC28A00), Color(0xFF2D63E0), Color(0xFF9A6BD0), Color(0xFF0E9AA7), Color(0xFFB3446C)];
@@ -5702,14 +5732,57 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       );
       _curveGeom = geom;
       return Stack(children: [
-        GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapUp: (d) => _curveTap(geom, d.localPosition),
-          onPanStart: (d) => _curvePanStart(geom, d.localPosition),
-          onPanUpdate: (d) => _curvePanUpdate(d.localPosition),
-          onPanEnd: (_) => _curvePanEnd(),
-          onPanCancel: _curvePanEnd,
-          child: CustomPaint(size: Size(box.maxWidth, h), painter: _CurvesPainter(geom, colours, _frame, _curveKey, fps: _fps.round().clamp(1, 240))),
+        // the same hands as the timeline: drag the ruler to scrub, pinch to
+        // zoom, wheel to scroll (Ctrl + wheel zooms); one finger elsewhere
+        // moves a key or a handle, or scrolls
+        Listener(
+          onPointerDown: (e) {
+            _curvePointers++;
+            if (_curvePointers == 1) _curveDownAt = e.localPosition;
+          },
+          onPointerUp: (_) => _curvePointers = math.max(0, _curvePointers - 1),
+          onPointerCancel: (_) => _curvePointers = math.max(0, _curvePointers - 1),
+          onPointerSignal: (e) {
+            if (e is! PointerScrollEvent) return;
+            if (HardwareKeyboard.instance.isControlPressed) {
+              _curveZoom(_cellW * (e.scrollDelta.dy > 0 ? 1 / 1.15 : 1.15), e.localPosition.dx);
+            } else {
+              _setCurveScroll(_curveScroll + (e.scrollDelta.dx != 0 ? e.scrollDelta.dx : e.scrollDelta.dy));
+            }
+          },
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapUp: (d) => _curveTap(geom, d.localPosition),
+            onScaleStart: (d) {
+              if (d.pointerCount >= 2) {
+                _curvePinchStart(d.localFocalPoint);
+              } else {
+                _curvePanStart(geom, _curveDownAt ?? d.localFocalPoint);
+              }
+            },
+            onScaleUpdate: (d) {
+              if (d.pointerCount >= 2) {
+                // a second finger mid-drag: the drag ends, the pinch begins
+                if (_curvePinchCell == null) {
+                  _curvePanEnd();
+                  _curvePinchStart(d.localFocalPoint);
+                }
+                _curveZoom(_curvePinchCell! * d.horizontalScale, d.localFocalPoint.dx, anchor: _curvePinchAnchor);
+                return;
+              }
+              if (_curvePinchCell != null) return; // a finger left over from a pinch
+              _curvePanUpdate(d.localFocalPoint);
+            },
+            onScaleEnd: (_) {
+              if (_curvePinchCell != null) {
+                _curvePinchCell = null;
+                _curveDrag = null;
+                return;
+              }
+              _curvePanEnd();
+            },
+            child: CustomPaint(size: Size(box.maxWidth, h), painter: _CurvesPainter(geom, colours, _frame, _curveKey, fps: _fps.round().clamp(1, 240))),
+          ),
         ),
         if (chans.isEmpty)
           Positioned.fill(
@@ -5833,6 +5906,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   void _curvePanStart(_CurveGeom g, Offset p) {
     _curveFrom = p;
+    if (p.dy < _CurveGeom.rulerH) {
+      // the ruler scrubs, as on the timeline
+      if (_playing) _togglePlay();
+      _curveDrag = 'scrub';
+      _scrubTo(g.frameAt(p.dx));
+      return;
+    }
     final part = p.dy >= _CurveGeom.rulerH ? _curveHandleAt(g, p) : null;
     final hit = part == null && p.dy >= _CurveGeom.rulerH ? _curveKeyAt(g, p) : null;
     if (part == null && hit == null) {
@@ -5853,9 +5933,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   void _curvePanUpdate(Offset p) {
     final g = _curveGeom;
     final d = p - _curveFrom;
+    if (_curveDrag == 'scrub') {
+      if (g != null) _scrubTo(g.frameAt(p.dx));
+      return;
+    }
     if (_curveDrag == 'scroll' || g == null) {
-      final most = math.max(0.0, 16 + _frames * _cellW - (g?.size.width ?? 0));
-      setState(() => _curveScroll = (_curveScrollFrom - d.dx).clamp(0.0, most));
+      _setCurveScroll(_curveScrollFrom - d.dx);
       return;
     }
     if (_curveDrag == null) return;
@@ -5865,8 +5948,30 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   void _curvePanEnd() {
-    if (_curveDrag != null && _curveDrag != 'scroll') _cmd({'op': 'up'});
+    if (_curveDrag != null && _curveDrag != 'scroll' && _curveDrag != 'scrub') _cmd({'op': 'up'});
     _curveDrag = null;
+    _curveDownAt = null;
+  }
+
+  void _setCurveScroll(double v) {
+    final w = _curveGeom?.size.width ?? 0;
+    final most = math.max(0.0, 16 + _frames * _cellW - w);
+    setState(() => _curveScroll = v.clamp(0.0, most));
+  }
+
+  void _curvePinchStart(Offset focal) {
+    _curvePinchCell = _cellW;
+    _curvePinchAnchor = (focal.dx + _curveScroll - _CurveGeom.left - _cellW / 2) / _cellW;
+    _curveDrag = 'pinch';
+  }
+
+  /// Zooms the graph (the same zoom as the timeline's) keeping the frame
+  /// `anchor` (by default the one under x) under x.
+  void _curveZoom(double cell, double x, {double? anchor}) {
+    final at = anchor ?? (x + _curveScroll - _CurveGeom.left - _cellW / 2) / _cellW;
+    final next = cell.clamp(14.0, 112.0).toDouble();
+    setState(() => _cellW = next);
+    _setCurveScroll(_CurveGeom.left + at * next + next / 2 - x);
   }
 
   /// The bottom bar while Curves is open: the selected key's handles, Fit,
