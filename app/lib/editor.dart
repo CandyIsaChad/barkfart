@@ -1845,7 +1845,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             top: 44 + pad.top,
             right: leftHand ? null : 64 + pad.right + 6,
             left: leftHand ? 64 + pad.left + 6 : null,
-            bottom: 8 + pad.bottom,
+            bottom: ((_selPoseKeys.isNotEmpty || _selPropKeys.isNotEmpty) && _layersOpen && !_playing ? 46 : 8) + pad.bottom,
             width: _floatingCardWidth(screen, big),
             child: _slideIn(showFloatingProps ? KeyedSubtree(key: const ValueKey('props'), child: _propertiesCard()) : null, fromRight: !leftHand),
           ),
@@ -2788,7 +2788,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         behavior: HitTestBehavior.translucent,
         onPointerDown: (e) {
           final now = DateTime.now();
-          final quick = now.difference(_lastDown) < const Duration(milliseconds: 350) && (e.localPosition - _lastDownAt).distance < 28;
+          final quick = now.difference(_lastDown) < const Duration(milliseconds: 450) && (e.localPosition - _lastDownAt).distance < 28;
           _taps = quick ? _taps + 1 : 1;
           _lastDown = now;
           _lastDownAt = e.localPosition;
@@ -3484,12 +3484,17 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       if (hitPoses.isNotEmpty || hitProps.isNotEmpty || hitLayers.isNotEmpty) _frameSelected = false;
     });
 
+    final screen = MediaQuery.sizeOf(context);
+    final compactPhone = screen.shortestSide <= 600 && screen.height < 500;
+    final hasKeys = hitPoses.isNotEmpty || hitProps.isNotEmpty;
     if (hitFigures.length > 1) {
       _cmd({'op': 'select_many', 'layers': hitFigures});
-      setState(() => _panelOpen = true);
+      setState(() => _panelOpen = !(compactPhone && hasKeys));
     } else if (hitLayers.length == 1) {
       _cmd({'op': 'select', 'layer': hitLayers.first});
-      setState(() => _panelOpen = true);
+      setState(() => _panelOpen = !(compactPhone && hasKeys));
+    } else if (compactPhone && hasKeys) {
+      setState(() => _panelOpen = false);
     }
   }
 
@@ -5043,8 +5048,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         final tween = _st['tweening'] == true;
         final n = (_st['tweenedFrames'] as num?)?.toInt() ?? 5;
         final rate = (_st['rate'] as num?)?.toDouble() ?? _fps;
+        // On short landscape screens (e.g. 844x390 phone), lay out in two columns
+        // so all rows stay visible without clipping or covering the top bar.
+        final wideCompact = screen.height < 500 && screen.width >= 600;
         final leftRows = <rw.Desc>[
-          rw.DStep('Frames per second', _fpsLabel, onMinus: _fps > 1 ? () => cmd({'op': 'fps', 'v': _fps - 1}) : null, onPlus: () => cmd({'op': 'fps', 'v': _fps + 1})),
+          rw.DStep(wideCompact ? 'Frame rate' : 'Frames per second', _fpsLabel, onMinus: _fps > 1 ? () => cmd({'op': 'fps', 'v': _fps - 1}) : null, onPlus: () => cmd({'op': 'fps', 'v': _fps + 1})),
           rw.DTick('Tweening', tween, onChanged: (v) => cmd({'op': 'animation', 'tweening': v})),
           rw.DStep('Extra smoothness', '$n', onMinus: tween && n > 0 ? () => cmd({'op': 'animation', 'tweened': n - 1}) : null, onPlus: tween ? () => cmd({'op': 'animation', 'tweened': n + 1}) : null),
           rw.DTick('Loop back to the start', _st['loopTween'] == true, onChanged: tween ? (v) => cmd({'op': 'animation', 'loop': v}) : null),
@@ -5064,14 +5072,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               ? 'In-between pictures added between frames when playing and exporting (${rate.round()} a second). Your poses stay the same.'
               : 'Each frame shows for 1/${_fps.round()} s. Tweening on adds in-between pictures; your poses stay the same.'),
         ];
-        // On short landscape screens (e.g. 844x390 phone), lay out in two columns
-        // so all rows stay visible without clipping or covering the top bar.
-        final wideCompact = screen.height < 500 && screen.width >= 600;
         final topMin = MediaQuery.paddingOf(c).top + 44;
         return Stack(children: [
           kit.Anchored(
             anchor: anchor,
-            width: wideCompact ? math.min(540.0, screen.width - 24) : 320,
+            width: wideCompact ? math.min(560.0, screen.width - 24) : 320,
             alignRight: true,
             topMin: anchor.top > topMin + 110 ? topMin : 0,
             card: (w) => kit.PanelCard(
@@ -5080,9 +5085,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               child: wideCompact
                   ? Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                       Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Expanded(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [for (final d in leftRows) rw.renderDesc(d)])),
+                        Expanded(flex: 11, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [for (final d in leftRows) rw.renderDesc(d)])),
                         const SizedBox(width: 14),
-                        Expanded(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [for (final d in rightRows) rw.renderDesc(d)])),
+                        Expanded(flex: 10, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [for (final d in rightRows) rw.renderDesc(d)])),
                       ]),
                     ])
                   : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
