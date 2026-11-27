@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       runner:
-        description: "macOS runner (macos-15-intel, macos-15, macos-14)"
-        default: macos-15-intel
+        description: "macOS runner (macos-15, macos-14, macos-15-intel)"
+        default: macos-15
 
 jobs:
   build:
-    runs-on: ${{ inputs.runner || 'macos-15-intel' }}
+    runs-on: ${{ inputs.runner || 'macos-15' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +46,20 @@ jobs:
           cp -R build/ios/iphoneos/Runner.app out/Payload/
           cd out && zip -qr "$name" Payload
           ls -l "$name"
+      - name: Check the IPA opens as an app
+        working-directory: app/out
+        run: |
+          ipa=$(ls *.ipa)
+          file "$ipa"
+          zip -T "$ipa"
+          unzip -l "$ipa" | head -8
+          rm -rf check && mkdir check && cd check && unzip -q "../$ipa"
+          test -f Payload/Runner.app/Info.plist || { echo "no Payload/Runner.app/Info.plist"; exit 1; }
+          plutil -lint Payload/Runner.app/Info.plist
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' -c 'Print :CFBundleExecutable' -c 'Print :CFBundleShortVersionString' Payload/Runner.app/Info.plist
+          file Payload/Runner.app/Runner
+          lipo -info Payload/Runner.app/Runner
+          du -sh Payload/Runner.app
       # The .ipa goes up as it is, not inside a zip: GitHub's streamed artifact
       # zip would not open in iOS Files ("Bad message"), and the download is
       # now the .ipa itself (artifact named after the file).
