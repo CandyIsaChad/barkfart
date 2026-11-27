@@ -100,9 +100,9 @@ fn live_timeline_drag_updates_stage_in_flight_commits_once_and_cancels_cleanly()
     // Cancel rolls back live changes and restores original frame
     s.command(&json!({"op": "frame", "i": 2}));
     s.command(&json!({"op": "timeline_drag_start", "kind": "pose_key", "layer": "L2", "frame": 2}));
-    // Cross over occupied frame 3 -> should keep valid state when on 3, then succeed on 5
+    // Cross over occupied frame 3 -> silently hold previous valid state (no toast spam), then succeed on 5
     let over = s.command(&json!({"op": "timeline_drag_move", "to": 3}));
-    assert!(!over["message"].as_str().unwrap_or("").is_empty());
+    assert_eq!(over["message"], "", "no mid-drag toast spam over occupied frames");
     let across = s.command(&json!({"op": "timeline_drag_move", "to": 5}));
     assert_eq!(across["frames"], 6);
     assert_eq!(l2_frames(&s), vec![0, 3, 5]);

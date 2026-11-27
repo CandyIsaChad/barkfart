@@ -2546,9 +2546,8 @@ impl Session {
                                         }
                                         self.rev += 1;
                                     }
-                                    Err(e) => {
-                                        // Keep previous valid preview state when crossing occupied frames
-                                        self.message = e.0;
+                                    Err(_) => {
+                                        // Silently hold previous valid preview state when crossing occupied frames mid-drag
                                     }
                                 }
                             }
