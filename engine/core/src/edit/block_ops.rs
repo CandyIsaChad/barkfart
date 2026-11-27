@@ -81,13 +81,19 @@ pub fn shown_at(l: &Layer, frame: i32, fps: f64) -> bool {
 }
 
 fn set_shown_range(l: &mut Layer, from: i32, to: i32, fps: f64, want: bool) {
-    if matches!(l.kind, LayerKind::Camera(_)) {
+    if matches!(l.kind, LayerKind::Camera(_)) || from >= to {
         return;
     }
+    // what `to` shows now: the range's keys hold on past it, so it gets its
+    // own key back (review, 2026-11-28: a moved block stayed shown after it)
+    let after = shown_at(l, to, fps);
     for f in from..to {
         if shown_at(l, f, fps) != want {
             l.shown.track.put(Key::new(f as f64 / fps, Value::B(want), Interp::Hold));
         }
+    }
+    if shown_at(l, to, fps) != after {
+        l.shown.track.put(Key::new(to as f64 / fps, Value::B(after), Interp::Hold));
     }
 }
 
@@ -256,7 +262,14 @@ fn others_last(st: &State, sym: &str, id: &str, fps: f64, n: i32) -> i32 {
                 .filter(|x| x.id != id && matches!(x.kind, LayerKind::Figure(_) | LayerKind::Sprite(_) | LayerKind::Symbol(_) | LayerKind::Text(_) | LayerKind::Adjustment))
                 .filter_map(|x| {
                     let last_pose = pose_frames(x, fps).into_iter().filter(|&f| shown_at(x, f, fps)).last();
-                    let last_shown = (0..n.max(1)).rev().find(|&f| shown_at(x, f, fps));
+                    // a layer merely shown on through the end isn't holding it
+                    // (review, 2026-11-28): only a shown run that ends before
+                    // the end counts, or any shown frame of a layer with no poses
+                    let last_shown = if pose_frames(x, fps).is_empty() {
+                        (0..n.max(1)).rev().find(|&f| shown_at(x, f, fps))
+                    } else {
+                        (0..n - 1).rev().find(|&f| shown_at(x, f, fps) && !shown_at(x, f + 1, fps))
+                    };
                     match (last_pose, last_shown) {
                         (Some(a), Some(b)) => Some(a.max(b)),
                         (a, b) => a.or(b),
@@ -467,6 +480,17 @@ pub fn extend_to(st: &mut State, sym: &str, id: &str, target_frame: i32) -> Edit
 /// Moves the block under `frame` so it starts on `to`, between the poses
 /// before and after it (blocks do not pass each other).
 pub fn move_block(st: &mut State, sym: &str, id: &str, frame: i32, to: i32) -> EditResult<()> {
+    move_block_ex(st, sym, id, frame, to, false)
+}
+
+/// The left grip: the pose starts at `to`, its end stays (a block on its
+/// own, hidden before and after, grows or shrinks from the left; in a run of
+/// poses the key moves, which is the same thing).
+pub fn move_block_start(st: &mut State, sym: &str, id: &str, frame: i32, to: i32) -> EditResult<()> {
+    move_block_ex(st, sym, id, frame, to, true)
+}
+
+fn move_block_ex(st: &mut State, sym: &str, id: &str, frame: i32, to: i32, keep_end: bool) -> EditResult<()> {
     let fps = fps(st);
     let n = frame_count(st);
     let vis_info = {
@@ -506,11 +530,23 @@ pub fn move_block(st: &mut State, sym: &str, id: &str, frame: i32, to: i32) -> E
             .map(|(_, _, vl, _)| (vl, start + vl >= n || !shown_at(l, start + vl, fps)))
             .filter(|(_, after_off)| *after_off)
             .map(|(vl, _)| vl);
+        if keep_end && isolated.is_some_and(|vl| to > start + vl - 1) {
+            return fail("A pose lasts at least one frame.");
+        }
         if has_key {
             retime(l, fps, |fr| if fr == start { to } else { fr });
         }
         isolated.map(|vl| (start, vl))
     };
+    if let (true, Some((start, _))) = (keep_end, vis_info) {
+        let l = layer(st, sym, id)?;
+        if to < start {
+            set_shown_range(l, to, start, fps, true);
+        } else {
+            set_shown_range(l, start, to, fps, false);
+        }
+        return Ok(());
+    }
     if let Some((start, vl)) = vis_info {
         ensure_length(st, to + vl);
         let new_n = frame_count(st);

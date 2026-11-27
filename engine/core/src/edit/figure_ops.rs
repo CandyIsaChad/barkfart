@@ -18,9 +18,9 @@ fn copy_looks(from: &Node, to: &mut Node) {
     to.is_static = from.is_static;
     to.stretchy = from.stretchy;
     to.gradient = from.gradient;
-    to.gradient_reverse = from.gradient_reverse;
-    to.gradient_sideways = from.gradient_sideways;
-    to.gradient_linear = from.gradient_linear;
+    // the gradient as it draws: a copy has no Stick Nodes extras to read
+    // the raw flags through (review, 2026-11-28)
+    (to.gradient_reverse, to.gradient_sideways, to.gradient_linear) = from.effective_gradient();
     to.circle_hollow = from.circle_hollow;
     to.circle_outline = from.circle_outline;
     to.half_arc = from.half_arc;

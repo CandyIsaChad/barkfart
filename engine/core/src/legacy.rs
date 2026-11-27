@@ -842,7 +842,8 @@ pub fn to_legacy(layer: &Layer) -> R<LegacyFigure> {
         if ln.fields.contains_key("reverseGradient") && (ln.i("reverseGradient") != 0) != legacy_reverse {
             ln.fields.insert("reverseGradient".into(), LV::I(legacy_reverse as i32));
         }
-        if ln.fields.contains_key("gradientMode") && (ln.i("gradientMode") == 1) != n.gradient_sideways {
+        // a node with Stick Nodes' own mode keeps it (set_effective_gradient keeps it current)
+        if !n.legacy_extras.contains_key("L.gradientMode") && ln.fields.contains_key("gradientMode") && (ln.i("gradientMode") == 1) != n.gradient_sideways {
             ln.fields.insert("gradientMode".into(), LV::I(n.gradient_sideways as i32));
         }
         sync_flag(&mut ln, "static", n.is_static);

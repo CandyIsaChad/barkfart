@@ -144,6 +144,9 @@ pub struct Group {
     pub blend: Blend,
     /// Adjustment layers: effects apply to everything before this group.
     pub adjustment: bool,
+    /// A layer group with a blend: composited as one picture with that blend
+    /// (a single layer's blend goes on each of its shapes, as Stick Nodes does).
+    pub whole: bool,
     /// Optional explicit world-space bounds `[min_x, min_y, max_x, max_y]`
     /// (used to clip Adjustment layers to the camera shot in stage view).
     pub bounds: Option<[f32; 4]>,
@@ -153,7 +156,7 @@ pub struct Group {
 
 impl Group {
     pub fn new(source: impl Into<String>) -> Group {
-        Group { source: source.into(), opacity: 1.0, blend: Blend::Normal, adjustment: false, bounds: None, effects: Vec::new(), children: Vec::new() }
+        Group { source: source.into(), opacity: 1.0, blend: Blend::Normal, adjustment: false, whole: false, bounds: None, effects: Vec::new(), children: Vec::new() }
     }
 }
 

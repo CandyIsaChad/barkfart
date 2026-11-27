@@ -270,7 +270,8 @@ pub fn layered(scene: &Scene, glyphs: Option<&dyn GlyphSource>) -> DrawList {
 }
 
 pub fn isolates(g: &Group) -> bool {
-    g.adjustment || g.opacity < 1.0 || g.effects.iter().any(|e| e.mix > 0.0)
+    // a layer group with a blend blends as one picture, at any opacity
+    g.adjustment || g.whole || g.opacity < 1.0 || g.effects.iter().any(|e| e.mix > 0.0)
 }
 
 fn layered_walk(g: &Group, opacity: f32, blend: Blend, out: &mut DrawList, is_root: bool, glyphs: Option<&dyn GlyphSource>) {

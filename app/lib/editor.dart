@@ -2622,7 +2622,20 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       final meta = _thumbInFlight.remove(res.tag);
       if (meta == null) continue;
       _thumbPendingKeys.remove('${meta.kind}:${meta.key}');
-      if (meta.rev != curRev) continue;
+      if (res.w == 0 || res.h == 0) continue; // the engine couldn't draw it
+      if (meta.rev != curRev) {
+        // drawn for an older edit: ask again (its new request was skipped
+        // while this one was on its way)
+        switch (meta.kind) {
+          case 0:
+            if (int.tryParse(meta.key) case final i?) _thumbDirty.add(i);
+          case 1:
+            _rowPicDirty.add(meta.key);
+          case 2:
+            _groupDirty.add(meta.key);
+        }
+        continue;
+      }
       ui.decodeImageFromPixels(res.rgba, res.w, res.h, ui.PixelFormat.rgba8888, (img) {
         if (!mounted) {
           img.dispose();
@@ -2678,7 +2691,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       }
     }
     final sw = (_st['w'] as num).toDouble(), sh = (_st['h'] as num).toDouble();
-    final w = (120 * math.min(_dpr, 2.0)).round(), h = math.max(1, (w * sh / sw).round());
+    // the engine draws thumbnails up to 2048 a side: a very tall canvas
+    // gets a narrower one, same shape
+    var w = (120 * math.min(_dpr, 2.0)).round(), h = math.max(1, (w * sh / sw).round());
+    if (h > 2048) {
+      h = 2048;
+      w = math.max(1, (h * sw / sh).round());
+    }
     while (_thumbDirty.isNotEmpty && _thumbInFlight.length < _thumbMaxInFlight) {
       final i = _thumbDirty.reduce((a, b) => (a - _frame).abs() <= (b - _frame).abs() ? a : b);
       _thumbDirty.remove(i);

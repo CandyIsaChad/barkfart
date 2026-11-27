@@ -97,8 +97,7 @@ pub fn break_apart(st: &mut State, sym: &str, inst: &str, t: f64) -> EditResult<
                     m.triangle_upside_down = n.triangle_upside_down;
                     m.right_triangle = n.right_triangle;
                     m.gradient = n.gradient;
-                    m.gradient_reverse = n.gradient_reverse;
-                    m.gradient_sideways = n.gradient_sideways;
+                    (m.gradient_reverse, m.gradient_sideways, m.gradient_linear) = n.effective_gradient();
                     m.is_static = n.is_static;
                     m.stretchy = n.stretchy;
                     m.smart_stretch = n.smart_stretch;
@@ -114,7 +113,6 @@ pub fn break_apart(st: &mut State, sym: &str, inst: &str, t: f64) -> EditResult<
                     m.angle_lock = n.angle_lock;
                     m.drag_lock = n.drag_lock;
                     m.pinned = n.pinned;
-                    m.gradient_linear = n.gradient_linear;
                     m.rotation.value = r.resolve(&n.rotation, inner);
                     m.length.value = r.resolve(&n.length, inner);
                     m.thickness.value = r.resolve(&n.thickness, inner);

@@ -106,3 +106,72 @@ fn a_moved_filter_stays_where_it_was_put() {
     s.command(&json!({"op": "filter", "glow": 0.5}));
     assert_eq!(order(&s)[0], "filter.blur", "{:?}", order(&s));
 }
+
+fn shown(s: &Session, id: &str) -> Vec<i32> {
+    let p = s.project();
+    let fps = p.settings.fps as f64;
+    let l = p.root().unwrap().layer(id).unwrap();
+    (0..s.frame_count()).filter(|&f| barkfart_core::edit::block_ops::shown_at(l, f, fps)).collect()
+}
+
+/// A figure added on `frame` (shown there only) of an `n`-frame animation.
+fn added_on(n: i32, frame: i32) -> (Session, String) {
+    let mut s = Session::new(Document::new(new_editor_project()));
+    for _ in 1..n {
+        s.command(&json!({"op": "insert_frame"}));
+    }
+    s.command(&json!({"op": "frame", "i": frame}));
+    let st = s.command(&json!({"op": "add_figure"}));
+    let id = st["selected"]["layer"].as_str().unwrap().to_string();
+    assert_eq!(shown(&s, &id), [frame]);
+    (s, id)
+}
+
+#[test]
+fn a_moved_block_is_shown_only_where_it_went() {
+    let (mut s, x) = added_on(8, 3);
+    // Add time on the last frame: no keys on the new frames, x's last
+    // hidden key holds across them
+    s.command(&json!({"op": "frame", "i": 7}));
+    s.command(&json!({"op": "add_time", "n": 12}));
+    assert_eq!(s.frame_count(), 20);
+    assert_eq!(shown(&s, &x), [3]);
+    s.command(&json!({"op": "frame", "i": 3}));
+    s.command(&json!({"op": "select", "layer": x}));
+    s.command(&json!({"op": "move_block", "layer": x, "to": 12}));
+    assert_eq!(shown(&s, &x), [12], "not on every frame after it");
+}
+
+#[test]
+fn the_left_grip_resizes_a_block_on_its_own() {
+    let (mut s, x) = added_on(10, 5);
+    s.command(&json!({"op": "extend_to", "layer": x, "frame": 9}));
+    assert_eq!(shown(&s, &x), (5..10).collect::<Vec<_>>());
+    s.command(&json!({"op": "timeline_drag_start", "kind": "block_start", "layer": x, "frame": 5}));
+    s.command(&json!({"op": "timeline_drag_move", "to": 2}));
+    s.command(&json!({"op": "up"}));
+    assert_eq!(shown(&s, &x), (2..10).collect::<Vec<_>>(), "its end stays on frame 10");
+    assert_eq!(s.frame_count(), 10);
+    s.command(&json!({"op": "timeline_drag_start", "kind": "block_start", "layer": x, "frame": 2}));
+    s.command(&json!({"op": "timeline_drag_move", "to": 7}));
+    s.command(&json!({"op": "up"}));
+    assert_eq!(shown(&s, &x), (7..10).collect::<Vec<_>>());
+    assert_eq!(s.frame_count(), 10, "the animation keeps its length");
+}
+
+#[test]
+fn shortening_a_pose_gives_frames_back_with_another_figure_there() {
+    let mut s = Session::new(Document::new(new_editor_project()));
+    for _ in 0..4 {
+        s.command(&json!({"op": "insert_frame"}));
+    }
+    s.command(&json!({"op": "select", "layer": "L2"}));
+    s.command(&json!({"op": "duplicate_figure"}));
+    s.command(&json!({"op": "select", "layer": "L2"}));
+    assert_eq!(s.frame_count(), 5);
+    s.command(&json!({"op": "frame", "i": 2}));
+    s.command(&json!({"op": "block_length", "frames": 3}));
+    assert_eq!(s.frame_count(), 7);
+    s.command(&json!({"op": "block_length", "frames": 1}));
+    assert_eq!(s.frame_count(), 5, "the two frames are given back");
+}

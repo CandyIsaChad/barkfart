@@ -396,6 +396,7 @@ fn eval_symbol<'p>(ctx: &mut Ctx<'p>, w: Work<'p>, stack: &mut Vec<Work<'p>>, on
                     let mut gg = Group::new(format!("{}/{}", sym.id, lg.id));
                     gg.opacity = lg.opacity.clamp(0.0, 1.0);
                     gg.blend = lg.blend;
+                    gg.whole = lg.blend != crate::model::Blend::Normal;
                     resolve_stack(&lg.effects, t, &mut ctx.r, &mut gg);
                     let into = ctx.group_at(&w.into);
                     into.children.push(Item::Group(gg));

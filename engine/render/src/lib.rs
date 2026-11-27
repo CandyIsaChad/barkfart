@@ -1167,6 +1167,7 @@ mod tests {
                 opacity: 1.0,
                 blend: Blend::Normal,
                 adjustment: false,
+                whole: false,
                 bounds: None,
                 effects: vec![],
                 children: vec![
@@ -1177,6 +1178,7 @@ mod tests {
                         opacity,
                         blend: Blend::Normal,
                         adjustment: true,
+                        whole: false,
                         bounds: adj_bounds,
                         effects,
                         children: vec![],
@@ -1189,6 +1191,7 @@ mod tests {
                 opacity: 1.0,
                 blend: Blend::Normal,
                 adjustment: false,
+                whole: false,
                 bounds: None,
                 effects: vec![],
                 children: vec![Item::Group(Group {
@@ -1196,6 +1199,7 @@ mod tests {
                     opacity,
                     blend: Blend::Normal,
                     adjustment: false,
+                    whole: false,
                     bounds: None,
                     effects,
                     children: vec![s1, s2],

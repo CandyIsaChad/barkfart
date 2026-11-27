@@ -2734,7 +2734,8 @@ impl Session {
                                         let mut trial = snapshot.clone();
                                         let res = match kind {
                                             TimelineDragKind::BlockEnd => crate::edit::block_ops::set_block_length(&mut trial, &sym, &layer, frame, val),
-                                            TimelineDragKind::BlockStart | TimelineDragKind::BlockMove => crate::edit::block_ops::move_block(&mut trial, &sym, &layer, frame, val),
+                                            TimelineDragKind::BlockStart => crate::edit::block_ops::move_block_start(&mut trial, &sym, &layer, frame, val),
+                                            TimelineDragKind::BlockMove => crate::edit::block_ops::move_block(&mut trial, &sym, &layer, frame, val),
                                             TimelineDragKind::PoseKey => crate::edit::block_ops::move_pose_key(&mut trial, &sym, &layer, frame, val),
                                             TimelineDragKind::PropKey => match property.as_deref() {
                                                 Some(pid) => crate::edit::block_ops::move_prop_key(&mut trial, pid, frame, val),

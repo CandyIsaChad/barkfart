@@ -91,11 +91,15 @@ impl ThumbWorker {
                             _ => None,
                         }
                     }));
-                    if let Ok(Some(rgba)) = rendered {
-                        if let Ok(mut q) = lock.lock() {
-                            if !q.shutdown && job.gen == q.gen {
-                                q.ready.push_back(ThumbDone { gen: job.gen, tag: job.tag, w: job.w, h: job.h, rgba });
-                            }
+                    // every job answers: a failed one with an empty 0x0 picture,
+                    // so the app frees its slot (review, 2026-11-28)
+                    let done = match rendered {
+                        Ok(Some(rgba)) => ThumbDone { gen: job.gen, tag: job.tag, w: job.w, h: job.h, rgba },
+                        _ => ThumbDone { gen: job.gen, tag: job.tag, w: 0, h: 0, rgba: Vec::new() },
+                    };
+                    if let Ok(mut q) = lock.lock() {
+                        if !q.shutdown && job.gen == q.gen {
+                            q.ready.push_back(done);
                         }
                     }
                 }
@@ -111,7 +115,10 @@ impl ThumbWorker {
                 return;
             }
             if q.pending.len() >= 64 {
-                q.pending.pop_front();
+                // the oldest is dropped: it answers as failed
+                if let Some(old) = q.pending.pop_front() {
+                    q.ready.push_back(ThumbDone { gen: old.gen, tag: old.tag, w: 0, h: 0, rgba: Vec::new() });
+                }
             }
             let gen = q.gen;
             q.pending.push_back(ThumbJob { gen, tag, kind, project, t, w, h });
