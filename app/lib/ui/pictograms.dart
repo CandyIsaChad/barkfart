@@ -196,6 +196,8 @@ const _strokeIcons = <String, List<_Shape>>{
   'headonly': [_C(12.0, 12.0, 5.5, dashed: false)],
   'key': [_P(r'M12 4.8 19.2 12 12 19.2 4.8 12z', dashed: false)],
   'link': [_P(r'M10 14a3.5 3.5 0 0 0 5 0l3-3a3.5 3.5 0 0 0-5-5l-1 1', dashed: false), _P(r'M14 10a3.5 3.5 0 0 0-5 0l-3 3a3.5 3.5 0 0 0 5 5l1-1', dashed: false)],
+  'lock': [_R(5.0, 10.5, 14.0, 9.5, 2.0, dashed: false), _P(r'M8 10.5V7.8a4 4 0 0 1 8 0v2.7', dashed: false)],
+  'unlock': [_R(5.0, 10.5, 14.0, 9.5, 2.0, dashed: false), _P(r'M8 10.5V7.8a4 4 0 0 1 7.6-1.7', dashed: false)],
   'loop': [_P(r'M17.5 8A6.5 6.5 0 0 0 6 9', dashed: false), _P(r'M6.5 16a6.5 6.5 0 0 0 11.5-1', dashed: false), _P(r'M18 4.2v4h-4', dashed: false), _P(r'M6 19.8v-4h4', dashed: false)],
   'loopmod': [_P(r'M8.5 7.5A6 6 0 1 0 12 6', dashed: false), _P(r'm12 2.8 0 6.2-3.4-1.6', dashed: false)],
   'next': [_P(r'm9 5 7 7-7 7', dashed: false)],

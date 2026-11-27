@@ -2,9 +2,12 @@
 // one renderer draws every page (Stickfigure, Segment, Pose, Frame, Camera,
 // Text, Sound, View, Export, Settings, ...). Built-in tools and plugins use
 // the same descriptors.
+import 'dart:math' as math;
+
 import 'package:flutter/widgets.dart';
 
 import 'kit.dart';
+import 'pictograms.dart';
 import 'tokens.dart';
 
 /// One row of a page.
@@ -304,10 +307,11 @@ class PropertyPage extends StatelessWidget {
 /// A row that slides aside to show actions (Duplicate, Delete, Reset to N).
 /// The same gesture everywhere: layers, effects, keys, properties.
 class SwipeAction {
-  const SwipeAction(this.label, this.onTap, {this.danger = false});
+  const SwipeAction(this.label, this.onTap, {this.danger = false, this.icon});
   final String label;
   final VoidCallback onTap;
   final bool danger;
+  final String? icon;
 }
 
 class SwipeActions extends StatefulWidget {
@@ -324,14 +328,38 @@ class SwipeActions extends StatefulWidget {
 class _SwipeActionsState extends State<SwipeActions> {
   double get _w => widget.actionWidth;
   late double _dx = widget.initiallyOpen ? -_w * widget.actions.length : 0;
+  bool _dragging = false;
 
   double get _max => _w * widget.actions.length;
 
   @override
+  void didUpdateWidget(SwipeActions oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initiallyOpen != oldWidget.initiallyOpen) {
+      _dx = widget.initiallyOpen ? -_max : 0;
+    } else if (_dx < -_max) {
+      _dx = -_max;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onHorizontalDragStart: (_) => setState(() => _dragging = true),
       onHorizontalDragUpdate: (d) => setState(() => _dx = (_dx + d.delta.dx).clamp(-_max, 0)),
-      onHorizontalDragEnd: (_) => setState(() => _dx = _dx < -_max / 2 ? -_max : 0),
+      onHorizontalDragEnd: (d) {
+        final v = d.primaryVelocity ?? 0;
+        final open = v < -180 || (v <= 180 && _dx < -math.min(_max * 0.32, 36.0));
+        setState(() {
+          _dragging = false;
+          _dx = open ? -_max : 0;
+        });
+      },
+      onHorizontalDragCancel: () => setState(() {
+        _dragging = false;
+        _dx = _dx < -_max / 2 ? -_max : 0;
+      }),
       onSecondaryTap: () => setState(() => _dx = _dx == 0 ? -_max : 0), // right-click on Linux
       child: ClipRect(
         child: Stack(children: [
@@ -347,17 +375,29 @@ class _SwipeActionsState extends State<SwipeActions> {
                   child: Container(
                     width: _w,
                     alignment: Alignment.center,
+                    padding: const EdgeInsets.symmetric(horizontal: 3),
                     color: a.danger ? const Color(0xFFE5484D) : cControl,
-                    child: Text(a.label, maxLines: 1, overflow: TextOverflow.fade, softWrap: false, style: ink(_w < 90 ? 12 : 13, FontWeight.w700, a.danger ? cCard : cAccent)),
+                    child: a.icon != null && _w <= 56
+                        ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                            Pictogram(a.icon!, size: 14, color: a.danger ? cCard : cAccent),
+                            Text(a.label, maxLines: 1, overflow: TextOverflow.clip, softWrap: false, style: ink(9.5, FontWeight.w700, a.danger ? cCard : cAccent)),
+                          ])
+                        : Text(a.label, maxLines: 1, overflow: TextOverflow.fade, softWrap: false, style: ink(_w < 90 ? 12 : 13, FontWeight.w700, a.danger ? cCard : cAccent)),
                   ),
                 ),
             ]),
           ),
           AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
+            duration: _dragging ? Duration.zero : const Duration(milliseconds: 120),
             transform: Matrix4.translationValues(_dx, 0, 0),
             color: cCard,
-            child: widget.child,
+            child: _dx < -1
+                ? GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => setState(() => _dx = 0),
+                    child: AbsorbPointer(child: widget.child),
+                  )
+                : widget.child,
           ),
         ]),
       ),

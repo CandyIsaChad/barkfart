@@ -169,6 +169,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       }
     }
     await AppSettings.load();
+    final savedTh = AppSettings.values['timelineHeight'];
+    if (savedTh is num && savedTh > 0) _timelineHeight = savedTh.toDouble();
     e.command({'op': 'set', 'k': 'axis', 'v': AppSettings.flag('axisLock')});
     e.command({'op': 'set', 'k': 'path', 'v': AppSettings.values['motionPath'] != false});
     _refresh(e.command({'op': 'state'}));
@@ -281,9 +283,16 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   void _refresh(Map<String, dynamic>? st) {
     if (st == null) return;
     if (_soundPage && (st['selected']?['layer'] != _st['selected']?['layer'] || st['frame'] != _st['frame'] || st['frameSound'] == null)) _soundPage = false;
+    final hadSel = _st['selected'] != null || _st['textfield'] != null || _st['picture'] != null || _st['movieclip'] != null || _st['group'] != null || _st['script'] != null || _st['multi'] != null;
+    final hasSel = st['selected'] != null || st['textfield'] != null || st['picture'] != null || st['movieclip'] != null || st['group'] != null || st['script'] != null || st['multi'] != null;
     // another figure selected: once the finger is up, keep it clear of the card
     if (st['selected']?['layer'] != null && st['selected']?['layer'] != _st['selected']?['layer']) _wantClear = true;
-    setState(() => _st = st);
+    setState(() {
+      _st = st;
+      // On phones where the panel starts hidden with nothing selected, open it
+      // automatically once the user selects something.
+      if (!hadSel && hasSel && !_hidePanels) _panelOpen = true;
+    });
     if (_wantClear) WidgetsBinding.instance.addPostFrameCallback((_) => _keepSelectionClear());
     final m = st['message'] as String? ?? '';
     if (m.isNotEmpty) _say(m);
@@ -1318,7 +1327,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           // and slid, with "move") by dx
           final pose = _sel?['pose'] as Map?;
           if (pose != null) {
-            setState(() => _blockDrag = _BlockDrag('${_sel!['layer']}', (pose['start'] as num).toInt(), (pose['length'] as num).toInt(), _cellW, edge: w.length > 2 ? (w[2] == 'move' ? 1 : w[2] == 'start' ? 2 : 0) : 0)..dx = double.parse(w[1]));
+            final mode = w.length > 2 ? w[2] : 'end';
+            final edge = mode == 'move' ? 1 : mode == 'start' ? 2 : 0;
+            final kind = mode == 'move' ? 'pose_key' : mode == 'start' ? 'block_start' : 'block_end';
+            _startTimelineDrag(_BlockDrag('${_sel!['layer']}', (pose['start'] as num).toInt(), (pose['length'] as num).toInt(), _cellW, edge: edge, kind: kind));
+            _updateTimelineDrag(double.parse(w[1]), absolute: true);
           }
         case 'blockdrop':
           _endBlockDrag();
@@ -1337,6 +1350,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           setState(() => _rowActionsOpen = true);
         case 'zoomtimeline':
           setState(() => _cellW = double.parse(w[1]).clamp(14.0, 112.0));
+        case 'timelineheight':
+          setState(() => _timelineHeight = w[1] == 'auto' ? null : double.parse(w[1]).clamp(88.0, 560.0));
         case 'backups':
           unawaited(_backupsSheet());
         case 'exportfull':
@@ -1738,11 +1753,21 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     // screen padding from the settings (notches, rounded corners)
     final pad = MediaQuery.paddingOf(context) + EdgeInsets.only(left: AppSettings.number('padLeft').toDouble(), right: AppSettings.number('padRight').toDouble());
     final leftHand = AppSettings.flag('leftHand');
+    // On compact phones (e.g. 844x390), hoist the floating Properties card into
+    // the outer Stack so it spans over the timeline (~338pt) instead of being
+    // squished to ~168pt, and suppress the empty "Nothing selected" hint card
+    // unless the user tapped Properties or has something ready to paste.
+    final compactPhone = !big && screen.height < 500;
+    final secNames = _sections();
+    final emptyCard = secNames.length == 1 && secNames.first == 'Nothing selected' && !_fxBrowser && !_modBrowser;
+    final hasPaste = _st['figureCopied'] == true || _st['textfieldCopied'] == true;
+    final showFloatingProps = _panelOpen && !_hidePanels && !_playing && !(compactPhone && emptyCard && !_panelUserOpened && !hasPaste);
     return Scaffold(
       backgroundColor: cSurround,
       body: RepaintBoundary(
         key: _shot,
-        child: Column(children: [
+        child: Stack(children: [
+        Column(children: [
         if (!_fsNow) (_st['copyEdit'] is Map ? _copyHeader(pad, _st['copyEdit'] as Map) : _appBar(pad)),
         Expanded(child: Row(textDirection: leftHand ? TextDirection.rtl : TextDirection.ltr, children: [
           if (!_fsNow) _leftRail(pad, leftHand),
@@ -1757,14 +1782,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                     if (_magnifier && !_playing) Positioned(left: _magAt.dx, top: _magAt.dy, child: _magnifierWindow()),
                     // floating over the stage; docked, it is a column beside it (below)
                     // it slides in from its edge and back out (D37)
-                    if (!_fsNow && !dock)
+                    if (!_fsNow && !dock && !compactPhone)
                       Positioned(
                         top: 8,
                         right: 8,
                         bottom: 8,
-                        width: big ? 360 : 320,
+                        width: _floatingCardWidth(screen, big),
                         // while playing the card steps aside: the whole picture shows
-                        child: _slideIn(_panelOpen && !_hidePanels && !_playing ? KeyedSubtree(key: const ValueKey('props'), child: _propertiesCard()) : null, fromRight: true),
+                        child: _slideIn(showFloatingProps ? KeyedSubtree(key: const ValueKey('props'), child: _propertiesCard()) : null, fromRight: true),
                       ),
                     if (_st['building'] != null && _partsOpen && !_viewOptions && !_hidePanels) Positioned(top: 8, left: 8, bottom: 8, width: 220, child: _partsPanel()),
                     Positioned(top: 8, left: 8, bottom: 8, width: 330, child: _slideIn(_viewOptions ? KeyedSubtree(key: const ValueKey('view'), child: _viewOptionsPanel()) : null, fromRight: false)),
@@ -1788,16 +1813,27 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 ? _shapeShelf()
                 // folding and unfolding ease the stage's edge along (D37)
                 : AnimatedSize(
-                    // playing starting or stopping snaps (playback stays instant)
-                    duration: _playing != _sizedPlaying ? Duration.zero : kit.motion(context, 180),
+                    // playing starting or stopping, or dragging the resize handle, snaps immediately
+                    duration: _playing != _sizedPlaying || _timelineDragging ? Duration.zero : kit.motion(context, 180),
                     curve: kit.kEase,
                     alignment: Alignment.bottomCenter,
                     child: Column(children: [
+                      if (_layersOpen && !_playing) _timelineResizeHandle(screen.height),
                       _controlBar(),
                       if (_curvesOn && _layersOpen && !_playing) _curvesView() else _previewRow(),
-                      if (_layersOpen) _curvesOn && !_playing ? _curvesBar() : _framesBar(),
+                      if (_layersOpen) _curvesOn && !_playing ? _curvesBar() : (!_playing && (_selPoseKeys.isNotEmpty || _selPropKeys.isNotEmpty) ? _keySelectionBar() : _framesBar()),
                     ]),
                   ),
+          ),
+        ]),
+        if (!_fsNow && !dock && compactPhone)
+          Positioned(
+            top: 44 + pad.top,
+            right: leftHand ? null : 64 + pad.right + 6,
+            left: leftHand ? 64 + pad.left + 6 : null,
+            bottom: 8 + pad.bottom,
+            width: _floatingCardWidth(screen, big),
+            child: _slideIn(showFloatingProps ? KeyedSubtree(key: const ValueKey('props'), child: _propertiesCard()) : null, fromRight: !leftHand),
           ),
         ]),
       ),
@@ -2184,13 +2220,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   Iterable<String> get _foldedGroups => ((_st['rows'] as List?) ?? const []).cast<Map>().where((r) => r['kind'] == 'group' && r['open'] == false).map((r) => '${r['id']}');
 
   /// After a change: during a drag only the current frame's picture is stale.
-  void _thumbsChanged(String op) {
+  void _thumbsChanged(String op, {bool force = false}) {
     final rev = (_st['rev'] as num?)?.toInt() ?? 0;
     // a project just opened, made or imported into always redraws everything
-    final whole = op == 'open' || op == 'new' || op == 'import';
+    final whole = force || op == 'open' || op == 'new' || op == 'import';
     if (rev == _thumbRev && !whole) return;
     _thumbRev = rev;
-    if (op == 'move' || op == 'down') return;
+    if (!force && (op == 'move' || op == 'down' || op == 'timeline_drag_start' || op == 'timeline_drag_move')) return;
     final folded = _foldedGroups.toList();
     if (op == 'up') {
       _thumbDirty.add(_frame);
@@ -2435,7 +2471,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     // K: a folded group hides its members' rows
     final folded = {for (final r in allRows) if (r['kind'] == 'group' && r['open'] == false) r['id']};
     final rows = folded.isEmpty ? allRows : allRows.where((r) => !folded.contains(r['group'])).toList();
-    final selLayer = _sel?['layer'] ?? (_st['group'] as Map?)?['id'] ?? (_st['script'] as Map?)?['id'];
+    final selLayer = _sel?['layer'] ?? (_st['group'] as Map?)?['id'] ?? (_st['script'] as Map?)?['id'] ?? (_st['picture'] as Map?)?['layer'] ?? (_st['movieclip'] as Map?)?['layer'] ?? (_st['textfield'] as Map?)?['id'];
     final showPreview = AppSettings.values['previewRow'] != false;
     final top = rulerH + (showPreview ? stripH + gap : 0);
     // H3: a layer's animated values as thin rows under it, when opened
@@ -2461,8 +2497,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final aspect = ((_st['w'] as num?) ?? 16) / ((_st['h'] as num?) ?? 9);
     int frameAt(double x) => ((x - left) / cell).floor().clamp(0, _frames - 1);
     void frameTap(int i) {
+      if (_boxActive || _boxPath != null || DateTime.now().difference(_boxEndedAt) < const Duration(milliseconds: 80)) return;
       if (_playing) _togglePlay();
-      setState(() => _frameSelected = true);
+      setState(() {
+        _frameSelected = true;
+        _selPoseKeys.clear();
+        _selPropKeys.clear();
+      });
       _cmd({'op': 'frame', 'i': i});
       if (!AppSettings.flag('keepSelection')) _cmd({'op': 'select'});
     }
@@ -2470,6 +2511,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     Widget mark(String icon, Color c) => Padding(padding: const EdgeInsets.only(right: 1), child: Icon(_markIcons[icon], size: 10, color: c));
     final markList = (_st['frameMarks'] as List?) ?? const [];
     final noTween = (_st['noTweenFrames'] as List?) ?? const [];
+    final propDrag = _blockDrag != null && _blockDrag!.kind == 'prop_key' ? _blockDrag : null;
+    final int? loopStartF = (_loopEnd > 0 || _loopToStart) ? (_loopToStart ? _frame : 0) : null;
+    final int? loopEndF = (_loopEnd > 0 || _loopToStart) ? (_loopEnd > 0 ? math.min(_loopEnd, _frames) : _frames) : null;
     final content = SizedBox(
       width: width,
       height: contentH,
@@ -2482,6 +2526,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               lines: [for (final y in ys) y + rowH, for (final (_, _, y) in props) y + propH],
               bands: [for (final (_, _, y) in props) (y, propH)],
               aspect: aspect.toDouble(), thumbs: _thumbs,
+              loopStart: loopStartF,
+              loopEnd: loopEndF,
               groupStrips: [
                 for (var k = 0; k < rows.length; k++)
                   if (rows[k]['kind'] == 'group' && rows[k]['open'] == false) (ys[k] + 2, rowH - 5, _groupThumbs['${rows[k]['id']}'] ?? const <int, ui.Image>{}),
@@ -2490,7 +2536,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           ),
         ),
         // the ruler and the Preview row: the whole moment (Frame page); hold to
-        // copy; slide along it to scrub (the rows below still scroll)
+        // copy; slide along it to scrub (guarded against double-tap box select)
         Positioned(
           left: 0,
           top: 0,
@@ -2498,13 +2544,23 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           height: top,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTapUp: (d) => frameTap(frameAt(d.localPosition.dx)),
-            onLongPressStart: _playing ? null : (d) => _copyPopup(frameAt(d.localPosition.dx)),
+            onTapUp: (d) {
+              if (_boxActive || _boxPath != null) return;
+              frameTap(frameAt(d.localPosition.dx));
+            },
+            onLongPressStart: _playing ? null : (d) {
+              if (_boxActive || _boxPath != null) return;
+              _copyPopup(frameAt(d.localPosition.dx));
+            },
             onHorizontalDragStart: (d) {
+              if (_boxActive || _boxPath != null) return;
               if (_playing) _togglePlay();
               _scrubTo(frameAt(d.localPosition.dx));
             },
-            onHorizontalDragUpdate: (d) => _scrubTo(frameAt(_scrubEdge(d.localPosition.dx, cell))),
+            onHorizontalDragUpdate: (d) {
+              if (_boxActive || _boxPath != null) return;
+              _scrubTo(frameAt(_scrubEdge(d.localPosition.dx, cell)));
+            },
           ),
         ),
         if (showPreview)
@@ -2535,23 +2591,110 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           ),
         // the rows' blocks: one per pose
         for (var k = 0; k < rows.length; k++) ..._rowBlocks(rows[k], ys[k], rowH, cell, left, rows[k]['id'] == selLayer),
-        // grey diamonds where an animated value changes
-        for (final (_, pr, y) in props)
-          for (final f in ((pr['keys'] as List?) ?? const []).cast<num>())
+        // User list #3: interactive property keyframe rows & diamonds (tap for popover, drag to move)
+        for (final (r, pr, y) in props) ...[
+          if (!_playing && _st['propKeyCopied'] == true)
             Positioned(
-              left: left + f * cell + cell / 2 - 5,
-              top: y + propH / 2 - 5,
-              child: IgnorePointer(child: Transform.rotate(angle: math.pi / 4, child: Container(width: 8, height: 8, decoration: BoxDecoration(color: const Color(0xFF8A9099), borderRadius: BorderRadius.circular(1.5))))),
+              left: left,
+              top: y,
+              width: _frames * cell,
+              height: propH,
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTapUp: (d) {
+                  if (_boxActive || _boxPath != null) return;
+                  final f = (d.localPosition.dx / cell).floor().clamp(0, _frames - 1);
+                  final existing = ((pr['keys'] as List?) ?? const []).cast<num>().map((v) => v.toInt());
+                  if (!existing.contains(f)) _propPastePopover(pr, f, d.globalPosition);
+                },
+              ),
             ),
-        // the playhead: a pale line and the pill
+          for (var ki = 0; ki < ((pr['keys'] as List?) ?? const []).length; ki++)
+            () {
+              final f = (((pr['keys'] as List)[ki]) as num).toInt();
+              final pid = '${pr['id']}';
+              final eases = (pr['eases'] as List?) ?? const [];
+              final ease = ki < eases.length ? '${eases[ki]}' : 'auto';
+              final isDragged = propDrag != null && propDrag.property == pid && (propDrag.live ? f == (propDrag.lastSent ?? propDrag.start) : propDrag.start == f);
+              final isBoxSel = _selPropKeys.contains((pid, f));
+              final diamondSize = isBoxSel || isDragged ? 10.0 : 8.0;
+              return Positioned(
+                left: left + f * cell + cell / 2 - 12,
+                top: y + propH / 2 - 12,
+                width: 24,
+                height: 24,
+                child: _playing
+                    ? Center(child: Transform.rotate(angle: math.pi / 4, child: Container(width: 8, height: 8, decoration: BoxDecoration(color: const Color(0xFF8A9099), borderRadius: BorderRadius.circular(1.5)))))
+                    : MouseRegion(
+                        cursor: SystemMouseCursors.grab,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          dragStartBehavior: DragStartBehavior.down,
+                          onTapUp: (d) {
+                            if (_boxActive || _boxPath != null) return;
+                            _propKeyPopover(r, pr, f, ease, Rect.fromCenter(center: d.globalPosition, width: 20, height: 20));
+                          },
+                          onSecondaryTapUp: (d) => _propKeyPopover(r, pr, f, ease, Rect.fromCenter(center: d.globalPosition, width: 20, height: 20)),
+                          onHorizontalDragStart: (d) => _startTimelineDrag(
+                            _BlockDrag('${r['id']}', f, 1, cell, edge: 1, kind: 'prop_key', property: pid),
+                            rawStartX: d.globalPosition.dx,
+                          ),
+                          child: Center(
+                            child: Transform.rotate(
+                              angle: math.pi / 4,
+                              child: Container(
+                                width: diamondSize,
+                                height: diamondSize,
+                                decoration: BoxDecoration(
+                                  color: isBoxSel || isDragged ? cAccent : const Color(0xFF8A9099),
+                                  borderRadius: BorderRadius.circular(1.5),
+                                  border: isBoxSel || isDragged ? Border.all(color: cCard, width: 1.2) : null,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+              );
+            }(),
+          if (propDrag != null && !propDrag.live && propDrag.property == '${pr['id']}')
+            () {
+              final (st, _) = propDrag.preview(allowStart0: true);
+              return Positioned(
+                left: left + st * cell + cell / 2 - 6,
+                top: y + propH / 2 - 6,
+                width: 12,
+                height: 12,
+                child: IgnorePointer(
+                  child: Center(
+                    child: Transform.rotate(
+                      angle: math.pi / 4,
+                      child: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(color: cAccent, borderRadius: BorderRadius.circular(2), border: Border.all(color: cCard, width: 1.2)),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }(),
+        ],
+        // the playhead: a pale line and the tappable frame pill (Jump to frame popover)
         Positioned(left: left + cur * cell + cell / 2 - 0.75, top: rulerH - 2, width: 1.5, height: contentH - rulerH + 2, child: const IgnorePointer(child: ColoredBox(color: Color(0xFF8DB8E8)))),
         Positioned(
-          left: left + cur * cell + cell / 2 - 16,
-          top: 2,
-          child: IgnorePointer(
+          left: left + cur * cell + cell / 2 - 18,
+          top: 0,
+          child: kit.Tap(
+            key: _playheadKey,
+            label: 'Frame ${cur + 1} of $_frames (tap to jump)',
+            minSize: 22,
+            radius: 9,
+            onTap: _playing ? null : _frameJumpPopover,
             child: Container(
-              constraints: const BoxConstraints(minWidth: 32),
-              height: 18,
+              constraints: const BoxConstraints(minWidth: 36),
+              height: 19,
+              margin: const EdgeInsets.only(top: 1.5),
               padding: const EdgeInsets.symmetric(horizontal: 6),
               alignment: Alignment.center,
               decoration: BoxDecoration(color: const Color(0xFFDCEAF9), borderRadius: BorderRadius.circular(9)),
@@ -2561,10 +2704,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         ),
       ]),
     );
+    final lockScroll = _boxPath != null || _blockDrag != null;
     final scroller = SingleChildScrollView(
       controller: _stripScroll,
       scrollDirection: Axis.horizontal,
-      physics: _boxPath != null ? const NeverScrollableScrollPhysics() : null,
+      physics: lockScroll ? const NeverScrollableScrollPhysics() : null,
       child: content,
     );
     // G3: pinch (or Ctrl + scroll wheel) to zoom the frames
@@ -2583,18 +2727,30 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         child: scroller,
       ),
     );
-    // G5: double-tap and drag for a selection box, triple-tap and drag for a
-    // lasso (counted from raw touches, so a plain tap stays instant)
+    // User list #4 & #5: double-tap and drag for a selection box, triple-tap
+    // and drag for a lasso — works starting over the Preview strip too without
+    // altering the strip!
     if (rows.isNotEmpty) {
       area = Listener(
         behavior: HitTestBehavior.translucent,
         onPointerDown: (e) {
           final now = DateTime.now();
-          final quick = now.difference(_lastDown) < const Duration(milliseconds: 350) && (e.localPosition - _lastDownAt).distance < 24;
+          final quick = now.difference(_lastDown) < const Duration(milliseconds: 350) && (e.localPosition - _lastDownAt).distance < 28;
           _taps = quick ? _taps + 1 : 1;
           _lastDown = now;
           _lastDownAt = e.localPosition;
-          if (_taps >= 2 && !_playing && e.localPosition.dy > top) {
+          if (_taps == 1) {
+            _boxActive = false;
+            _preBoxFrame = _frame;
+            _preBoxFrameSel = _frameSelected;
+            _preBoxInPreview = e.localPosition.dy >= rulerH && e.localPosition.dy < top;
+          } else if (_taps >= 2 && !_playing && e.localPosition.dy >= rulerH) {
+            _boxActive = true;
+            // If tap 1 landed on the Preview strip and shifted the frame, restore it so the strip stays untouched.
+            if (_preBoxInPreview && _preBoxFrame != null) {
+              if (_frame != _preBoxFrame) _cmd({'op': 'frame', 'i': _preBoxFrame});
+              _frameSelected = _preBoxFrameSel ?? false;
+            }
             setState(() {
               _boxPath = [e.localPosition];
               _lasso = _taps >= 3;
@@ -2602,6 +2758,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           }
         },
         onPointerMove: (e) {
+          if (_blockDrag != null && _blockDrag!.rawStartX != null) {
+            _updateTimelineDrag(e.position.dx - _blockDrag!.rawStartX!, absolute: true);
+            return;
+          }
           final path = _boxPath;
           if (path == null) return;
           setState(() {
@@ -2612,82 +2772,161 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             }
           });
         },
-        onPointerUp: (_) => _finishBox(rows, ys, cell, rowH),
-        onPointerCancel: (_) => setState(() => _boxPath = null),
+        onPointerUp: (_) {
+          if (_blockDrag != null && _blockDrag!.rawStartX != null) {
+            _endBlockDrag();
+            return;
+          }
+          _finishBox(rows, ys, props, cell, rowH, propH);
+        },
+        onPointerCancel: (_) {
+          if (_blockDrag != null && _blockDrag!.rawStartX != null) {
+            _endBlockDrag(cancel: true);
+            return;
+          }
+          setState(() {
+            _boxActive = false;
+            _boxPath = null;
+          });
+        },
         child: Stack(children: [
           area,
-          if (_boxPath != null) Positioned.fill(child: IgnorePointer(child: CustomPaint(painter: _BoxPainter(_boxPath!, _lasso)))),
+          if (_boxPath != null) Positioned.fill(child: AbsorbPointer(child: CustomPaint(painter: _BoxPainter(_boxPath!, _lasso)))),
         ]),
       );
     }
-    // the names column: a blank cell by the ruler, "Preview" with its eye,
-    // then each layer front first with its icon, name and eye
+    // User list #6 & #7: every layer row is tappable to select its item, has a
+    // tappable eye + lock badge, and swipes left to reveal quick actions.
+    final namesColW = _namesW(context);
     Widget name(Map r) {
-      final on = r['visible'] != false, selected = r['id'] == selLayer || ((_st['multi'] as List?)?.any((m) => (m as Map)['id'] == r['id']) ?? false);
+      final on = r['visible'] != false;
+      final locked = r['locked'] == true;
+      final kind = '${r['kind']}';
+      final id = '${r['id']}';
+      final selected = id == selLayer || (kind == 'camera' && _st['mode'] == 'camera') || (kind == 'sound' && _soundPage) || ((_st['multi'] as List?)?.any((m) => (m as Map)['id'] == id) ?? false);
       const icons = {'figure': 'figure', 'picture': 'picture', 'text': 'text', 'movieclip': 'clip', 'camera': 'camera', 'sound': 'sound', 'group': 'folder', 'script': 'script'};
-      final isGroup = r['kind'] == 'group';
+      final isGroup = kind == 'group';
+      final canHide = kind != 'camera' && kind != 'sound';
       final row = Container(
         height: rowH,
         // K: a group's members sit 20 in under its folder row
-        padding: EdgeInsets.only(left: r['group'] != null ? 28 : 8, right: 8),
+        padding: EdgeInsets.only(left: r['group'] != null ? 24 : 6, right: 4),
         decoration: BoxDecoration(color: selected ? cSelected : null, border: const Border(bottom: BorderSide(color: Color(0xFFEEF0F2)))),
         child: Row(children: [
           if (isGroup)
             kit.Tap(
               label: r['open'] == false ? 'Open ${r['name']}' : 'Fold ${r['name']}',
               minSize: 20,
-              onTap: () => _cmd({'op': 'group_set', 'group': r['id'], 'open': r['open'] == false}),
+              onTap: () => _cmd({'op': 'group_set', 'group': id, 'open': r['open'] == false}),
               child: Transform.rotate(angle: r['open'] == false ? -math.pi / 2 : 0, child: const Pictogram('chevron', size: 14, color: cSecondary)),
             )
           else if (((r['props'] as List?) ?? const []).isNotEmpty)
             kit.Tap(
-              label: _openRows.contains(r['id']) ? 'Hide ${r['name']}\u2019s animated values' : 'Show ${r['name']}\u2019s animated values',
+              label: _openRows.contains(id) ? 'Hide ${r['name']}\u2019s animated values' : 'Show ${r['name']}\u2019s animated values',
               minSize: 20,
-              onTap: () => setState(() => _openRows.contains(r['id']) ? _openRows.remove(r['id']) : _openRows.add('${r['id']}')),
-              child: Transform.rotate(angle: _openRows.contains(r['id']) ? 0 : -math.pi / 2, child: const Pictogram('chevron', size: 14, color: cSecondary)),
+              onTap: () => setState(() => _openRows.contains(id) ? _openRows.remove(id) : _openRows.add(id)),
+              child: Transform.rotate(angle: _openRows.contains(id) ? 0 : -math.pi / 2, child: const Pictogram('chevron', size: 14, color: cSecondary)),
             )
           else
             const SizedBox(width: 14),
-          const SizedBox(width: 4),
-          Pictogram(icons[r['kind']] ?? 'figure', size: 20, color: selected ? cAccent : cInk2b),
+          const SizedBox(width: 3),
+          Pictogram(icons[kind] ?? 'figure', size: 18, color: selected ? cAccent : cInk2b),
           const SizedBox(width: 6),
-          const SizedBox(width: 4),
           Expanded(
             child: Text.rich(
               TextSpan(children: [
                 TextSpan(text: '${r['name']}'),
                 // K2c: a script's row says what it moves
-                if (r['kind'] == 'script' && r['sub'] != null) TextSpan(text: '  ${r['sub']}', style: const TextStyle(color: cSecondary, fontSize: 12, fontWeight: FontWeight.w400)),
+                if (kind == 'script' && r['sub'] != null) TextSpan(text: '  ${r['sub']}', style: const TextStyle(color: cSecondary, fontSize: 12, fontWeight: FontWeight.w400)),
               ]),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: selected ? cAccent : on ? cText : cSecondary, fontSize: 15, fontWeight: selected ? FontWeight.w700 : FontWeight.w400),
+              style: TextStyle(color: selected ? cAccent : on ? cText : cSecondary, fontSize: 14, fontWeight: selected ? FontWeight.w700 : FontWeight.w400),
             ),
           ),
-          Pictogram('eye', size: 18, color: on ? const Color(0xFF9AA0A8) : const Color(0xFFD5D8DD)),
+          if (locked) const Padding(padding: EdgeInsets.only(right: 2), child: Pictogram('lock', size: 13, color: cSecondary)),
+          if (canHide)
+            kit.Tap(
+              label: on ? 'Hide ${r['name']}' : 'Show ${r['name']}',
+              minSize: 26,
+              onTap: _playing ? null : () => _cmd({'op': 'layer_visible', 'layer': id, 'v': !on}),
+              child: Pictogram('eye', size: 17, color: on ? const Color(0xFF9AA0A8) : const Color(0xFFD5D8DD)),
+            )
+          else
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Pictogram('eye', size: 17, color: on ? const Color(0xFF9AA0A8) : const Color(0xFFD5D8DD))),
         ]),
       );
-      if (isGroup && !_playing) return GestureDetector(onTap: () => _cmd({'op': 'select', 'group': r['id']}), child: row);
-      if (r['kind'] == 'script' && !_playing) return GestureDetector(onTap: () => _pickScript('${r['id']}', null), child: row);
-      if (r['kind'] != 'figure' || _playing) return row;
-      // G4: swipe a row (right-click on Linux) for Duplicate and Delete
-      void pick() => _cmd({'op': 'select', 'layer': r['id']});
-      return rw.SwipeActions(
-        key: ValueKey('row-${r['id']}-$_rowActionsOpen'),
-        initiallyOpen: _rowActionsOpen && r['id'] == selLayer,
-        actionWidth: 70,
-        actions: [
-          rw.SwipeAction('Duplicate', () {
-            pick();
-            _cmd({'op': 'duplicate_figure'});
-          }),
+      if (_playing) return row;
+
+      void pick() {
+        setState(() {
+          _frameSelected = false;
+          _selPoseKeys.clear();
+          _selPropKeys.clear();
+          _panelOpen = true;
+          if (kind != 'sound') _soundPage = false;
+        });
+        if (isGroup) {
+          _cmd({'op': 'select', 'group': id});
+        } else if (kind == 'script') {
+          _pickScript(id, null);
+        } else if (kind == 'camera') {
+          _setMode('camera');
+        } else if (kind == 'sound') {
+          final clips = ((r['clips'] as List?) ?? const []).cast<List>();
+          if (clips.isNotEmpty) _cmd({'op': 'frame', 'i': (clips.first[0] as num).floor()});
+          setState(() {
+            _soundPage = true;
+            _panelOpen = true;
+          });
+        } else {
+          final onList = (r['on'] as List?) ?? const [];
+          if (onList.isNotEmpty && onList.elementAtOrNull(_frame) == false) {
+            final firstOn = onList.indexWhere((v) => v != false);
+            if (firstOn >= 0) _cmd({'op': 'frame', 'i': firstOn});
+          }
+          _cmd({'op': 'select', 'layer': id});
+        }
+      }
+
+      final actions = <rw.SwipeAction>[
+        if (kind == 'figure' || kind == 'picture' || kind == 'text' || kind == 'movieclip') ...[
+          rw.SwipeAction(locked ? 'Unlock' : 'Lock', () => _cmd({'op': 'layer_lock', 'layer': id, 'v': !locked}), icon: locked ? 'unlock' : 'lock'),
+          rw.SwipeAction('Copy', () => _cmd({'op': 'duplicate_figure', 'layer': id})),
           rw.SwipeAction('Delete', () {
-            pick();
-            _cmd({'op': 'delete_everywhere'});
-            kit.showToast(context, '${r['name']} is gone from every frame.', light: true, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
-          }, danger: true),
+            _cmd({'op': 'delete_everywhere', 'layer': id});
+            kit.showToast(context, '${r['name']} deleted from every frame.', light: true, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
+          }, danger: true, icon: 'bin'),
+        ] else if (isGroup) ...[
+          rw.SwipeAction('Ungroup', () => _cmd({'op': 'ungroup', 'group': id})),
+          rw.SwipeAction('Delete', () {
+            _cmd({'op': 'delete_group', 'group': id});
+            kit.showToast(context, '${r['name']} deleted.', light: true, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
+          }, danger: true, icon: 'bin'),
+        ] else if (kind == 'script') ...[
+          rw.SwipeAction(on ? 'Hide' : 'Show', () => _cmd({'op': 'layer_visible', 'layer': id, 'v': !on}), icon: 'eye'),
+          rw.SwipeAction('Delete', () {
+            _pickScript(id, null);
+            _cmd({'op': 'script_delete'});
+            kit.showToast(context, '${r['name']} deleted.', light: true, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
+          }, danger: true, icon: 'bin'),
+        ] else if (kind == 'sound') ...[
+          rw.SwipeAction('Delete', () {
+            _cmd({'op': 'delete_everywhere', 'layer': id});
+            kit.showToast(context, '${r['name']} deleted.', light: true, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
+          }, danger: true, icon: 'bin'),
         ],
-        child: GestureDetector(onTap: pick, child: row),
+      ];
+
+      final tappable = GestureDetector(behavior: HitTestBehavior.opaque, onTap: pick, child: row);
+      if (actions.isEmpty) return tappable;
+      final aw = math.min(62.0, math.max(40.0, (namesColW - 14) / actions.length));
+      return rw.SwipeActions(
+        key: ValueKey('row-$id-$_rowActionsOpen'),
+        initiallyOpen: _rowActionsOpen && id == selLayer,
+        actionWidth: aw,
+        actions: actions,
+        child: tappable,
       );
     }
 
@@ -2695,7 +2934,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     // Preview row each end in a divider (timeline board), so "Preview" sits
     // in a row of its own instead of under a tall empty space
     final names = Container(
-      width: _namesW(context),
+      width: namesColW,
       decoration: const BoxDecoration(color: cPanel, border: Border(right: BorderSide(color: Color(0xFFE6E8EB)))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Container(height: rulerH, decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFE6E8EB))))),
@@ -2740,17 +2979,23 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         ],
       ]),
     );
+    final screenH = MediaQuery.sizeOf(context).height;
+    final double? fixedH = _layersOpen && !_playing && _timelineHeight != null ? _timelineHeight!.clamp(88.0, math.max(120.0, screenH * 0.62)).toDouble() : null;
+    final autoMaxH = math.min(contentH, math.min(240.0, screenH * 0.36));
+    _lastTimelineBodyH = fixedH ?? autoMaxH;
     return Container(
       color: cCard,
-      constraints: BoxConstraints(maxHeight: math.min(contentH, MediaQuery.sizeOf(context).height * 0.38)),
+      height: fixedH,
+      constraints: fixedH == null ? BoxConstraints(maxHeight: autoMaxH) : null,
       child: SingleChildScrollView(
+        physics: lockScroll ? const NeverScrollableScrollPhysics() : null,
         child: SizedBox(
           height: contentH,
           child: Stack(children: [
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [names, Expanded(child: area)]),
             if (empty)
               Positioned(
-                left: _namesW(context),
+                left: namesColW,
                 right: 0,
                 top: yy - 2 * rowH,
                 height: 2 * rowH,
@@ -2917,23 +3162,27 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       }
       return out;
     }
-    final drag = _blockDrag != null && _blockDrag!.layer == r['id'] ? _blockDrag : null;
-    Widget bar(double x, double w, {bool strong = false, bool ghost = false}) => AnimatedContainer(
-          duration: kit.motion(context, 120),
+    final drag = _blockDrag != null && _blockDrag!.layer == r['id'] && _blockDrag!.kind != 'prop_key' ? _blockDrag : null;
+    final layerId = '${r['id']}';
+    Widget bar(double x, double w, {bool strong = false, bool boxSel = false, bool ghost = false}) => AnimatedContainer(
+          duration: _blockDrag != null ? Duration.zero : kit.motion(context, 120),
           width: w,
           height: 26,
           decoration: BoxDecoration(
-            color: strong ? const Color(0xFFE4EEFA) : const Color(0xFFEEF0F3),
+            color: boxSel ? const Color(0xFFD6E8FC) : strong ? const Color(0xFFE4EEFA) : const Color(0xFFEEF0F3),
             borderRadius: BorderRadius.circular(5),
-            border: Border.all(color: strong ? cAccent : const Color(0xFFDCDFE4), width: strong ? 2 : 1),
+            border: Border.all(color: strong || boxSel ? cAccent : const Color(0xFFDCDFE4), width: strong || boxSel ? 2 : 1),
           ),
           foregroundDecoration: ghost ? BoxDecoration(color: cCard.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(5)) : null,
         );
-    for (final b in (r['blocks'] as List? ?? const [])) {
+    final blockList = ((r['blocks'] as List?) ?? const []).cast<List>();
+    for (var bi = 0; bi < blockList.length; bi++) {
+      final b = blockList[bi];
       final st = (b[0] as num).toInt(), len = (b[1] as num).toInt();
+      final prevStart = bi > 0 ? (blockList[bi - 1][0] as num).toInt() : 0;
       // the block being dragged is drawn where it is going (below); it stays
       // here unseen, because its grip or long press is what's dragging
-      final dragged = drag != null && drag.start == st;
+      final dragged = drag != null && !drag.live && drag.start == st;
       // only the frames the layer is on
       var a = st, z = st + len - 1;
       while (a <= z && on.elementAtOrNull(a) == false) {
@@ -2944,15 +3193,21 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       }
       if (a > z) continue;
       final strong = selectedRow && _frame >= st && _frame < st + len;
+      final boxSel = _selPoseKeys.contains((layerId, st));
       final x = left + a * cell + 1, w = (z - a + 1) * cell - 2;
       void select(double dx) {
+        setState(() {
+          _frameSelected = false;
+          _selPoseKeys.clear();
+          _selPropKeys.clear();
+        });
         _cmd({'op': 'frame', 'i': (a + dx ~/ cell).clamp(0, _frames - 1)});
         if (r['kind'] == 'camera') {
           _setMode('camera');
           return;
         }
-        if (r['kind'] == 'picture' || r['kind'] == 'movieclip') {
-          _cmd({'op': 'select', 'layer': r['id'], 'node': ''});
+        if (r['kind'] == 'picture' || r['kind'] == 'movieclip' || r['kind'] == 'text') {
+          _cmd({'op': 'select', 'layer': r['id']});
           setState(() => _panelOpen = true);
           return;
         }
@@ -2963,22 +3218,39 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         }
       }
 
+      final gripW = math.min(18.0, math.max(8.0, w * 0.35));
       Widget grip(bool atStart) => Positioned(
             left: atStart ? 0 : null,
             right: atStart ? null : 0,
             top: 0,
             bottom: 0,
-            width: 14,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onHorizontalDragStart: (_) => setState(() => _blockDrag = _BlockDrag('${r['id']}', st, len, cell, edge: atStart ? 2 : 0)),
-              onHorizontalDragUpdate: (d) {
-                if (_blockDrag != null) setState(() => _blockDrag!.dx += d.delta.dx);
-              },
-              onHorizontalDragEnd: (_) => _endBlockDrag(),
-              child: MouseRegion(
-                cursor: SystemMouseCursors.resizeLeftRight,
-                child: Center(child: Container(width: 4, height: 14, decoration: BoxDecoration(color: cAccent, borderRadius: BorderRadius.circular(2)))),
+            width: gripW,
+            child: Listener(
+              onPointerDown: (e) => _gripDownX = e.position.dx,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                dragStartBehavior: DragStartBehavior.down,
+                onHorizontalDragStart: (d) {
+                  final startX = _gripDownX ?? d.globalPosition.dx;
+                  _startTimelineDrag(
+                    _BlockDrag(
+                      layerId,
+                      st,
+                      len,
+                      cell,
+                      edge: atStart ? 2 : 0,
+                      kind: atStart ? 'block_start' : 'block_end',
+                      minStart: atStart ? math.max(1, prevStart + 1) : null,
+                      maxStart: atStart ? st + len - 1 : null,
+                    ),
+                    rawStartX: startX,
+                  );
+                  _updateTimelineDrag(d.globalPosition.dx - startX, absolute: true);
+                },
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.resizeLeftRight,
+                  child: Center(child: Container(width: 4, height: 14, decoration: BoxDecoration(color: cAccent, borderRadius: BorderRadius.circular(2)))),
+                ),
               ),
             ),
           );
@@ -3020,24 +3292,30 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             : Opacity(
                 opacity: dragged ? 0 : 1,
                 child: GestureDetector(
-                onTapUp: (d) => select(d.localPosition.dx),
-                onLongPressStart: figure && st > 0
-                    ? (d) {
-                        select(d.localPosition.dx);
-                        setState(() => _blockDrag = _BlockDrag('${r['id']}', st, len, cell, edge: 1));
-                      }
-                    : null,
-                onLongPressMoveUpdate: (d) {
-                  if (_blockDrag != null) setState(() => _blockDrag!.dx = d.offsetFromOrigin.dx);
-                },
-                onLongPressEnd: (_) => _endBlockDrag(),
-                child: Stack(children: [
-                  bar(x, w, strong: strong),
-                  ...pics,
-                  if (strong && figure && st > 0) grip(true),
-                  if (strong && figure) grip(false),
-                ]),
-              )),
+                  onTapUp: (d) {
+                    if (_boxActive || _boxPath != null || DateTime.now().difference(_boxEndedAt) < const Duration(milliseconds: 80)) return;
+                    if (strong && figure) {
+                      _poseKeyPopover(r, b, Rect.fromCenter(center: d.globalPosition, width: 24, height: 24));
+                    } else {
+                      select(d.localPosition.dx);
+                    }
+                  },
+                  onSecondaryTapUp: figure ? (d) => _poseKeyPopover(r, b, Rect.fromCenter(center: d.globalPosition, width: 24, height: 24)) : null,
+                  onLongPressStart: figure && st > 0
+                      ? (d) {
+                          if (_boxActive || _boxPath != null) return;
+                          select(d.localPosition.dx);
+                          _startTimelineDrag(_BlockDrag(layerId, st, len, cell, edge: 1, kind: 'pose_key', minStart: 1), rawStartX: d.globalPosition.dx);
+                        }
+                      : null,
+                  child: Stack(children: [
+                    bar(x, w, strong: strong, boxSel: boxSel),
+                    ...pics,
+                    if (strong && figure && st > 0) grip(true),
+                    if (strong && figure) grip(false),
+                  ]),
+                ),
+              ),
       ));
     }
     // I2: joins over time: a grey chain where it joins, a red broken chain
@@ -3062,22 +3340,26 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         ),
       ));
     }
-    if (drag != null) {
+    if (drag != null && !drag.live) {
       final (st, len) = drag.preview();
       out.add(Positioned(left: left + st * cell + 1, top: y + (rowH - 26) / 2, child: IgnorePointer(child: bar(0, len * cell - 2, strong: true, ghost: true))));
     }
     return out;
   }
 
-  /// A selection box or lasso let go: the figures whose poses it covers (a
-  /// plain double tap: the row under it). One figure is selected; several
-  /// open the multi-select page.
-  void _finishBox(List<Map> rows, List<double> ys, double cell, double rowH) {
+  /// User list #4 & #5: a selection box or lasso let go genuinely selects the
+  /// pose keys, property keys, and layers it covers.
+  void _finishBox(List<Map> rows, List<double> ys, List<(Map, Map, double)> props, double cell, double rowH, double propH) {
     final path = _boxPath;
+    _boxActive = false;
     if (path == null) return;
+    _boxEndedAt = DateTime.now();
     setState(() => _boxPath = null);
     final off = _stripScroll.hasClients ? _stripScroll.offset : 0.0;
-    final hit = <String>[];
+    final hitLayers = <String>[];
+    final hitFigures = <String>[];
+    final hitPoses = <(String, int)>{};
+    final hitProps = <(String, int)>{};
     final rect = Rect.fromPoints(path.first, path.last);
     final point = !_lasso && rect.width < 6 && rect.height < 6;
     bool inLasso(Offset p) {
@@ -3091,29 +3373,71 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
     for (var k = 0; k < rows.length; k++) {
       final r = rows[k];
-      if (r['kind'] != 'figure') continue;
+      final kind = '${r['kind']}';
+      if (kind != 'figure' && kind != 'picture' && kind != 'text' && kind != 'movieclip') continue;
+      final id = '${r['id']}';
       final y0 = ys[k], cy = y0 + rowH / 2;
       if (point) {
-        if (path.first.dy >= y0 && path.first.dy < y0 + rowH) hit.add('${r['id']}');
+        if (path.first.dy >= y0 && path.first.dy < y0 + rowH) {
+          hitLayers.add(id);
+          if (kind == 'figure') hitFigures.add(id);
+          final f = ((path.first.dx + off - 8) / cell).floor();
+          for (final b in ((r['blocks'] as List?) ?? const []).cast<List>()) {
+            final st = (b[0] as num).toInt(), len = (b[1] as num).toInt();
+            if (f >= st && f < st + len && kind == 'figure') hitPoses.add((id, st));
+          }
+        }
         continue;
       }
-      final on = (r['on'] as List?) ?? const [];
-      for (var i = 0; i < _frames; i++) {
-        if (on.elementAtOrNull(i) == false) continue;
-        final c = Offset(8 + i * cell + cell / 2 - off, cy);
-        if (_lasso ? inLasso(c) : rect.inflate(cell / 2).contains(c) && rect.top <= y0 + rowH && rect.bottom >= y0) {
-          hit.add('${r['id']}');
-          break;
+      var rowHit = false;
+      for (final b in ((r['blocks'] as List?) ?? const []).cast<List>()) {
+        final st = (b[0] as num).toInt(), len = (b[1] as num).toInt();
+        final bx0 = 8 + st * cell - off, bx1 = 8 + (st + len) * cell - off;
+        final blockRect = Rect.fromLTRB(bx0, y0 + 3, bx1, y0 + rowH - 3);
+        final hit = _lasso
+            ? inLasso(Offset(bx0 + cell / 2, cy)) || inLasso(blockRect.center)
+            : rect.overlaps(blockRect);
+        if (hit) {
+          rowHit = true;
+          if (kind == 'figure') hitPoses.add((id, st));
         }
       }
+      if (rowHit) {
+        hitLayers.add(id);
+        if (kind == 'figure') hitFigures.add(id);
+      }
     }
-    if (hit.isEmpty) return;
-    if (hit.length == 1) {
-      _cmd({'op': 'select', 'layer': hit.first});
-    } else {
-      _cmd({'op': 'select_many', 'layers': hit});
+
+    for (final (_, pr, y) in props) {
+      final pid = '${pr['id']}';
+      final cy = y + propH / 2;
+      for (final fn in ((pr['keys'] as List?) ?? const []).cast<num>()) {
+        final f = fn.toInt();
+        final c = Offset(8 + f * cell + cell / 2 - off, cy);
+        final hit = point
+            ? (c - path.first).distance < 16
+            : (_lasso ? inLasso(c) : rect.inflate(8).contains(c));
+        if (hit) hitProps.add((pid, f));
+      }
     }
-    setState(() => _panelOpen = true);
+
+    setState(() {
+      _selPoseKeys
+        ..clear()
+        ..addAll(hitPoses);
+      _selPropKeys
+        ..clear()
+        ..addAll(hitProps);
+      if (hitPoses.isNotEmpty || hitProps.isNotEmpty || hitLayers.isNotEmpty) _frameSelected = false;
+    });
+
+    if (hitFigures.length > 1) {
+      _cmd({'op': 'select_many', 'layers': hitFigures});
+      setState(() => _panelOpen = true);
+    } else if (hitLayers.length == 1) {
+      _cmd({'op': 'select', 'layer': hitLayers.first});
+      setState(() => _panelOpen = true);
+    }
   }
 
   /// A chain marker tapped (I2): what it is, and Let go / Join elsewhere (a
@@ -3193,13 +3517,48 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     return x + (to - before);
   }
 
-  /// A grip or a held block let go: the new length, start, or place.
-  void _endBlockDrag() {
+  /// Starts a live timeline drag (grips, pose key, or property key).
+  void _startTimelineDrag(_BlockDrag d, {double? rawStartX}) {
+    d.rawStartX = rawStartX;
+    if (d.run == null) {
+      d.live = true;
+      d.lastSent = d.kind == 'block_end' ? d.length : d.start;
+      _cmd({
+        'op': 'timeline_drag_start',
+        'kind': d.kind,
+        'layer': d.layer,
+        'frame': d.start,
+        if (d.property != null) 'property': d.property,
+      });
+    }
+    setState(() => _blockDrag = d);
+  }
+
+  /// Updates an active timeline drag; sends a live preview op only when the
+  /// target integer frame or length actually changes (zero undo spam).
+  void _updateTimelineDrag(double delta, {bool absolute = false}) {
+    final d = _blockDrag;
+    if (d == null) return;
+    d.dx = absolute ? delta : d.dx + delta;
+    if (d.live) {
+      final (st, len) = d.preview(allowStart0: d.kind == 'prop_key');
+      final target = d.kind == 'block_end' ? len : st;
+      if (target != d.lastSent) {
+        d.lastSent = target;
+        _cmd(d.kind == 'block_end' ? {'op': 'timeline_drag_move', 'frames': len} : {'op': 'timeline_drag_move', 'to': st});
+      }
+    }
+    setState(() {});
+  }
+
+  /// A grip or held block/key let go: commits the live drag (1 undo step) or cancels it.
+  void _endBlockDrag({bool cancel = false}) {
     final d = _blockDrag;
     if (d == null) return;
     setState(() => _blockDrag = null);
     // K2c: a script's run (frames from, to; a move keeps its length)
     if (d.run != null) {
+      if (cancel) return;
       final (st, len) = d.preview(allowStart0: true);
       if (d.edge == 1) {
         if (st != d.start) _cmd({'op': 'script_run', 'layer': d.layer, 'run': d.run, 'from': st, 'move': true});
@@ -3208,13 +3567,364 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       }
       return;
     }
+    if (d.live) {
+      if (cancel) {
+        _cmd({'op': 'cancel'});
+      } else {
+        _cmd({'op': 'up'});
+        _thumbsChanged('timeline_commit', force: true);
+      }
+      return;
+    }
+    if (cancel) return;
     final (st, len) = d.preview();
     _cmd({'op': 'frame', 'i': d.start});
     if (d.edge == 0) {
-      if (len != d.length) _cmd({'op': 'block_length', 'frames': len});
+      if (len != d.length) _cmd({'op': 'block_length', 'layer': d.layer, 'frames': len});
     } else if (st != d.start) {
-      _cmd({'op': 'move_block', 'to': st});
+      _cmd({'op': 'move_block', 'layer': d.layer, 'to': st});
     }
+  }
+
+  /// User list #3: anchored popover for a pose keyframe (copy, paste, duplicate, easing, delete).
+  Future<void> _poseKeyPopover(Map r, List b, Rect anchor) async {
+    final layerId = '${r['id']}';
+    final name = '${r['name']}';
+    final st = (b[0] as num).toInt();
+    final isHold = b[2] == true;
+    var ease = b.length > 3 && b[3] is String ? '${b[3]}' : (isHold ? 'hold' : 'auto');
+    const eases = ['auto', 'linear', 'out', 'smooth', 'bounce'];
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Pose keyframe',
+      barrierColor: const Color(0x00000000),
+      transitionDuration: kit.motion(context, 150),
+      pageBuilder: (c, a1, a2) => StatefulBuilder(builder: (c, set) {
+        final hold = ease == 'hold';
+        void setEase(String v) {
+          _cmd({'op': 'easing', 'layer': layerId, 'frame': st, 'v': v});
+          set(() => ease = v);
+        }
+        return Stack(children: [
+          kit.Anchored(
+            anchor: anchor,
+            width: 300,
+            card: (w) => kit.PanelCard(
+              width: w,
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                rw.renderDesc(rw.DTitle('$name (frame ${st + 1})')),
+                rw.renderDesc(rw.DSeg(const ['Hold', 'Tween'], hold ? 0 : 1, onSelect: (i) => setEase(i == 0 ? 'hold' : 'auto'))),
+                rw.renderDesc(rw.DEase(math.max(0, eases.indexOf(ease == 'in' ? 'linear' : ease)), enabled: !hold, onSelect: (i) => setEase(eases[i]))),
+                rw.renderDesc(rw.DButtons(
+                  'Copy pose',
+                  () {
+                    _cmd({'op': 'copy_pose', 'layer': layerId, 'frame': st, 'withTransform': true});
+                    Navigator.pop(c);
+                  },
+                  b: 'Paste pose',
+                  onB: _st['pose'] == true
+                      ? () {
+                          _cmd({'op': 'paste_pose', 'layer': layerId, 'frame': st, 'withTransform': true});
+                          Navigator.pop(c);
+                        }
+                      : null,
+                )),
+                kit.ButtonPair(
+                  'Duplicate',
+                  () {
+                    _cmd({'op': 'duplicate_pose_key', 'layer': layerId, 'from': st});
+                    Navigator.pop(c);
+                  },
+                ),
+                if (st > 0)
+                  rw.renderDesc(rw.DDanger('Delete pose', () {
+                    _cmd({'op': 'delete_pose', 'layer': layerId, 'frame': st});
+                    Navigator.pop(c);
+                  })),
+              ]),
+            ),
+          ),
+        ]);
+      }),
+    );
+  }
+
+  /// User list #3: anchored popover for an animated property keyframe.
+  Future<void> _propKeyPopover(Map r, Map pr, int f, String initialEase, Rect anchor) async {
+    final pid = '${pr['id']}';
+    final pname = '${pr['name']}';
+    var ease = initialEase;
+    const eases = ['auto', 'linear', 'out', 'smooth', 'bounce'];
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Property keyframe',
+      barrierColor: const Color(0x00000000),
+      transitionDuration: kit.motion(context, 150),
+      pageBuilder: (c, a1, a2) => StatefulBuilder(builder: (c, set) {
+        final hold = ease == 'hold';
+        void setEase(String v) {
+          _cmd({'op': 'easing', 'property': pid, 'frame': f, 'v': v});
+          set(() => ease = v);
+        }
+        return Stack(children: [
+          kit.Anchored(
+            anchor: anchor,
+            width: 300,
+            card: (w) => kit.PanelCard(
+              width: w,
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                rw.renderDesc(rw.DTitle('$pname (frame ${f + 1})')),
+                rw.renderDesc(rw.DSeg(const ['Hold', 'Tween'], hold ? 0 : 1, onSelect: (i) => setEase(i == 0 ? 'hold' : 'auto'))),
+                rw.renderDesc(rw.DEase(math.max(0, eases.indexOf(ease == 'in' ? 'linear' : ease)), enabled: !hold, onSelect: (i) => setEase(eases[i]))),
+                rw.renderDesc(rw.DButtons(
+                  'Copy key',
+                  () {
+                    _cmd({'op': 'copy_prop_key', 'property': pid, 'frame': f});
+                    Navigator.pop(c);
+                  },
+                  b: 'Paste key',
+                  onB: _st['propKeyCopied'] == true
+                      ? () {
+                          _cmd({'op': 'paste_prop_key', 'property': pid, 'frame': f});
+                          Navigator.pop(c);
+                        }
+                      : null,
+                )),
+                kit.ButtonPair(
+                  'Duplicate',
+                  () {
+                    _cmd({'op': 'duplicate_prop_key', 'property': pid, 'from': f});
+                    Navigator.pop(c);
+                  },
+                ),
+                rw.renderDesc(rw.DDanger('Delete key', () {
+                  _cmd({'op': 'delete_prop_key', 'property': pid, 'frame': f});
+                  Navigator.pop(c);
+                })),
+              ]),
+            ),
+          ),
+        ]);
+      }),
+    );
+  }
+
+  /// Quick paste popover when tapping an empty cell on a property row with a copied key.
+  Future<void> _propPastePopover(Map pr, int f, Offset at) async {
+    final pid = '${pr['id']}';
+    final pname = '${pr['name']}';
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Paste key',
+      barrierColor: const Color(0x00000000),
+      transitionDuration: kit.motion(context, 150),
+      pageBuilder: (c, a1, a2) => Stack(children: [
+        kit.Anchored(
+          anchor: Rect.fromCenter(center: at, width: 20, height: 20),
+          width: 240,
+          card: (w) => kit.PanelCard(
+            width: w,
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              rw.renderDesc(rw.DHint('$pname at frame ${f + 1}')),
+              kit.WordButton('Paste key here', primary: true, expand: true, height: 36, onTap: () {
+                _cmd({'op': 'paste_prop_key', 'property': pid, 'frame': f});
+                Navigator.pop(c);
+              }),
+            ]),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  /// Sorted unique keyframe numbers on the selected layer (or across all layers).
+  List<int> _keyFramesForJump() {
+    final rows = ((_st['rows'] as List?) ?? const []).cast<Map>();
+    final selId = _sel?['layer'];
+    final target = selId != null ? rows.where((r) => r['id'] == selId) : rows;
+    final set = <int>{};
+    for (final r in target) {
+      for (final b in ((r['blocks'] as List?) ?? const []).cast<List>()) {
+        set.add((b[0] as num).toInt());
+      }
+      for (final pr in ((r['props'] as List?) ?? const []).cast<Map>()) {
+        for (final f in ((pr['keys'] as List?) ?? const []).cast<num>()) {
+          set.add(f.toInt());
+        }
+      }
+    }
+    return set.toList()..sort();
+  }
+
+  /// Personal addition: quick Jump to Frame popover anchored to the playhead pill.
+  Future<void> _frameJumpPopover() async {
+    final screen = MediaQuery.sizeOf(context);
+    final anchor = kit.Anchored.rectOf(_playheadKey) ?? Rect.fromLTWH(screen.width / 2 - 20, screen.height - 160, 40, 22);
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Jump to frame',
+      barrierColor: const Color(0x00000000),
+      transitionDuration: kit.motion(context, 150),
+      pageBuilder: (c, a1, a2) => StatefulBuilder(builder: (c, set) {
+        final keys = _keyFramesForJump();
+        final prevKey = keys.where((k) => k < _frame).lastOrNull;
+        final nextKey = keys.where((k) => k > _frame).firstOrNull;
+        void jump(int i) {
+          _goFrame(i);
+          set(() {});
+        }
+        return Stack(children: [
+          kit.Anchored(
+            anchor: anchor,
+            width: 280,
+            card: (w) => kit.PanelCard(
+              width: w,
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                rw.renderDesc(const rw.DTitle('Jump to frame')),
+                rw.renderDesc(rw.DStep('Frame', '${_frame + 1} / $_frames', onMinus: _frame > 0 ? () => jump(_frame - 1) : null, onPlus: _frame < _frames - 1 ? () => jump(_frame + 1) : null)),
+                rw.renderDesc(rw.DButtons(
+                  'Prev key',
+                  prevKey != null ? () => jump(prevKey) : null,
+                  b: 'Next key',
+                  onB: nextKey != null ? () => jump(nextKey) : null,
+                )),
+                rw.renderDesc(rw.DButtons(
+                  'First frame',
+                  _frame > 0 ? () => jump(0) : null,
+                  b: 'Last frame',
+                  onB: _frame < _frames - 1 ? () => jump(_frames - 1) : null,
+                )),
+              ]),
+            ),
+          ),
+        ]);
+      }),
+    );
+  }
+
+  /// Inline action bar shown when keys are box/lasso selected (User list #4 & #5).
+  Widget _keySelectionBar() {
+    final total = _selPoseKeys.length + _selPropKeys.length;
+    final allFrames = <int>[for (final (_, f) in _selPoseKeys) f, for (final (_, f) in _selPropKeys) f];
+    final minF = allFrames.isEmpty ? 0 : allFrames.reduce(math.min);
+    final maxF = allFrames.isEmpty ? 0 : allFrames.reduce(math.max);
+    final canReverse = maxF > minF;
+    return Container(
+      height: 40,
+      decoration: const BoxDecoration(color: cSelected, border: Border(top: BorderSide(color: cLine))),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(children: [
+        Text('$total key${total == 1 ? '' : 's'}', style: const TextStyle(color: cAccent, fontSize: 13, fontWeight: FontWeight.w700)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              kit.WordButton('Shift -1', size: 13, height: 32, onTap: () => _shiftSelectedKeys(-1)),
+              kit.WordButton('Shift +1', size: 13, height: 32, onTap: () => _shiftSelectedKeys(1)),
+              kit.WordButton('Ease…', key: _boxEaseKey, size: 13, height: 32, onTap: _boxEasePopover),
+              if (canReverse) kit.WordButton('Reverse', size: 13, height: 32, onTap: () => _reverseSelectedRange(pingPong: false)),
+              if (canReverse) kit.WordButton('Ping-pong', size: 13, height: 32, onTap: () => _reverseSelectedRange(pingPong: true)),
+              kit.WordButton('Delete', size: 13, height: 32, danger: true, onTap: _deleteSelectedKeys),
+            ]),
+          ),
+        ),
+        kit.WordButton('Done', size: 13, height: 32, strong: true, onTap: () => setState(() {
+          _selPoseKeys.clear();
+          _selPropKeys.clear();
+        })),
+      ]),
+    );
+  }
+
+  void _shiftSelectedKeys(int by) {
+    final poses = [for (final (l, f) in _selPoseKeys) [l, f]];
+    final props = [for (final (p, f) in _selPropKeys) [p, f]];
+    _cmd({'op': 'shift_keys', 'poses': poses, 'props': props, 'by': by});
+    // Update highlighted frame indices to follow the shifted keys
+    final nextPoses = <(String, int)>{for (final (l, f) in _selPoseKeys) (l, f == 0 ? 0 : math.max(1, f + by))};
+    final nextProps = <(String, int)>{for (final (p, f) in _selPropKeys) (p, math.max(0, f + by))};
+    setState(() {
+      _selPoseKeys
+        ..clear()
+        ..addAll(nextPoses);
+      _selPropKeys
+        ..clear()
+        ..addAll(nextProps);
+    });
+  }
+
+  Future<void> _boxEasePopover() async {
+    final anchor = kit.Anchored.rectOf(_boxEaseKey) ?? const Rect.fromLTWH(200, 300, 60, 32);
+    const eases = [('hold', 'Hold'), ('auto', 'Auto'), ('linear', 'Even'), ('out', 'Slow end'), ('smooth', 'Slow both'), ('bounce', 'Bounce')];
+    final pick = await showGeneralDialog<String>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Ease selected keys',
+      barrierColor: const Color(0x00000000),
+      transitionDuration: kit.motion(context, 150),
+      pageBuilder: (c, a1, a2) => Stack(children: [
+        kit.Anchored(
+          anchor: anchor,
+          width: 220,
+          card: (w) => kit.PanelCard(
+            width: w,
+            padding: const EdgeInsets.all(6),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              for (final (id, label) in eases)
+                kit.Tap(
+                  minSize: 0,
+                  onTap: () => Navigator.pop(c, id),
+                  child: Container(height: 36, alignment: Alignment.centerLeft, padding: const EdgeInsets.symmetric(horizontal: 10), child: Text(label, style: const TextStyle(color: cAccent, fontSize: 14, fontWeight: FontWeight.w600))),
+                ),
+            ]),
+          ),
+        ),
+      ]),
+    );
+    if (pick == null) return;
+    _cmd({
+      'op': 'ease_keys',
+      'poses': [for (final (l, f) in _selPoseKeys) [l, f]],
+      'props': [for (final (p, f) in _selPropKeys) [p, f]],
+      'v': pick,
+    });
+  }
+
+  void _deleteSelectedKeys() {
+    _cmd({
+      'op': 'delete_keys',
+      'poses': [for (final (l, f) in _selPoseKeys) [l, f]],
+      'props': [for (final (p, f) in _selPropKeys) [p, f]],
+    });
+    setState(() {
+      _selPoseKeys.clear();
+      _selPropKeys.clear();
+    });
+    kit.showToast(context, 'Deleted selected keys.', light: true, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
+  }
+
+  void _reverseSelectedRange({required bool pingPong}) {
+    final allFrames = <int>[for (final (_, f) in _selPoseKeys) f, for (final (_, f) in _selPropKeys) f];
+    if (allFrames.length < 2) return;
+    final from = allFrames.reduce(math.min), to = allFrames.reduce(math.max);
+    if (to <= from) return;
+    final layers = {for (final (l, _) in _selPoseKeys) l};
+    final layer = layers.length == 1 && _selPropKeys.isEmpty ? layers.first : null;
+    _cmd({
+      'op': pingPong ? 'ping_pong_range' : 'reverse_range',
+      'layer': ?layer,
+      'from': from,
+      'to': to,
+    });
+    setState(() {
+      _selPoseKeys.clear();
+      _selPropKeys.clear();
+    });
   }
 
 
@@ -3233,12 +3943,66 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (!AppSettings.flag('keepSelection')) _cmd({'op': 'select'});
   }
 
+  /// Drag handle along the top of the timeline to resize its height (User list #8).
+  Widget _timelineResizeHandle(double screenH) {
+    final maxH = math.max(120.0, screenH * 0.62);
+    return Semantics(
+      label: 'Resize timeline',
+      hint: 'Drag up or down to resize the timeline; double-tap to reset.',
+      child: MouseRegion(
+        cursor: SystemMouseCursors.resizeUpDown,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onVerticalDragStart: (_) => setState(() {
+            _timelineDragging = true;
+            _timelineHeight ??= _lastTimelineBodyH.clamp(88.0, maxH);
+          }),
+          onVerticalDragUpdate: (d) => setState(() {
+            final base = _timelineHeight ?? _lastTimelineBodyH;
+            _timelineHeight = (base - d.delta.dy).clamp(88.0, maxH);
+          }),
+          onVerticalDragEnd: (_) {
+            setState(() => _timelineDragging = false);
+            if (_timelineHeight != null) {
+              AppSettings.values['timelineHeight'] = _timelineHeight!.round();
+              unawaited(AppSettings.save());
+            }
+          },
+          onVerticalDragCancel: () => setState(() => _timelineDragging = false),
+          onDoubleTap: () {
+            setState(() {
+              _timelineHeight = null;
+              _timelineDragging = false;
+            });
+            AppSettings.values.remove('timelineHeight');
+            unawaited(AppSettings.save());
+          },
+          child: Container(
+            height: 12,
+            width: double.infinity,
+            decoration: const BoxDecoration(color: cCard, border: Border(top: BorderSide(color: cLine))),
+            alignment: Alignment.center,
+            child: AnimatedContainer(
+              duration: kit.motion(context, 100),
+              width: _timelineDragging ? 52 : 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: _timelineDragging ? cAccent : const Color(0xFFC9CED5),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   /// The timeline's control toolbar (REDESIGN §4): frame steps on the left,
   /// onion skin, transport in the middle, the frame rate on the right.
   Widget _controlBar() {
     return Container(
       height: 40,
-      decoration: const BoxDecoration(color: cCard, border: Border(top: BorderSide(color: cLine), bottom: BorderSide(color: Color(0xFFE6E8EB)))),
+      decoration: BoxDecoration(color: cCard, border: Border(top: _layersOpen && !_playing ? BorderSide.none : const BorderSide(color: cLine), bottom: const BorderSide(color: Color(0xFFE6E8EB)))),
       padding: const EdgeInsets.symmetric(horizontal: 6),
       child: Stack(alignment: Alignment.center, children: [
         Row(children: [
@@ -3340,8 +4104,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       }),
       // K2c: a script that moves figures or values (sway, breathing, physics)
       ('script', 'Script', _scriptPicker),
-      // planned (K): shown as on the board, not yet usable
-      ('folder', 'Group', null),
+      ('folder', 'Group', () {
+        if (_st['multi'] != null || _sel != null || _st['picture'] != null || _st['movieclip'] != null || _st['textfield'] != null) {
+          _cmd({'op': 'group'});
+        } else {
+          _say('Select one or more layers first, then tap + › Group.', light: true);
+        }
+      }),
     ];
     final pick = await showGeneralDialog<int>(
       context: context,
@@ -3407,7 +4176,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   Widget _curvesView() {
     final cv = _st['curves'] as Map?;
-    final h = math.min(300.0, MediaQuery.sizeOf(context).height * 0.42);
+    final screenH = MediaQuery.sizeOf(context).height;
+    final double h = _timelineHeight != null ? _timelineHeight!.clamp(100.0, math.max(140.0, screenH * 0.62)).toDouble() : math.min(300.0, screenH * 0.42);
+    _lastTimelineBodyH = h;
     final nameW = _namesW(context);
     if (cv == null) {
       return Container(
@@ -3772,9 +4543,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     return null;
   }
 
-  bool _panelOpen = true, _hidePanels = false;
+  bool _panelOpen = true, _hidePanels = false, _panelUserOpened = false;
   bool _partsOpen = true;
   bool _layersOpen = true, _rowActionsOpen = false;
+  // User list #8: user-resized timeline body height (null = auto-fit up to cap)
+  double? _timelineHeight;
+  bool _timelineDragging = false;
+  double _lastTimelineBodyH = 120;
   // the Sound page (a sound block tapped); any other pick leaves it
   bool _soundPage = false;
   final Set<String> _openRows = {};
@@ -3787,6 +4562,17 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   Offset _lastDownAt = Offset.zero;
   List<Offset>? _boxPath;
   bool _lasso = false;
+  bool _boxActive = false;
+  DateTime _boxEndedAt = DateTime(0);
+  double? _gripDownX;
+  int? _preBoxFrame;
+  bool? _preBoxFrameSel;
+  bool _preBoxInPreview = false;
+  // User list #4 & #5: box-selected pose keys (layerId, startFrame) and property keys (propId, frame)
+  final Set<(String, int)> _selPoseKeys = {};
+  final Set<(String, int)> _selPropKeys = {};
+  final GlobalKey _playheadKey = GlobalKey();
+  final GlobalKey _boxEaseKey = GlobalKey();
 
   /// The right rail (REDESIGN §4): undo, redo, Properties, delete; hide the
   /// panels at the bottom.
@@ -3806,6 +4592,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           setState(() {
             _hidePanels = false;
             _panelOpen = !_panelOpen;
+            _panelUserOpened = _panelOpen;
           });
           // opened over the selected figure: ease it clear of the card
           if (_panelOpen) WidgetsBinding.instance.addPostFrameCallback((_) => _keepSelectionClear());
@@ -3820,6 +4607,34 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   static String _tabLabel(String n) => n == 'Stickfigure Filters' ? 'Filters' : n == 'Figure editor' ? 'Figure' : n.replaceAll(' Tools', '');
 
+  /// Width of the floating Properties / Effects card. On phones when nothing is
+  /// selected, keeps the hint tucked in the right offstage margin off the canvas.
+  double _floatingCardWidth(Size screen, bool big) {
+    if (_fxBrowser && (_sel != null || _st['multi'] != null) && !_playing && screen.height < 500) {
+      return math.min(440.0, math.max(300.0, screen.width - 144));
+    }
+    if (big) return 360;
+    final names = _sections();
+    if (names.length == 1 && names.first == 'Nothing selected' && !_fxBrowser && !_modBrowser) {
+      final avail = _rightOffstageWidth();
+      if (avail != null && avail >= 156) return math.min(200.0, avail - 8);
+      return math.min(280.0, math.max(180.0, screen.width - 144));
+    }
+    return 320;
+  }
+
+  /// Empty grey offstage width to the right of the camera frame in stage coordinates.
+  double? _rightOffstageWidth() {
+    final cam = (_st['camera'] as List?)?.map((v) => (v as num).toDouble()).toList();
+    if (cam == null || cam.length < 8 || _view.size.isEmpty) return null;
+    var maxX = cam[0];
+    for (var i = 2; i < 8; i += 2) {
+      maxX = math.max(maxX, cam[i]);
+    }
+    final camRight = _view.toScreen(maxX, 0).dx;
+    return math.max(0.0, _view.size.width - camRight);
+  }
+
   /// The Properties card (REDESIGN §4): today's sections, tabbed by what is
   /// selected. It floats over the stage on the right.
   Widget _propertiesCard({bool docked = false}) {
@@ -3827,68 +4642,88 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (_modBrowser && _curvesOn && _curveValue != null && !_playing) return kit.PanelCard(docked: docked, padding: EdgeInsets.zero, child: _modifierBrowser(_curveValue!));
     final names = _sections();
     if (names.length == 1 && names.first == 'Nothing selected' && !docked) {
+      final big = MediaQuery.sizeOf(context).shortestSide > 600;
+      final rightOff = _rightOffstageWidth();
+      final fitsOffstage = !big && rightOff != null && rightOff >= 156;
+      final compactBottom = !big && !fitsOffstage;
       return Align(
-        alignment: Alignment.topCenter,
-        child: kit.PanelCard(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: _sectionBody('Nothing selected'))),
+        alignment: compactBottom ? Alignment.bottomRight : Alignment.topCenter,
+        child: kit.PanelCard(
+          padding: big ? const EdgeInsets.fromLTRB(14, 10, 14, 10) : const EdgeInsets.fromLTRB(10, 7, 10, 7),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: _sectionBody('Nothing selected')),
+        ),
       );
     }
     final current = names.contains(_tab) ? names.indexOf(_tab) : 0;
+    final foot = _pageFoot(_playing ? '' : names[current]);
     return kit.PanelCard(
       docked: docked,
       padding: EdgeInsets.zero,
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        if (!_playing && _showTabs && names.length > 1)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(10, 10, 10, 0),
-            child: names.length <= 3
-                ? kit.Segmented([for (final n in names) _tabLabel(n)], current, onSelect: (i) => _jumpTo(names[i]))
+      child: LayoutBuilder(builder: (context, box) {
+        // On short screens (phone landscape with timeline open), put the
+        // destructive footer inside the scroll view so the body stays usable.
+        final compact = !docked && box.maxHeight < 260;
+        final footBtn = foot == null
+            ? null
+            : GestureDetector(onLongPress: foot.$3, child: kit.WordButton(foot.$1, onTap: foot.$2, filled: true, danger: true, expand: true, height: 36));
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          if (!_playing && _showTabs && names.length > 1)
+            Padding(
+              padding: EdgeInsets.fromLTRB(compact ? 8 : 10, compact ? 6 : 10, compact ? 8 : 10, 0),
+              child: names.length <= 3
+                  ? kit.Segmented([for (final n in names) _tabLabel(n)], current, onSelect: (i) => _jumpTo(names[i]))
+                  : SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(children: [
+                        for (var i = 0; i < names.length; i++)
+                          Container(
+                            margin: const EdgeInsets.only(right: 2),
+                            decoration: i == current ? BoxDecoration(color: cControl, borderRadius: BorderRadius.circular(9)) : null,
+                            child: kit.WordButton(_tabLabel(names[i]), size: 13, height: 32, onTap: () => _jumpTo(names[i])),
+                          ),
+                      ]),
+                    ),
+            ),
+          Expanded(
+            child: _playing
+                ? ListView(padding: const EdgeInsets.fromLTRB(14, 10, 14, 10), children: _playbackPanel())
                 : SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(children: [
-                      for (var i = 0; i < names.length; i++)
-                        Container(
-                          margin: const EdgeInsets.only(right: 2),
-                          decoration: i == current ? BoxDecoration(color: cControl, borderRadius: BorderRadius.circular(9)) : null,
-                          child: kit.WordButton(_tabLabel(names[i]), size: 13, height: 32, onTap: () => _jumpTo(names[i])),
-                        ),
+                    controller: _panelScroll,
+                    padding: EdgeInsets.fromLTRB(14, compact ? 2 : 4, 14, compact ? 12 : 40),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                      // one page per tab (round 10 boards); without tabs, the pages stack
+                      for (final n in (_showTabs && names.length > 1 ? [names[current]] : names)) ...[
+                        if (_pageTitle(n).isNotEmpty)
+                          Container(key: _sectionKey(n), width: double.infinity, padding: EdgeInsets.only(top: compact ? 4 : 10, bottom: 4), child: Text(_pageTitle(n), textAlign: TextAlign.center, style: const TextStyle(color: cTitle, fontSize: 15, fontWeight: FontWeight.w600)))
+                        else
+                          SizedBox(key: _sectionKey(n), height: compact ? 2 : 6),
+                        ..._sectionBody(n),
+                        const SizedBox(height: 10),
+                      ],
+                      if (compact && footBtn != null) ...[
+                        const Divider(height: 14, color: Color(0xFFE6E8EB)),
+                        footBtn,
+                      ],
                     ]),
                   ),
           ),
-        Expanded(
-          child: _playing
-              ? ListView(padding: const EdgeInsets.fromLTRB(14, 10, 14, 10), children: _playbackPanel())
-              : SingleChildScrollView(
-                  controller: _panelScroll,
-                  padding: const EdgeInsets.fromLTRB(14, 4, 14, 40),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    // one page per tab (round 10 boards); without tabs, the pages stack
-                    for (final n in (_showTabs && names.length > 1 ? [names[current]] : names)) ...[
-                      if (_pageTitle(n).isNotEmpty)
-                        Container(key: _sectionKey(n), width: double.infinity, padding: const EdgeInsets.only(top: 10, bottom: 4), child: Text(_pageTitle(n), textAlign: TextAlign.center, style: const TextStyle(color: cTitle, fontSize: 15, fontWeight: FontWeight.w600)))
-                      else
-                        SizedBox(key: _sectionKey(n), height: 6),
-                      ..._sectionBody(n),
-                      const SizedBox(height: 10),
-                    ],
-                  ]),
-                ),
-        ),
-        // the page's pinned button (round 10 boards): Delete stickfigure,
-        // Reset this segment, Delete this pose, Clear frame, ...
-        if (_pageFoot(_playing ? '' : names[current]) case (final String label, final VoidCallback onTap, final VoidCallback? onHold))
-          Container(
-            decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFFE6E8EB)))),
-            padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
-            child: GestureDetector(onLongPress: onHold, child: kit.WordButton(label, onTap: onTap, filled: true, danger: true, expand: true, height: 36)),
-          ),
-        // export progress (until the Export sheet shows it, B5)
-        if (_status.isNotEmpty)
-          Container(
-            color: cControl,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            child: Text(_status, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cSecondary, fontSize: 12)),
-          ),
-      ]),
+          // the page's pinned button (round 10 boards): Delete stickfigure,
+          // Reset this segment, Delete this pose, Clear frame, ...
+          if (!compact && footBtn != null)
+            Container(
+              decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFFE6E8EB)))),
+              padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+              child: footBtn,
+            ),
+          // export progress (until the Export sheet shows it, B5)
+          if (_status.isNotEmpty)
+            Container(
+              color: cControl,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              child: Text(_status, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cSecondary, fontSize: 12)),
+            ),
+        ]);
+      }),
     );
   }
 
@@ -4153,12 +4988,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         final tween = _st['tweening'] == true;
         final n = (_st['tweenedFrames'] as num?)?.toInt() ?? 5;
         final rate = (_st['rate'] as num?)?.toDouble() ?? _fps;
-        final rows = <rw.Desc>[
-          const rw.DTitle('Animation'),
+        final leftRows = <rw.Desc>[
           rw.DStep('Frames per second', _fpsLabel, onMinus: _fps > 1 ? () => cmd({'op': 'fps', 'v': _fps - 1}) : null, onPlus: () => cmd({'op': 'fps', 'v': _fps + 1})),
           rw.DTick('Tweening', tween, onChanged: (v) => cmd({'op': 'animation', 'tweening': v})),
           rw.DStep('Extra smoothness', '$n', onMinus: tween && n > 0 ? () => cmd({'op': 'animation', 'tweened': n - 1}) : null, onPlus: tween ? () => cmd({'op': 'animation', 'tweened': n + 1}) : null),
           rw.DTick('Loop back to the start', _st['loopTween'] == true, onChanged: tween ? (v) => cmd({'op': 'animation', 'loop': v}) : null),
+        ];
+        final rightRows = <rw.Desc>[
           rw.DTick('Effects while playing', AppSettings.flag('playFilters'), onChanged: (v) {
             AppSettings.values['playFilters'] = v;
             unawaited(AppSettings.save());
@@ -4173,14 +5009,31 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               ? 'In-between pictures added between frames when playing and exporting (${rate.round()} a second). Your poses stay the same.'
               : 'Each frame shows for 1/${_fps.round()} s. Tweening on adds in-between pictures; your poses stay the same.'),
         ];
+        // On short landscape screens (e.g. 844x390 phone), lay out in two columns
+        // so all rows stay visible without clipping or covering the top bar.
+        final wideCompact = screen.height < 500 && screen.width >= 600;
+        final topMin = MediaQuery.paddingOf(c).top + 44;
         return Stack(children: [
           kit.Anchored(
             anchor: anchor,
-            width: 320,
+            width: wideCompact ? math.min(540.0, screen.width - 24) : 320,
             alignRight: true,
+            topMin: anchor.top > topMin + 110 ? topMin : 0,
             card: (w) => kit.PanelCard(
               width: w,
-              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [for (final d in rows) rw.renderDesc(d)]),
+              padding: wideCompact ? const EdgeInsets.fromLTRB(12, 6, 12, 8) : const EdgeInsets.fromLTRB(14, 10, 14, 10),
+              child: wideCompact
+                  ? Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Expanded(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [for (final d in leftRows) rw.renderDesc(d)])),
+                        const SizedBox(width: 14),
+                        Expanded(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [for (final d in rightRows) rw.renderDesc(d)])),
+                      ]),
+                    ])
+                  : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                      rw.renderDesc(const rw.DTitle('Animation')),
+                      for (final d in [...leftRows, ...rightRows]) rw.renderDesc(d),
+                    ]),
             ),
           ),
         ]);
@@ -4470,6 +5323,16 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ],
       rw.DTick('Silence all sounds', _st['frameSilence'] == true, onChanged: (v) => _cmd({'op': 'frame_silence', 'on': v})),
       const rw.DHint('Sounds still playing stop when this frame starts.'),
+      if (_frames > 1) ...[
+        const rw.DTitle('Range'),
+        rw.DButtons(
+          'Reverse all',
+          () => _cmd({'op': 'reverse_range', 'from': 0, 'to': _frames - 1}),
+          b: 'Ping-pong',
+          onB: () => _cmd({'op': 'ping_pong_range', 'from': 0, 'to': _frames - 1}),
+        ),
+        rw.DHint('Reverse flips frames 1 to $_frames in place. Ping-pong appends the animation playing back to the start.'),
+      ],
     ];
     // a frame's sound has its own page (the Sound board): tap its block
     final snd = _st['frameSound'] as Map?;
@@ -4704,6 +5567,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final gid = g['id'];
     final members = ((g['members'] as List?) ?? const []).cast<Map>();
     final opacity = ((g['opacity'] as num?) ?? 1).toDouble();
+    const blends = ['NORMAL', 'MULTIPLY', 'SCREEN', 'ADD'];
+    const blendNames = ['Normal', 'Multiply', 'Screen', 'Add'];
+    final blend = math.max(0, blends.indexOf('${g['blend'] ?? 'NORMAL'}'));
     final rows = <rw.Desc>[
       rw.DName('${g['name']}', link: 'Rename', onLink: () async {
         final n = await _askName('Rename group', '${g['name']}');
@@ -4713,6 +5579,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ..._effectRows({'filters': g['filters'], 'layer': gid}, group: true),
       const rw.DTitle('Blending'),
       rw.DSlider('Opacity', '${(opacity * 100).round()}%', opacity, onChanged: (x) => _cmd({'op': 'group_set', 'group': gid, 'opacity': (x * 100).round() / 100})),
+      rw.DLink('Blend', blendNames[blend], onTap: () => _cmd({'op': 'group_set', 'group': gid, 'blend': blends[(blend + 1) % blends.length]})),
       const rw.DTitle('Group'),
       rw.DButtons('Send back', () => _cmd({'op': 'group_order', 'group': gid, 'forward': false}), b: 'Bring forward', onB: () => _cmd({'op': 'group_order', 'group': gid, 'forward': true})),
       rw.DButtons('Ungroup', () => _cmd({'op': 'ungroup', 'group': gid}), b: 'Make movieclip…', onB: members.isEmpty
@@ -5227,7 +6094,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         if (handle < 0) const rw.DHint('This pose has handles set by hand.'),
       ],
       rw.DStep('Length in frames', '$len',
-          onMinus: !last && len > 1 ? () => _cmd({'op': 'block_length', 'frames': len - 1}) : null,
+          onMinus: len > 1 ? () => _cmd({'op': 'block_length', 'frames': len - 1}) : null,
           onPlus: () => _cmd({'op': 'block_length', 'frames': len + 1})),
       rw.DButtons('Copy pose', () => _cmd({'op': 'copy_pose'}), b: 'Paste pose', onB: _st['pose'] == true ? () => _cmd({'op': 'paste_pose'}) : null),
     ];
@@ -5451,79 +6318,94 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _jumpTo(_st['group'] != null ? 'Group Tools' : 'Stickfigure Tools');
     }
 
-    Widget tile(String label, Widget picture, VoidCallback? onTap) => Opacity(
-          opacity: onTap == null ? 0.4 : 1,
-          child: kit.Tap(
-            label: label,
-            minSize: 0,
-            onTap: onTap,
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Container(
-                height: 58,
-                clipBehavior: Clip.antiAlias,
-                decoration: BoxDecoration(color: cCard, borderRadius: BorderRadius.circular(8), border: Border.all(color: cLine)),
-                child: picture,
-              ),
-              const SizedBox(height: 3),
-              Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 12)),
-            ]),
-          ),
-        );
-    Widget grid(List<Widget> tiles) => GridView.count(
-          crossAxisCount: 3,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 8,
-          childAspectRatio: 1.25,
-          children: tiles,
-        );
-    Widget pic(String k) => _fxPreviews[k] == null ? const SizedBox.expand() : RawImage(image: _fxPreviews[k], fit: BoxFit.contain);
-    final look = [for (final (k, l, on, _) in _fxLook) if (match(l)) tile(l, pic(k), () => pick(k, {'op': 'filter', ...on}))];
-    // K2: effect plugins (one figure at a time)
-    final yours = [
-      for (final p in _effectPlugins)
-        if (match('${p['name']}')) tile('${p['name']}', pic('plugin:${p['id']}'), p['off'] != null || _st['multi'] != null ? null : () => pick('plugin:${p['id']}', {'op': 'plugin_effect', 'id': p['id']})),
-    ];
-    final edges = [for (final (k, l, on, _) in _fxEdges) if (match(l)) tile(l, pic(k), () => pick(k, {'op': 'filter', ...on}))];
-    final moves = [
-      for (final (k, l, icon) in _fxMovement)
-        if (match(l))
-          // movement moves a figure's joints: not for a group
-          tile(l, Center(child: Pictogram(icon, size: 30, color: cAccent, stroke: 1.8)), (k == 'wiggle' || k == 'swing') && _st['group'] == null ? () => pick(k, {'op': 'move_fx', 'kind': k, 'on': true}) : null),
-    ];
-    Widget title(String t) => Padding(padding: const EdgeInsets.only(top: 12, bottom: 6), child: Text(t, textAlign: TextAlign.center, style: const TextStyle(color: cTitle, fontSize: 15, fontWeight: FontWeight.w700)));
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(6, 8, 10, 0),
-        child: Row(children: [kit.WordButton('‹ Properties', onTap: close), const Spacer(), kit.WordButton('Import…', onTap: _importPlugin)]),
-      ),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
-        child: TextField(
-          style: const TextStyle(color: cText, fontSize: 14),
-          decoration: InputDecoration(
-            isDense: true,
-            filled: true,
-            fillColor: cControl,
-            hintText: 'Search effects',
-            prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF8A9099)),
-            contentPadding: const EdgeInsets.symmetric(vertical: 10),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-          ),
-          onChanged: (v) => setState(() => _fxSearch = v),
+    return LayoutBuilder(builder: (context, box) {
+      final compact = box.maxHeight < 260;
+      final cols = compact && box.maxWidth >= 340 ? 4 : 3;
+      final tileH = compact ? 44.0 : 58.0;
+      Widget cTile(String label, Widget picture, VoidCallback? onTap) => Opacity(
+            opacity: onTap == null ? 0.4 : 1,
+            child: kit.Tap(
+              label: label,
+              minSize: 0,
+              onTap: onTap,
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Container(
+                  height: tileH,
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(color: cCard, borderRadius: BorderRadius.circular(8), border: Border.all(color: cLine)),
+                  child: picture,
+                ),
+                const SizedBox(height: 2),
+                Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: cText, fontSize: compact ? 11 : 12)),
+              ]),
+            ),
+          );
+      Widget cGrid(List<Widget> tiles) => GridView.count(
+            crossAxisCount: cols,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: compact ? 6 : 10,
+            crossAxisSpacing: compact ? 6 : 8,
+            childAspectRatio: compact ? 1.35 : 1.25,
+            children: tiles,
+          );
+      Widget pic(String k) => _fxPreviews[k] == null ? const SizedBox.expand() : RawImage(image: _fxPreviews[k], fit: BoxFit.contain);
+      final look = [for (final (k, l, on, _) in _fxLook) if (match(l)) cTile(l, pic(k), () => pick(k, {'op': 'filter', ...on}))];
+      final yours = [
+        for (final p in _effectPlugins)
+          if (match('${p['name']}')) cTile('${p['name']}', pic('plugin:${p['id']}'), p['off'] != null || _st['multi'] != null ? null : () => pick('plugin:${p['id']}', {'op': 'plugin_effect', 'id': p['id']})),
+      ];
+      final edges = [for (final (k, l, on, _) in _fxEdges) if (match(l)) cTile(l, pic(k), () => pick(k, {'op': 'filter', ...on}))];
+      final moves = [
+        for (final (k, l, icon) in _fxMovement)
+          if (match(l))
+            cTile(l, Center(child: Pictogram(icon, size: compact ? 24 : 30, color: cAccent, stroke: 1.8)), (k == 'wiggle' || k == 'swing') && _st['group'] == null ? () => pick(k, {'op': 'move_fx', 'kind': k, 'on': true}) : null),
+      ];
+      Widget title(String t) => Padding(padding: EdgeInsets.only(top: compact ? 6 : 12, bottom: compact ? 4 : 6), child: Text(t, textAlign: TextAlign.center, style: TextStyle(color: cTitle, fontSize: compact ? 13 : 15, fontWeight: FontWeight.w700)));
+      final searchField = TextField(
+        style: const TextStyle(color: cText, fontSize: 13),
+        decoration: InputDecoration(
+          isDense: true,
+          filled: true,
+          fillColor: cControl,
+          hintText: 'Search effects',
+          prefixIcon: const Icon(Icons.search, size: 17, color: Color(0xFF8A9099)),
+          prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 28),
+          contentPadding: EdgeInsets.symmetric(vertical: compact ? 6 : 10, horizontal: 8),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
         ),
-      ),
-      Expanded(
-        child: ListView(padding: const EdgeInsets.fromLTRB(14, 0, 14, 16), children: [
-          if (yours.isNotEmpty) ...[title('Yours'), grid(yours)],
-          if (look.isNotEmpty) ...[title('Look'), grid(look)],
-          if (moves.isNotEmpty) ...[title('Movement'), grid(moves), if (q.isEmpty) const kit.Hint('Loop, Follow and Link come later.')],
-          if (edges.isNotEmpty) ...[title('Edges'), grid(edges)],
-          if (look.isEmpty && moves.isEmpty && edges.isEmpty) const Padding(padding: EdgeInsets.only(top: 24), child: Text('No effect by that name.', textAlign: TextAlign.center, style: TextStyle(color: cSecondary))),
-        ]),
-      ),
-    ]);
+        onChanged: (v) => setState(() => _fxSearch = v),
+      );
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        if (compact)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 4, 6, 4),
+            child: Row(children: [
+              kit.WordButton('‹ Back', size: 13, height: 32, onTap: close),
+              const SizedBox(width: 4),
+              Expanded(child: searchField),
+              const SizedBox(width: 4),
+              kit.WordButton('Import…', size: 13, height: 32, onTap: _importPlugin),
+            ]),
+          )
+        else ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(6, 8, 10, 0),
+            child: Row(children: [kit.WordButton('‹ Properties', onTap: close), const Spacer(), kit.WordButton('Import…', onTap: _importPlugin)]),
+          ),
+          Padding(padding: const EdgeInsets.fromLTRB(14, 4, 14, 0), child: searchField),
+        ],
+        Expanded(
+          child: ListView(padding: EdgeInsets.fromLTRB(compact ? 10 : 14, 0, compact ? 10 : 14, 12), children: [
+            if (yours.isNotEmpty) ...[title('Yours'), cGrid(yours)],
+            if (look.isNotEmpty) ...[title('Look'), cGrid(look)],
+            if (moves.isNotEmpty) ...[title('Movement'), cGrid(moves), if (q.isEmpty) const kit.Hint('Loop, Follow and Link come later.')],
+            if (edges.isNotEmpty) ...[title('Edges'), cGrid(edges)],
+            if (look.isEmpty && moves.isEmpty && edges.isEmpty) const Padding(padding: EdgeInsets.only(top: 16), child: Text('No effect by that name.', textAlign: TextAlign.center, style: TextStyle(color: cSecondary))),
+          ]),
+        ),
+      ]);
+    });
   }
 
   /// Stickfigure Tools as rows (D15; REDESIGN §8 Stickfigure page). Every old
@@ -6209,6 +7091,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final entries = <_PickEntry>[];
     for (final f in await figureFiles()) {
       final name = f.path.split(Platform.pathSeparator).last;
+      if (movieclip && !name.toLowerCase().endsWith('.nodemc')) continue;
       final key = 'file:${f.path}';
       if (!_previews.containsKey(key)) {
         final px = e.renderFile(name, await f.readAsBytes(), 160, 160);
@@ -6223,6 +7106,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     // the stock figures and effects that ship with the app
     final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
     for (final path in manifest.listAssets().where((a) => a.startsWith('assets/stock/')).toList()..sort()) {
+      if (movieclip && !path.toLowerCase().endsWith('.nodemc')) continue;
       final key = 'asset:$path';
       final name = Uri.decodeComponent(path.split('/').last);
       if (!_previews.containsKey(key)) {
@@ -6683,7 +7567,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           child: _Btn('Edit polyfill ${f['id']} (${f['count']} polynodes)', small: true, onTap: () => _cmd({'op': 'polyfill_edit', 'id': f['id']})),
         ),
       _gap,
-      _Btn('Done', accent: true, onTap: () => _cmd({'op': 'build_done'})),
+      if (_st['copyEdit'] is Map) ...[
+        _hint('Save as new figure adds this copy to your library and leaves the animation unchanged.'),
+        _pair(_Btn('Discard copy', onTap: () => _cmd({'op': 'edit_copy_end'})), _Btn('Save as new figure', accent: true, onTap: _saveCopy)),
+      ] else
+        _Btn('Apply to figure', accent: true, onTap: () => _cmd({'op': 'build_done'})),
     ];
   }
 
@@ -7507,27 +8395,40 @@ class _BoxPainter extends CustomPainter {
   bool shouldRepaint(_BoxPainter old) => true;
 }
 
-/// A block being changed (G3): its end grip (edge 0), held and slid (1), or
-/// its start grip (2), which moves where it starts and keeps where it ends.
+/// A block or keyframe being dragged on the timeline (User list #1, #2, #3):
+/// - `block_end` (edge 0): right grip (changes block length both ways)
+/// - `block_move` / `pose_key` (edge 1): held block / keyframe moved freely
+/// - `block_start` (edge 2): left grip (moves start both ways within neighbour bounds)
+/// - `prop_key`: animated property keyframe dragged along its row
 class _BlockDrag {
-  _BlockDrag(this.layer, this.start, this.length, this.cell, {this.edge = 0, this.run});
+  _BlockDrag(this.layer, this.start, this.length, this.cell, {this.edge = 0, this.kind = 'block_end', this.run, this.property, this.minStart, this.maxStart});
   final String layer;
   final int start, length, edge;
+  final String kind;
   final double cell;
-  /// K2c: the script run being dragged (null: a pose).
+  final int? minStart, maxStart;
+  /// K2c: the script run being dragged (null: a pose or property key).
   final String? run;
+  /// User list #3: the animated property id when dragging a property key.
+  final String? property;
   double dx = 0;
+  double? rawStartX;
+  int? lastSent;
+  bool live = false;
 
-  /// Where the pose would be now: (first frame, length). A pose never moves
-  /// onto the first frame (every figure keeps its first pose there); a
-  /// script's run may (`allowStart0`).
+  /// Where the block/key would be now: (first frame, length).
   (int, int) preview({bool allowStart0 = false}) {
     final by = (dx / cell).round();
-    final lo = allowStart0 ? 0 : 1;
+    final lo = minStart ?? (allowStart0 ? 0 : 1);
+    if (kind == 'prop_key') return (math.max(0, start + by), 1);
     return switch (edge) {
       0 => (start, math.max(1, length + by)),
       1 => (math.max(lo, start + by), length),
-      _ => (math.max(lo, math.min(start + length - 1, start + by)), start + length - math.max(lo, math.min(start + length - 1, start + by))),
+      _ => () {
+          final hi = maxStart ?? (start + length - 1);
+          final ns = (start + by).clamp(lo, math.max(lo, hi)).toInt();
+          return (ns, math.max(1, start + length - ns));
+        }(),
     };
   }
 }
@@ -7583,10 +8484,11 @@ class _TracePainter extends CustomPainter {
 
 /// The ruler, the merged Preview row and the rows' lines (REDESIGN §4, D16).
 class _TimelinePainter extends CustomPainter {
-  _TimelinePainter({required this.frames, required this.cell, required this.left, required this.fps, required this.cur, required this.rulerH, required this.stripH, required this.lines, required this.bands, required this.aspect, required this.thumbs, this.groupStrips = const []});
+  _TimelinePainter({required this.frames, required this.cell, required this.left, required this.fps, required this.cur, required this.rulerH, required this.stripH, required this.lines, required this.bands, required this.aspect, required this.thumbs, this.groupStrips = const [], this.loopStart, this.loopEnd});
   /// K: folded groups' rows: (top, height, pictures by frame)
   final List<(double, double, Map<int, ui.Image>)> groupStrips;
   final int frames, fps, cur;
+  final int? loopStart, loopEnd;
   final double cell, left, rulerH, stripH, aspect;
   final List<double> lines;
   final List<(double, double)> bands;
@@ -7594,6 +8496,16 @@ class _TimelinePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Visual loop range indicator on the ruler when "Loop to" is configured
+    if (loopStart != null && loopEnd != null && loopEnd! > loopStart!) {
+      final lx0 = left + loopStart!.clamp(0, frames - 1) * cell;
+      final lx1 = left + loopEnd!.clamp(1, frames) * cell;
+      canvas.drawRect(Rect.fromLTRB(lx0, 0, lx1, rulerH), Paint()..color = const Color(0x1F1577D6));
+      final bar = Paint()..color = cAccent;
+      canvas.drawRect(Rect.fromLTRB(lx0, 0, lx1, 2), bar);
+      canvas.drawRect(Rect.fromLTRB(lx0, 0, lx0 + 2, 7), bar);
+      canvas.drawRect(Rect.fromLTRB(lx1 - 2, 0, lx1, 7), bar);
+    }
     // ruler: ticks every frame, labels every quarter second (fewer zoomed out),
     // whole seconds bold and taller; the current frame's label is the pill
     final step = math.max(1, (cell >= 40 ? fps / 4 : cell >= 28 ? fps / 2 : cell >= 18 ? fps : fps * 2).round());
@@ -7733,7 +8645,7 @@ class _FigurePickerState extends State<_FigurePicker> {
                       isDense: true,
                       filled: true,
                       fillColor: cControl,
-                      hintText: widget.movieclip ? 'Search' : 'Search figures',
+                      hintText: widget.movieclip ? 'Search movieclips' : 'Search figures',
                       prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF8A9099)),
                       contentPadding: const EdgeInsets.symmetric(vertical: 10),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
@@ -7748,7 +8660,11 @@ class _FigurePickerState extends State<_FigurePicker> {
               child: list.isEmpty
                   ? Center(
                       child: Text(
-                        _tab == 1 ? 'Put figure files (.nodes, .nodemc, .stknds) in the "Barkfart Figures" folder (Files app) and they show up here.' : 'Nothing matches.',
+                        _tab == 1
+                            ? (widget.movieclip
+                                ? 'Put movieclip files (.nodemc) in the "Barkfart Figures" folder, or tap "New movieclip" below to make one.'
+                                : 'Put figure files (.nodes, .nodemc, .stknds) in the "Barkfart Figures" folder (Files app) and they show up here.')
+                            : 'Nothing matches.',
                         textAlign: TextAlign.center,
                         style: const TextStyle(color: cSecondary, fontSize: 13),
                       ),
@@ -7762,15 +8678,16 @@ class _FigurePickerState extends State<_FigurePicker> {
             Container(
               padding: const EdgeInsets.only(top: 10),
               decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFFE6E8EB)))),
-              // the board's footer: Import from Files… and Paste figure; the
-              // project's library and New movieclip beside them
+              // the board's footer: Import from Files… and Paste figure (figures)
+              // or New movieclip (movieclips); the project's library beside them
               child: Row(children: [
                 kit.WordButton('Import from Files…', size: 14, onTap: () => Navigator.pop(context, ['#import'])),
                 kit.WordButton('This project\u2019s library…', size: 14, onTap: () => Navigator.pop(context, ['#library'])),
-                if (widget.movieclip) kit.WordButton('New movieclip', size: 14, onTap: widget.editing ? null : () => Navigator.pop(context, ['#newclip'])),
                 const Spacer(),
                 if (_picked.isNotEmpty)
                   kit.WordButton('Add ${_picked.length}', size: 14, primary: true, onTap: () => Navigator.pop(context, List<String>.from(_picked)))
+                else if (widget.movieclip)
+                  kit.WordButton('New movieclip', size: 14, primary: true, onTap: widget.editing ? null : () => Navigator.pop(context, ['#newclip']))
                 else
                   kit.WordButton('Paste figure', size: 14, onTap: widget.canPaste ? () => Navigator.pop(context, ['#paste']) : null),
               ]),
@@ -7838,16 +8755,20 @@ class _ExportDialogState extends State<_ExportDialog> {
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             const Padding(padding: EdgeInsets.only(bottom: 8), child: Text('Export', textAlign: TextAlign.center, style: TextStyle(color: cTitle, fontSize: 17, fontWeight: FontWeight.w700))),
+            const kit.PropRow('File name', height: 24),
             TextField(
               controller: _name,
-              style: const TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w700),
+              style: const TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w600),
               decoration: InputDecoration(
                 isDense: true,
                 filled: true,
-                fillColor: cControl,
-                hintText: 'Name',
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                fillColor: cCard,
+                hintText: 'File name',
+                suffixIcon: const Icon(Icons.edit_outlined, size: 16, color: cSecondary),
+                suffixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: cLine)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: cAccent, width: 1.5)),
               ),
             ),
             const SizedBox(height: 8),

@@ -546,9 +546,9 @@ class PanelCard extends StatelessWidget {
 /// the screen's edges or its safe area, scrolling when taller than the room.
 /// Use it as a child of the popover's Stack. `card` gets the width to use.
 class Anchored extends StatelessWidget {
-  const Anchored({super.key, required this.anchor, required this.width, required this.card, this.alignRight = false, this.below = false, this.gap = 6});
+  const Anchored({super.key, required this.anchor, required this.width, required this.card, this.alignRight = false, this.below = false, this.gap = 6, this.topMin = 0});
   final Rect anchor;
-  final double width, gap;
+  final double width, gap, topMin;
   final bool alignRight, below;
   final Widget Function(double width) card;
 
@@ -568,15 +568,17 @@ class Anchored extends StatelessWidget {
     final mq = MediaQuery.of(context);
     final screen = mq.size, pad = mq.padding;
     const margin = 8.0;
-    final top = pad.top + margin, bottom = screen.height - pad.bottom - margin;
+    final top = math.max(pad.top + margin, topMin);
+    final bottom = screen.height - pad.bottom - margin;
     final roomAbove = anchor.top - gap - top, roomBelow = bottom - anchor.bottom - gap;
-    final goAbove = below ? roomBelow < 160 && roomAbove > roomBelow : roomAbove >= 160 || roomAbove >= roomBelow;
-    final room = math.max(96.0, goAbove ? roomAbove : roomBelow);
+    final tightBoth = roomAbove < 200 && roomBelow < 200 && bottom - top > math.max(roomAbove, roomBelow) + 60;
+    final goAbove = below ? roomBelow < 160 && roomAbove > roomBelow : roomAbove >= 120 || roomAbove >= roomBelow;
+    final room = math.max(96.0, tightBoth ? bottom - top : (goAbove ? roomAbove : roomBelow));
     final w = math.min(width, screen.width - pad.left - pad.right - 2 * margin);
     final left = (alignRight ? anchor.right - w : anchor.left).clamp(pad.left + margin, math.max(pad.left + margin, screen.width - pad.right - margin - w)).toDouble();
     Widget body = ConstrainedBox(
       constraints: BoxConstraints(maxHeight: room, maxWidth: w),
-      child: SingleChildScrollView(child: card(w)),
+      child: _AnchoredScroll(child: card(w)),
     );
     // it grows out of what opened it (the popover's route animates it)
     final a = ModalRoute.of(context)?.animation;
@@ -585,14 +587,85 @@ class Anchored extends StatelessWidget {
       final ax = ((anchor.center.dx - left) / w * 2 - 1).clamp(-1.0, 1.0);
       body = FadeTransition(
         opacity: c,
-        child: ScaleTransition(scale: Tween(begin: 0.94, end: 1.0).animate(c), alignment: Alignment(ax, goAbove ? 1 : -1), child: body),
+        child: ScaleTransition(scale: Tween(begin: 0.94, end: 1.0).animate(c), alignment: Alignment(ax, tightBoth ? 0 : (goAbove ? 1 : -1)), child: body),
       );
     }
     return Positioned(
       left: left,
-      top: goAbove ? null : math.min(anchor.bottom + gap, bottom - 96),
-      bottom: goAbove ? screen.height - math.max(anchor.top - gap, top + 96) : null,
+      top: tightBoth ? top : (goAbove ? null : math.min(anchor.bottom + gap, bottom - 96)),
+      bottom: tightBoth ? null : (goAbove ? screen.height - math.max(anchor.top - gap, top + 96) : null),
       child: body,
+    );
+  }
+}
+
+/// Scrollable popover body with a subtle bottom cue when more rows sit below the fold.
+class _AnchoredScroll extends StatefulWidget {
+  const _AnchoredScroll({required this.child});
+  final Widget child;
+  @override
+  State<_AnchoredScroll> createState() => _AnchoredScrollState();
+}
+
+class _AnchoredScrollState extends State<_AnchoredScroll> {
+  final ScrollController _sc = ScrollController();
+  bool _moreBelow = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _sc.addListener(_sync);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
+  }
+
+  void _sync() {
+    if (!mounted || !_sc.hasClients) return;
+    final more = _sc.position.maxScrollExtent > 4 && _sc.offset < _sc.position.maxScrollExtent - 4;
+    if (more != _moreBelow) setState(() => _moreBelow = more);
+  }
+
+  @override
+  void dispose() {
+    _sc.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return NotificationListener<ScrollMetricsNotification>(
+      onNotification: (_) {
+        _sync();
+        return false;
+      },
+      child: Stack(children: [
+        ScrollConfiguration(
+          behavior: const _AnyPointerScroll(),
+          child: RawScrollbar(
+            controller: _sc,
+            thumbVisibility: _moreBelow,
+            thickness: 3.5,
+            radius: const Radius.circular(2),
+            thumbColor: const Color(0x666B7078),
+            child: SingleChildScrollView(controller: _sc, child: widget.child),
+          ),
+        ),
+        if (_moreBelow)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 24,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
+                  gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [cCard.withValues(alpha: 0), cCard.withValues(alpha: 0.95)]),
+                ),
+                child: const Align(alignment: Alignment.bottomCenter, child: Padding(padding: EdgeInsets.only(bottom: 2), child: Pictogram('chevron', size: 12, color: cSecondary))),
+              ),
+            ),
+          ),
+      ]),
     );
   }
 }
