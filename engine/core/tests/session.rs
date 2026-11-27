@@ -2122,6 +2122,9 @@ fn toggle_rows() -> Vec<(&'static str, Option<Value>, Value, Value)> {
         ("group blur kept while off", Some(json!([{"op": "group", "layers": ["L2"]}, {"op": "filter", "blur": 6}])), json!({"op": "filter", "blur": 0}), json!({"op": "filter", "blur": 6})),
         // K2: a value's modifier switched off and on
         ("value swing", Some(json!({"op": "modifier_add", "property": "L2/armR1/rotation", "kind": "swing"})), json!({"op": "modifier_set", "property": "L2/armR1/rotation", "index": 0, "enabled": false}), json!({"op": "modifier_set", "property": "L2/armR1/rotation", "index": 0, "enabled": true})),
+        // Wave 1: layer visibility & lock
+        ("layer visible", None, json!({"op": "layer_visible", "layer": "L2", "v": false}), json!({"op": "layer_visible", "layer": "L2", "v": true})),
+        ("layer lock", None, json!({"op": "layer_lock", "layer": "L2", "v": true}), json!({"op": "layer_lock", "layer": "L2", "v": false})),
     ]
 }
 
@@ -2248,6 +2251,18 @@ fn every_command_undoes_and_redoes_exactly() {
         json!({"op": "handles", "v": "vector", "frame": 1, "property": "L2/armR1/rotation"}), json!({"op": "curve_add", "property": "L2/opacity"}),
         // K2: a value's modifiers
         json!({"op": "modifier_add", "property": "L2/armR1/rotation", "kind": "wiggle"}),
+        // Wave 1: keyframe, batch, and layer ops
+        json!({"op": "move_pose_key", "layer": "L2", "from": 1, "to": 3}),
+        json!({"op": "duplicate_pose_key", "layer": "L2", "from": 1}),
+        json!({"op": "move_prop_key", "property": "L2/opacity", "from": 1, "to": 3}),
+        json!({"op": "duplicate_prop_key", "property": "L2/opacity", "from": 1}),
+        json!({"op": "paste_prop_key", "property": "L2/opacity", "frame": 2}),
+        json!({"op": "delete_prop_key", "property": "L2/opacity", "frame": 1}),
+        json!({"op": "shift_keys", "poses": [["L2", 1]], "props": [], "by": 2}),
+        json!({"op": "delete_keys", "poses": [["L2", 1]], "props": []}),
+        json!({"op": "ease_keys", "poses": [["L2", 0]], "props": [], "v": "hold"}),
+        json!({"op": "layer_visible", "layer": "L2", "v": false}),
+        json!({"op": "layer_lock", "layer": "L2", "v": true}),
     ];
     let text = |s: &Session| codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
     let mut failures = Vec::new();
@@ -2344,6 +2359,19 @@ fn every_command_undoes_and_redoes_exactly() {
             "movieclip_done" => {
                 movieclip(&mut s);
                 s.command(&json!({"op": "edit_movieclip"}));
+            }
+            "move_prop_key" | "duplicate_prop_key" | "delete_prop_key" => {
+                s.command(&json!({"op": "set", "k": "keying", "v": true}));
+                s.command(&json!({"op": "frame", "i": 0}));
+                s.command(&json!({"op": "filter", "opacity": 0.4}));
+                s.command(&json!({"op": "frame", "i": 1}));
+                s.command(&json!({"op": "filter", "opacity": 0.8}));
+            }
+            "paste_prop_key" => {
+                s.command(&json!({"op": "set", "k": "keying", "v": true}));
+                s.command(&json!({"op": "frame", "i": 0}));
+                s.command(&json!({"op": "filter", "opacity": 0.4}));
+                s.command(&json!({"op": "copy_prop_key", "property": "L2/opacity", "frame": 0}));
             }
             _ => {}
         }

@@ -127,8 +127,23 @@ pub fn new_pose(st: &mut State, sym: &str, id: &str, frame: i32) -> EditResult<(
     Ok(())
 }
 
+/// The last pose frame of any other drawn/timed layer in `sym` (0 when none).
+fn others_last(st: &State, sym: &str, id: &str, fps: f64) -> i32 {
+    st.project
+        .symbol(sym)
+        .map(|s| {
+            s.layers
+                .iter()
+                .filter(|x| x.id != id && matches!(x.kind, LayerKind::Figure(_) | LayerKind::Sprite(_) | LayerKind::Symbol(_)))
+                .filter_map(|x| pose_frames(x, fps).last().copied())
+                .max()
+                .unwrap_or(0)
+        })
+        .unwrap_or(0)
+}
+
 /// The block under `frame` lasts `frames` frames: the figure's later poses
-/// move with its end. A last block grows the animation when it needs to.
+/// move with its end. A last block grows or shrinks the animation as needed.
 pub fn set_block_length(st: &mut State, sym: &str, id: &str, frame: i32, frames: i32) -> EditResult<()> {
     if frames < 1 {
         return fail("A pose lasts at least one frame.");
@@ -145,20 +160,23 @@ pub fn set_block_length(st: &mut State, sym: &str, id: &str, frame: i32, frames:
     if by == 0 {
         return Ok(());
     }
+    let others = others_last(st, sym, id, fps);
     if next.is_none() {
-        // the last block: it runs to the end of the animation
-        ensure_length(st, start + frames);
+        // the last block: runs to the end of the animation, both lengthening and shortening
+        if start + frames > n {
+            ensure_length(st, start + frames);
+        } else {
+            let to = (start + frames).max(others + 1).max(start + 1).max(1);
+            if let Some(r) = st.project.root_mut() {
+                r.duration = to as f64 / fps;
+            }
+        }
         return Ok(());
     }
     // the poses after it move with its end; a figure whose last pose is the
     // animation's last moves the animation's end with it, both ways, so
     // lengthening and then shortening a pose is a round trip (the bughunt,
     // 2026-11-24); otherwise the end stays, growing only when it must
-    let others = st
-        .project
-        .symbol(sym)
-        .map(|s| s.layers.iter().filter(|x| x.id != id && matches!(x.kind, LayerKind::Figure(_) | LayerKind::Sprite(_) | LayerKind::Symbol(_))).filter_map(|x| pose_frames(x, fps).last().copied()).max().unwrap_or(0))
-        .unwrap_or(0);
     let owns_end = last >= others;
     let l = layer(st, sym, id)?;
     retime(l, fps, |fr| if fr >= end { fr + by } else { fr });
@@ -222,6 +240,335 @@ pub fn delete_pose(st: &mut State, sym: &str, id: &str, frame: i32) -> EditResul
     for q in pose_props(l) {
         if let Ok(i) = q.track.index_of(t) {
             q.track.remove_at(i);
+        }
+    }
+    Ok(())
+}
+
+/// Moves a layer's pose key at `from` (>0) to any unoccupied frame `to` (>=1),
+/// crossing other pose keys freely. Grows duration if `to >= frames`.
+pub fn move_pose_key(st: &mut State, sym: &str, id: &str, from: i32, to: i32) -> EditResult<()> {
+    if from == to {
+        return Ok(());
+    }
+    if from == 0 {
+        return fail("The first pose stays on the first frame.");
+    }
+    if to < 1 {
+        return fail("A pose cannot move to the first frame.");
+    }
+    let fps = fps(st);
+    {
+        let l = layer(st, sym, id)?;
+        let keys = pose_frames(l, fps);
+        if !keys.contains(&from) {
+            return fail("There is no pose on this frame.");
+        }
+        if keys.contains(&to) {
+            return fail("There is already a pose on that frame.");
+        }
+        retime(l, fps, |fr| if fr == from { to } else { fr });
+    }
+    ensure_length(st, to + 1);
+    Ok(())
+}
+
+/// Duplicates a layer's pose key at `from` (values, interp, ease, handles) to
+/// `to` (or the first free frame > `from`). Returns the frame it landed on.
+pub fn duplicate_pose_key(st: &mut State, sym: &str, id: &str, from: i32, to: Option<i32>) -> EditResult<i32> {
+    let fps = fps(st);
+    let tw = st.project.settings.tween_interp;
+    let target = {
+        let l = layer(st, sym, id)?;
+        let keys = pose_frames(l, fps);
+        if !keys.contains(&from) {
+            return fail("There is no pose on this frame.");
+        }
+        let target = match to {
+            Some(t) => {
+                if t < 0 {
+                    return fail("Invalid frame.");
+                }
+                if keys.contains(&t) {
+                    return fail("There is already a pose on that frame.");
+                }
+                t
+            }
+            None => (from + 1..).find(|f| !keys.contains(f)).unwrap_or(from + 1),
+        };
+        let t_from = from as f64 / fps;
+        let t_to = target as f64 / fps;
+        for q in pose_props(l) {
+            let k = q
+                .track
+                .keys()
+                .iter()
+                .find(|k| (k.time * fps).round() as i32 == from)
+                .copied()
+                .unwrap_or_else(|| {
+                    let v = q.key_value(t_from);
+                    let interp = crate::edit::editor::interp_at(q, t_from, tw);
+                    Key::new(t_from, v, interp)
+                });
+            q.track.put(Key { time: t_to, ..k });
+        }
+        target
+    };
+    ensure_length(st, target + 1);
+    Ok(target)
+}
+
+/// Moves one property's key at `from` to any unoccupied frame `to` (>=0).
+pub fn move_prop_key(st: &mut State, prop_id: &str, from: i32, to: i32) -> EditResult<()> {
+    if from == to {
+        return Ok(());
+    }
+    if to < 0 {
+        return fail("Frame must be at least 1.");
+    }
+    let fps = fps(st);
+    {
+        let Some(q) = st.project.property_mut(prop_id) else { return fail("There is no such value.") };
+        let Some(idx) = q.track.keys().iter().position(|k| (k.time * fps).round() as i32 == from) else {
+            return fail("There is no key on that frame.");
+        };
+        if q.track.keys().iter().any(|k| (k.time * fps).round() as i32 == to) {
+            return fail("There is already a key on that frame.");
+        }
+        let k = q.track.keys()[idx];
+        q.track.remove_at(idx);
+        q.track.put(Key { time: to as f64 / fps, ..k });
+    }
+    ensure_length(st, to + 1);
+    Ok(())
+}
+
+/// Duplicates one property's key at `from` to `to` (or the first free frame > `from`).
+pub fn duplicate_prop_key(st: &mut State, prop_id: &str, from: i32, to: Option<i32>) -> EditResult<i32> {
+    let fps = fps(st);
+    let target = {
+        let Some(q) = st.project.property_mut(prop_id) else { return fail("There is no such value.") };
+        let Some(k) = q.track.keys().iter().find(|k| (k.time * fps).round() as i32 == from).copied() else {
+            return fail("There is no key on that frame.");
+        };
+        let existing: Vec<i32> = q.track.keys().iter().map(|x| (x.time * fps).round() as i32).collect();
+        let target = match to {
+            Some(t) => {
+                if t < 0 {
+                    return fail("Frame must be at least 1.");
+                }
+                if existing.contains(&t) {
+                    return fail("There is already a key on that frame.");
+                }
+                t
+            }
+            None => (from + 1..).find(|f| !existing.contains(f)).unwrap_or(from + 1),
+        };
+        q.track.put(Key { time: target as f64 / fps, ..k });
+        target
+    };
+    ensure_length(st, target + 1);
+    Ok(target)
+}
+
+/// Deletes one property's key at `frame`. If 1 or 0 keys remain, keeps the
+/// surviving (or deleted) value as static so nothing jumps to an old default.
+pub fn delete_prop_key(st: &mut State, prop_id: &str, frame: i32) -> EditResult<()> {
+    let fps = fps(st);
+    let Some(q) = st.project.property_mut(prop_id) else { return fail("There is no such value.") };
+    let Some(idx) = q.track.keys().iter().position(|k| (k.time * fps).round() as i32 == frame) else {
+        return fail("There is no key on that frame.");
+    };
+    let removed = q.track.keys()[idx];
+    q.track.remove_at(idx);
+    if q.track.len() == 1 {
+        let v = q.track.keys()[0].value;
+        q.track.clear();
+        q.value = v;
+    } else if q.track.is_empty() {
+        q.value = removed.value;
+    }
+    Ok(())
+}
+
+/// Pastes a copied property key onto `prop_id` at `frame` (>=0).
+pub fn paste_prop_key(st: &mut State, prop_id: &str, frame: i32, ty: ValueType, key: Key) -> EditResult<()> {
+    if frame < 0 {
+        return fail("Frame must be at least 1.");
+    }
+    let fps = fps(st);
+    {
+        let Some(q) = st.project.property_mut(prop_id) else { return fail("There is no such value.") };
+        if q.ty != ty || !q.ty.checked(&key.value) {
+            return fail("That copied key is a different kind of value.");
+        }
+        q.track.put(Key { time: frame as f64 / fps, ..key });
+    }
+    ensure_length(st, frame + 1);
+    Ok(())
+}
+
+/// Shifts a batch of pose keys `(layer_id, frame)` and property keys `(prop_id, frame)`
+/// by `by` frames. Frame 0 poses are skipped; poses clamp >= 1 and props >= 0.
+pub fn shift_keys(st: &mut State, sym: &str, poses: &[(String, i32)], props: &[(String, i32)], by: i32) -> EditResult<()> {
+    if by == 0 {
+        return Ok(());
+    }
+    let fps = fps(st);
+    let mut max_frame: Option<i32> = None;
+
+    let mut by_layer: indexmap::IndexMap<&str, Vec<i32>> = indexmap::IndexMap::new();
+    for (lid, fr) in poses {
+        if *fr > 0 {
+            let v = by_layer.entry(lid.as_str()).or_default();
+            if !v.contains(fr) {
+                v.push(*fr);
+            }
+        }
+    }
+    for (lid, mut sel) in by_layer {
+        sel.sort_unstable();
+        let Ok(l) = layer(st, sym, lid) else { continue };
+        let existing = pose_frames(l, fps);
+        let moving: Vec<i32> = sel.into_iter().filter(|f| existing.contains(f)).collect();
+        if moving.is_empty() {
+            continue;
+        }
+        let delta = by.max(1 - moving[0]);
+        if delta == 0 {
+            continue;
+        }
+        for &fr in &moving {
+            let dst = fr + delta;
+            if existing.contains(&dst) && !moving.contains(&dst) {
+                return fail("Those poses would overlap another pose.");
+            }
+            max_frame = Some(max_frame.map_or(dst, |m| m.max(dst)));
+        }
+        retime(l, fps, |fr| if moving.contains(&fr) { fr + delta } else { fr });
+    }
+
+    let mut by_prop: indexmap::IndexMap<&str, Vec<i32>> = indexmap::IndexMap::new();
+    for (pid, fr) in props {
+        let v = by_prop.entry(pid.as_str()).or_default();
+        if !v.contains(fr) {
+            v.push(*fr);
+        }
+    }
+    for (pid, mut sel) in by_prop {
+        sel.sort_unstable();
+        let Some(q) = st.project.property_mut(pid) else { continue };
+        let existing: Vec<i32> = q.track.keys().iter().map(|k| (k.time * fps).round() as i32).collect();
+        let moving: Vec<i32> = sel.into_iter().filter(|f| existing.contains(f)).collect();
+        if moving.is_empty() {
+            continue;
+        }
+        let delta = by.max(-moving[0]);
+        if delta == 0 {
+            continue;
+        }
+        for &fr in &moving {
+            let dst = fr + delta;
+            if existing.contains(&dst) && !moving.contains(&dst) {
+                return fail("Those keys would overlap another key.");
+            }
+            max_frame = Some(max_frame.map_or(dst, |m| m.max(dst)));
+        }
+        let keys: Vec<Key> = q.track.keys().to_vec();
+        q.track.clear();
+        for k in keys {
+            let fr = (k.time * fps).round() as i32;
+            let nfr = if moving.contains(&fr) { fr + delta } else { fr };
+            q.track.put(Key { time: nfr as f64 / fps, ..k });
+        }
+    }
+
+    if let Some(m) = max_frame {
+        ensure_length(st, m + 1);
+    }
+    Ok(())
+}
+
+/// Deletes a batch of pose keys (skipping frame 0) and property keys.
+pub fn delete_keys(st: &mut State, sym: &str, poses: &[(String, i32)], props: &[(String, i32)]) -> EditResult<()> {
+    let fps = fps(st);
+    for (lid, fr) in poses {
+        if *fr <= 0 {
+            continue;
+        }
+        let Ok(l) = layer(st, sym, lid) else { continue };
+        for q in pose_props(l) {
+            if let Some(i) = q.track.keys().iter().position(|k| (k.time * fps).round() as i32 == *fr) {
+                q.track.remove_at(i);
+            }
+        }
+    }
+    let mut by_prop: indexmap::IndexMap<&str, Vec<i32>> = indexmap::IndexMap::new();
+    for (pid, fr) in props {
+        let v = by_prop.entry(pid.as_str()).or_default();
+        if !v.contains(fr) {
+            v.push(*fr);
+        }
+    }
+    for (pid, frames) in by_prop {
+        let Some(q) = st.project.property_mut(pid) else { continue };
+        let mut last_removed: Option<Value> = None;
+        for fr in frames {
+            if let Some(i) = q.track.keys().iter().position(|k| (k.time * fps).round() as i32 == fr) {
+                last_removed = Some(q.track.keys()[i].value);
+                q.track.remove_at(i);
+            }
+        }
+        if last_removed.is_some() {
+            if q.track.len() == 1 {
+                let v = q.track.keys()[0].value;
+                q.track.clear();
+                q.value = v;
+            } else if q.track.is_empty() {
+                if let Some(v) = last_removed {
+                    q.value = v;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Sets easing on a batch of pose keys and property keys.
+pub fn ease_keys(st: &mut State, sym: &str, poses: &[(String, i32)], props: &[(String, i32)], interp: Interp, ease: Ease) -> EditResult<()> {
+    let fps = fps(st);
+    for (lid, fr) in poses {
+        let Ok(l) = layer(st, sym, lid) else { continue };
+        for q in pose_props(l) {
+            if !q.ty.continuous() {
+                continue;
+            }
+            let keys: Vec<Key> = q
+                .track
+                .keys()
+                .iter()
+                .map(|k| if (k.time * fps).round() as i32 == *fr { Key { interp, ease, ..*k } } else { *k })
+                .collect();
+            q.track.clear();
+            for k in keys {
+                q.track.put(k);
+            }
+        }
+    }
+    for (pid, fr) in props {
+        let Some(q) = st.project.property_mut(pid) else { continue };
+        if !q.ty.continuous() {
+            continue;
+        }
+        let keys: Vec<Key> = q
+            .track
+            .keys()
+            .iter()
+            .map(|k| if (k.time * fps).round() as i32 == *fr { Key { interp, ease, ..*k } } else { *k })
+            .collect();
+        q.track.clear();
+        for k in keys {
+            q.track.put(k);
         }
     }
     Ok(())

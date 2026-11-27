@@ -104,4 +104,9 @@ fn lengthening_then_shortening_a_pose_is_a_round_trip() {
     s.command(&json!({"op": "block_length", "frames": 1}));
     assert_eq!(frames(&s), [0, 1, 2, 3, 4]);
     assert_eq!(s.frame_count(), 7);
+    // shortening the last pose itself shrinks the animation back cleanly
+    s.command(&json!({"op": "frame", "i": 4}));
+    s.command(&json!({"op": "block_length", "frames": 1}));
+    assert_eq!(s.frame_count(), 5);
+    assert_eq!(frames(&s), [0, 1, 2, 3, 4]);
 }
