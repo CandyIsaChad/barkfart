@@ -2122,9 +2122,10 @@ fn toggle_rows() -> Vec<(&'static str, Option<Value>, Value, Value)> {
         ("group blur kept while off", Some(json!([{"op": "group", "layers": ["L2"]}, {"op": "filter", "blur": 6}])), json!({"op": "filter", "blur": 0}), json!({"op": "filter", "blur": 6})),
         // K2: a value's modifier switched off and on
         ("value swing", Some(json!({"op": "modifier_add", "property": "L2/armR1/rotation", "kind": "swing"})), json!({"op": "modifier_set", "property": "L2/armR1/rotation", "index": 0, "enabled": false}), json!({"op": "modifier_set", "property": "L2/armR1/rotation", "index": 0, "enabled": true})),
-        // Wave 1: layer visibility & lock
+        // Wave 1 & 2: layer visibility, lock, and group blend
         ("layer visible", None, json!({"op": "layer_visible", "layer": "L2", "v": false}), json!({"op": "layer_visible", "layer": "L2", "v": true})),
         ("layer lock", None, json!({"op": "layer_lock", "layer": "L2", "v": true}), json!({"op": "layer_lock", "layer": "L2", "v": false})),
+        ("group blend", Some(json!({"op": "group", "layers": ["L2"]})), json!({"op": "group_set", "blend": "MULTIPLY"}), json!({"op": "group_set", "blend": "NORMAL"})),
     ]
 }
 
@@ -2263,6 +2264,10 @@ fn every_command_undoes_and_redoes_exactly() {
         json!({"op": "ease_keys", "poses": [["L2", 0]], "props": [], "v": "hold"}),
         json!({"op": "layer_visible", "layer": "L2", "v": false}),
         json!({"op": "layer_lock", "layer": "L2", "v": true}),
+        // Wave 2: group blend, reverse_range, ping_pong_range
+        json!({"op": "group_set", "blend": "SCREEN"}),
+        json!({"op": "reverse_range", "from": 0, "to": 1}),
+        json!({"op": "ping_pong_range", "from": 0, "to": 1}),
     ];
     let text = |s: &Session| codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
     let mut failures = Vec::new();

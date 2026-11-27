@@ -132,8 +132,8 @@ pub fn delete(st: &mut State, sym: &str, gid: &str) -> EditResult<()> {
     Ok(())
 }
 
-/// The group page's settings: name, opacity, open (the folder row).
-pub fn set(st: &mut State, sym: &str, gid: &str, name: Option<&str>, opacity: Option<f32>, open: Option<bool>) -> EditResult<()> {
+/// The group page's settings: name, opacity, blend, open (the folder row).
+pub fn set(st: &mut State, sym: &str, gid: &str, name: Option<&str>, opacity: Option<f32>, blend: Option<Blend>, open: Option<bool>) -> EditResult<()> {
     let s = symbol(st, sym)?;
     let Some(g) = s.groups.iter_mut().find(|g| g.id == gid) else { return fail("There is no such group.") };
     if let Some(n) = name {
@@ -145,6 +145,9 @@ pub fn set(st: &mut State, sym: &str, gid: &str, name: Option<&str>, opacity: Op
     }
     if let Some(o) = opacity {
         g.opacity = o.clamp(0.0, 1.0);
+    }
+    if let Some(bl) = blend {
+        g.blend = bl;
     }
     if let Some(o) = open {
         g.open = o;

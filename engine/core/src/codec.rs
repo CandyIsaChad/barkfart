@@ -601,6 +601,10 @@ fn symbol(m: &Obj) -> R<Symbol> {
         let id = req(gm, "id")?;
         let mut g = LayerGroup::new(id, str_(gm, "name")?.unwrap_or("Group"));
         g.opacity = f(gm, "opacity", 1.0)?;
+        g.blend = match str_(gm, "blend")? {
+            None => Blend::Normal,
+            Some(s) => Blend::from_name(s).ok_or_else(|| FormatError(format!("blend {s}")))?,
+        };
         g.open = b(gm, "open", true)?;
         if let Some(e) = gm.get("effects") {
             read_stack(as_map(e, "effects")?, &mut g.effects, id)?;
@@ -1227,6 +1231,9 @@ fn symbol_json(s: &Symbol) -> Json {
             .map(|g| {
                 let mut gm = JObj::new();
                 gm.put("id", json::s(&g.id)).put("name", json::s(&g.name)).put("opacity", json::f32(g.opacity)).put("open", Json::Bool(g.open));
+                if g.blend != Blend::Normal {
+                    gm.put("blend", json::s(g.blend.name()));
+                }
                 if !g.effects.is_empty() {
                     gm.put("effects", stack_json(&g.effects));
                 }

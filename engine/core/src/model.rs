@@ -1848,6 +1848,7 @@ pub struct LayerGroup {
     pub id: String,
     pub name: String,
     pub opacity: f32,
+    pub blend: Blend,
     pub effects: EffectStack,
     /// The folder row is open (its members' rows show).
     pub open: bool,
@@ -1855,7 +1856,7 @@ pub struct LayerGroup {
 
 impl LayerGroup {
     pub fn new(id: &str, name: &str) -> LayerGroup {
-        LayerGroup { id: id.into(), name: name.into(), opacity: 1.0, effects: EffectStack::default(), open: true }
+        LayerGroup { id: id.into(), name: name.into(), opacity: 1.0, blend: Blend::Normal, effects: EffectStack::default(), open: true }
     }
 }
 

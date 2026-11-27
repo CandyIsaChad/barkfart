@@ -2656,6 +2656,19 @@ impl Session {
                     self.step("Easing", |s| crate::edit::block_ops::ease_keys(s, &sym, &poses, &props, interp, ease));
                 }
             }
+            "reverse_range" | "ping_pong_range" => {
+                let layer = c["layer"].as_str().map(str::to_string);
+                let from = c["from"].as_i64().unwrap_or(0) as i32;
+                let to = c["to"].as_i64().unwrap_or((self.frame_count() - 1) as i64) as i32;
+                let pp = op == "ping_pong_range";
+                self.step(if pp { "Ping-pong range" } else { "Reverse range" }, |s| {
+                    if pp {
+                        crate::edit::block_ops::ping_pong_range(s, &sym, layer.as_deref(), from, to)
+                    } else {
+                        crate::edit::block_ops::reverse_range(s, &sym, layer.as_deref(), from, to)
+                    }
+                });
+            }
             "layer_visible" => {
                 if let Some(id) = c["layer"].as_str().map(str::to_string).or_else(|| self.sel_layer()) {
                     let vis = b("v");
@@ -3287,16 +3300,27 @@ impl Session {
             }
             "group_set" => {
                 if let Some(gid) = c["group"].as_str().map(str::to_string).or_else(|| self.selected_group.clone()) {
-                    let (name, opacity, open) = (c["name"].as_str().map(str::to_string), c["opacity"].as_f64().map(|v| v as f32), c["open"].as_bool());
+                    let (name, opacity, blend, open) = (
+                        c["name"].as_str().map(str::to_string),
+                        c["opacity"].as_f64().map(|v| v as f32),
+                        c["blend"].as_str().and_then(Blend::from_name),
+                        c["open"].as_bool(),
+                    );
                     // opening and closing the folder row is not an edit to undo
-                    if name.is_none() && opacity.is_none() && open.is_some() {
+                    if name.is_none() && opacity.is_none() && blend.is_none() && open.is_some() {
                         let r = self.doc.project_mut().symbol_mut(&sym).and_then(|s| s.groups.iter_mut().find(|g| g.id == gid)).map(|g| g.open = open.unwrap_or(true));
                         if r.is_some() {
                             self.rev += 1;
                         }
                     } else {
-                        let label = if name.is_some() { "Rename group" } else { "Group opacity" };
-                        self.step(label, |s| crate::edit::group_ops::set(s, &sym, &gid, name.as_deref(), opacity, open));
+                        let label = if name.is_some() {
+                            "Rename group"
+                        } else if blend.is_some() {
+                            "Group blend"
+                        } else {
+                            "Group opacity"
+                        };
+                        self.step(label, |s| crate::edit::group_ops::set(s, &sym, &gid, name.as_deref(), opacity, blend, open));
                     }
                 }
             }
@@ -4760,14 +4784,14 @@ impl Session {
                 let r = p.root()?;
                 let g = r.groups.iter().find(|x| x.id == *gid)?;
                 let members: Vec<&std::sync::Arc<Layer>> = r.layers.iter().rev().filter(|l| l.group.as_deref() == Some(gid.as_str())).collect();
-                Some(json!({"id": g.id, "name": g.name, "opacity": round2(g.opacity), "open": g.open,
+                Some(json!({"id": g.id, "name": g.name, "opacity": round2(g.opacity), "blend": g.blend.name(), "open": g.open,
                     // the effects that are on (a switched-off one keeps its settings, silent)
                     "effects": group_on(p, gid),
                     "filters": crate::edit::filters::group_state(p, &p.root_symbol, gid),
                     "members": members.iter().map(|l| json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone())})).collect::<Vec<_>>()}))
             }),
             "groups": p.root().map(|r| r.groups.iter().map(|g| json!({
-                "id": g.id, "name": g.name, "opacity": round2(g.opacity), "open": g.open, "effects": group_on(p, &g.id).len(),
+                "id": g.id, "name": g.name, "opacity": round2(g.opacity), "blend": g.blend.name(), "open": g.open, "effects": group_on(p, &g.id).len(),
                 "members": r.layers.iter().rev().filter(|l| l.group.as_deref() == Some(g.id.as_str())).map(|l| l.id.clone()).collect::<Vec<_>>(),
             })).collect::<Vec<_>>()).unwrap_or_default(),
             "joining": self.joining.is_some(),

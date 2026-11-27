@@ -107,3 +107,56 @@ fn export_follows_tweening() {
     assert_eq!(count(e), 12, "0.2 s at 60 pictures a second");
     bf_engine_free(e);
 }
+
+#[test]
+fn async_thumbnails_render_poll_resize_and_clear() {
+    let e = bf_engine_new();
+    if e.is_null() {
+        eprintln!("skipping: no GPU");
+        return;
+    }
+    assert_eq!(bf_doc_new(e), 0);
+    let st = cmd(e, r#"{"op":"group","layers":["L2"]}"#);
+    let gid = st["group"]["id"].as_str().unwrap().to_string();
+    let l2 = CString::new("L2").unwrap();
+    let gcs = CString::new(gid.as_str()).unwrap();
+
+    // Enqueue kind 0 (preview), kind 1 (layer), kind 2 (group)
+    assert_eq!(bf_thumb_request(e, 0, std::ptr::null(), 0.0, 64, 36, 101), 0);
+    assert_eq!(bf_thumb_request(e, 1, l2.as_ptr(), 0.0, 44, 44, 102), 0);
+    assert_eq!(bf_thumb_request(e, 2, gcs.as_ptr(), 0.0, 64, 36, 103), 0);
+
+    // Wait for first result using a deliberately undersized buffer to verify -1 resize handshake
+    let mut tag = 0u64;
+    let mut w = 0u32;
+    let mut h = 0u32;
+    let mut small = [0u8; 4];
+    let mut got = Vec::new();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while got.len() < 3 && std::time::Instant::now() < deadline {
+        let r = bf_thumb_poll(e, &mut tag, &mut w, &mut h, small.as_mut_ptr(), small.len());
+        if r == 0 {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            continue;
+        }
+        assert_eq!(r, -1, "undersized buffer must ask for resize");
+        let need = (w * h * 4) as usize;
+        assert!(need > 4);
+        let mut buf = vec![0u8; need];
+        assert_eq!(bf_thumb_poll(e, &mut tag, &mut w, &mut h, buf.as_mut_ptr(), buf.len()), 1);
+        assert!(buf.iter().any(|&b| b != 0), "rendered thumbnail {tag} should have non-zero pixels");
+        got.push((tag, w, h));
+    }
+    assert_eq!(got.len(), 3, "all three async thumbnails should complete: {got:?}");
+    assert_eq!(got[0], (101, 64, 36));
+    assert_eq!(got[1], (102, 44, 44));
+    assert_eq!(got[2], (103, 64, 36));
+
+    // Clear drops queued/ready thumbnails cleanly
+    assert_eq!(bf_thumb_request(e, 0, std::ptr::null(), 0.0, 64, 36, 201), 0);
+    bf_thumb_clear(e);
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    let mut buf = vec![0u8; 64 * 36 * 4];
+    assert_eq!(bf_thumb_poll(e, &mut tag, &mut w, &mut h, buf.as_mut_ptr(), buf.len()), 0);
+    bf_engine_free(e);
+}

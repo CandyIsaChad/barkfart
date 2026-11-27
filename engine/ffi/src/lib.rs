@@ -8,18 +8,172 @@ use barkfart_core::session::Session;
 use barkfart_core::{codec, eval, tess};
 use barkfart_render::glyphs::{GlyphAtlas, PAGE};
 use barkfart_render::{Renderer, View};
+use std::collections::VecDeque;
 use std::ffi::c_char;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
+
+struct ThumbJob {
+    gen: u64,
+    tag: u64,
+    kind: i32,
+    project: Project,
+    t: f64,
+    w: u32,
+    h: u32,
+}
+
+struct ThumbDone {
+    gen: u64,
+    tag: u64,
+    w: u32,
+    h: u32,
+    rgba: Vec<u8>,
+}
+
+struct ThumbQueue {
+    gen: u64,
+    pending: VecDeque<ThumbJob>,
+    ready: VecDeque<ThumbDone>,
+    shutdown: bool,
+}
+
+struct ThumbWorker {
+    shared: Arc<(Mutex<ThumbQueue>, Condvar)>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ThumbWorker {
+    fn new(renderer: Arc<Renderer>, glyphs: Arc<RwLock<GlyphAtlas>>) -> Self {
+        let shared = Arc::new((
+            Mutex::new(ThumbQueue { gen: 0, pending: VecDeque::new(), ready: VecDeque::new(), shutdown: false }),
+            Condvar::new(),
+        ));
+        let worker_shared = shared.clone();
+        let thread = std::thread::Builder::new()
+            .name("bf-thumbs".into())
+            .spawn(move || {
+                let (lock, cv) = &*worker_shared;
+                loop {
+                    let job = {
+                        let mut q = match lock.lock() {
+                            Ok(g) => g,
+                            Err(_) => return,
+                        };
+                        while q.pending.is_empty() && !q.shutdown {
+                            q = match cv.wait(q) {
+                                Ok(g) => g,
+                                Err(_) => return,
+                            };
+                        }
+                        if q.shutdown {
+                            return;
+                        }
+                        let Some(job) = q.pending.pop_front() else { continue };
+                        if job.gen != q.gen {
+                            continue;
+                        }
+                        job
+                    };
+                    let rendered = catch_unwind(AssertUnwindSafe(|| {
+                        let g = glyphs.read().ok()?;
+                        match job.kind {
+                            0 | 2 => {
+                                let scene = eval::evaluate_with(&job.project, &job.project.root_symbol, job.t, false, true);
+                                let list = tess::layered(&scene, Some(&*g));
+                                let (sw, sh) = (job.project.settings.width.max(1) as f32, job.project.settings.height.max(1) as f32);
+                                let bg = job.project.settings.background;
+                                let view = View { x0: -sw / 2.0, y0: -sh / 2.0, x1: sw / 2.0, y1: sh / 2.0, background: [bg.r, bg.g, bg.b, bg.a] };
+                                Some(renderer.render(&list, job.w, job.h, view))
+                            }
+                            1 => render_fitted_with(&renderer, &*g, &job.project, job.t, job.w, job.h)
+                                .or_else(|| Some(vec![0u8; (job.w * job.h * 4) as usize])),
+                            _ => None,
+                        }
+                    }));
+                    if let Ok(Some(rgba)) = rendered {
+                        if let Ok(mut q) = lock.lock() {
+                            if !q.shutdown && job.gen == q.gen {
+                                q.ready.push_back(ThumbDone { gen: job.gen, tag: job.tag, w: job.w, h: job.h, rgba });
+                            }
+                        }
+                    }
+                }
+            })
+            .ok();
+        ThumbWorker { shared, thread }
+    }
+
+    fn enqueue(&self, kind: i32, project: Project, t: f64, w: u32, h: u32, tag: u64) {
+        let (lock, cv) = &*self.shared;
+        if let Ok(mut q) = lock.lock() {
+            if q.shutdown {
+                return;
+            }
+            if q.pending.len() >= 64 {
+                q.pending.pop_front();
+            }
+            let gen = q.gen;
+            q.pending.push_back(ThumbJob { gen, tag, kind, project, t, w, h });
+            cv.notify_one();
+        }
+    }
+
+    fn poll(&self, out_tag: &mut u64, out_w: &mut u32, out_h: &mut u32, out_buf: &mut [u8]) -> i32 {
+        let (lock, _) = &*self.shared;
+        let Ok(mut q) = lock.lock() else { return 0 };
+        let gen = q.gen;
+        while q.ready.front().is_some_and(|d| d.gen != gen) {
+            q.ready.pop_front();
+        }
+        let Some(front) = q.ready.front() else { return 0 };
+        *out_tag = front.tag;
+        *out_w = front.w;
+        *out_h = front.h;
+        if out_buf.len() < front.rgba.len() {
+            return -1;
+        }
+        let item = q.ready.pop_front().expect("checked front");
+        out_buf[..item.rgba.len()].copy_from_slice(&item.rgba);
+        1
+    }
+
+    fn clear(&self) {
+        let (lock, _) = &*self.shared;
+        if let Ok(mut q) = lock.lock() {
+            q.gen = q.gen.wrapping_add(1);
+            q.pending.clear();
+            q.ready.clear();
+        }
+    }
+}
+
+impl Drop for ThumbWorker {
+    fn drop(&mut self) {
+        let (lock, cv) = &*self.shared;
+        if let Ok(mut q) = lock.lock() {
+            q.shutdown = true;
+            q.pending.clear();
+            q.ready.clear();
+            cv.notify_all();
+        }
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
 
 pub struct Engine {
-    renderer: Renderer,
+    renderer: Arc<Renderer>,
     /// Decoded sounds of the current project (for the soundtrack export).
     plan: Option<barkfart_core::audio::AudioPlan>,
     /// Frame delays and repeats in wall time (rebuilt with the plan).
     schedule: Option<barkfart_core::timing::Schedule>,
     player: barkfart_audio::Player,
     audio_label: Vec<u8>,
-    glyphs: GlyphAtlas,
+    glyphs: Arc<RwLock<GlyphAtlas>>,
+    /// Off-UI-thread thumbnail renderer (User list #9).
+    thumbs: ThumbWorker,
     /// Image ids uploaded for the current project.
     images: Vec<String>,
     /// Figure editor "Load BG image": its size (texture "editor:bg"); view only.
@@ -47,6 +201,7 @@ impl Engine {
 
     /// Opens a project: textures, sounds, a fresh session.
     fn open(&mut self, p: Project, entries: indexmap::IndexMap<String, Vec<u8>>) {
+        self.thumbs.clear();
         for id in self.images.drain(..) {
             self.renderer.remove_texture(&id);
         }
@@ -87,40 +242,47 @@ impl Engine {
         let mut used: Vec<String> = Vec::new();
         let p = s.project();
         let mut wanted: Vec<String> = Vec::new();
-        for sym in p.library.values() {
-            for l in &sym.layers {
-                if let barkfart_core::model::LayerKind::Text(t) = &l.kind {
-                    if let Some(f) = &t.font {
-                        if !self.glyphs.has_font(f) && !wanted.contains(f) {
-                            wanted.push(f.clone());
-                        }
-                        if !used.contains(f) {
-                            used.push(f.clone());
+        {
+            let glyphs = self.glyphs.read().expect("glyphs");
+            for sym in p.library.values() {
+                for l in &sym.layers {
+                    if let barkfart_core::model::LayerKind::Text(t) = &l.kind {
+                        if let Some(f) = &t.font {
+                            if !glyphs.has_font(f) && !wanted.contains(f) {
+                                wanted.push(f.clone());
+                            }
+                            if !used.contains(f) {
+                                used.push(f.clone());
+                            }
                         }
                     }
                 }
             }
         }
-        for key in wanted {
-            let page = match p.assets.get(&key) {
-                Some(a) if a.kind == barkfart_core::model::AssetKind::Font => s.asset_bytes(&a.path).and_then(|b| self.glyphs.add_font(&key, &b)),
-                _ => self.glyphs.add_bundled(&key),
-            };
-            if let Some(pg) = page {
-                self.renderer.set_texture(&pg.id, pg.width, pg.height, &pg.rgba);
+        if !wanted.is_empty() {
+            let mut glyphs = self.glyphs.write().expect("glyphs");
+            for key in wanted {
+                let page = match p.assets.get(&key) {
+                    Some(a) if a.kind == barkfart_core::model::AssetKind::Font => s.asset_bytes(&a.path).and_then(|b| glyphs.add_font(&key, &b)),
+                    _ => glyphs.add_bundled(&key),
+                };
+                if let Some(pg) = page {
+                    self.renderer.set_texture(&pg.id, pg.width, pg.height, &pg.rgba);
+                }
             }
         }
         // metrics for the textfield boxes
+        let glyphs = self.glyphs.read().expect("glyphs");
         let Some(s) = self.session.as_mut() else { return changed };
         if !s.fonts.contains_key("") {
-            if let Some(m) = self.glyphs.metrics(None) {
+            if let Some(m) = glyphs.metrics(None) {
                 s.fonts.insert(String::new(), m);
                 changed = true;
             }
         }
         for key in used {
             if !s.fonts.contains_key(&key) {
-                if let Some(m) = self.glyphs.metrics(Some(&key)) {
+                if let Some(m) = glyphs.metrics(Some(&key)) {
                     s.fonts.insert(key, m);
                     changed = true;
                 }
@@ -171,6 +333,9 @@ pub extern "C" fn bf_engine_new() -> *mut Engine {
             label.push(0);
             let glyphs = GlyphAtlas::new();
             renderer.set_texture(PAGE, glyphs.width, glyphs.height, &glyphs.rgba);
+            let renderer = Arc::new(renderer);
+            let glyphs = Arc::new(RwLock::new(glyphs));
+            let thumbs = ThumbWorker::new(renderer.clone(), glyphs.clone());
             let player = barkfart_audio::Player::new();
             let mut audio_label = if player.available() { format!("{} at {} Hz", player.device, player.rate) } else { player.device.clone() }.into_bytes();
             audio_label.push(0);
@@ -181,6 +346,7 @@ pub extern "C" fn bf_engine_new() -> *mut Engine {
                 player,
                 audio_label,
                 glyphs,
+                thumbs,
                 images: Vec::new(),
                 editor_image: None,
                 redirect: None,
@@ -290,7 +456,8 @@ pub extern "C" fn bf_render_frame(e: *const Engine, t: f64, w: u32, h: u32, out:
         let start = std::time::Instant::now();
         let scene = eval::evaluate(p, &p.root_symbol, t);
         // isolates: effects, adjustment layers, translucent groups drawn as one piece
-        let list = tess::layered(&scene, Some(&engine.glyphs));
+        let glyphs = engine.glyphs.read().expect("glyphs");
+        let list = tess::layered(&scene, Some(&*glyphs));
         let (sw, sh) = (p.settings.width.max(1) as f32, p.settings.height.max(1) as f32);
         let aspect = w as f32 / h as f32;
         let (hw, hh) = if aspect >= sw / sh { (sh * aspect / 2.0, sh / 2.0) } else { (sw / 2.0, sw / aspect / 2.0) };
@@ -554,7 +721,8 @@ pub extern "C" fn bf_export_step(e: *const Engine, x: *mut Export) -> i32 {
             let shape = eval::Shape::new(eval::ShapeKind::Text { text: text.clone(), font: None, size, xf: eval::Affine::translate(hw - margin, hh - margin), corner: 2, align: 2 }, *color, "watermark");
             scene.root.children.push(eval::Item::Shape(shape));
         }
-        let list = tess::layered(&scene, Some(&engine.glyphs));
+        let glyphs = engine.glyphs.read().expect("glyphs");
+        let list = tess::layered(&scene, Some(&*glyphs));
         let (hw, hh) = (p.settings.width as f32 / 2.0, p.settings.height as f32 / 2.0);
         let bg = p.settings.background;
         let view = View { x0: -hw, y0: -hh, x1: hw, y1: hh, background: [bg.r, bg.g, bg.b, bg.a] };
@@ -716,7 +884,8 @@ pub extern "C" fn bf_render_view(e: *const Engine, t: f64, w: u32, h: u32, x0: f
         } else {
             None
         };
-        let mut list = tess::layered(&scene, Some(&engine.glyphs));
+        let glyphs = engine.glyphs.read().expect("glyphs");
+        let mut list = tess::layered(&scene, Some(&*glyphs));
         if flags & 2 != 0 {
             let v = &p.view;
             // ghosts only of frames that exist (none before the first, none after the last)
@@ -905,8 +1074,13 @@ fn render_fitted(engine: &Engine, p: &Project, w: u32, h: u32) -> Option<Vec<u8>
 }
 
 fn render_fitted_at(engine: &Engine, p: &Project, t: f64, w: u32, h: u32) -> Option<Vec<u8>> {
+    let glyphs = engine.glyphs.read().ok()?;
+    render_fitted_with(&engine.renderer, &*glyphs, p, t, w, h)
+}
+
+fn render_fitted_with(renderer: &Renderer, glyphs: &GlyphAtlas, p: &Project, t: f64, w: u32, h: u32) -> Option<Vec<u8>> {
     let scene = eval::evaluate_with(p, &p.root_symbol, t, false, false);
-    let list = tess::layered(&scene, Some(&engine.glyphs));
+    let list = tess::layered(&scene, Some(glyphs));
     let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
     for b in &list.batches {
         for v in b.xy.chunks(2) {
@@ -923,7 +1097,7 @@ fn render_fitted_at(engine: &Engine, p: &Project, t: f64, w: u32, h: u32) -> Opt
     let k = ((x1 - x0) / w as f32).max((y1 - y0) / h as f32).max(1e-3) * 1.15;
     let (hw, hh) = (w as f32 * k / 2.0, h as f32 * k / 2.0);
     let view = View { x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh, background: [0.0, 0.0, 0.0, 0.0] };
-    Some(engine.renderer.render(&list, w, h, view))
+    Some(renderer.render(&list, w, h, view))
 }
 
 /// A sound clip's waveform (M5): `n` loudness values (0..1) of `asset`
@@ -982,7 +1156,8 @@ pub extern "C" fn bf_render_group(e: *const Engine, id: *const c_char, t: f64, w
     let r = catch_unwind(AssertUnwindSafe(|| {
         let p = s.group_alone(&id)?;
         let scene = eval::evaluate_with(&p, &p.root_symbol, t, false, true);
-        let list = tess::layered(&scene, Some(&engine.glyphs));
+        let glyphs = engine.glyphs.read().ok()?;
+        let list = tess::layered(&scene, Some(&*glyphs));
         let (sw, sh) = (p.settings.width as f32, p.settings.height as f32);
         let bg = p.settings.background;
         let view = View { x0: -sw / 2.0, y0: -sh / 2.0, x1: sw / 2.0, y1: sh / 2.0, background: [bg.r, bg.g, bg.b, bg.a] };
@@ -1116,4 +1291,62 @@ pub extern "C" fn bf_doc_new_with(e: *mut Engine, name: *const c_char, data: *co
     let p = barkfart_core::session::new_editor_project_with(&name, bytes);
     engine.open(p, Default::default());
     0
+}
+
+// ---------------------------------------------------------------- off-UI-thread thumbnails (#9)
+
+/// Enqueues an off-UI-thread thumbnail render.
+/// kind: 0 = preview strip (camera view, `id` may be null),
+///       1 = layer alone fitted transparent,
+///       2 = group alone through camera.
+/// Returns 0 on enqueue, 1 on invalid args, 2 when no project/target exists.
+#[no_mangle]
+pub extern "C" fn bf_thumb_request(e: *const Engine, kind: i32, id: *const c_char, t: f64, w: u32, h: u32, tag: u64) -> i32 {
+    if e.is_null() || w == 0 || h == 0 || w > 2048 || h > 2048 || !(0..=2).contains(&kind) {
+        return 1;
+    }
+    // SAFETY: live handle
+    let engine = unsafe { &*e };
+    let Some(s) = engine.session.as_ref() else { return 2 };
+    let project = match kind {
+        0 => s.project().clone(),
+        1 => {
+            let Some(id) = cstr(id) else { return 1 };
+            let Some(p) = s.layer_alone(&id) else { return 2 };
+            p
+        }
+        2 => {
+            let Some(id) = cstr(id) else { return 1 };
+            let Some(p) = s.group_alone(&id) else { return 2 };
+            p
+        }
+        _ => return 1,
+    };
+    engine.thumbs.enqueue(kind, project, t, w, h, tag);
+    0
+}
+
+/// Non-blocking poll for one completed off-UI-thread thumbnail.
+/// Returns 1 if copied into `out_buf`, 0 if none ready, -1 if `buf_len` is too small
+/// (writes required `out_w`/`out_h`/`out_tag` without popping).
+#[no_mangle]
+pub extern "C" fn bf_thumb_poll(e: *const Engine, out_tag: *mut u64, out_w: *mut u32, out_h: *mut u32, out_buf: *mut u8, buf_len: usize) -> i32 {
+    if e.is_null() || out_tag.is_null() || out_w.is_null() || out_h.is_null() || out_buf.is_null() {
+        return 0;
+    }
+    // SAFETY: live handle and caller-provided output pointers / buffer
+    let engine = unsafe { &*e };
+    let (tag, w, h, buf) = unsafe { (&mut *out_tag, &mut *out_w, &mut *out_h, std::slice::from_raw_parts_mut(out_buf, buf_len)) };
+    engine.thumbs.poll(tag, w, h, buf)
+}
+
+/// Drops all queued and completed off-UI-thread thumbnails.
+#[no_mangle]
+pub extern "C" fn bf_thumb_clear(e: *const Engine) {
+    if e.is_null() {
+        return;
+    }
+    // SAFETY: live handle
+    let engine = unsafe { &*e };
+    engine.thumbs.clear();
 }

@@ -286,3 +286,76 @@ fn layer_select_visibility_lock_and_duplicate_copy_naming() {
     let st = s.command(&json!({"op": "delete_everywhere", "layer": id1}));
     assert!(st["rows"].as_array().unwrap().iter().all(|r| r["id"] != id1));
 }
+
+#[test]
+fn group_blend_saves_evaluates_and_undoes_cleanly() {
+    use barkfart_core::{eval, model::Blend};
+    let mut s = three_distinct_poses();
+    let st = s.command(&json!({"op": "group", "layers": ["L2"]}));
+    let gid = st["group"]["id"].as_str().unwrap().to_string();
+    assert_eq!(st["group"]["blend"], "NORMAL");
+
+    let before = canonical(&s);
+    let st = s.command(&json!({"op": "group_set", "group": gid, "blend": "MULTIPLY"}));
+    assert_eq!(st["undo"], "Group blend");
+    assert_eq!(st["group"]["blend"], "MULTIPLY");
+
+    // Evaluated scene carries Blend::Multiply on the group node
+    let scene = eval::evaluate(s.project(), &s.project().root_symbol, 0.0);
+    let grp = scene.root.children.iter().find_map(|i| match i {
+        eval::Item::Group(g) if g.source.ends_with(&gid) => Some(g),
+        _ => None,
+    }).expect("evaluated group");
+    assert_eq!(grp.blend, Blend::Multiply);
+
+    // Save / load round-trips blend
+    let encoded = codec::encode(s.project());
+    let decoded = codec::decode(&encoded).unwrap();
+    assert_eq!(decoded.root().unwrap().groups[0].blend, Blend::Multiply);
+
+    // Undo / redo exact
+    let after = canonical(&s);
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(canonical(&s), before);
+    assert_eq!(s.state()["group"]["blend"], "NORMAL");
+    s.command(&json!({"op": "redo"}));
+    assert_eq!(canonical(&s), after);
+}
+
+#[test]
+fn reverse_range_and_ping_pong_range_mirror_poses_and_properties() {
+    let mut s = three_distinct_poses(); // frames 0: 10, 1: 50, 2: 90
+    let orig = canonical(&s);
+    let st = s.command(&json!({"op": "reverse_range", "from": 0, "to": 2}));
+    assert_eq!(st["undo"], "Reverse range");
+    assert!((arm_angle(&s, 0) - 90.0).abs() < 0.01);
+    assert!((arm_angle(&s, 1) - 50.0).abs() < 0.01);
+    assert!((arm_angle(&s, 2) - 10.0).abs() < 0.01);
+
+    // Reversing a second time restores original poses
+    s.command(&json!({"op": "reverse_range", "from": 0, "to": 2}));
+    assert!((arm_angle(&s, 0) - 10.0).abs() < 0.01);
+    assert!((arm_angle(&s, 1) - 50.0).abs() < 0.01);
+    assert!((arm_angle(&s, 2) - 90.0).abs() < 0.01);
+
+    // Undo twice returns to exact original project
+    s.command(&json!({"op": "undo"}));
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(canonical(&s), orig);
+
+    // Ping-pong [0..=2] -> [0:10, 1:50, 2:90, 3:50, 4:10] (5 frames)
+    let st = s.command(&json!({"op": "ping_pong_range", "from": 0, "to": 2}));
+    assert_eq!(st["undo"], "Ping-pong range");
+    assert_eq!(st["frames"], 5);
+    assert!((arm_angle(&s, 0) - 10.0).abs() < 0.01);
+    assert!((arm_angle(&s, 1) - 50.0).abs() < 0.01);
+    assert!((arm_angle(&s, 2) - 90.0).abs() < 0.01);
+    assert!((arm_angle(&s, 3) - 50.0).abs() < 0.01);
+    assert!((arm_angle(&s, 4) - 10.0).abs() < 0.01);
+
+    let after_pp = canonical(&s);
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(canonical(&s), orig);
+    s.command(&json!({"op": "redo"}));
+    assert_eq!(canonical(&s), after_pp);
+}

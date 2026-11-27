@@ -573,3 +573,147 @@ pub fn ease_keys(st: &mut State, sym: &str, poses: &[(String, i32)], props: &[(S
     }
     Ok(())
 }
+
+fn mirror_key_handles(k: Key) -> Key {
+    if k.handle.stored() {
+        Key { lh: (-k.rh.0, k.rh.1), rh: (-k.lh.0, k.lh.1), ..k }
+    } else {
+        k
+    }
+}
+
+/// Reverses pose and animated property keys within `[from, to]` in place.
+/// When `only_layer` is `None`, applies to every non-audio, non-script layer.
+pub fn reverse_range(st: &mut State, sym: &str, only_layer: Option<&str>, from: i32, to: i32) -> EditResult<()> {
+    if from < 0 || to <= from {
+        return fail("Choose a range of at least two frames.");
+    }
+    let fps = fps(st);
+    let tw = st.project.settings.tween_interp;
+    let ids: Vec<String> = match only_layer {
+        Some(id) => {
+            if st.project.symbol(sym).and_then(|s| s.layer(id)).is_none() {
+                return fail(format!("no layer {id}"));
+            }
+            vec![id.to_string()]
+        }
+        None => st
+            .project
+            .symbol(sym)
+            .map(|s| s.layers.iter().filter(|l| !matches!(l.kind, LayerKind::Audio(_) | LayerKind::Script(_))).map(|l| l.id.clone()).collect())
+            .unwrap_or_default(),
+    };
+    let t_to = to as f64 / fps;
+    for id in ids {
+        let Some(l) = st.project.layer_mut(sym, &id) else { continue };
+        let pose_ids: std::collections::HashSet<String> = pose_props_of(l).into_iter().map(|q| q.id.clone()).collect();
+        for q in l.properties_mut() {
+            if q.track.is_empty() {
+                continue;
+            }
+            let is_pose = pose_ids.contains(&q.id);
+            let mut in_range: Vec<(i32, Key)> = Vec::new();
+            let mut outside: Vec<Key> = Vec::new();
+            for &k in q.track.keys() {
+                let fr = (k.time * fps).round() as i32;
+                if fr >= from && fr <= to {
+                    in_range.push((fr, k));
+                } else {
+                    outside.push(k);
+                }
+            }
+            if in_range.is_empty() {
+                continue;
+            }
+            // If reversing from frame 0 and `to` had no explicit pose key, preserve the
+            // pose visible at `to` so frame 0 receives it after mirroring.
+            let need_end = is_pose && from == 0 && !in_range.iter().any(|(fr, _)| *fr == to);
+            let end_key = need_end.then(|| {
+                let v = q.key_value(t_to);
+                let interp = crate::edit::editor::interp_at(q, t_to, tw);
+                Key::new(t_to, v, interp)
+            });
+            q.track.clear();
+            for k in outside {
+                q.track.put(k);
+            }
+            for (fr, k) in in_range {
+                let dst = from + to - fr;
+                let mk = mirror_key_handles(k);
+                q.track.put(Key { time: dst as f64 / fps, ..mk });
+            }
+            if let Some(ek) = end_key {
+                q.track.put(Key { time: from as f64 / fps, ..ek });
+            }
+        }
+    }
+    ensure_length(st, to + 1);
+    Ok(())
+}
+
+/// Appends the reversed `[from, to - 1]` range immediately after `to` (ping-pong),
+/// shifting any later keys forward by `to - from` and growing duration cleanly.
+pub fn ping_pong_range(st: &mut State, sym: &str, only_layer: Option<&str>, from: i32, to: i32) -> EditResult<()> {
+    if from < 0 || to <= from {
+        return fail("Choose a range of at least two frames.");
+    }
+    let fps = fps(st);
+    let tw = st.project.settings.tween_interp;
+    let added = to - from;
+    let n = frame_count(st);
+    let ids: Vec<String> = match only_layer {
+        Some(id) => {
+            if st.project.symbol(sym).and_then(|s| s.layer(id)).is_none() {
+                return fail(format!("no layer {id}"));
+            }
+            vec![id.to_string()]
+        }
+        None => st
+            .project
+            .symbol(sym)
+            .map(|s| s.layers.iter().filter(|l| !matches!(l.kind, LayerKind::Audio(_) | LayerKind::Script(_))).map(|l| l.id.clone()).collect())
+            .unwrap_or_default(),
+    };
+    let t_to = to as f64 / fps;
+    for id in ids {
+        let Some(l) = st.project.layer_mut(sym, &id) else { continue };
+        let pose_ids: std::collections::HashSet<String> = pose_props_of(l).into_iter().map(|q| q.id.clone()).collect();
+        for q in l.properties_mut() {
+            if q.track.is_empty() {
+                continue;
+            }
+            let is_pose = pose_ids.contains(&q.id);
+            let orig: Vec<Key> = q.track.keys().to_vec();
+            let has_to = orig.iter().any(|k| (k.time * fps).round() as i32 == to);
+            let turn_key = (is_pose && !has_to).then(|| {
+                let v = q.key_value(t_to);
+                let interp = crate::edit::editor::interp_at(q, t_to, tw);
+                Key::new(t_to, v, interp)
+            });
+            let mut mirrored: Vec<Key> = Vec::new();
+            q.track.clear();
+            for k in orig {
+                let fr = (k.time * fps).round() as i32;
+                if fr > to {
+                    q.track.put(Key { time: (fr + added) as f64 / fps, ..k });
+                } else {
+                    q.track.put(k);
+                    if fr >= from && fr < to {
+                        let dst = to + (to - fr);
+                        let mk = mirror_key_handles(k);
+                        mirrored.push(Key { time: dst as f64 / fps, ..mk });
+                    }
+                }
+            }
+            if let Some(tk) = turn_key {
+                q.track.put(tk);
+            }
+            for k in mirrored {
+                q.track.put(k);
+            }
+        }
+    }
+    let new_len = (n + added).max(to + added + 1);
+    ensure_length(st, new_len);
+    Ok(())
+}
