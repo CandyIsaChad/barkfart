@@ -128,6 +128,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _thumbTick();
       _rowPicTick();
       _magTick();
+      _timelineEdgeScrollTick();
     })..start();
     _start();
   }
@@ -173,11 +174,20 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (savedTh is num && savedTh > 0) _timelineHeight = savedTh.toDouble();
     e.command({'op': 'set', 'k': 'axis', 'v': AppSettings.flag('axisLock')});
     e.command({'op': 'set', 'k': 'path', 'v': AppSettings.values['motionPath'] != false});
-    _refresh(e.command({'op': 'state'}));
+    var st0 = e.command({'op': 'state'});
+    final script = Platform.environment['BARKFART_SCRIPT'];
+    if (script == null && st0 != null && st0['selected'] == null) {
+      final firstFig = ((st0['rows'] as List?) ?? const []).cast<Map>().where((r) => r['kind'] == 'figure').firstOrNull;
+      if (firstFig != null) st0 = e.command({'op': 'select', 'layer': firstFig['id']}) ?? st0;
+      if (mounted) {
+        final sz = MediaQuery.maybeSizeOf(context);
+        if (sz != null && sz.shortestSide <= 600 && sz.height < 500) _panelOpen = false;
+      }
+    }
+    _refresh(st0);
     // draw every frame picture for the project just opened
     _thumbsChanged('open');
     _reminder = Timer.periodic(const Duration(seconds: 30), (_) => _remindToSave());
-    final script = Platform.environment['BARKFART_SCRIPT'];
     if (script != null) Timer(const Duration(milliseconds: 1500), () => _runScript(script));
     // nothing saved yet: say hello first (REDESIGN §8, E1)
     if (firstRun && script == null && mounted) unawaited(_firstRun());
@@ -272,6 +282,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     WidgetsBinding.instance.removeObserver(this);
     _ticker.dispose();
     _reminder?.cancel();
+    _clearPan?.cancel();
+    _fitAnim?.cancel();
+    _stripScroll.dispose();
+    _layerVScroll.dispose();
+    _panelScroll.dispose();
     _clearCache();
     for (final img in _thumbs.values) {
       img.dispose();
@@ -398,6 +413,50 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _view.cy = (minY + maxY) / 2;
     _fitted = true;
     _viewMoved = false;
+  }
+
+  Timer? _fitAnim;
+
+  void _animateFit() {
+    final cam = (_st['camera'] as List?)?.map((v) => (v as num).toDouble()).toList();
+    final size = _view.size;
+    if (cam == null || cam.length < 8 || size.isEmpty) return;
+    var minX = cam[0], maxX = cam[0], minY = cam[1], maxY = cam[1];
+    for (var i = 0; i < 8; i += 2) {
+      minX = math.min(minX, cam[i]);
+      maxX = math.max(maxX, cam[i]);
+      minY = math.min(minY, cam[i + 1]);
+      maxY = math.max(maxY, cam[i + 1]);
+    }
+    final toS = math.min(size.width / ((maxX - minX) * 1.08), size.height / ((maxY - minY) * 1.08));
+    final toCx = (minX + maxX) / 2, toCy = (minY + maxY) / 2;
+    final fromS = _view.s, fromCx = _view.cx, fromCy = _view.cy;
+    _fitAnim?.cancel();
+    _clearPan?.cancel();
+    final ms = kit.motion(context, 180).inMilliseconds;
+    if (ms <= 0) {
+      setState(_fit);
+      return;
+    }
+    final sw = Stopwatch()..start();
+    _fitAnim = Timer.periodic(const Duration(milliseconds: 16), (tm) {
+      if (!mounted || _pointers.isNotEmpty) {
+        tm.cancel();
+        return;
+      }
+      final u = (sw.elapsedMilliseconds / ms).clamp(0.0, 1.0);
+      final e = kit.kEase.transform(u);
+      setState(() {
+        _view.s = fromS + (toS - fromS) * e;
+        _view.cx = fromCx + (toCx - fromCx) * e;
+        _view.cy = fromCy + (toCy - fromCy) * e;
+        if (u >= 1) {
+          _fitted = true;
+          _viewMoved = false;
+        }
+      });
+      if (u >= 1) tm.cancel();
+    });
   }
 
   void _tick() {
@@ -732,33 +791,38 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   Future<void> _loopToPopup() async {
-    final play = await showDialog<bool>(
-      context: context,
-      builder: (c) => StatefulBuilder(
-        builder: (c, set) => AlertDialog(
-          backgroundColor: cPanel,
-          title: const Text('Loop to', style: TextStyle(color: cText, fontSize: 16)),
-          content: SizedBox(
-            width: 300,
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              _hint('After the end frame, playback goes back to:'),
-              const SizedBox(height: 6),
-              _Segmented(const ['Frame 1', 'Start frame'], _loopToStart ? 1 : 0, (i) => set(() => _loopToStart = i == 1)),
-              const SizedBox(height: 10),
-              _stepper('End frame', _loopEnd == 0 ? 'last' : '$_loopEnd', () => set(() => _loopEnd = math.max(0, _loopEnd - 1)), () => set(() => _loopEnd = math.min(_frames, _loopEnd + 1))),
-              const SizedBox(height: 10),
-              _Btn('Reset all', onTap: () => set(() {
+    final play = await kit.showSheet<bool>(
+      context,
+      title: 'Loop range',
+      width: 360,
+      children: (c) => [
+        StatefulBuilder(
+          builder: (c, set) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const kit.Hint('Choose where playback loops back when it reaches the end frame.'),
+            kit.Segmented(const ['From frame 1', 'From playhead'], _loopToStart ? 1 : 0, onSelect: (i) => set(() => _loopToStart = i == 1)),
+            kit.StepRow('End frame', _loopEnd == 0 ? 'Last ($_frames)' : '$_loopEnd', onMinus: _loopEnd > 0 ? () => set(() => _loopEnd = math.max(0, _loopEnd - 1)) : null, onPlus: (_loopEnd == 0 ? _frames : _loopEnd) < _frames ? () => set(() => _loopEnd = math.min(_frames, _loopEnd + 1)) : null),
+            if (_loopToStart || _loopEnd > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 4, bottom: 4),
+                child: kit.WordButton('Reset loop range', filled: true, expand: true, height: 34, size: 13, onTap: () {
+                  set(() {
                     _loopToStart = false;
                     _loopEnd = 0;
-                  })),
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Close')),
-            TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Play')),
-          ],
+                  });
+                  setState(() {});
+                }),
+              ),
+            const SizedBox(height: 8),
+            kit.ButtonPair('Close', () {
+              setState(() {});
+              Navigator.pop(c, false);
+            }, 'Play', () {
+              setState(() {});
+              Navigator.pop(c, true);
+            }, true),
+          ]),
         ),
-      ),
+      ],
     );
     if (play == true && !_playing) _togglePlay();
   }
@@ -1073,23 +1137,29 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   Future<String?> _askName(String title, String initial) {
     final ctl = TextEditingController(text: initial)..selection = TextSelection(baseOffset: 0, extentOffset: initial.length);
-    return showDialog<String>(
-      context: context,
-      builder: (c) => AlertDialog(
-        backgroundColor: cPanel,
-        title: Text(title, style: const TextStyle(color: cText, fontSize: 17)),
-        content: TextField(
+    return kit.showSheet<String>(
+      context,
+      title: title,
+      width: 380,
+      children: (c) => [
+        TextField(
           controller: ctl,
           autofocus: true,
-          style: const TextStyle(color: cText),
-          decoration: const InputDecoration(labelText: 'Name'),
+          style: const TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w600),
+          decoration: InputDecoration(
+            isDense: true,
+            filled: true,
+            fillColor: cControl,
+            hintText: 'Name',
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: cLine)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: cAccent, width: 1.5)),
+          ),
           onSubmitted: (v) => Navigator.pop(c, v.trim().isEmpty ? null : v.trim()),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(c, ctl.text.trim().isEmpty ? null : ctl.text.trim()), child: const Text('Save')),
-        ],
-      ),
+        const SizedBox(height: 10),
+        kit.ButtonPair('Cancel', () => Navigator.pop(c), 'Save', () => Navigator.pop(c, ctl.text.trim().isEmpty ? null : ctl.text.trim()), true),
+      ],
     );
   }
 
@@ -1099,7 +1169,16 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _file = null;
     _fitted = false;
     _frameSelected = false;
-    _refresh(_engine?.command({'op': 'state'}));
+    var st0 = _engine?.command({'op': 'state'});
+    if (Platform.environment['BARKFART_SCRIPT'] == null && st0 != null && st0['selected'] == null) {
+      final firstFig = ((st0['rows'] as List?) ?? const []).cast<Map>().where((r) => r['kind'] == 'figure').firstOrNull;
+      if (firstFig != null) st0 = _engine?.command({'op': 'select', 'layer': firstFig['id']}) ?? st0;
+      if (mounted) {
+        final sz = MediaQuery.sizeOf(context);
+        if (sz.shortestSide <= 600 && sz.height < 500) _panelOpen = false;
+      }
+    }
+    _refresh(st0);
     _thumbsChanged('new');
     _say('New animation', light: true);
   }
@@ -1884,15 +1963,19 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           kit.WordButton('Projects', key: _projectsKey, onTap: _projectsMenu),
           kit.WordButton('View', filled: _viewOptions, onTap: () => setState(() => _viewOptions = !_viewOptions)),
           kit.WordButton('Export', onTap: _exportDialog),
+          const Spacer(),
+          if (dirty && !_playing) kit.WordButton('Save', size: 14, strong: true, onTap: _save),
         ]),
-        IgnorePointer(
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 320),
-              child: Text(_file?.name ?? 'Untitled', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w700)),
-            ),
-            if (dirty) Container(width: 7, height: 7, margin: const EdgeInsets.only(left: 7), decoration: const BoxDecoration(color: Color(0xFFF2A93B), shape: BoxShape.circle)),
-          ]),
+        Padding(
+          padding: const EdgeInsets.only(left: 214, right: 76),
+          child: IgnorePointer(
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Flexible(
+                child: Text(_file?.name ?? 'Untitled', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w700)),
+              ),
+              if (dirty) Container(width: 7, height: 7, margin: const EdgeInsets.only(left: 7), decoration: const BoxDecoration(color: Color(0xFFF2A93B), shape: BoxShape.circle)),
+            ]),
+          ),
         ),
       ]),
     );
@@ -1950,13 +2033,36 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       // a rotation (or a window resize) fits the stage again, unless the view
       // was zoomed or panned by hand; the timeline folding or a docked panel
       // opening keeps the zoom (the stage stays put)
-      final screenW = MediaQuery.sizeOf(context).width;
+      final screen = MediaQuery.sizeOf(context);
+      final screenW = screen.width;
       final rotated = _screenW > 0 && (screenW - _screenW).abs() > 1;
       _screenW = screenW;
       if (_view.size != c.biggest || rotated) {
         _view.size = c.biggest;
         if (!_fitted || (rotated && !_viewMoved)) _fit();
       }
+      final fitS = _fitScale();
+      final zoomPct = fitS > 0 ? (_view.s / fitS * 100).round() : 100;
+      final showZoomBtns = AppSettings.flag('zoomButtons');
+      final showZoomPill = !_playing && (_viewMoved || (zoomPct - 100).abs() >= 2 || showZoomBtns);
+      final leftInset = _viewOptions ? 346.0 : (_st['building'] != null && _partsOpen && !_hidePanels ? 236.0 : 10.0);
+      final dock = (screen.width >= 1200 && screen.height >= 900) || Platform.environment['BARKFART_DOCK'] == '1';
+      final rightInset = !_dockOrHidden(dock) && _panelOpen && !_hidePanels ? (_floatingCardWidth(screen, screen.shortestSide > 600) + 16) : 10.0;
+      final mode = _st['mode'] as String? ?? 'figure';
+      final joining = _st['joining'] == true;
+      final showModeBanner = !_playing && _st['building'] == null && (joining || mode == 'camera' || mode == 'all');
+
+      void zoomBy(double k) {
+        setState(() {
+          final center = _view.toStage(_view.size.center(Offset.zero));
+          _view.s = (_view.s * k).clamp(0.02, 40.0);
+          final center2 = _view.toStage(_view.size.center(Offset.zero));
+          _view.cx += center.dx - center2.dx;
+          _view.cy += center.dy - center2.dy;
+          _viewMoved = true;
+        });
+      }
+
       return Listener(
         onPointerDown: (ev) {
           if (_viewOptions) setState(() => _viewOptions = false);
@@ -1970,40 +2076,103 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           child: Stack(fit: StackFit.expand, children: [
             if (_image != null) CustomPaint(painter: _StagePicture(_image!, _imageRect, _imageCamera, _view, Size(((_st['w'] as num?) ?? 16).toDouble(), ((_st['h'] as num?) ?? 9).toDouble()))),
             CustomPaint(painter: _Overlay(_pictureSt ?? _st, _view, _playing)),
-            if (AppSettings.flag('zoomButtons') && !_playing)
+            if (showModeBanner)
               Positioned(
-                right: 10,
-                bottom: 10,
-                child: Column(children: [
-                  for (final (icon, k) in [(Icons.zoom_in, 1.2), (Icons.zoom_out, 1 / 1.2)])
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Material(
-                        color: cControl,
-                        shape: const CircleBorder(),
-                        child: InkWell(
-                          customBorder: const CircleBorder(),
-                          onTap: () => setState(() {
-                            // zoom about the middle of the view
-                            final c = _view.toStage(_view.size.center(Offset.zero));
-                            _view.s = (_view.s * k).clamp(0.02, 40.0);
-                            final c2 = _view.toStage(_view.size.center(Offset.zero));
-                            _view.cx += c.dx - c2.dx;
-                            _viewMoved = true;
-                            _view.cy += c.dy - c2.dy;
-                          }),
-                          child: Padding(padding: const EdgeInsets.all(8), child: Icon(icon, color: cText)),
+                left: leftInset,
+                right: rightInset,
+                top: 10,
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 6, 4),
+                    decoration: BoxDecoration(
+                      color: joining ? cHint : cCard.withValues(alpha: 0.95),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: joining ? const Color(0xFFE5B84B) : cLine),
+                      boxShadow: const [BoxShadow(color: Color(0x1F000000), blurRadius: 10, offset: Offset(0, 3))],
+                    ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Pictogram(joining ? 'chain' : mode == 'camera' ? 'camera' : 'all', size: 16, color: joining ? cText : cTitle),
+                      const SizedBox(width: 7),
+                      Flexible(
+                        child: Text(
+                          joining
+                              ? 'Tap a joint on another figure to join'
+                              : mode == 'camera'
+                                  ? 'Camera mode · Drag stage to frame'
+                                  : 'Move everything',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: cText, fontSize: 12.5, fontWeight: FontWeight.w600),
                         ),
                       ),
-                    ),
-                ]),
+                      const SizedBox(width: 4),
+                      kit.WordButton(
+                        joining ? 'Cancel' : 'Pose figures',
+                        size: 12.5,
+                        height: 28,
+                        filled: !joining,
+                        onTap: () => joining ? _cmd({'op': 'join_cancel'}) : _setMode('figure'),
+                      ),
+                    ]),
+                  ),
+                ),
               ),
-
+            if (showZoomPill)
+              Positioned(
+                left: math.min(leftInset, math.max(8.0, c.biggest.width - 170)),
+                bottom: 10,
+                child: Container(
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: cCard.withValues(alpha: 0.94),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: cLine),
+                    boxShadow: const [BoxShadow(color: Color(0x1F000000), blurRadius: 8, offset: Offset(0, 2))],
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    if (showZoomBtns)
+                      kit.Tap(
+                        label: 'Zoom out',
+                        minSize: 34,
+                        radius: 16,
+                        onTap: () => zoomBy(1 / 1.2),
+                        child: const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Pictogram('minus', size: 15, color: cInk2b)),
+                      ),
+                    kit.Tap(
+                      label: 'Fit stage (100%)',
+                      minSize: 34,
+                      radius: 16,
+                      onTap: _animateFit,
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: showZoomBtns ? 6 : 11),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Text('$zoomPct%', style: const TextStyle(color: cText, fontSize: 12, fontWeight: FontWeight.w700, fontFeatures: [ui.FontFeature.tabularFigures()])),
+                          if (_viewMoved || (zoomPct - 100).abs() >= 2) ...[
+                            const SizedBox(width: 5),
+                            const Text('Fit', style: TextStyle(color: cAccent, fontSize: 12, fontWeight: FontWeight.w700)),
+                          ],
+                        ]),
+                      ),
+                    ),
+                    if (showZoomBtns)
+                      kit.Tap(
+                        label: 'Zoom in',
+                        minSize: 34,
+                        radius: 16,
+                        onTap: () => zoomBy(1.2),
+                        child: const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Pictogram('plus', size: 15, color: cInk2b)),
+                      ),
+                  ]),
+                ),
+              ),
           ]),
         ),
       );
     });
   }
+
+  bool _dockOrHidden(bool dock) => dock || _fsNow || _hidePanels;
 
   /// The figure editor's Shape page (FigureEditor board): the seven shapes as
   /// tiles in the segment's own colour, the current one ringed, then that
@@ -2435,46 +2604,52 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     setState(() => _frameSelected = true);
     _cmd({'op': 'frame', 'i': frame});
     if (!AppSettings.flag('keepSelection')) _cmd({'op': 'select'});
-    await showDialog<void>(
-      context: context,
-      builder: (c) => StatefulBuilder(
-        builder: (c, set) {
-          final maxN = math.max(0, _frames - 1 - frame);
-          final n = math.min(_copyCount, maxN);
-          return AlertDialog(
-            backgroundColor: cPanel,
-            content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              _pair(
-                _Btn('Copy this frame', onTap: () {
+    await kit.showSheet<void>(
+      context,
+      title: 'Frame ${frame + 1}',
+      width: 380,
+      children: (c) => [
+        StatefulBuilder(
+          builder: (c, set) {
+            final maxN = math.max(0, _frames - 1 - frame);
+            final n = math.min(_copyCount, maxN);
+            return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              kit.ButtonPair(
+                'Copy this frame',
+                () {
                   _cmd({'op': 'copy_frame', 'n': 0});
                   Navigator.pop(c);
-                }),
-                _Btn('Paste after it', enabled: _st['frameCopied'] == true, onTap: () {
-                  _cmd({'op': 'paste_frame'});
+                },
+                'Paste after it',
+                _st['frameCopied'] == true
+                    ? () {
+                        _cmd({'op': 'paste_frame'});
+                        Navigator.pop(c);
+                      }
+                    : null,
+              ),
+              if (maxN > 0) ...[
+                const SizedBox(height: 6),
+                const kit.Hint('Or copy a range starting from this frame:'),
+                kit.StepRow(
+                  'Frames ${frame + 1}–${frame + 1 + n}',
+                  '+$n',
+                  onMinus: n > 1 ? () => set(() => _copyCount = math.max(1, n - 1)) : null,
+                  onPlus: n < maxN ? () => set(() => _copyCount = math.min(maxN, n + 1)) : null,
+                ),
+                const SizedBox(height: 4),
+                kit.WordButton('Copy ${n + 1} frames', primary: true, expand: true, height: 38, onTap: () {
+                  _cmd({'op': 'copy_frame', 'n': n});
                   Navigator.pop(c);
                 }),
-              ),
-              const SizedBox(height: 12),
-              const Text('Or copy this frame and the frames after it:', style: TextStyle(color: cSecondary, fontSize: 12)),
+              ] else
+                const kit.Hint('This is the last frame in the animation.'),
               const SizedBox(height: 6),
-              Row(children: [
-                SizedBox(width: 44, child: _Btn('−', enabled: n > 1, onTap: () => set(() => _copyCount = math.max(1, n - 1)))),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: _Btn('Copy +$n', accent: true, enabled: maxN > 0, onTap: () {
-                    _cmd({'op': 'copy_frame', 'n': n});
-                    Navigator.pop(c);
-                  }),
-                ),
-                const SizedBox(width: 6),
-                SizedBox(width: 44, child: _Btn('+', enabled: n < maxN, onTap: () => set(() => _copyCount = math.min(maxN, n + 1)))),
-              ]),
-              const SizedBox(height: 4),
-              Text(maxN > 0 ? 'Frames ${frame + 1} to ${frame + 1 + n}.' : 'This is the last frame.', style: const TextStyle(color: cSecondary, fontSize: 11)),
-            ]),
-          );
-        },
-      ),
+              kit.WordButton('Close', filled: true, expand: true, height: 36, onTap: () => Navigator.pop(c)),
+            ]);
+          },
+        ),
+      ],
     );
   }
 
@@ -2502,36 +2677,184 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   final ScrollController _stripScroll = ScrollController();
+  final ScrollController _layerVScroll = ScrollController();
+  final GlobalKey _timelineTrackKey = GlobalKey();
+  final Map<int, Offset> _tlPinch = {};
+  double _tlPinchSpan = 0;
+  double _tlPinchCellStart = 46;
+  double _tlPinchAnchorFrame = 0;
+  Offset? _dragPointerGlobal;
+  bool _scrubbingPlayhead = false;
+  int _dragRunwayFrames = 0;
+  double _lastTrackViewportW = 600;
+
+  /// Smoothly scrolls the timeline horizontally so `frame` is comfortably visible.
+  void _ensureFrameVisible(int frame, {bool animate = true}) {
+    if (!_stripScroll.hasClients) return;
+    final pos = _stripScroll.position;
+    if (pos.maxScrollExtent <= 0) return;
+    const left = 8.0;
+    final x0 = left + frame * _cellW;
+    final x1 = x0 + _cellW;
+    double? target;
+    if (x0 < pos.pixels + 12) {
+      target = math.max(0.0, x0 - 24);
+    } else if (x1 > pos.pixels + pos.viewportDimension - 12) {
+      target = math.min(pos.maxScrollExtent, x1 - pos.viewportDimension + _cellW * 1.6);
+    }
+    if (target == null || (target - pos.pixels).abs() < 1) return;
+    final dur = kit.motion(context, 140);
+    if (!animate || dur == Duration.zero) {
+      _stripScroll.jumpTo(target);
+    } else {
+      unawaited(_stripScroll.animateTo(target, duration: dur, curve: kit.kEase));
+    }
+  }
+
+  void _zoomTimeline(double factor, {double? anchorLocalX}) {
+    final oldCell = _cellW;
+    final newCell = (oldCell * factor).clamp(14.0, 112.0);
+    if ((newCell - oldCell).abs() < 0.05) return;
+    final hOff = _stripScroll.hasClients ? _stripScroll.offset : 0.0;
+    final pivotX = anchorLocalX ?? (_lastTrackViewportW * 0.45);
+    final anchorFrame = (pivotX + hOff - 8.0) / oldCell;
+    setState(() => _cellW = newCell);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_stripScroll.hasClients) return;
+      final to = (8.0 + anchorFrame * newCell - pivotX).clamp(0.0, _stripScroll.position.maxScrollExtent);
+      _stripScroll.jumpTo(to);
+    });
+  }
+
+  void _fitTimeline() {
+    final vw = math.max(160.0, _lastTrackViewportW - 24);
+    final count = math.max(4, _frames + 1);
+    setState(() {
+      _cellW = (vw / count).clamp(14.0, 68.0);
+      _dragRunwayFrames = 0;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_stripScroll.hasClients) _stripScroll.jumpTo(0);
+    });
+  }
+
+  /// Auto-scrolls the timeline smoothly at 60fps whenever a grip, keyframe,
+  /// playhead scrub, or double-tap selection box approaches the viewport edge.
+  void _timelineEdgeScrollTick() {
+    final ptr = _dragPointerGlobal;
+    if (ptr == null || (_blockDrag == null && !_scrubbingPlayhead && !_boxActive)) return;
+    final box = _timelineTrackKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    final local = box.globalToLocal(ptr);
+    const edge = 44.0;
+    var vx = 0.0;
+    if (local.dx < edge) {
+      vx = -((edge - local.dx) / edge).clamp(0.15, 1.6) * 10.5;
+    } else if (local.dx > box.size.width - edge) {
+      vx = ((local.dx - (box.size.width - edge)) / edge).clamp(0.15, 1.6) * 10.5;
+    }
+
+    if (vx != 0 && _stripScroll.hasClients) {
+      final pos = _stripScroll.position;
+      // Dynamically grow trailing runway while dragging a block/key past the right edge!
+      if (vx > 0 && _blockDrag != null && pos.pixels >= pos.maxScrollExtent - _cellW * 3) {
+        final needed = ((pos.pixels + box.size.width) / _cellW).ceil() + 18;
+        if (needed > _dragRunwayFrames) {
+          setState(() => _dragRunwayFrames = needed);
+        }
+      }
+      final before = pos.pixels;
+      final next = (before + vx).clamp(pos.minScrollExtent, pos.maxScrollExtent);
+      final dh = next - before;
+      if (dh.abs() > 0.05) {
+        _stripScroll.jumpTo(next);
+        if (_blockDrag != null) {
+          _updateTimelineDragFromPointer(ptr);
+        } else if (_scrubbingPlayhead) {
+          final f = ((local.dx.clamp(0.0, box.size.width) + next - 8.0) / _cellW).floor().clamp(0, _frames - 1);
+          _scrubTo(f);
+        } else if (_boxActive && _boxPath != null && _boxPath!.isNotEmpty) {
+          setState(() {
+            if (_lasso) {
+              for (var i = 0; i < _boxPath!.length; i++) {
+                _boxPath![i] = _boxPath![i].translate(-dh, 0);
+              }
+              _boxPath!.add(local);
+            } else {
+              _boxPath = [_boxPath!.first.translate(-dh, 0), local];
+            }
+          });
+        }
+      }
+    }
+
+    // Vertical auto-edge-scroll during double-tap box / lasso selection
+    if (_boxActive && _boxPath != null && _layerVScroll.hasClients) {
+      final showPreview = AppSettings.values['previewRow'] != false;
+      final headerH = 22.0 + (showPreview ? 32.0 : 0.0);
+      var vy = 0.0;
+      if (local.dy > headerH && local.dy < headerH + 28) {
+        vy = -((headerH + 28 - local.dy) / 28).clamp(0.15, 1.2) * 7.0;
+      } else if (local.dy > box.size.height - 28) {
+        vy = ((local.dy - (box.size.height - 28)) / 28).clamp(0.15, 1.2) * 7.0;
+      }
+      if (vy != 0) {
+        final vpos = _layerVScroll.position;
+        final vBefore = vpos.pixels;
+        final vNext = (vBefore + vy).clamp(vpos.minScrollExtent, vpos.maxScrollExtent);
+        final dv = vNext - vBefore;
+        if (dv.abs() > 0.05) {
+          _layerVScroll.jumpTo(vNext);
+          setState(() {
+            if (_lasso) {
+              for (var i = 0; i < _boxPath!.length; i++) {
+                _boxPath![i] = _boxPath![i].translate(0, -dv);
+              }
+              _boxPath!.add(local);
+            } else {
+              _boxPath = [_boxPath!.first.translate(0, -dv), local];
+            }
+          });
+        }
+      }
+    }
+  }
 
   /// The layer names column's width: wide on big screens, 180 on a tablet
   /// held upright (the bughunt: "Stickfigure" was cut at 140), 140 on a phone.
   static double _namesW(BuildContext context) {
     final s = MediaQuery.sizeOf(context);
-    return s.width >= 900 ? 210 : s.shortestSide > 600 ? 180 : 140;
+    return s.width >= 900 ? 210 : s.shortestSide > 600 ? 180 : 148;
   }
 
-  /// The timeline (REDESIGN §4, D16, D27): a names column, then the ruler in
-  /// frames, the Preview row (every layer merged, tiled like a film strip at
-  /// the picture's shape, not a box per frame) and, unfolded, one row per
-  /// layer with its poses as quiet blocks. The playhead is a pale line with a
-  /// pill on the ruler. Per-frame marks stay small and quiet (D17).
+  String? get _activeLayerId => (_sel?['layer'] ??
+      (_st['picture'] as Map?)?['layer'] ??
+      (_st['movieclip'] as Map?)?['layer'] ??
+      (_st['textfield'] as Map?)?['layer'] ??
+      (_st['textfield'] as Map?)?['id']) as String?;
+
+  /// The timeline (REDESIGN §4, D16, D27): pinned ruler + Preview header at top,
+  /// vertically & horizontally scrollable layer tracks below with generous
+  /// trailing runway, 2-finger pinch zoom (zero 1-finger scroll interference),
+  /// crisp scrollbars, and `⋯` + swipe layer actions.
   Widget _previewRow() {
-    const rulerH = 22.0, stripH = 28.0, gap = 4.0, rowH = 32.0, left = 8.0;
+    const rulerH = 22.0, stripH = 28.0, gap = 4.0, rowH = 32.0, left = 8.0, propH = 24.0;
     final cell = _cellW;
     final fps = _fps.round().clamp(1, 240);
     final cur = _playing ? (_playT * _fps).floor().clamp(0, _frames - 1) : _frame;
-    final allRows = _layersOpen && !_playing ? ((_st['rows'] as List?) ?? const []).cast<Map>() : const <Map>[];
+    final showLayers = _layersOpen && !_playing;
+    final allRows = showLayers ? ((_st['rows'] as List?) ?? const []).cast<Map>() : const <Map>[];
     // K: a folded group hides its members' rows
     final folded = {for (final r in allRows) if (r['kind'] == 'group' && r['open'] == false) r['id']};
     final rows = folded.isEmpty ? allRows : allRows.where((r) => !folded.contains(r['group'])).toList();
-    final selLayer = _sel?['layer'] ?? (_st['group'] as Map?)?['id'] ?? (_st['script'] as Map?)?['id'] ?? (_st['picture'] as Map?)?['layer'] ?? (_st['movieclip'] as Map?)?['layer'] ?? (_st['textfield'] as Map?)?['id'];
+    final selLayer = _activeLayerId ?? (_st['group'] as Map?)?['id'] ?? (_st['script'] as Map?)?['id'];
     final showPreview = AppSettings.values['previewRow'] != false;
-    final top = rulerH + (showPreview ? stripH + gap : 0);
-    // H3: a layer's animated values as thin rows under it, when opened
-    const propH = 24.0;
+    final headerH = rulerH + (showPreview ? stripH + gap : 0);
+
+    // Layer body Y coordinates (0-based inside the scrollable layer body)
     final ys = <double>[];
     final props = <(Map, Map, double)>[]; // layer, property, y
-    var yy = top;
+    var yy = 0.0;
     for (final r in rows) {
       ys.add(yy);
       yy += rowH;
@@ -2542,11 +2865,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         }
       }
     }
-    // the States board: an animation with nothing in it says how to start
-    final empty = _layersOpen && !_playing && !rows.any((r) => r['kind'] != 'camera');
+    final empty = showLayers && !rows.any((r) => r['kind'] != 'camera');
     if (empty) yy += 2 * rowH;
-    final contentH = yy + (rows.isEmpty && !empty ? 6 : 0);
-    final width = left * 2 + _frames * cell;
+    final rawBodyH = yy + (showLayers ? 10.0 : 0.0);
+
     final aspect = ((_st['w'] as num?) ?? 16) / ((_st['h'] as num?) ?? 9);
     int frameAt(double x) => ((x - left) / cell).floor().clamp(0, _frames - 1);
     void frameTap(int i) {
@@ -2567,291 +2889,27 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final propDrag = _blockDrag != null && _blockDrag!.kind == 'prop_key' ? _blockDrag : null;
     final int? loopStartF = (_loopEnd > 0 || _loopToStart) ? (_loopToStart ? _frame : 0) : null;
     final int? loopEndF = (_loopEnd > 0 || _loopToStart) ? (_loopEnd > 0 ? math.min(_loopEnd, _frames) : _frames) : null;
-    final content = SizedBox(
-      width: width,
-      height: contentH,
-      child: Stack(clipBehavior: Clip.none, children: [
-        Positioned.fill(
-          child: CustomPaint(
-            painter: _TimelinePainter(
-              frames: _frames, cell: cell, left: left, fps: fps, cur: cur, rulerH: rulerH,
-              stripH: showPreview ? stripH : 0,
-              lines: [for (final y in ys) y + rowH, for (final (_, _, y) in props) y + propH],
-              bands: [for (final (_, _, y) in props) (y, propH)],
-              aspect: aspect.toDouble(), thumbs: _thumbs,
-              loopStart: loopStartF,
-              loopEnd: loopEndF,
-              groupStrips: [
-                for (var k = 0; k < rows.length; k++)
-                  if (rows[k]['kind'] == 'group' && rows[k]['open'] == false) (ys[k] + 2, rowH - 5, _groupThumbs['${rows[k]['id']}'] ?? const <int, ui.Image>{}),
-              ],
-            ),
-          ),
-        ),
-        // the ruler and the Preview row: the whole moment (Frame page); hold to
-        // copy; slide along it to scrub (guarded against double-tap box select)
-        Positioned(
-          left: 0,
-          top: 0,
-          width: width,
-          height: top,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTapUp: (d) {
-              if (_boxActive || _boxPath != null) return;
-              frameTap(frameAt(d.localPosition.dx));
-            },
-            onLongPressStart: _playing ? null : (d) {
-              if (_boxActive || _boxPath != null) return;
-              _copyPopup(frameAt(d.localPosition.dx));
-            },
-            onHorizontalDragStart: (d) {
-              if (_boxActive || _boxPath != null) return;
-              if (_playing) _togglePlay();
-              _scrubTo(frameAt(d.localPosition.dx));
-            },
-            onHorizontalDragUpdate: (d) {
-              if (_boxActive || _boxPath != null) return;
-              _scrubTo(frameAt(_scrubEdge(d.localPosition.dx, cell)));
-            },
-          ),
-        ),
-        if (showPreview)
-          for (var i = 0; i < _frames; i++)
-            if ((markList.elementAtOrNull(i) as List?)?.any((m) => m == true) == true || (_st['tweening'] == true && noTween.elementAtOrNull(i) == true && i < _frames - 1))
-              Positioned(
-                left: left + i * cell + 3,
-                top: rulerH + stripH - 12,
-                child: IgnorePointer(
-                  child: Row(children: [
-                    if ((markList[i] as List?)?.first == true) mark('pause', const Color(0xFFD9821E)),
-                    if ((markList[i] as List?)?.elementAtOrNull(1) == true) mark('repeat', cConnected),
-                    if ((markList[i] as List?)?.elementAtOrNull(2) == true) mark('silence', cDanger),
-                    if ((markList[i] as List?)?.elementAtOrNull(3) == true) mark('slow', cConnected),
-                    if ((markList[i] as List?)?.elementAtOrNull(4) == true) mark('camera', const Color(0xFFD94F94)),
-                    if (_st['tweening'] == true && noTween.elementAtOrNull(i) == true && i < _frames - 1) mark('notween', cDanger),
-                  ]),
-                ),
-              ),
-        // the Frame page is about this moment: its cell outlined in the strip
-        if (_frameSelected && showPreview && !_playing)
-          Positioned(
-            left: left + cur * cell - 1,
-            top: rulerH,
-            width: cell + 2,
-            height: stripH,
-            child: IgnorePointer(child: Container(decoration: BoxDecoration(border: Border.all(color: cAccent, width: 2), borderRadius: BorderRadius.circular(5)))),
-          ),
-        // the rows' blocks: one per pose
-        for (var k = 0; k < rows.length; k++) ..._rowBlocks(rows[k], ys[k], rowH, cell, left, rows[k]['id'] == selLayer),
-        // User list #3: interactive property keyframe rows & diamonds (tap for popover, drag to move)
-        for (final (r, pr, y) in props) ...[
-          if (!_playing && _st['propKeyCopied'] == true)
-            Positioned(
-              left: left,
-              top: y,
-              width: _frames * cell,
-              height: propH,
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onTapUp: (d) {
-                  if (_boxActive || _boxPath != null) return;
-                  final f = (d.localPosition.dx / cell).floor().clamp(0, _frames - 1);
-                  final existing = ((pr['keys'] as List?) ?? const []).cast<num>().map((v) => v.toInt());
-                  if (!existing.contains(f)) _propPastePopover(pr, f, d.globalPosition);
-                },
-              ),
-            ),
-          for (var ki = 0; ki < ((pr['keys'] as List?) ?? const []).length; ki++)
-            () {
-              final f = (((pr['keys'] as List)[ki]) as num).toInt();
-              final pid = '${pr['id']}';
-              final eases = (pr['eases'] as List?) ?? const [];
-              final ease = ki < eases.length ? '${eases[ki]}' : 'auto';
-              final isDragged = propDrag != null && propDrag.property == pid && (propDrag.live ? f == (propDrag.lastSent ?? propDrag.start) : propDrag.start == f);
-              final isBoxSel = _selPropKeys.contains((pid, f));
-              final diamondSize = isBoxSel || isDragged ? 10.0 : 8.0;
-              return Positioned(
-                left: left + f * cell + cell / 2 - 12,
-                top: y + propH / 2 - 12,
-                width: 24,
-                height: 24,
-                child: _playing
-                    ? Center(child: Transform.rotate(angle: math.pi / 4, child: Container(width: 8, height: 8, decoration: BoxDecoration(color: const Color(0xFF8A9099), borderRadius: BorderRadius.circular(1.5)))))
-                    : MouseRegion(
-                        cursor: SystemMouseCursors.grab,
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          dragStartBehavior: DragStartBehavior.down,
-                          onTapUp: (d) {
-                            if (_boxActive || _boxPath != null) return;
-                            _propKeyPopover(r, pr, f, ease, Rect.fromCenter(center: d.globalPosition, width: 20, height: 20));
-                          },
-                          onSecondaryTapUp: (d) => _propKeyPopover(r, pr, f, ease, Rect.fromCenter(center: d.globalPosition, width: 20, height: 20)),
-                          onHorizontalDragStart: (d) => _startTimelineDrag(
-                            _BlockDrag('${r['id']}', f, 1, cell, edge: 1, kind: 'prop_key', property: pid),
-                            rawStartX: d.globalPosition.dx,
-                          ),
-                          child: Center(
-                            child: Transform.rotate(
-                              angle: math.pi / 4,
-                              child: Container(
-                                width: diamondSize,
-                                height: diamondSize,
-                                decoration: BoxDecoration(
-                                  color: isBoxSel || isDragged ? cAccent : const Color(0xFF8A9099),
-                                  borderRadius: BorderRadius.circular(1.5),
-                                  border: isBoxSel || isDragged ? Border.all(color: cCard, width: 1.2) : null,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-              );
-            }(),
-          if (propDrag != null && !propDrag.live && propDrag.property == '${pr['id']}')
-            () {
-              final (st, _) = propDrag.preview(allowStart0: true);
-              return Positioned(
-                left: left + st * cell + cell / 2 - 6,
-                top: y + propH / 2 - 6,
-                width: 12,
-                height: 12,
-                child: IgnorePointer(
-                  child: Center(
-                    child: Transform.rotate(
-                      angle: math.pi / 4,
-                      child: Container(
-                        width: 10,
-                        height: 10,
-                        decoration: BoxDecoration(color: cAccent, borderRadius: BorderRadius.circular(2), border: Border.all(color: cCard, width: 1.2)),
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            }(),
-        ],
-        // the playhead: a pale line and the tappable frame pill (Jump to frame popover)
-        Positioned(left: left + cur * cell + cell / 2 - 0.75, top: rulerH - 2, width: 1.5, height: contentH - rulerH + 2, child: const IgnorePointer(child: ColoredBox(color: Color(0xFF8DB8E8)))),
-        Positioned(
-          left: left + cur * cell + cell / 2 - 18,
-          top: 0,
-          child: kit.Tap(
-            key: _playheadKey,
-            label: 'Frame ${cur + 1} of $_frames (tap to jump)',
-            minSize: 22,
-            radius: 9,
-            onTap: _playing ? null : _frameJumpPopover,
-            child: Container(
-              constraints: const BoxConstraints(minWidth: 36),
-              height: 19,
-              margin: const EdgeInsets.only(top: 1.5),
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(color: const Color(0xFFDCEAF9), borderRadius: BorderRadius.circular(9)),
-              child: Text('${cur + 1}', style: const TextStyle(color: cAccent, fontSize: 11, fontWeight: FontWeight.w700)),
-            ),
-          ),
-        ),
-      ]),
-    );
-    final lockScroll = _boxPath != null || _blockDrag != null;
-    final scroller = SingleChildScrollView(
-      controller: _stripScroll,
-      scrollDirection: Axis.horizontal,
-      physics: lockScroll ? const NeverScrollableScrollPhysics() : null,
-      child: content,
-    );
-    // G3: pinch (or Ctrl + scroll wheel) to zoom the frames
-    void zoom(double k) => setState(() => _cellW = (_cellW * k).clamp(14.0, 112.0));
-    Widget area = Listener(
-      onPointerSignal: (e) {
-        if (e is PointerScrollEvent && HardwareKeyboard.instance.isControlPressed) {
-          zoom(e.scrollDelta.dy > 0 ? 1 / 1.15 : 1.15);
-        }
-      },
-      child: GestureDetector(
-        onScaleStart: (_) => _pinchFrom = _cellW,
-        onScaleUpdate: (d) {
-          if (d.pointerCount >= 2) setState(() => _cellW = (_pinchFrom * d.horizontalScale).clamp(14.0, 112.0));
-        },
-        child: scroller,
-      ),
-    );
-    // User list #4 & #5: double-tap and drag for a selection box, triple-tap
-    // and drag for a lasso — works starting over the Preview strip too without
-    // altering the strip!
-    if (rows.isNotEmpty) {
-      area = Listener(
-        behavior: HitTestBehavior.translucent,
-        onPointerDown: (e) {
-          final now = DateTime.now();
-          final quick = now.difference(_lastDown) < const Duration(milliseconds: 450) && (e.localPosition - _lastDownAt).distance < 28;
-          _taps = quick ? _taps + 1 : 1;
-          _lastDown = now;
-          _lastDownAt = e.localPosition;
-          if (_taps == 1) {
-            _boxActive = false;
-            _preBoxFrame = _frame;
-            _preBoxFrameSel = _frameSelected;
-            _preBoxInPreview = e.localPosition.dy >= rulerH && e.localPosition.dy < top;
-          } else if (_taps >= 2 && !_playing && e.localPosition.dy >= rulerH) {
-            _boxActive = true;
-            // If tap 1 landed on the Preview strip and shifted the frame, restore it so the strip stays untouched.
-            if (_preBoxInPreview && _preBoxFrame != null) {
-              if (_frame != _preBoxFrame) _cmd({'op': 'frame', 'i': _preBoxFrame});
-              _frameSelected = _preBoxFrameSel ?? false;
-            }
-            setState(() {
-              _boxPath = [e.localPosition];
-              _lasso = _taps >= 3;
-            });
-          }
-        },
-        onPointerMove: (e) {
-          if (_blockDrag != null && _blockDrag!.rawStartX != null) {
-            _updateTimelineDrag(e.position.dx - _blockDrag!.rawStartX!, absolute: true);
-            return;
-          }
-          final path = _boxPath;
-          if (path == null) return;
-          setState(() {
-            if (_lasso) {
-              path.add(e.localPosition);
-            } else {
-              _boxPath = [path.first, e.localPosition];
-            }
-          });
-        },
-        onPointerUp: (_) {
-          if (_blockDrag != null && _blockDrag!.rawStartX != null) {
-            _endBlockDrag();
-            return;
-          }
-          _finishBox(rows, ys, props, cell, rowH, propH);
-        },
-        onPointerCancel: (_) {
-          if (_blockDrag != null && _blockDrag!.rawStartX != null) {
-            _endBlockDrag(cancel: true);
-            return;
-          }
-          setState(() {
-            _boxActive = false;
-            _boxPath = null;
-          });
-        },
-        child: Stack(children: [
-          area,
-          if (_boxPath != null) Positioned.fill(child: AbsorbPointer(child: CustomPaint(painter: _BoxPainter(_boxPath!, _lasso)))),
-        ]),
-      );
+
+    // Trailing runway calculation: always at least +14 frames beyond _frames,
+    // expanding dynamically during rightward grip/key drags!
+    int dragEndFrame = _frames;
+    if (_blockDrag != null) {
+      final (dSt, dLen) = _blockDrag!.preview(allowStart0: _blockDrag!.kind == 'prop_key' || _blockDrag!.run != null);
+      dragEndFrame = math.max(dragEndFrame, dSt + dLen + 10);
     }
-    // User list #6 & #7: every layer row is tappable to select its item, has a
-    // tappable eye + lock badge, and swipes left to reveal quick actions.
+    final baseCells = math.max(math.max(_frames + 14, _dragRunwayFrames), dragEndFrame);
+
     final namesColW = _namesW(context);
-    Widget name(Map r) {
+    final screenH = MediaQuery.sizeOf(context).height;
+    final totalNaturalH = headerH + rawBodyH + (!showLayers && !showPreview ? 4.0 : 0.0);
+    final double? fixedH = showLayers && _timelineHeight != null ? _timelineHeight!.clamp(96.0, math.max(132.0, screenH * 0.62)).toDouble() : null;
+    final autoCap = screenH < 500 ? math.min(188.0, screenH * 0.42) : math.min(284.0, screenH * 0.38);
+    final autoMaxH = showLayers ? math.min(totalNaturalH, math.max(headerH + rowH * 2.2, autoCap)) : totalNaturalH;
+    final effectiveTotalH = fixedH ?? autoMaxH;
+    _lastTimelineBodyH = effectiveTotalH;
+
+    // Build each layer's name cell with eye, lock, swipe actions AND discoverable `⋯` button
+    Widget nameCell(Map r) {
       final on = r['visible'] != false;
       final locked = r['locked'] == true;
       final kind = '${r['kind']}';
@@ -2860,53 +2918,64 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       const icons = {'figure': 'figure', 'picture': 'picture', 'text': 'text', 'movieclip': 'clip', 'camera': 'camera', 'sound': 'sound', 'group': 'folder', 'script': 'script'};
       final isGroup = kind == 'group';
       final canHide = kind != 'camera' && kind != 'sound';
+      final moreKey = GlobalKey();
       final row = Container(
         height: rowH,
-        // K: a group's members sit 20 in under its folder row
-        padding: EdgeInsets.only(left: r['group'] != null ? 24 : 6, right: 4),
+        padding: EdgeInsets.only(left: r['group'] != null ? 20 : 5, right: 2),
         decoration: BoxDecoration(color: selected ? cSelected : null, border: const Border(bottom: BorderSide(color: Color(0xFFEEF0F2)))),
         child: Row(children: [
           if (isGroup)
             kit.Tap(
               label: r['open'] == false ? 'Open ${r['name']}' : 'Fold ${r['name']}',
-              minSize: 20,
+              minSize: 22,
               onTap: () => _cmd({'op': 'group_set', 'group': id, 'open': r['open'] == false}),
               child: Transform.rotate(angle: r['open'] == false ? -math.pi / 2 : 0, child: const Pictogram('chevron', size: 14, color: cSecondary)),
             )
           else if (((r['props'] as List?) ?? const []).isNotEmpty)
             kit.Tap(
               label: _openRows.contains(id) ? 'Hide ${r['name']}\u2019s animated values' : 'Show ${r['name']}\u2019s animated values',
-              minSize: 20,
+              minSize: 22,
               onTap: () => setState(() => _openRows.contains(id) ? _openRows.remove(id) : _openRows.add(id)),
               child: Transform.rotate(angle: _openRows.contains(id) ? 0 : -math.pi / 2, child: const Pictogram('chevron', size: 14, color: cSecondary)),
             )
           else
             const SizedBox(width: 14),
-          const SizedBox(width: 3),
-          Pictogram(icons[kind] ?? 'figure', size: 18, color: selected ? cAccent : cInk2b),
-          const SizedBox(width: 6),
+          const SizedBox(width: 2),
+          Pictogram(icons[kind] ?? 'figure', size: 17, color: selected ? cAccent : cInk2b),
+          const SizedBox(width: 5),
           Expanded(
             child: Text.rich(
               TextSpan(children: [
                 TextSpan(text: '${r['name']}'),
-                // K2c: a script's row says what it moves
-                if (kind == 'script' && r['sub'] != null) TextSpan(text: '  ${r['sub']}', style: const TextStyle(color: cSecondary, fontSize: 12, fontWeight: FontWeight.w400)),
+                if (kind == 'script' && r['sub'] != null) TextSpan(text: '  ${r['sub']}', style: const TextStyle(color: cSecondary, fontSize: 11.5, fontWeight: FontWeight.w400)),
               ]),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: selected ? cAccent : on ? cText : cSecondary, fontSize: 14, fontWeight: selected ? FontWeight.w700 : FontWeight.w400),
+              style: TextStyle(color: selected ? cAccent : on ? cText : cSecondary, fontSize: 13.5, fontWeight: selected ? FontWeight.w700 : FontWeight.w400),
             ),
           ),
-          if (locked) const Padding(padding: EdgeInsets.only(right: 2), child: Pictogram('lock', size: 13, color: cSecondary)),
+          if (locked)
+            kit.Tap(
+              label: 'Unlock ${r['name']}',
+              minSize: 22,
+              onTap: _playing ? null : () => _cmd({'op': 'layer_lock', 'layer': id, 'v': false}),
+              child: const Padding(padding: EdgeInsets.only(right: 1), child: Pictogram('lock', size: 13, color: cAccent)),
+            ),
           if (canHide)
             kit.Tap(
               label: on ? 'Hide ${r['name']}' : 'Show ${r['name']}',
-              minSize: 26,
+              minSize: 24,
               onTap: _playing ? null : () => _cmd({'op': 'layer_visible', 'layer': id, 'v': !on}),
-              child: Pictogram('eye', size: 17, color: on ? const Color(0xFF9AA0A8) : const Color(0xFFD5D8DD)),
-            )
-          else
-            Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Pictogram('eye', size: 17, color: on ? const Color(0xFF9AA0A8) : const Color(0xFFD5D8DD))),
+              child: Pictogram('eye', size: 16, color: on ? const Color(0xFF9AA0A8) : const Color(0xFFD5D8DD)),
+            ),
+          if (!_playing)
+            kit.Tap(
+              key: moreKey,
+              label: '${r['name']} options',
+              minSize: 24,
+              onTap: () => _layerActionsPopover(r, moreKey),
+              child: const Pictogram('more', size: 15, color: Color(0xFF8A9099)),
+            ),
         ]),
       );
       if (_playing) return row;
@@ -2936,7 +3005,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           final onList = (r['on'] as List?) ?? const [];
           if (onList.isNotEmpty && onList.elementAtOrNull(_frame) == false) {
             final firstOn = onList.indexWhere((v) => v != false);
-            if (firstOn >= 0) _cmd({'op': 'frame', 'i': firstOn});
+            if (firstOn >= 0) {
+              _cmd({'op': 'frame', 'i': firstOn});
+              WidgetsBinding.instance.addPostFrameCallback((_) => _ensureFrameVisible(firstOn));
+            }
           }
           _cmd({'op': 'select', 'layer': id});
         }
@@ -2983,25 +3055,60 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       );
     }
 
-    // the names column on the rail grey; the blank cell by the ruler and the
-    // Preview row each end in a divider (timeline board), so "Preview" sits
-    // in a row of its own instead of under a tall empty space
-    final names = Container(
+    // Left pinned header (Timeline zoom controls + Preview toggle)
+    final namesHeader = Container(
       width: namesColW,
+      height: headerH,
       decoration: const BoxDecoration(color: cPanel, border: Border(right: BorderSide(color: Color(0xFFE6E8EB)))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Container(height: rulerH, decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFE6E8EB))))),
+        Container(
+          height: rulerH,
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFE6E8EB)))),
+          child: Row(children: [
+            if (showLayers && namesColW >= 170)
+              const Expanded(child: Text('Layers', style: TextStyle(color: cSecondary, fontSize: 11, fontWeight: FontWeight.w600)))
+            else
+              const Spacer(),
+            kit.HitPad(
+              dy: 6,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                kit.Tap(
+                  label: 'Zoom timeline out',
+                  minSize: 22,
+                  radius: 5,
+                  onTap: () => _zoomTimeline(1 / 1.25),
+                  child: const Padding(padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2), child: Pictogram('minus', size: 12, color: cInk2b, stroke: 2.2)),
+                ),
+                kit.Tap(
+                  label: 'Fit all frames in view',
+                  minSize: 22,
+                  radius: 5,
+                  onTap: _fitTimeline,
+                  child: const Padding(padding: EdgeInsets.symmetric(horizontal: 5, vertical: 2), child: Text('Fit', style: TextStyle(color: cAccent, fontSize: 10.5, fontWeight: FontWeight.w700))),
+                ),
+                kit.Tap(
+                  label: 'Zoom timeline in',
+                  minSize: 22,
+                  radius: 5,
+                  onTap: () => _zoomTimeline(1.25),
+                  child: const Padding(padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2), child: Pictogram('plus', size: 12, color: cInk2b, stroke: 2.2)),
+                ),
+              ]),
+            ),
+          ]),
+        ),
         if (showPreview)
           Container(
             height: stripH + gap,
             decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFDADDE2)))),
             child: Padding(
-              padding: const EdgeInsets.only(left: 36, right: 4),
+              padding: const EdgeInsets.only(left: 24, right: 4),
               child: Row(children: [
                 const Expanded(child: Text('Preview', style: TextStyle(color: cSecondary, fontSize: 12))),
                 kit.Tap(
                   label: 'Hide the preview',
-                  minSize: 28,
+                  minSize: 26,
                   onTap: () => setState(() {
                     AppSettings.values['previewRow'] = false;
                     unawaited(AppSettings.save());
@@ -3011,68 +3118,820 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               ]),
             ),
           ),
-        for (final r in rows) ...[
-          name(r),
-          if (_openRows.contains(r['id']))
-            for (final pr in ((r['props'] as List?) ?? const []).cast<Map>())
-              Container(
-                height: propH,
-                padding: const EdgeInsets.only(left: 30, right: 2),
-                decoration: const BoxDecoration(color: Color(0xFFFAFBFC), border: Border(bottom: BorderSide(color: Color(0xFFEEF0F2)))),
-                child: Row(children: [
-                  Expanded(child: Text('${pr['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cSecondary, fontSize: 12))),
-                  kit.Tap(
-                    label: 'Stop animating ${pr['name']}',
-                    minSize: 24,
-                    onTap: () => _cmd({'op': 'stop_animating', 'property': pr['id']}),
-                    child: const Pictogram('x', size: 13, color: Color(0xFF9AA0A8)),
-                  ),
-                ]),
-              ),
-        ],
       ]),
     );
-    final screenH = MediaQuery.sizeOf(context).height;
-    final double? fixedH = _layersOpen && !_playing && _timelineHeight != null ? _timelineHeight!.clamp(88.0, math.max(120.0, screenH * 0.62)).toDouble() : null;
-    final autoMaxH = math.min(contentH, math.min(240.0, screenH * 0.36));
-    _lastTimelineBodyH = fixedH ?? autoMaxH;
+
+    final lockScroll = _boxPath != null || _blockDrag != null || _tlPinch.length >= 2;
+
     return Container(
       color: cCard,
-      height: fixedH,
-      constraints: fixedH == null ? BoxConstraints(maxHeight: autoMaxH) : null,
-      child: SingleChildScrollView(
-        physics: lockScroll ? const NeverScrollableScrollPhysics() : null,
-        child: SizedBox(
-          height: contentH,
-          child: Stack(children: [
-            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [names, Expanded(child: area)]),
-            if (empty)
-              Positioned(
-                left: namesColW,
-                right: 0,
-                top: yy - 2 * rowH,
-                height: 2 * rowH,
-                child: const IgnorePointer(child: Center(child: Text('Nothing here yet. Tap + to add a stick figure.', style: TextStyle(color: cSecondary, fontSize: 14)))),
+      height: effectiveTotalH,
+      child: LayoutBuilder(builder: (context, outerBox) {
+        final trackVw = math.max(120.0, outerBox.maxWidth - namesColW);
+        _lastTrackViewportW = trackVw;
+        final minViewportCells = ((trackVw - left * 2) / cell).ceil() + 8;
+        final displayCells = math.max(baseCells, minViewportCells);
+        final width = left * 2 + displayCells * cell;
+        final bodyViewH = math.max(0.0, outerBox.maxHeight - headerH);
+        final bodyContentH = math.max(rawBodyH, bodyViewH);
+
+        // Pinned ruler + Preview strip track content
+        final headerTrack = SizedBox(
+          width: width,
+          height: headerH,
+          child: Stack(clipBehavior: Clip.none, children: [
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _TimelinePainter(
+                  frames: _frames,
+                  displayCells: displayCells,
+                  cell: cell,
+                  left: left,
+                  fps: fps,
+                  cur: cur,
+                  rulerH: rulerH,
+                  stripH: showPreview ? stripH : 0,
+                  lines: const [],
+                  bands: const [],
+                  aspect: aspect.toDouble(),
+                  thumbs: _thumbs,
+                  loopStart: loopStartF,
+                  loopEnd: loopEndF,
+                  drawHeader: true,
+                  drawBody: false,
+                ),
               ),
+            ),
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTapUp: (d) {
+                  if (_boxActive || _boxPath != null) return;
+                  frameTap(frameAt(d.localPosition.dx));
+                },
+                onLongPressStart: _playing
+                    ? null
+                    : (d) {
+                        if (_boxActive || _boxPath != null) return;
+                        _copyPopup(frameAt(d.localPosition.dx));
+                      },
+                onHorizontalDragStart: (d) {
+                  if (_boxActive || _boxPath != null || _tlPinch.length >= 2) return;
+                  if (_playing) _togglePlay();
+                  _scrubbingPlayhead = true;
+                  _dragPointerGlobal = d.globalPosition;
+                  _scrubTo(frameAt(d.localPosition.dx));
+                },
+                onHorizontalDragUpdate: (d) {
+                  if (_boxActive || _boxPath != null || _tlPinch.length >= 2) return;
+                  _dragPointerGlobal = d.globalPosition;
+                  _scrubTo(frameAt(d.localPosition.dx));
+                },
+                onHorizontalDragEnd: (_) {
+                  _scrubbingPlayhead = false;
+                  _dragPointerGlobal = null;
+                },
+                onHorizontalDragCancel: () {
+                  _scrubbingPlayhead = false;
+                  _dragPointerGlobal = null;
+                },
+              ),
+            ),
+            if (showPreview)
+              for (var i = 0; i < _frames; i++)
+                if ((markList.elementAtOrNull(i) as List?)?.any((m) => m == true) == true || (_st['tweening'] == true && noTween.elementAtOrNull(i) == true && i < _frames - 1))
+                  Positioned(
+                    left: left + i * cell + 3,
+                    top: rulerH + stripH - 12,
+                    child: IgnorePointer(
+                      child: Row(children: [
+                        if ((markList[i] as List?)?.first == true) mark('pause', const Color(0xFFD9821E)),
+                        if ((markList[i] as List?)?.elementAtOrNull(1) == true) mark('repeat', cConnected),
+                        if ((markList[i] as List?)?.elementAtOrNull(2) == true) mark('silence', cDanger),
+                        if ((markList[i] as List?)?.elementAtOrNull(3) == true) mark('slow', cConnected),
+                        if ((markList[i] as List?)?.elementAtOrNull(4) == true) mark('camera', const Color(0xFFD94F94)),
+                        if (_st['tweening'] == true && noTween.elementAtOrNull(i) == true && i < _frames - 1) mark('notween', cDanger),
+                      ]),
+                    ),
+                  ),
+            if (_frameSelected && showPreview && !_playing)
+              Positioned(
+                left: left + cur * cell - 1,
+                top: rulerH,
+                width: cell + 2,
+                height: stripH,
+                child: IgnorePointer(child: Container(decoration: BoxDecoration(border: Border.all(color: cAccent, width: 2), borderRadius: BorderRadius.circular(5)))),
+              ),
+            Positioned(left: left + cur * cell + cell / 2 - 0.75, top: rulerH - 2, width: 1.5, height: headerH - rulerH + 2, child: const IgnorePointer(child: ColoredBox(color: Color(0xFF8DB8E8)))),
+            Positioned(
+              left: left + cur * cell + cell / 2 - 18,
+              top: 0,
+              child: kit.Tap(
+                key: _playheadKey,
+                label: 'Frame ${cur + 1} of $_frames (tap to jump)',
+                minSize: 22,
+                radius: 9,
+                onTap: _playing ? null : _frameJumpPopover,
+                child: Container(
+                  constraints: const BoxConstraints(minWidth: 36),
+                  height: 19,
+                  margin: const EdgeInsets.only(top: 1.5),
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(color: const Color(0xFFDCEAF9), borderRadius: BorderRadius.circular(9)),
+                  child: Text('${cur + 1}', style: const TextStyle(color: cAccent, fontSize: 11, fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ),
           ]),
-        ),
-      ),
+        );
+
+        // Folded or playing: only the header row shows, directly scrollable horizontally
+        if (!showLayers) {
+          return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            namesHeader,
+            Expanded(
+              key: _timelineTrackKey,
+              child: _wrapTimelinePinchAndWheel(
+                RawScrollbar(
+                  controller: _stripScroll,
+                  thumbVisibility: width > trackVw + 4,
+                  interactive: true,
+                  thickness: 3.5,
+                  radius: const Radius.circular(2),
+                  thumbColor: const Color(0x666B7078),
+                  child: SingleChildScrollView(
+                    controller: _stripScroll,
+                    scrollDirection: Axis.horizontal,
+                    physics: lockScroll ? const NeverScrollableScrollPhysics() : const ClampingScrollPhysics(),
+                    child: headerTrack,
+                  ),
+                ),
+              ),
+            ),
+          ]);
+        }
+
+        // Unfolded: Pinned Header at top + Synchronized Vertical & Horizontal Layer Body below
+        final namesBody = Container(
+          width: namesColW,
+          constraints: BoxConstraints(minHeight: bodyContentH),
+          decoration: const BoxDecoration(color: cPanel, border: Border(right: BorderSide(color: Color(0xFFE6E8EB)))),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            for (final r in rows) ...[
+              nameCell(r),
+              if (_openRows.contains(r['id']))
+                for (final pr in ((r['props'] as List?) ?? const []).cast<Map>())
+                  Container(
+                    height: propH,
+                    padding: const EdgeInsets.only(left: 28, right: 2),
+                    decoration: const BoxDecoration(color: Color(0xFFFAFBFC), border: Border(bottom: BorderSide(color: Color(0xFFEEF0F2)))),
+                    child: Row(children: [
+                      Expanded(child: Text('${pr['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cSecondary, fontSize: 12))),
+                      kit.Tap(
+                        label: 'Stop animating ${pr['name']}',
+                        minSize: 24,
+                        onTap: () => _cmd({'op': 'stop_animating', 'property': pr['id']}),
+                        child: const Pictogram('x', size: 13, color: Color(0xFF9AA0A8)),
+                      ),
+                    ]),
+                  ),
+            ],
+          ]),
+        );
+
+        final bodyTrack = SizedBox(
+          width: width,
+          height: bodyContentH,
+          child: Stack(clipBehavior: Clip.none, children: [
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _TimelinePainter(
+                  frames: _frames,
+                  displayCells: displayCells,
+                  cell: cell,
+                  left: left,
+                  fps: fps,
+                  cur: cur,
+                  rulerH: 0,
+                  stripH: 0,
+                  lines: [for (final y in ys) y + rowH, for (final (_, _, y) in props) y + propH],
+                  bands: [for (final (_, _, y) in props) (y, propH)],
+                  aspect: aspect.toDouble(),
+                  thumbs: const {},
+                  groupStrips: [
+                    for (var k = 0; k < rows.length; k++)
+                      if (rows[k]['kind'] == 'group' && rows[k]['open'] == false) (ys[k] + 2, rowH - 5, _groupThumbs['${rows[k]['id']}'] ?? const <int, ui.Image>{}),
+                  ],
+                  drawHeader: false,
+                  drawBody: true,
+                ),
+              ),
+            ),
+            // Empty timeline / runway cell tap handler (Tap ONLY — zero drag recognizers, so 1-finger horizontal & vertical scroll work everywhere!)
+            if (!_playing && rows.isNotEmpty)
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTapUp: (d) {
+                    if (_boxActive || _boxPath != null || DateTime.now().difference(_boxEndedAt) < const Duration(milliseconds: 80)) return;
+                    final f = ((d.localPosition.dx - left) / cell).floor();
+                    if (f < 0 || f >= displayCells) return;
+                    final dy = d.localPosition.dy;
+                    for (var k = 0; k < rows.length; k++) {
+                      if (dy >= ys[k] && dy < ys[k] + rowH) {
+                        _onEmptyTimelineCellTap(rows[k], f, d.globalPosition);
+                        return;
+                      }
+                    }
+                  },
+                ),
+              ),
+            // Layer pose blocks
+            for (var k = 0; k < rows.length; k++) ..._rowBlocks(rows[k], ys[k], rowH, cell, left, rows[k]['id'] == selLayer),
+            // Property keyframe rows & diamonds
+            for (final (r, pr, y) in props) ...[
+              if (!_playing && _st['propKeyCopied'] == true)
+                Positioned(
+                  left: left,
+                  top: y,
+                  width: displayCells * cell,
+                  height: propH,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTapUp: (d) {
+                      if (_boxActive || _boxPath != null) return;
+                      final f = (d.localPosition.dx / cell).floor().clamp(0, displayCells - 1);
+                      final existing = ((pr['keys'] as List?) ?? const []).cast<num>().map((v) => v.toInt());
+                      if (!existing.contains(f)) _propPastePopover(pr, f, d.globalPosition);
+                    },
+                  ),
+                ),
+              for (var ki = 0; ki < ((pr['keys'] as List?) ?? const []).length; ki++)
+                () {
+                  final f = (((pr['keys'] as List)[ki]) as num).toInt();
+                  final pid = '${pr['id']}';
+                  final eases = (pr['eases'] as List?) ?? const [];
+                  final ease = ki < eases.length ? '${eases[ki]}' : 'auto';
+                  final isDragged = propDrag != null && propDrag.property == pid && (propDrag.live ? f == (propDrag.lastSent ?? propDrag.start) : propDrag.start == f);
+                  final isBoxSel = _selPropKeys.contains((pid, f));
+                  final diamondSize = isBoxSel || isDragged ? 10.0 : 8.0;
+                  return Positioned(
+                    left: left + f * cell + cell / 2 - 12,
+                    top: y + propH / 2 - 12,
+                    width: 24,
+                    height: 24,
+                    child: _playing
+                        ? Center(child: Transform.rotate(angle: math.pi / 4, child: Container(width: 8, height: 8, decoration: BoxDecoration(color: const Color(0xFF8A9099), borderRadius: BorderRadius.circular(1.5)))))
+                        : MouseRegion(
+                            cursor: SystemMouseCursors.grab,
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              dragStartBehavior: DragStartBehavior.start,
+                              onTapUp: (d) {
+                                if (_boxActive || _boxPath != null) return;
+                                _propKeyPopover(r, pr, f, ease, Rect.fromCenter(center: d.globalPosition, width: 20, height: 20));
+                              },
+                              onSecondaryTapUp: (d) => _propKeyPopover(r, pr, f, ease, Rect.fromCenter(center: d.globalPosition, width: 20, height: 20)),
+                              onHorizontalDragStart: (d) {
+                                _dragPointerGlobal = d.globalPosition;
+                                _startTimelineDrag(
+                                  _BlockDrag('${r['id']}', f, 1, cell, edge: 1, kind: 'prop_key', property: pid),
+                                  rawStartX: d.globalPosition.dx,
+                                );
+                              },
+                              onHorizontalDragUpdate: (d) {
+                                _dragPointerGlobal = d.globalPosition;
+                                _updateTimelineDragFromPointer(d.globalPosition);
+                              },
+                              onHorizontalDragEnd: (_) {
+                                _dragPointerGlobal = null;
+                                _endBlockDrag();
+                              },
+                              onHorizontalDragCancel: () {
+                                _dragPointerGlobal = null;
+                                _endBlockDrag(cancel: true);
+                              },
+                              child: Center(
+                                child: Transform.rotate(
+                                  angle: math.pi / 4,
+                                  child: Container(
+                                    width: diamondSize,
+                                    height: diamondSize,
+                                    decoration: BoxDecoration(
+                                      color: isBoxSel || isDragged ? cAccent : const Color(0xFF8A9099),
+                                      borderRadius: BorderRadius.circular(1.5),
+                                      border: isBoxSel || isDragged ? Border.all(color: cCard, width: 1.2) : null,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                  );
+                }(),
+              if (propDrag != null && !propDrag.live && propDrag.property == '${pr['id']}')
+                () {
+                  final (st, _) = propDrag.preview(allowStart0: true);
+                  return Positioned(
+                    left: left + st * cell + cell / 2 - 6,
+                    top: y + propH / 2 - 6,
+                    width: 12,
+                    height: 12,
+                    child: IgnorePointer(
+                      child: Center(
+                        child: Transform.rotate(
+                          angle: math.pi / 4,
+                          child: Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(color: cAccent, borderRadius: BorderRadius.circular(2), border: Border.all(color: cCard, width: 1.2)),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }(),
+            ],
+            // Vertical playhead line through all layer rows
+            Positioned(left: left + cur * cell + cell / 2 - 0.75, top: 0, width: 1.5, height: bodyContentH, child: const IgnorePointer(child: ColoredBox(color: Color(0xFF8DB8E8)))),
+          ]),
+        );
+
+        // Synced header strip (follows _stripScroll with zero controller conflict)
+        final syncedHeader = ListenableBuilder(
+          listenable: _stripScroll,
+          builder: (context, child) {
+            final off = _stripScroll.hasClients ? _stripScroll.offset : 0.0;
+            return ClipRect(
+              child: OverflowBox(
+                alignment: Alignment.topLeft,
+                minWidth: 0,
+                maxWidth: double.infinity,
+                child: Transform.translate(offset: Offset(-off, 0), child: child),
+              ),
+            );
+          },
+          child: headerTrack,
+        );
+
+        Widget rightTrackColumn = Column(children: [
+          SizedBox(height: headerH, width: double.infinity, child: syncedHeader),
+          Expanded(
+            child: RawScrollbar(
+              controller: _stripScroll,
+              notificationPredicate: (n) => n.metrics.axis == Axis.horizontal,
+              thumbVisibility: width > trackVw + 4,
+              interactive: true,
+              thickness: 4,
+              radius: const Radius.circular(2),
+              thumbColor: const Color(0x666B7078),
+              child: SingleChildScrollView(
+                controller: _layerVScroll,
+                physics: lockScroll ? const NeverScrollableScrollPhysics() : const ClampingScrollPhysics(),
+                child: SizedBox(
+                  height: bodyContentH,
+                  child: SingleChildScrollView(
+                    controller: _stripScroll,
+                    scrollDirection: Axis.horizontal,
+                    physics: lockScroll ? const NeverScrollableScrollPhysics() : const ClampingScrollPhysics(),
+                    child: bodyTrack,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ]);
+
+        rightTrackColumn = _wrapTimelinePinchAndWheel(rightTrackColumn);
+
+        // Double-tap selection box & triple-tap lasso across Preview strip + Layer rows
+        if (rows.isNotEmpty) {
+          rightTrackColumn = Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: (e) {
+              final now = DateTime.now();
+              final quick = now.difference(_lastDown) < const Duration(milliseconds: 450) && (e.localPosition - _lastDownAt).distance < 28;
+              _taps = quick ? _taps + 1 : 1;
+              _lastDown = now;
+              _lastDownAt = e.localPosition;
+              if (_taps == 1) {
+                _boxActive = false;
+                _preBoxFrame = _frame;
+                _preBoxFrameSel = _frameSelected;
+                _preBoxInPreview = e.localPosition.dy >= rulerH && e.localPosition.dy < headerH;
+              } else if (_taps >= 2 && !_playing && e.localPosition.dy >= rulerH) {
+                _boxActive = true;
+                _scrubbingPlayhead = false;
+                _dragPointerGlobal = e.position;
+                if (_preBoxInPreview && _preBoxFrame != null) {
+                  if (_frame != _preBoxFrame) _cmd({'op': 'frame', 'i': _preBoxFrame});
+                  _frameSelected = _preBoxFrameSel ?? false;
+                }
+                setState(() {
+                  _boxPath = [e.localPosition];
+                  _lasso = _taps >= 3;
+                });
+              }
+            },
+            onPointerMove: (e) {
+              final path = _boxPath;
+              if (path == null || !_boxActive) return;
+              _dragPointerGlobal = e.position;
+              setState(() {
+                if (_lasso) {
+                  path.add(e.localPosition);
+                } else {
+                  _boxPath = [path.first, e.localPosition];
+                }
+              });
+            },
+            onPointerUp: (_) {
+              if (_boxActive) {
+                _dragPointerGlobal = null;
+                _finishBox(rows, ys, props, cell, rowH, propH, headerH: headerH);
+              }
+            },
+            onPointerCancel: (_) {
+              if (_boxActive) {
+                _dragPointerGlobal = null;
+                setState(() {
+                  _boxActive = false;
+                  _boxPath = null;
+                });
+              }
+            },
+            child: Stack(children: [
+              rightTrackColumn,
+              if (_boxPath != null) Positioned.fill(child: AbsorbPointer(child: CustomPaint(painter: _BoxPainter(_boxPath!, _lasso)))),
+            ]),
+          );
+        }
+
+        // Sync vertical scroll between left `namesBody` and right `_layerVScroll`!
+        final syncedNamesBody = ListenableBuilder(
+          listenable: _layerVScroll,
+          builder: (context, child) {
+            final vOff = _layerVScroll.hasClients ? _layerVScroll.offset : 0.0;
+            return ClipRect(
+              child: OverflowBox(
+                alignment: Alignment.topLeft,
+                minHeight: 0,
+                maxHeight: double.infinity,
+                child: Transform.translate(offset: Offset(0, -vOff), child: child),
+              ),
+            );
+          },
+          child: Listener(
+            onPointerSignal: (ev) {
+              if (ev is PointerScrollEvent && _layerVScroll.hasClients) {
+                final pos = _layerVScroll.position;
+                _layerVScroll.jumpTo((pos.pixels + ev.scrollDelta.dy).clamp(pos.minScrollExtent, pos.maxScrollExtent));
+              }
+            },
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onVerticalDragUpdate: (d) {
+                if (!_layerVScroll.hasClients) return;
+                final pos = _layerVScroll.position;
+                _layerVScroll.jumpTo((pos.pixels - d.delta.dy).clamp(pos.minScrollExtent, pos.maxScrollExtent));
+              },
+              onVerticalDragEnd: (d) {
+                if (!_layerVScroll.hasClients) return;
+                final v = -(d.primaryVelocity ?? 0);
+                if (v.abs() < 60) return;
+                final pos = _layerVScroll.position;
+                final target = (pos.pixels + v * 0.22).clamp(pos.minScrollExtent, pos.maxScrollExtent);
+                unawaited(_layerVScroll.animateTo(target, duration: const Duration(milliseconds: 260), curve: Curves.decelerate));
+              },
+              child: namesBody,
+            ),
+          ),
+        );
+
+        return Stack(children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            SizedBox(
+              width: namesColW,
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                namesHeader,
+                Expanded(child: syncedNamesBody),
+              ]),
+            ),
+            Expanded(
+              key: _timelineTrackKey,
+              child: RawScrollbar(
+                controller: _layerVScroll,
+                notificationPredicate: (n) => n.metrics.axis == Axis.vertical,
+                thumbVisibility: rawBodyH > bodyViewH + 4,
+                thickness: 3.5,
+                radius: const Radius.circular(2),
+                thumbColor: const Color(0x666B7078),
+                padding: EdgeInsets.only(top: headerH + 2, bottom: 6, right: 1),
+                child: rightTrackColumn,
+              ),
+            ),
+          ]),
+          if (empty)
+            Positioned(
+              left: namesColW,
+              right: 0,
+              top: headerH + math.max(0, yy - 2 * rowH),
+              height: 2 * rowH,
+              child: const IgnorePointer(child: Center(child: Text('Nothing here yet. Tap + to add a stick figure.', style: TextStyle(color: cSecondary, fontSize: 14)))),
+            ),
+        ]);
+      }),
     );
   }
 
-  /// A layer row's poses as quiet blocks (G2): one rounded bar per pose, no
-  /// markers. The selected figure's pose under the playhead is pale blue with
-  /// a blue edge and grips at both ends: the right one sets its length, the
-  /// left one where it starts (G3). Holding any later pose and sliding moves
-  /// it. Tapping selects the figure on that frame and opens its pose.
+  /// Pure raw-pointer 2-finger pinch-to-zoom + Ctrl/wheel zoom wrapper.
+  /// Never enters the gesture arena for 1 finger, so horizontal and vertical
+  /// `SingleChildScrollView` scrolling work with native momentum everywhere!
+  Widget _wrapTimelinePinchAndWheel(Widget child) {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerSignal: (e) {
+        if (e is PointerScrollEvent) {
+          if (HardwareKeyboard.instance.isControlPressed) {
+            _zoomTimeline(e.scrollDelta.dy > 0 ? 1 / 1.15 : 1.15, anchorLocalX: e.localPosition.dx);
+          } else if (e.scrollDelta.dx.abs() > 0 && _stripScroll.hasClients) {
+            final pos = _stripScroll.position;
+            _stripScroll.jumpTo((pos.pixels + e.scrollDelta.dx).clamp(pos.minScrollExtent, pos.maxScrollExtent));
+          }
+        }
+      },
+      onPointerDown: (e) {
+        _tlPinch[e.pointer] = e.localPosition;
+        if (_tlPinch.length == 2) {
+          _scrubbingPlayhead = false;
+          final pts = _tlPinch.values.toList();
+          _tlPinchSpan = (pts[0] - pts[1]).distance;
+          _tlPinchCellStart = _cellW;
+          final midX = (pts[0].dx + pts[1].dx) / 2;
+          final hOff = _stripScroll.hasClients ? _stripScroll.offset : 0.0;
+          _tlPinchAnchorFrame = (midX + hOff - 8.0) / _cellW;
+          setState(() {});
+        }
+      },
+      onPointerMove: (e) {
+        if (!_tlPinch.containsKey(e.pointer)) return;
+        _tlPinch[e.pointer] = e.localPosition;
+        if (_tlPinch.length >= 2 && _tlPinchSpan > 12) {
+          final pts = _tlPinch.values.toList();
+          final span = (pts[0] - pts[1]).distance;
+          final midX = (pts[0].dx + pts[1].dx) / 2;
+          final nextCell = (_tlPinchCellStart * (span / _tlPinchSpan)).clamp(14.0, 112.0);
+          if ((nextCell - _cellW).abs() > 0.05) {
+            setState(() => _cellW = nextCell);
+            if (_stripScroll.hasClients) {
+              final to = (8.0 + _tlPinchAnchorFrame * nextCell - midX).clamp(0.0, _stripScroll.position.maxScrollExtent);
+              _stripScroll.jumpTo(to);
+            }
+          }
+        }
+      },
+      onPointerUp: (e) {
+        final wasPinch = _tlPinch.length >= 2;
+        _tlPinch.remove(e.pointer);
+        if (wasPinch && _tlPinch.length < 2) setState(() {});
+      },
+      onPointerCancel: (e) {
+        final wasPinch = _tlPinch.length >= 2;
+        _tlPinch.remove(e.pointer);
+        if (wasPinch && _tlPinch.length < 2) setState(() {});
+      },
+      child: child,
+    );
+  }
+
+  /// Discoverable `⋯` layer actions popover (complements left-swipe on layer rows).
+  Future<void> _layerActionsPopover(Map r, GlobalKey key) async {
+    final screen = MediaQuery.sizeOf(context);
+    final anchor = kit.Anchored.rectOf(key) ?? Rect.fromLTWH(120, screen.height - 160, 28, 28);
+    final kind = '${r['kind']}';
+    final id = '${r['id']}';
+    final name = '${r['name']}';
+    final visible = r['visible'] != false;
+    final locked = r['locked'] == true;
+    final isGroup = kind == 'group';
+    final isItem = kind == 'figure' || kind == 'picture' || kind == 'text' || kind == 'movieclip';
+
+    Widget item(String label, String? icon, VoidCallback onTap, {bool danger = false}) => kit.Tap(
+          minSize: 0,
+          onTap: onTap,
+          child: Container(
+            height: 38,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Row(children: [
+              if (icon != null) ...[
+                Pictogram(icon, size: 17, color: danger ? cDanger : cAccent),
+                const SizedBox(width: 10),
+              ],
+              Expanded(child: Text(label, style: TextStyle(color: danger ? cDanger : cText, fontSize: 14, fontWeight: danger ? FontWeight.w600 : FontWeight.w500))),
+            ]),
+          ),
+        );
+
+    final pick = await showGeneralDialog<String>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Layer options',
+      barrierColor: const Color(0x00000000),
+      transitionDuration: kit.motion(context, 140),
+      pageBuilder: (c, a1, a2) => Stack(children: [
+        kit.Anchored(
+          anchor: anchor,
+          width: 224,
+          card: (w) => kit.PanelCard(
+            width: w,
+            padding: const EdgeInsets.fromLTRB(6, 8, 6, 6),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
+                child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cTitle, fontSize: 13.5, fontWeight: FontWeight.w700)),
+              ),
+              if (isItem || isGroup) item('Rename…', 'edit', () => Navigator.pop(c, 'rename')),
+              if (isItem) item('Duplicate', 'copy', () => Navigator.pop(c, 'dup')),
+              if (isItem) item(locked ? 'Unlock layer' : 'Lock layer', locked ? 'unlock' : 'lock', () => Navigator.pop(c, 'lock')),
+              if (isItem || kind == 'script' || isGroup) item(visible ? 'Hide layer' : 'Show layer', 'eye', () => Navigator.pop(c, 'vis')),
+              if (isItem || isGroup) item('Bring forward', 'chevron', () => Navigator.pop(c, 'fwd')),
+              if (isItem || isGroup) item('Send back', 'chevron', () => Navigator.pop(c, 'back')),
+              if (isGroup) item('Ungroup', 'folder', () => Navigator.pop(c, 'ungroup')),
+              if (kind == 'camera') ...[
+                item('Center camera', 'camera', () => Navigator.pop(c, 'cam_center')),
+                item('Reset camera', 'undo', () => Navigator.pop(c, 'cam_reset')),
+              ],
+              if (kind != 'camera') ...[
+                Container(height: 1, margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), color: const Color(0xFFE6E8EB)),
+                item(isGroup ? 'Delete group' : 'Delete everywhere', 'bin', () => Navigator.pop(c, 'del'), danger: true),
+              ],
+            ]),
+          ),
+        ),
+      ]),
+    );
+    if (pick == null || !mounted) return;
+    switch (pick) {
+      case 'rename':
+        final n = await _askName('Rename', name);
+        if (n != null && n.trim().isNotEmpty) {
+          if (isGroup) {
+            _cmd({'op': 'group_set', 'group': id, 'name': n.trim()});
+          } else {
+            _cmd({'op': 'rename', 'layer': id, 'name': n.trim()});
+          }
+        }
+      case 'dup':
+        _cmd({'op': 'duplicate_figure', 'layer': id});
+      case 'lock':
+        _cmd({'op': 'layer_lock', 'layer': id, 'v': !locked});
+      case 'vis':
+        _cmd({'op': 'layer_visible', 'layer': id, 'v': !visible});
+      case 'fwd' || 'back':
+        if (isGroup) {
+          _cmd({'op': 'group_order', 'group': id, 'forward': pick == 'fwd'});
+        } else {
+          _cmd({'op': 'select', 'layer': id});
+          _cmd({'op': 'layer_order', 'forward': pick == 'fwd'});
+        }
+      case 'ungroup':
+        _cmd({'op': 'ungroup', 'group': id});
+      case 'cam_center':
+        _cmd({'op': 'camera', 'center': true});
+      case 'cam_reset':
+        _cmd({'op': 'reset_camera'});
+      case 'del':
+        if (isGroup) {
+          _cmd({'op': 'delete_group', 'group': id});
+          kit.showToast(context, '$name deleted.', light: true, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
+        } else if (kind == 'script') {
+          _pickScript(id, null);
+          _cmd({'op': 'script_delete'});
+          kit.showToast(context, '$name deleted.', light: true, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
+        } else {
+          _cmd({'op': 'delete_everywhere', 'layer': id});
+          kit.showToast(context, '$name deleted from every frame.', light: true, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
+        }
+    }
+  }
+
+  /// Tapping an empty timeline cell (or trailing runway cell) on a layer row:
+  /// selects the layer, moves the playhead (when within active frames), and
+  /// offers 1-tap "Extend to frame N" (`extend_to`) or "New pose at frame N"!
+  Future<void> _onEmptyTimelineCellTap(Map r, int f, Offset globalPos) async {
+    final kind = '${r['kind']}';
+    final id = '${r['id']}';
+    final name = '${r['name']}';
+    if (kind == 'camera') {
+      if (f < _frames) {
+        _cmd({'op': 'frame', 'i': f});
+        _setMode('camera');
+      }
+      return;
+    }
+    if (kind != 'figure' && kind != 'picture' && kind != 'movieclip' && kind != 'text') return;
+
+    final on = (r['on'] as List?) ?? const [];
+    final blockList = ((r['blocks'] as List?) ?? const []).cast<List>();
+    var hasVisibleSpan = false;
+    for (final b in blockList) {
+      final st = (b[0] as num).toInt(), len = (b[1] as num).toInt();
+      var a = st, z = st + len - 1;
+      while (a <= z && on.elementAtOrNull(a) == false) {
+        a++;
+      }
+      while (z >= a && on.elementAtOrNull(z) == false) {
+        z--;
+      }
+      if (a > z) continue;
+      hasVisibleSpan = true;
+      if (f >= a && f <= z) return; // Already inside a visible block!
+    }
+    if (!hasVisibleSpan && on.any((v) => v == true)) hasVisibleSpan = true;
+
+    // Select the layer immediately and jump playhead if tapping within existing frames
+    if (f < _frames && f != _frame) _cmd({'op': 'frame', 'i': f});
+    _cmd({'op': 'select', 'layer': id});
+
+    final canExtend = hasVisibleSpan;
+    final isFigure = kind == 'figure';
+    if (!canExtend && !isFigure) return;
+
+    final pick = await showGeneralDialog<String>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Frame action',
+      barrierColor: const Color(0x00000000),
+      transitionDuration: kit.motion(context, 140),
+      pageBuilder: (c, a1, a2) => Stack(children: [
+        kit.Anchored(
+          anchor: Rect.fromCenter(center: globalPos, width: 24, height: 24),
+          width: 264,
+          card: (w) => kit.PanelCard(
+            width: w,
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text('$name · Frame ${f + 1}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cTitle, fontSize: 13.5, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              if (canExtend) ...[
+                kit.WordButton('Extend to frame ${f + 1}', primary: true, expand: true, height: 36, size: 13.5, onTap: () => Navigator.pop(c, 'extend')),
+                const SizedBox(height: 6),
+              ],
+              if (isFigure) ...[
+                kit.WordButton('New pose at frame ${f + 1}', primary: !canExtend, filled: canExtend, expand: true, height: 36, size: 13.5, onTap: () => Navigator.pop(c, 'pose')),
+                if (_st['pose'] == true) ...[
+                  const SizedBox(height: 6),
+                  kit.WordButton('Paste pose here', filled: true, expand: true, height: 34, size: 13, onTap: () => Navigator.pop(c, 'paste')),
+                ],
+              ],
+              const Padding(
+                padding: EdgeInsets.only(top: 6),
+                child: Text('Tip: double-tap an empty cell to extend right away.', textAlign: TextAlign.center, style: TextStyle(color: cSecondary, fontSize: 11.5)),
+              ),
+            ]),
+          ),
+        ),
+      ]),
+    );
+    if (pick == null || !mounted) return;
+    final compactPhone = MediaQuery.sizeOf(context).shortestSide <= 600 && MediaQuery.sizeOf(context).height < 500;
+    setState(() {
+      _frameSelected = false;
+      _selPoseKeys.clear();
+      _selPropKeys.clear();
+      if (!compactPhone) _panelOpen = true;
+    });
+    if (pick == 'extend') {
+      _cmd({'op': 'extend_to', 'layer': id, 'frame': f});
+      _cmd({'op': 'frame', 'i': f.clamp(0, _frames - 1)});
+      _cmd({'op': 'select', 'layer': id});
+      _thumbsChanged('extend_to', force: true);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _ensureFrameVisible(_frame));
+    } else if (pick == 'pose') {
+      _cmd({'op': 'new_pose', 'layer': id, 'frame': f});
+      _cmd({'op': 'frame', 'i': f.clamp(0, _frames - 1)});
+      _cmd({'op': 'select', 'layer': id});
+      _jumpTo('Pose');
+      _thumbsChanged('new_pose', force: true);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _ensureFrameVisible(_frame));
+    } else if (pick == 'paste') {
+      _cmd({'op': 'new_pose', 'layer': id, 'frame': f});
+      _cmd({'op': 'paste_pose', 'layer': id, 'frame': f, 'withTransform': true});
+      _cmd({'op': 'frame', 'i': f.clamp(0, _frames - 1)});
+      _cmd({'op': 'select', 'layer': id});
+      _thumbsChanged('paste_pose', force: true);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _ensureFrameVisible(_frame));
+    }
+  }
+
+  /// A layer row's poses as clear, tactile blocks: active pose highlighted in
+  /// blue with generous capsule grips at its ends, subtle tween vs hold cue,
+  /// and long-press-drag to slide poses freely without blocking 1-finger scroll!
   List<Widget> _rowBlocks(Map r, double y, double rowH, double cell, double left, bool selectedRow) {
     final on = (r['on'] as List?) ?? const [];
     final out = <Widget>[];
-    // K: a group's row is a thin bar over the whole animation with a tick at
-    // every member's pose (Group board); tapping it selects the group
     if (r['kind'] == 'group' && r['open'] == false) {
-      // folded: the painter draws its merged strip; this takes the tap and
-      // rings it when the group is selected
       out.add(Positioned(
         left: left,
         top: y + 2,
@@ -3111,8 +3970,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ));
       return out;
     }
-    // K2c: a script row is its runs, each a block with a trace of what it
-    // does; the picked one has grips at both ends (Script board)
     if (r['kind'] == 'script') {
       final picked = (_st['script'] as Map?)?['id'] == r['id'] ? (_st['script'] as Map)['run'] : null;
       final sdrag = _blockDrag != null && _blockDrag!.layer == r['id'] ? _blockDrag : null;
@@ -3123,19 +3980,30 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         final dragged = sdrag != null && sdrag.run == rid;
         final x = left + a * cell + 1, w = math.max(10.0, len * cell - 2);
         Widget grip(bool atStart) => Positioned(
-              left: atStart ? 0 : null,
-              right: atStart ? null : 0,
-              top: 0,
-              bottom: 0,
-              width: 14,
+              left: atStart ? -4 : null,
+              right: atStart ? null : -6,
+              top: -3,
+              bottom: -3,
+              width: 20,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onHorizontalDragStart: (_) => setState(() => _blockDrag = _BlockDrag('${r['id']}', a, len, cell, edge: atStart ? 2 : 0, run: rid)),
-                onHorizontalDragUpdate: (d) {
-                  if (_blockDrag != null) setState(() => _blockDrag!.dx += d.delta.dx);
+                onHorizontalDragStart: (d) {
+                  _dragPointerGlobal = d.globalPosition;
+                  _startTimelineDrag(_BlockDrag('${r['id']}', a, len, cell, edge: atStart ? 2 : 0, run: rid), rawStartX: d.globalPosition.dx);
                 },
-                onHorizontalDragEnd: (_) => _endBlockDrag(),
-                child: Center(child: Container(width: 4, height: 14, decoration: BoxDecoration(color: cAccent, borderRadius: BorderRadius.circular(2)))),
+                onHorizontalDragUpdate: (d) {
+                  _dragPointerGlobal = d.globalPosition;
+                  _updateTimelineDragFromPointer(d.globalPosition);
+                },
+                onHorizontalDragEnd: (_) {
+                  _dragPointerGlobal = null;
+                  _endBlockDrag();
+                },
+                onHorizontalDragCancel: () {
+                  _dragPointerGlobal = null;
+                  _endBlockDrag(cancel: true);
+                },
+                child: Center(child: _gripPill()),
               ),
             );
         final block = AnimatedContainer(
@@ -3158,16 +4026,20 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                   opacity: dragged ? 0 : 1,
                   child: GestureDetector(
                     onTapUp: (_) => _pickScript('${r['id']}', rid),
-                    // hold and slide: the run moves (its length stays)
-                    onLongPressStart: (_) {
+                    onLongPressStart: (d) {
                       _pickScript('${r['id']}', rid);
-                      setState(() => _blockDrag = _BlockDrag('${r['id']}', a, len, cell, edge: 1, run: rid));
+                      _dragPointerGlobal = d.globalPosition;
+                      _startTimelineDrag(_BlockDrag('${r['id']}', a, len, cell, edge: 1, run: rid), rawStartX: d.globalPosition.dx);
                     },
                     onLongPressMoveUpdate: (d) {
-                      if (_blockDrag != null) setState(() => _blockDrag!.dx = d.offsetFromOrigin.dx);
+                      _dragPointerGlobal = d.globalPosition;
+                      _updateTimelineDragFromPointer(d.globalPosition);
                     },
-                    onLongPressEnd: (_) => _endBlockDrag(),
-                    child: SizedBox(width: w, height: 26, child: Stack(children: [block, if (sel) grip(true), if (sel) grip(false)])),
+                    onLongPressEnd: (_) {
+                      _dragPointerGlobal = null;
+                      _endBlockDrag();
+                    },
+                    child: SizedBox(width: w, height: 26, child: Stack(clipBehavior: Clip.none, children: [block, if (sel) grip(true), if (sel) grip(false)])),
                   ),
                 ),
         ));
@@ -3182,10 +4054,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       }
       return out;
     }
-    // M5: a sound row is its clips, with the waveform
     if (r['kind'] == 'sound') {
       for (final c in ((r['clips'] as List?) ?? const []).cast<List>()) {
-        // drawn up to the end of the animation (a longer sound plays on past it)
         final x = left + (c[0] as num).toDouble() * cell + 1;
         final w = math.max(8.0, math.min((c[1] as num).toDouble() * cell, (_frames - (c[0] as num).toDouble()) * cell) - 2);
         final n = math.max(1, ((w - 12) / 4).floor());
@@ -3215,28 +4085,35 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       }
       return out;
     }
+
     final drag = _blockDrag != null && _blockDrag!.layer == r['id'] && _blockDrag!.kind != 'prop_key' ? _blockDrag : null;
     final layerId = '${r['id']}';
-    Widget bar(double x, double w, {bool strong = false, bool boxSel = false, bool ghost = false}) => AnimatedContainer(
+    Widget bar(double w, {bool strong = false, bool boxSel = false, bool ghost = false, bool tween = false, int cells = 1}) => AnimatedContainer(
           duration: _blockDrag != null ? Duration.zero : kit.motion(context, 120),
           width: w,
           height: 26,
           decoration: BoxDecoration(
-            color: boxSel ? const Color(0xFFD6E8FC) : strong ? const Color(0xFFE4EEFA) : const Color(0xFFEEF0F3),
-            borderRadius: BorderRadius.circular(5),
-            border: Border.all(color: strong || boxSel ? cAccent : const Color(0xFFDCDFE4), width: strong || boxSel ? 2 : 1),
+            color: boxSel ? const Color(0xFFD6E8FC) : strong ? const Color(0xFFE4EEFA) : (tween ? const Color(0xFFEDF2F8) : const Color(0xFFF1F3F5)),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: strong || boxSel ? cAccent : (tween ? const Color(0xFFC7D7EC) : const Color(0xFFD8DCE2)), width: strong || boxSel ? 2 : 1),
           ),
-          foregroundDecoration: ghost ? BoxDecoration(color: cCard.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(5)) : null,
+          foregroundDecoration: ghost ? BoxDecoration(color: cCard.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(6)) : null,
+          child: cells > 1
+              ? Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 2.5),
+                    child: CustomPaint(size: Size(math.max(0, w - 16), 3), painter: _BlockSpanCuePainter(tween: tween, active: strong || boxSel)),
+                  ),
+                )
+              : null,
         );
+
     final blockList = ((r['blocks'] as List?) ?? const []).cast<List>();
     for (var bi = 0; bi < blockList.length; bi++) {
       final b = blockList[bi];
       final st = (b[0] as num).toInt(), len = (b[1] as num).toInt();
       final prevStart = bi > 0 ? (blockList[bi - 1][0] as num).toInt() : 0;
-      // the block being dragged is drawn where it is going (below); it stays
-      // here unseen, because its grip or long press is what's dragging
-      final dragged = drag != null && !drag.live && drag.start == st;
-      // only the frames the layer is on
       var a = st, z = st + len - 1;
       while (a <= z && on.elementAtOrNull(a) == false) {
         a++;
@@ -3245,9 +4122,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         z--;
       }
       if (a > z) continue;
-      final strong = selectedRow && _frame >= st && _frame < st + len;
-      final boxSel = _selPoseKeys.contains((layerId, st));
-      final x = left + a * cell + 1, w = (z - a + 1) * cell - 2;
+      final visLen = z - a + 1;
+      final dragged = drag != null && !drag.live && drag.start == a;
+      final strong = selectedRow && _frame >= a && _frame <= z;
+      final boxSel = _selPoseKeys.contains((layerId, a)) || _selPoseKeys.contains((layerId, st));
+      final x = left + a * cell + 1, w = math.max(10.0, visLen * cell - 2);
+
       void select(double dx) {
         setState(() {
           _frameSelected = false;
@@ -3271,47 +4151,79 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         }
       }
 
-      final gripW = math.min(18.0, math.max(8.0, w * 0.35));
+      final figure = r['kind'] == 'figure';
+      final extensible = figure || r['kind'] == 'picture' || r['kind'] == 'movieclip' || r['kind'] == 'text';
+      final hasLeftGrip = strong && extensible && a > 0;
+      final hasRightGrip = strong && extensible;
+      final rightHitW = math.max(24.0, math.min(30.0, w * (hasLeftGrip ? 0.44 : 0.55) + 10));
+      final leftHitW = math.max(20.0, math.min(26.0, w * 0.4 + 8));
+
+      void tapBlock(Offset globalPos, double localDx) {
+        if (_boxActive || _boxPath != null || DateTime.now().difference(_boxEndedAt) < const Duration(milliseconds: 80)) return;
+        if (strong && figure) {
+          _poseKeyPopover(r, b, bi, Rect.fromCenter(center: globalPos, width: 24, height: 24));
+        } else {
+          select(localDx);
+        }
+      }
+
       Widget grip(bool atStart) => Positioned(
-            left: atStart ? 0 : null,
-            right: atStart ? null : 0,
-            top: 0,
-            bottom: 0,
-            width: gripW,
+            left: atStart ? -6 : null,
+            right: atStart ? null : -10,
+            top: -3,
+            bottom: -3,
+            width: atStart ? leftHitW : rightHitW,
             child: Listener(
               onPointerDown: (e) => _gripDownX = e.position.dx,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 dragStartBehavior: DragStartBehavior.down,
+                onTapUp: (d) => tapBlock(d.globalPosition, atStart ? 0 : math.max(0, w - 1)),
                 onHorizontalDragStart: (d) {
                   final startX = _gripDownX ?? d.globalPosition.dx;
+                  _dragPointerGlobal = d.globalPosition;
                   _startTimelineDrag(
                     _BlockDrag(
                       layerId,
-                      st,
-                      len,
+                      a,
+                      visLen,
                       cell,
                       edge: atStart ? 2 : 0,
                       kind: atStart ? 'block_start' : 'block_end',
                       minStart: atStart ? math.max(1, prevStart + 1) : null,
-                      maxStart: atStart ? st + len - 1 : null,
+                      maxStart: atStart ? a + visLen - 1 : null,
                     ),
                     rawStartX: startX,
                   );
-                  _updateTimelineDrag(d.globalPosition.dx - startX, absolute: true);
+                  _updateTimelineDragFromPointer(d.globalPosition);
+                },
+                onHorizontalDragUpdate: (d) {
+                  _dragPointerGlobal = d.globalPosition;
+                  _updateTimelineDragFromPointer(d.globalPosition);
+                },
+                onHorizontalDragEnd: (_) {
+                  _dragPointerGlobal = null;
+                  _endBlockDrag();
+                },
+                onHorizontalDragCancel: () {
+                  _dragPointerGlobal = null;
+                  _endBlockDrag(cancel: true);
                 },
                 child: MouseRegion(
                   cursor: SystemMouseCursors.resizeLeftRight,
-                  child: Center(child: Container(width: 4, height: 14, decoration: BoxDecoration(color: cAccent, borderRadius: BorderRadius.circular(2)))),
+                  child: Align(
+                    alignment: atStart ? Alignment.centerLeft : Alignment.centerRight,
+                    child: Padding(
+                      padding: EdgeInsets.only(left: atStart ? 4 : 0, right: atStart ? 0 : 8),
+                      child: _gripPill(),
+                    ),
+                  ),
                 ),
               ),
             ),
           );
-      final figure = r['kind'] == 'figure';
-      // the pose's pictures: every frame of a tween, the first of a hold (a
-      // camera row shows the camera's glyph)
-      final tween = !(b[2] == true) && st + len < _frames;
-      // a joined figure's first block carries the chain (M5): the pictures move over
+
+      final tween = !(b[2] == true) && bi + 1 < blockList.length;
       final chain = r['joinedTo'] != null && a == on.indexWhere((v) => v != false);
       final nudge = chain ? 9.0 : 0.0;
       final pics = <Widget>[
@@ -3341,32 +4253,45 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         left: x,
         top: y + (rowH - 26) / 2,
         child: _playing
-            ? Stack(children: [bar(x, w), ...pics])
+            ? Stack(children: [bar(w, tween: tween, cells: visLen), ...pics])
             : Opacity(
                 opacity: dragged ? 0 : 1,
                 child: GestureDetector(
-                  onTapUp: (d) {
-                    if (_boxActive || _boxPath != null || DateTime.now().difference(_boxEndedAt) < const Duration(milliseconds: 80)) return;
-                    if (strong && figure) {
-                      _poseKeyPopover(r, b, bi, Rect.fromCenter(center: d.globalPosition, width: 24, height: 24));
-                    } else {
-                      select(d.localPosition.dx);
-                    }
-                  },
+                  onTapUp: (d) => tapBlock(d.globalPosition, d.localPosition.dx),
                   onSecondaryTapUp: figure ? (d) => _poseKeyPopover(r, b, bi, Rect.fromCenter(center: d.globalPosition, width: 24, height: 24)) : null,
-                  onLongPressStart: figure && st > 0
+                  onLongPressStart: extensible && a > 0
                       ? (d) {
                           if (_boxActive || _boxPath != null) return;
                           select(d.localPosition.dx);
-                          _startTimelineDrag(_BlockDrag(layerId, st, len, cell, edge: 1, kind: 'pose_key', minStart: 1), rawStartX: d.globalPosition.dx);
+                          _dragPointerGlobal = d.globalPosition;
+                          _startTimelineDrag(
+                            _BlockDrag(layerId, a, visLen, cell, edge: 1, kind: figure ? 'pose_key' : 'block_move', minStart: 1),
+                            rawStartX: d.globalPosition.dx,
+                          );
                         }
                       : null,
-                  child: Stack(children: [
-                    bar(x, w, strong: strong, boxSel: boxSel),
-                    ...pics,
-                    if (strong && figure && st > 0) grip(true),
-                    if (strong && figure) grip(false),
-                  ]),
+                  onLongPressMoveUpdate: extensible && a > 0
+                      ? (d) {
+                          _dragPointerGlobal = d.globalPosition;
+                          _updateTimelineDragFromPointer(d.globalPosition);
+                        }
+                      : null,
+                  onLongPressEnd: extensible && a > 0
+                      ? (_) {
+                          _dragPointerGlobal = null;
+                          _endBlockDrag();
+                        }
+                      : null,
+                  child: SizedBox(
+                    width: w,
+                    height: 26,
+                    child: Stack(clipBehavior: Clip.none, children: [
+                      bar(w, strong: strong, boxSel: boxSel, tween: tween, cells: visLen),
+                      ...pics,
+                      if (hasLeftGrip) grip(true),
+                      if (hasRightGrip) grip(false),
+                    ]),
+                  ),
                 ),
               ),
       ));
@@ -3395,20 +4320,34 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     }
     if (drag != null && !drag.live) {
       final (st, len) = drag.preview();
-      out.add(Positioned(left: left + st * cell + 1, top: y + (rowH - 26) / 2, child: IgnorePointer(child: bar(0, len * cell - 2, strong: true, ghost: true))));
+      out.add(Positioned(left: left + st * cell + 1, top: y + (rowH - 26) / 2, child: IgnorePointer(child: bar(len * cell - 2, strong: true, ghost: true, cells: len))));
     }
     return out;
   }
 
+  Widget _gripPill() => Container(
+        width: 7,
+        height: 18,
+        decoration: BoxDecoration(
+          color: cAccent,
+          borderRadius: BorderRadius.circular(3.5),
+          boxShadow: const [BoxShadow(color: Color(0x26000000), blurRadius: 2, offset: Offset(0, 1))],
+        ),
+        alignment: Alignment.center,
+        child: Container(width: 1.5, height: 8, decoration: BoxDecoration(color: cCard.withValues(alpha: 0.9), borderRadius: BorderRadius.circular(1))),
+      );
+
   /// User list #4 & #5: a selection box or lasso let go genuinely selects the
-  /// pose keys, property keys, and layers it covers.
-  void _finishBox(List<Map> rows, List<double> ys, List<(Map, Map, double)> props, double cell, double rowH, double propH) {
+  /// pose keys, property keys, and layers it covers (accounting for both
+  /// horizontal `_stripScroll` and vertical `_layerVScroll`!).
+  void _finishBox(List<Map> rows, List<double> ys, List<(Map, Map, double)> props, double cell, double rowH, double propH, {double headerH = 0}) {
     final path = _boxPath;
     _boxActive = false;
     if (path == null) return;
     _boxEndedAt = DateTime.now();
     setState(() => _boxPath = null);
     final off = _stripScroll.hasClients ? _stripScroll.offset : 0.0;
+    final vOff = _layerVScroll.hasClients ? _layerVScroll.offset : 0.0;
     final hitLayers = <String>[];
     final hitFigures = <String>[];
     final hitPoses = <(String, int)>{};
@@ -3429,16 +4368,47 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       final kind = '${r['kind']}';
       if (kind != 'figure' && kind != 'picture' && kind != 'text' && kind != 'movieclip') continue;
       final id = '${r['id']}';
-      final y0 = ys[k], cy = y0 + rowH / 2;
+      final y0 = headerH + ys[k] - vOff, cy = y0 + rowH / 2;
       if (point) {
         if (path.first.dy >= y0 && path.first.dy < y0 + rowH) {
-          hitLayers.add(id);
-          if (kind == 'figure') hitFigures.add(id);
           final f = ((path.first.dx + off - 8) / cell).floor();
+          final on = (r['on'] as List?) ?? const [];
+          var inVisibleBlock = false;
           for (final b in ((r['blocks'] as List?) ?? const []).cast<List>()) {
             final st = (b[0] as num).toInt(), len = (b[1] as num).toInt();
-            if (f >= st && f < st + len && kind == 'figure') hitPoses.add((id, st));
+            var a = st, z = st + len - 1;
+            while (a <= z && on.elementAtOrNull(a) == false) {
+              a++;
+            }
+            while (z >= a && on.elementAtOrNull(z) == false) {
+              z--;
+            }
+            if (a <= z && f >= a && f <= z) {
+              inVisibleBlock = true;
+              if (kind == 'figure') hitPoses.add((id, st));
+            }
           }
+          // Double-tapping an empty/runway cell on a layer row extends the layer right away!
+          if (!inVisibleBlock && f >= 0) {
+            setState(() {
+              _selPoseKeys.clear();
+              _selPropKeys.clear();
+              _frameSelected = false;
+            });
+            _cmd({'op': 'extend_to', 'layer': id, 'frame': f});
+            _cmd({'op': 'frame', 'i': f.clamp(0, _frames - 1)});
+            _cmd({'op': 'select', 'layer': id});
+            _thumbsChanged('extend_to', force: true);
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _ensureFrameVisible(_frame);
+              if (mounted) {
+                kit.showToast(context, '${r['name']} extended to frame ${f + 1}', light: true, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
+              }
+            });
+            return;
+          }
+          hitLayers.add(id);
+          if (kind == 'figure') hitFigures.add(id);
         }
         continue;
       }
@@ -3463,7 +4433,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
     for (final (_, pr, y) in props) {
       final pid = '${pr['id']}';
-      final cy = y + propH / 2;
+      final cy = headerH + y - vOff + propH / 2;
       for (final fn in ((pr['keys'] as List?) ?? const []).cast<num>()) {
         final f = fn.toInt();
         final c = Offset(8 + f * cell + cell / 2 - off, cy);
@@ -3559,26 +4529,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (i != _frame) _cmd({'op': 'frame', 'i': i});
   }
 
-  /// Near either end of the visible frames, scrubbing scrolls them along:
-  /// returns the finger's place in the timeline after any scroll.
-  double _scrubEdge(double x, double cell) {
-    if (!_stripScroll.hasClients) return x;
-    final pos = _stripScroll.position;
-    final inView = x - pos.pixels;
-    var by = 0.0;
-    if (inView < 28) by = -cell / 2;
-    if (inView > pos.viewportDimension - 28) by = cell / 2;
-    if (by == 0) return x;
-    final before = pos.pixels;
-    final to = (before + by).clamp(pos.minScrollExtent, pos.maxScrollExtent);
-    _stripScroll.jumpTo(to);
-    return x + (to - before);
-  }
-
   /// Starts a live timeline drag (grips, pose key, or property key).
   void _startTimelineDrag(_BlockDrag d, {double? rawStartX}) {
     d.rawStartX = rawStartX;
-    if (d.run == null) {
+    d.startScrollX = _stripScroll.hasClients ? _stripScroll.offset : 0.0;
+    if (d.run == null && d.kind != 'block_move') {
       d.live = true;
       d.lastSent = d.kind == 'block_end' ? d.length : d.start;
       _cmd({
@@ -3590,6 +4545,16 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       });
     }
     setState(() => _blockDrag = d);
+  }
+
+  /// Updates an active timeline drag from a global pointer position, including
+  /// any horizontal auto-edge-scroll distance accumulated since drag start!
+  void _updateTimelineDragFromPointer(Offset globalPos) {
+    final d = _blockDrag;
+    if (d == null || d.rawStartX == null) return;
+    final curScrollX = _stripScroll.hasClients ? _stripScroll.offset : 0.0;
+    final totalDx = (globalPos.dx - d.rawStartX!) + (curScrollX - d.startScrollX);
+    _updateTimelineDrag(totalDx, absolute: true);
   }
 
   /// Updates an active timeline drag; sends a live preview op only when the
@@ -3613,7 +4578,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   void _endBlockDrag({bool cancel = false}) {
     final d = _blockDrag;
     if (d == null) return;
-    setState(() => _blockDrag = null);
+    _dragPointerGlobal = null;
+    setState(() {
+      _blockDrag = null;
+      _dragRunwayFrames = 0;
+    });
     // K2c: a script's run (frames from, to; a move keeps its length)
     if (d.run != null) {
       if (cancel) return;
@@ -3999,56 +4968,61 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   void _goFrame(int i) {
     if (_playing) _togglePlay();
-    _cmd({'op': 'frame', 'i': i.clamp(0, _frames - 1)});
+    final clamped = i.clamp(0, _frames - 1);
+    _cmd({'op': 'frame', 'i': clamped});
     if (!AppSettings.flag('keepSelection')) _cmd({'op': 'select'});
+    WidgetsBinding.instance.addPostFrameCallback((_) => _ensureFrameVisible(clamped));
   }
 
   /// Drag handle along the top of the timeline to resize its height (User list #8).
   Widget _timelineResizeHandle(double screenH) {
-    final maxH = math.max(120.0, screenH * 0.62);
+    final maxH = math.max(132.0, screenH * 0.62);
     return Semantics(
       label: 'Resize timeline',
       hint: 'Drag up or down to resize the timeline; double-tap to reset.',
-      child: MouseRegion(
-        cursor: SystemMouseCursors.resizeUpDown,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onVerticalDragStart: (_) => setState(() {
-            _timelineDragging = true;
-            _timelineHeight ??= _lastTimelineBodyH.clamp(88.0, maxH);
-          }),
-          onVerticalDragUpdate: (d) => setState(() {
-            final base = _timelineHeight ?? _lastTimelineBodyH;
-            _timelineHeight = (base - d.delta.dy).clamp(88.0, maxH);
-          }),
-          onVerticalDragEnd: (_) {
-            setState(() => _timelineDragging = false);
-            if (_timelineHeight != null) {
-              AppSettings.values['timelineHeight'] = _timelineHeight!.round();
+      child: kit.HitPad(
+        dy: 10,
+        child: MouseRegion(
+          cursor: SystemMouseCursors.resizeUpDown,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onVerticalDragStart: (_) => setState(() {
+              _timelineDragging = true;
+              _timelineHeight ??= _lastTimelineBodyH.clamp(96.0, maxH);
+            }),
+            onVerticalDragUpdate: (d) => setState(() {
+              final base = _timelineHeight ?? _lastTimelineBodyH;
+              _timelineHeight = (base - d.delta.dy).clamp(96.0, maxH);
+            }),
+            onVerticalDragEnd: (_) {
+              setState(() => _timelineDragging = false);
+              if (_timelineHeight != null) {
+                AppSettings.values['timelineHeight'] = _timelineHeight!.round();
+                unawaited(AppSettings.save());
+              }
+            },
+            onVerticalDragCancel: () => setState(() => _timelineDragging = false),
+            onDoubleTap: () {
+              setState(() {
+                _timelineHeight = null;
+                _timelineDragging = false;
+              });
+              AppSettings.values.remove('timelineHeight');
               unawaited(AppSettings.save());
-            }
-          },
-          onVerticalDragCancel: () => setState(() => _timelineDragging = false),
-          onDoubleTap: () {
-            setState(() {
-              _timelineHeight = null;
-              _timelineDragging = false;
-            });
-            AppSettings.values.remove('timelineHeight');
-            unawaited(AppSettings.save());
-          },
-          child: Container(
-            height: 12,
-            width: double.infinity,
-            decoration: const BoxDecoration(color: cCard, border: Border(top: BorderSide(color: cLine))),
-            alignment: Alignment.center,
-            child: AnimatedContainer(
-              duration: kit.motion(context, 100),
-              width: _timelineDragging ? 52 : 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: _timelineDragging ? cAccent : const Color(0xFFC9CED5),
-                borderRadius: BorderRadius.circular(2),
+            },
+            child: Container(
+              height: 14,
+              width: double.infinity,
+              decoration: const BoxDecoration(color: cCard, border: Border(top: BorderSide(color: cLine))),
+              alignment: Alignment.center,
+              child: AnimatedContainer(
+                duration: kit.motion(context, 100),
+                width: _timelineDragging ? 56 : 40,
+                height: 4.5,
+                decoration: BoxDecoration(
+                  color: _timelineDragging ? cAccent : const Color(0xFFC2C8D0),
+                  borderRadius: BorderRadius.circular(2.5),
+                ),
               ),
             ),
           ),
@@ -4343,15 +5317,37 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         frozen: _curveRanges,
       );
       _curveGeom = geom;
-      return GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapUp: (d) => _curveTap(geom, d.localPosition),
-        onPanStart: (d) => _curvePanStart(geom, d.localPosition),
-        onPanUpdate: (d) => _curvePanUpdate(d.localPosition),
-        onPanEnd: (_) => _curvePanEnd(),
-        onPanCancel: _curvePanEnd,
-        child: CustomPaint(size: Size(box.maxWidth, h), painter: _CurvesPainter(geom, colours, _frame, _curveKey, fps: _fps.round().clamp(1, 240))),
-      );
+      return Stack(children: [
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapUp: (d) => _curveTap(geom, d.localPosition),
+          onPanStart: (d) => _curvePanStart(geom, d.localPosition),
+          onPanUpdate: (d) => _curvePanUpdate(d.localPosition),
+          onPanEnd: (_) => _curvePanEnd(),
+          onPanCancel: _curvePanEnd,
+          child: CustomPaint(size: Size(box.maxWidth, h), painter: _CurvesPainter(geom, colours, _frame, _curveKey, fps: _fps.round().clamp(1, 240))),
+        ),
+        if (chans.isEmpty)
+          Positioned.fill(
+            top: _CurveGeom.rulerH,
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const Text(
+                    'Move a figure on two frames to edit its motion curve.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: cSecondary, fontSize: 13, fontWeight: FontWeight.w500),
+                  ),
+                  if (addable.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    kit.WordButton('+ Add a value…', filled: true, height: 32, size: 13, onTap: () => _addCurveValue(addable)),
+                  ],
+                ]),
+              ),
+            ),
+          ),
+      ]);
     });
     return Container(
       height: h,
@@ -4536,9 +5532,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   /// The timeline's bottom bar: "+" alone on the left, frame words on the right.
   Widget _framesBar() {
+    final hasSel = _sel != null;
+    final activeLayer = _activeLayerId;
+    final pose = _sel?['pose'] as Map?;
+    final poseHere = pose?['here'] == true;
     return Container(
       height: 40,
-      color: cCard,
+      decoration: const BoxDecoration(color: cCard, border: Border(top: BorderSide(color: Color(0xFFEEF0F2)))),
       padding: const EdgeInsets.symmetric(horizontal: 6),
       child: Row(children: [
         kit.IconTool('plus', key: _addKey, label: 'Add', color: cAccent, onTap: _playing ? null : _addMenu),
@@ -4547,12 +5547,31 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         // H3 (D5): keying. Off, a change to an effect or the opacity is the
         // same on every frame; on, it is a key on this frame
         kit.IconTool('key', label: _opts['keying'] == true ? 'Keying: changes make keys' : 'Keying off: changes apply to every frame', on: _opts['keying'] == true, onTap: _playing ? null : () => _cmd({'op': 'set', 'k': 'keying', 'v': _opts['keying'] != true})),
-        const Spacer(),
-        // §4: the Stick Nodes bridge and the two pose words; copy, paste and
-        // delete frame are on the Frame page (tap the ruler)
-        kit.WordButton('Add frame', size: 14, onTap: _playing ? null : () => _cmd({'op': 'insert_frame'})),
-        kit.WordButton('New pose', size: 14, onTap: _playing || _sel == null || (_sel!['pose'] as Map?)?['here'] == true ? null : () => _cmd({'op': 'new_pose'})),
-        kit.WordButton('Hold longer', size: 14, onTap: _playing || _sel == null ? null : () => _cmd({'op': 'hold_longer'})),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                kit.WordButton('Add frame', size: 14, onTap: _playing ? null : () {
+                  _cmd({'op': 'insert_frame'});
+                  WidgetsBinding.instance.addPostFrameCallback((_) => _ensureFrameVisible(_frame));
+                }),
+                kit.WordButton('New pose', size: 14, onTap: _playing || !hasSel || poseHere ? null : () {
+                  _cmd({'op': 'new_pose'});
+                  WidgetsBinding.instance.addPostFrameCallback((_) => _ensureFrameVisible(_frame));
+                }),
+                kit.WordButton('Hold +1', size: 14, onTap: _playing || activeLayer == null ? null : () {
+                  _cmd({'op': 'hold_longer', if (!hasSel) 'layer': activeLayer});
+                  final nextP = _sel?['pose'] as Map?;
+                  final endF = nextP != null ? ((nextP['start'] as num).toInt() + (nextP['length'] as num).toInt() - 1) : _frame;
+                  WidgetsBinding.instance.addPostFrameCallback((_) => _ensureFrameVisible(endF));
+                }),
+              ]),
+            ),
+          ),
+        ),
       ]),
     );
   }
@@ -4613,8 +5632,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   // the Sound page (a sound block tapped); any other pick leaves it
   bool _soundPage = false;
   final Set<String> _openRows = {};
-  // G3: the timeline's zoom (a frame's width), a pinch's start, a block drag
-  double _cellW = 46, _pinchFrom = 46;
+  // G3: the timeline's zoom (a frame's width) and active block drag
+  double _cellW = 46;
   _BlockDrag? _blockDrag;
   // G5: quick taps counted for the box (2) and lasso (3); the shape being drawn
   int _taps = 0;
@@ -4747,31 +5766,43 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           Expanded(
             child: _playing
                 ? ListView(padding: const EdgeInsets.fromLTRB(14, 10, 14, 10), children: _playbackPanel())
-                : SingleChildScrollView(
+                : RawScrollbar(
                     controller: _panelScroll,
-                    padding: EdgeInsets.fromLTRB(14, compact ? 2 : 4, 14, compact ? 12 : 40),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                      // one page per tab (round 10 boards); without tabs, the pages stack
-                      for (final n in (_showTabs && names.length > 1 ? [names[current]] : names)) ...[
-                        if (_pageTitle(n).isNotEmpty)
-                          Container(key: _sectionKey(n), width: double.infinity, padding: EdgeInsets.only(top: compact ? 4 : 10, bottom: 4), child: Text(_pageTitle(n), textAlign: TextAlign.center, style: const TextStyle(color: cTitle, fontSize: 15, fontWeight: FontWeight.w600)))
-                        else
-                          SizedBox(key: _sectionKey(n), height: compact ? 2 : 6),
-                        ..._sectionBody(n),
-                        const SizedBox(height: 10),
-                      ],
-                      if (compact && footBtn != null) ...[
-                        const Divider(height: 14, color: Color(0xFFE6E8EB)),
-                        footBtn,
-                      ],
-                    ]),
+                    thumbVisibility: true,
+                    thickness: 3.5,
+                    radius: const Radius.circular(2),
+                    thumbColor: const Color(0x556B7078),
+                    padding: const EdgeInsets.only(top: 4, bottom: 4, right: 2),
+                    child: SingleChildScrollView(
+                      controller: _panelScroll,
+                      padding: EdgeInsets.fromLTRB(14, compact ? 2 : 4, 14, compact ? 12 : 20),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        // one page per tab (round 10 boards); without tabs, the pages stack
+                        for (final n in (_showTabs && names.length > 1 ? [names[current]] : names)) ...[
+                          if (_pageTitle(n).isNotEmpty)
+                            Container(key: _sectionKey(n), width: double.infinity, padding: EdgeInsets.only(top: compact ? 4 : 10, bottom: 4), child: Text(_pageTitle(n), textAlign: TextAlign.center, style: const TextStyle(color: cTitle, fontSize: 15, fontWeight: FontWeight.w600)))
+                          else
+                            SizedBox(key: _sectionKey(n), height: compact ? 2 : 6),
+                          ..._sectionBody(n),
+                          const SizedBox(height: 10),
+                        ],
+                        if (compact && footBtn != null) ...[
+                          const Divider(height: 14, color: Color(0xFFE6E8EB)),
+                          footBtn,
+                        ],
+                      ]),
+                    ),
                   ),
           ),
           // the page's pinned button (round 10 boards): Delete stickfigure,
           // Reset this segment, Delete this pose, Clear frame, ...
           if (!compact && footBtn != null)
             Container(
-              decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFFE6E8EB)))),
+              decoration: const BoxDecoration(
+                color: cCard,
+                border: Border(top: BorderSide(color: Color(0xFFE0E3E8))),
+                boxShadow: [BoxShadow(color: Color(0x0A000000), blurRadius: 6, offset: Offset(0, -2))],
+              ),
               padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
               child: footBtn,
             ),
@@ -6733,7 +7764,22 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         rw.DWidget(_swatches((sel['gradientColor'] as num?)?.toInt() ?? 0x808080ff, (c) => seg({'gradientColor': c})),
             changed: ch('gradientColor'), reset: ch('gradientColor') ? rw.DReset('Reset to ${hex(d['gradientColor'])}', () => seg({'gradientColor': d['gradientColor']})) : null),
         tick('Reverse gradient', 'gradientReverse'),
-        tick('Sideways gradient', 'gradientSideways'),
+        if (shape == 'circle' || shape == 'ellipse' || shape == 'polygon')
+          rw.DSeg(
+            const ['Radial', 'Along', 'Across'],
+            sel['gradientLinear'] != true ? 0 : (sel['gradientSideways'] == true ? 2 : 1),
+            label: 'Gradient style',
+            onSelect: (idx) => seg({'gradientLinear': idx != 0, 'gradientSideways': idx == 2}),
+            changed: ch('gradientLinear') || ch('gradientSideways'),
+            reset: (ch('gradientLinear') || ch('gradientSideways'))
+                ? rw.DReset(
+                    'Reset to ${d['gradientLinear'] != true ? 'radial' : (d['gradientSideways'] == true ? 'across' : 'along')}',
+                    () => seg({'gradientLinear': d['gradientLinear'] == true, 'gradientSideways': d['gradientSideways'] == true}),
+                  )
+                : null,
+          )
+        else
+          tick('Sideways gradient', 'gradientSideways'),
       ],
       if (shape == 'circle') ...[
         tick('Circle outline colour', 'outline'),
@@ -7330,7 +8376,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           const SizedBox(height: 14),
           kit.ButtonPair('Cancel', () => Navigator.pop(c, false), 'Edit a copy', () => Navigator.pop(c, true), true),
         ]);
-    if (go == true) _cmd({'op': 'edit_copy'});
+    if (go == true && mounted) {
+      final sz = MediaQuery.sizeOf(context);
+      if (sz.width < 900 || sz.height < 500) setState(() => _partsOpen = false);
+      _cmd({'op': 'edit_copy'});
+    }
   }
 
   /// The figure editor's header (EditCopy / FigureEditor boards): Cancel, the
@@ -7340,18 +8390,18 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       height: 44 + pad.top,
       padding: EdgeInsets.only(top: pad.top, left: pad.left + 8, right: pad.right + 8),
       decoration: const BoxDecoration(color: cCard, border: Border(bottom: BorderSide(color: cLine))),
-      child: Stack(alignment: Alignment.center, children: [
-        Row(children: [
-          kit.WordButton('Cancel', onTap: () => _cmd({'op': 'edit_copy_end'})),
-          const Spacer(),
-          kit.WordButton('Save as new figure', strong: true, onTap: _saveCopy),
-        ]),
-        IgnorePointer(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text('${ce['name']}', style: const TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w700)),
-            Text('${ce['of']} in your animation stays as it is', style: const TextStyle(color: cSecondary, fontSize: 12)),
-          ]),
+      child: Row(children: [
+        kit.WordButton('Cancel', onTap: () => _cmd({'op': 'edit_copy_end'})),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text('${ce['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 14.5, fontWeight: FontWeight.w700)),
+              Text('${ce['of']} in your animation stays as it is', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cSecondary, fontSize: 11.5)),
+            ]),
+          ),
         ),
+        kit.WordButton('Save as new figure', primary: true, height: 34, size: 13.5, onTap: _saveCopy),
       ]),
     );
   }
@@ -7990,30 +9040,36 @@ class _Overlay extends CustomPainter {
         canvas.drawLine(selAt, p, line);
       }
     }
+    final hasActiveFig = st['selected'] != null && st['building'] == null;
     for (final h in hs) {
       final l = h as List;
       final p = v.toScreen((l[0] as num).toDouble(), (l[1] as num).toDouble());
       final f = (l[2] as num).toInt();
       // the selected picture's main handle: its box and grips stand in for it
       if (pbox != null && f & 3 == 3) continue;
-      final root = f & 1 != 0, sel = f & 2 != 0, nb = f & 8 != 0;
-      final color = sel ? red : nb ? purple : (root ? cRootNode : blue);
+      final root = f & 1 != 0, sel = f & 2 != 0, inFig = f & 4 != 0, nb = f & 8 != 0;
+      final quiet = hasActiveFig && !inFig && !sel;
+      final rawColor = sel ? red : nb ? purple : (root ? cRootNode : blue);
+      final color = quiet ? rawColor.withValues(alpha: 0.52) : rawColor;
       // Settings: node style (0 legacy squares, 1 modern rings, 2 solid dots)
       // and line width (1 thin ... 5 thick)
-      final style = AppSettings.number('nodeStyle'), k = 0.6 + 0.2 * AppSettings.number('lineWidth').clamp(1, 5);
+      final style = AppSettings.number('nodeStyle'), k = (0.6 + 0.2 * AppSettings.number('lineWidth').clamp(1, 5)) * (quiet ? 0.86 : 1.0);
       final stroke = Paint()
         ..style = style == 2 ? PaintingStyle.fill : PaintingStyle.stroke
         ..strokeWidth = (sel || nb ? 2.5 : 2) * k
         ..color = color;
       final halo = Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 4.5 * k
-        ..color = const Color(0xCCFFFFFF);
+        ..strokeWidth = (quiet ? 3.5 : 4.5) * k
+        ..color = quiet ? const Color(0x99FFFFFF) : const Color(0xCCFFFFFF);
       // figure editor View options: Node highlight (a filled ring on the
       // polynodes, connectors or locked joints)
       final hl = AppSettings.number('nodeHighlight');
       final lit = (hl == 1 && f & 16 != 0) || (hl == 2 && f & 32 != 0) || (hl == 3 && f & 64 != 0);
       if (lit) canvas.drawCircle(p, 9, Paint()..color = const Color(0xAAFFB020));
+      if (sel) {
+        canvas.drawCircle(p, 12.5 * k, Paint()..color = red.withValues(alpha: 0.16));
+      }
       // shape-coded (FigureEditor board): the main node a dark square, the
       // selected joint a red dot, connectors diamonds and polyfill anchors
       // triangles in the figure editor, every other joint a ring
@@ -8473,6 +9529,7 @@ class _BlockDrag {
   final String? property;
   double dx = 0;
   double? rawStartX;
+  double startScrollX = 0;
   int? lastSent;
   bool live = false;
 
@@ -8491,6 +9548,47 @@ class _BlockDrag {
         }(),
     };
   }
+}
+
+/// Subtle visual cue along the bottom of multi-frame pose blocks:
+/// directional forward chevrons (`›`) for tweening blocks vs a calm flat hold
+/// bar with an end tick for held poses.
+class _BlockSpanCuePainter extends CustomPainter {
+  const _BlockSpanCuePainter({required this.tween, required this.active});
+  final bool tween, active;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.width < 6) return;
+    final c = active ? cAccent.withValues(alpha: 0.72) : (tween ? const Color(0xFF6B8FB8) : const Color(0xFF9EA6B0));
+    final y = size.height / 2;
+    if (tween) {
+      final pen = Paint()
+        ..color = c
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.25
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), Paint()..color = c.withValues(alpha: 0.35)..strokeWidth = 1.0);
+      for (var x = 6.0; x < size.width - 2; x += 10) {
+        final p = Path()
+          ..moveTo(x - 1.6, y - 1.6)
+          ..lineTo(x + 0.8, y)
+          ..lineTo(x - 1.6, y + 1.6);
+        canvas.drawPath(p, pen);
+      }
+    } else {
+      final holdPen = Paint()
+        ..color = c.withValues(alpha: active ? 0.5 : 0.55)
+        ..strokeWidth = 1.4
+        ..strokeCap = StrokeCap.round;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), holdPen);
+      canvas.drawLine(Offset(size.width, y - 1.6), Offset(size.width, y + 1.6), holdPen);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_BlockSpanCuePainter old) => old.tween != tween || old.active != active;
 }
 
 /// A script run's trace in its block: what the script does over the run (its
@@ -8542,59 +9640,132 @@ class _TracePainter extends CustomPainter {
   bool shouldRepaint(_TracePainter o) => o.values != values || o.color != color || o.missing != missing;
 }
 
-/// The ruler, the merged Preview row and the rows' lines (REDESIGN §4, D16).
+/// The ruler, the merged Preview row, the layer rows' grid, and the trailing runway.
 class _TimelinePainter extends CustomPainter {
-  _TimelinePainter({required this.frames, required this.cell, required this.left, required this.fps, required this.cur, required this.rulerH, required this.stripH, required this.lines, required this.bands, required this.aspect, required this.thumbs, this.groupStrips = const [], this.loopStart, this.loopEnd});
+  _TimelinePainter({
+    required this.frames,
+    int? displayCells,
+    required this.cell,
+    required this.left,
+    required this.fps,
+    required this.cur,
+    required this.rulerH,
+    required this.stripH,
+    required this.lines,
+    required this.bands,
+    required this.aspect,
+    required this.thumbs,
+    this.groupStrips = const [],
+    this.loopStart,
+    this.loopEnd,
+    this.drawHeader = true,
+    this.drawBody = true,
+  }) : displayCells = displayCells ?? frames;
+
   /// K: folded groups' rows: (top, height, pictures by frame)
   final List<(double, double, Map<int, ui.Image>)> groupStrips;
-  final int frames, fps, cur;
+  final int frames, displayCells, fps, cur;
   final int? loopStart, loopEnd;
   final double cell, left, rulerH, stripH, aspect;
   final List<double> lines;
   final List<(double, double)> bands;
   final Map<int, ui.Image> thumbs;
+  final bool drawHeader, drawBody;
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Visual loop range indicator on the ruler when "Loop to" is configured
-    if (loopStart != null && loopEnd != null && loopEnd! > loopStart!) {
-      final lx0 = left + loopStart!.clamp(0, frames - 1) * cell;
-      final lx1 = left + loopEnd!.clamp(1, frames) * cell;
-      canvas.drawRect(Rect.fromLTRB(lx0, 0, lx1, rulerH), Paint()..color = const Color(0x1F1577D6));
-      final bar = Paint()..color = cAccent;
-      canvas.drawRect(Rect.fromLTRB(lx0, 0, lx1, 2), bar);
-      canvas.drawRect(Rect.fromLTRB(lx0, 0, lx0 + 2, 7), bar);
-      canvas.drawRect(Rect.fromLTRB(lx1 - 2, 0, lx1, 7), bar);
-    }
-    // ruler: ticks every frame, labels every quarter second (fewer zoomed out),
-    // whole seconds bold and taller; the current frame's label is the pill
+    final endX = left + frames * cell;
     final step = math.max(1, (cell >= 40 ? fps / 4 : cell >= 28 ? fps / 2 : cell >= 18 ? fps : fps * 2).round());
-    for (var i = 0; i < frames; i++) {
-      final f = i + 1, sec = f % fps == 0, label = f == 1 || f % step == 0 || (sec && cell >= 18);
-      final x = left + i * cell + cell / 2;
-      final h = sec ? 8.0 : label ? 6.0 : 4.0;
-      canvas.drawRect(Rect.fromLTWH(x - 0.5, rulerH - h, 1, h), Paint()..color = sec ? cInk2b : label ? const Color(0xFF9AA0A8) : const Color(0xFFC4C8CE));
-      if (label && i != cur) {
-        final tp = TextPainter(
-          text: TextSpan(text: '$f', style: TextStyle(color: sec ? cText : cSecondary, fontSize: 11, fontWeight: sec ? FontWeight.w700 : FontWeight.w400, fontFamily: kit.kFont, fontFeatures: const [ui.FontFeature.tabularFigures()])),
-          textDirection: TextDirection.ltr,
-        )..layout();
-        tp.paint(canvas, Offset(x - tp.width / 2, 3));
+
+    if (drawHeader) {
+      // Subtle runway shading on the header past `frames`
+      if (displayCells > frames && endX < size.width) {
+        canvas.drawRect(Rect.fromLTRB(endX, 0, size.width, size.height), Paint()..color = const Color(0xFFF7F8FA));
+      }
+      // Visual loop range indicator on the ruler when "Loop to" is configured
+      if (loopStart != null && loopEnd != null && loopEnd! > loopStart!) {
+        final lx0 = left + loopStart!.clamp(0, frames - 1) * cell;
+        final lx1 = left + loopEnd!.clamp(1, frames) * cell;
+        canvas.drawRect(Rect.fromLTRB(lx0, 0, lx1, rulerH), Paint()..color = const Color(0x1F1577D6));
+        final bar = Paint()..color = cAccent;
+        canvas.drawRect(Rect.fromLTRB(lx0, 0, lx1, 2), bar);
+        canvas.drawRect(Rect.fromLTRB(lx0, 0, lx0 + 2, 7), bar);
+        canvas.drawRect(Rect.fromLTRB(lx1 - 2, 0, lx1, 7), bar);
+      }
+      // Ruler ticks & frame numbers across both active frames AND trailing runway!
+      for (var i = 0; i < displayCells; i++) {
+        final inRunway = i >= frames;
+        final f = i + 1, sec = f % fps == 0, label = f == 1 || f % step == 0 || (sec && cell >= 18);
+        final x = left + i * cell + cell / 2;
+        final h = sec ? 8.0 : label ? 6.0 : 4.0;
+        final tickColor = inRunway
+            ? (sec ? const Color(0xFFB8BEC7) : const Color(0xFFD6DAE0))
+            : (sec ? cInk2b : label ? const Color(0xFF9AA0A8) : const Color(0xFFC4C8CE));
+        canvas.drawRect(Rect.fromLTWH(x - 0.5, rulerH - h, 1, h), Paint()..color = tickColor);
+        if (label && i != cur) {
+          final tp = TextPainter(
+            text: TextSpan(
+              text: '$f',
+              style: TextStyle(
+                color: inRunway ? const Color(0xFFAEB4BD) : (sec ? cText : cSecondary),
+                fontSize: 11,
+                fontWeight: sec && !inRunway ? FontWeight.w700 : FontWeight.w400,
+                fontFamily: kit.kFont,
+                fontFeatures: const [ui.FontFeature.tabularFigures()],
+              ),
+            ),
+            textDirection: TextDirection.ltr,
+          )..layout();
+          tp.paint(canvas, Offset(x - tp.width / 2, 3));
+        }
+      }
+      canvas.drawRect(Rect.fromLTWH(0, rulerH - 1, size.width, 1), Paint()..color = const Color(0xFFE6E8EB));
+      if (stripH > 0) {
+        _strip(canvas, rulerH + 2, stripH - 4, thumbs);
+        canvas.drawRect(Rect.fromLTWH(0, size.height - 1, size.width, 1), Paint()..color = const Color(0xFFDADDE2));
+      }
+      if (displayCells > frames && endX < size.width) {
+        canvas.drawRect(Rect.fromLTWH(endX, 0, 1, size.height), Paint()..color = const Color(0xFFDADDE2));
       }
     }
-    // the Preview row: one strip, tiles at the picture's shape, each showing
-    // the moment under its middle
-    if (stripH > 0) _strip(canvas, rulerH + 2, stripH - 4, thumbs);
-    // K: a folded group's row: the same strip, its members merged
-    for (final (y, h, pics) in groupStrips) {
-      _strip(canvas, y, h, pics);
-    }
-    // property rows: a paler band; every row: a faint line under it
-    for (final (y, h) in bands) {
-      canvas.drawRect(Rect.fromLTWH(0, y, size.width, h), Paint()..color = const Color(0xFFFAFBFC));
-    }
-    for (final y in lines) {
-      canvas.drawRect(Rect.fromLTWH(0, y - 1, size.width, 1), Paint()..color = const Color(0xFFEEF0F2));
+
+    if (drawBody) {
+      // Subtle runway background past `frames` so users see open scrollable space to extend into
+      if (displayCells > frames && endX < size.width) {
+        canvas.drawRect(Rect.fromLTRB(endX, 0, size.width, size.height), Paint()..color = const Color(0xFFF8F9FB));
+      }
+      // Property rows paler band
+      for (final (y, h) in bands) {
+        canvas.drawRect(Rect.fromLTWH(0, y, size.width, h), Paint()..color = const Color(0xFFFAFBFC));
+      }
+      // Subtle current-playhead column highlight across all layer rows
+      final maxRowY = lines.isEmpty ? size.height : lines.last;
+      if (cur >= 0 && cur < displayCells) {
+        canvas.drawRect(
+          Rect.fromLTWH(left + cur * cell, 0, cell, maxRowY),
+          Paint()..color = cAccent.withValues(alpha: 0.055),
+        );
+      }
+      // Subtle vertical cell grid hairlines so empty cells read clearly per frame
+      final gridStep = cell >= 24 ? 1 : step;
+      final gridPaint = Paint()..color = const Color(0xFFF1F3F6);
+      final secPaint = Paint()..color = const Color(0xFFE7EAEE);
+      for (var i = 1; i < displayCells; i += gridStep) {
+        final gx = left + i * cell;
+        canvas.drawRect(Rect.fromLTWH(gx, 0, 1, maxRowY), i % fps == 0 ? secPaint : gridPaint);
+      }
+      // Folded group preview strips
+      for (final (y, h, pics) in groupStrips) {
+        _strip(canvas, y, h, pics);
+      }
+      // Horizontal row dividers
+      for (final y in lines) {
+        canvas.drawRect(Rect.fromLTWH(0, y - 1, size.width, 1), Paint()..color = const Color(0xFFEEF0F2));
+      }
+      // End-of-animation boundary line
+      if (displayCells > frames && endX < size.width) {
+        canvas.drawRect(Rect.fromLTWH(endX, 0, 1, maxRowY), Paint()..color = const Color(0xFFDADDE2));
+      }
     }
   }
 
@@ -8652,6 +9823,7 @@ class _FigurePickerState extends State<_FigurePicker> {
   final List<String> _picked = [];
   String _filter = '';
   int _tab = 0; // Stock (figures, then effect figures), Yours
+  int _cat = 0; // 0 All, 1 Figures, 2 Effects
 
   Widget _tile(_PickEntry f) {
     final on = _picked.contains(f.id);
@@ -8663,13 +9835,27 @@ class _FigurePickerState extends State<_FigurePicker> {
       onSecondaryTap: () => setState(() => on ? _picked.remove(f.id) : _picked.add(f.id)),
       child: Column(children: [
         Expanded(
-          child: Container(
-            decoration: BoxDecoration(color: cCard, borderRadius: BorderRadius.circular(10), border: Border.all(color: on ? cAccent : cLine, width: on ? 2 : 1)),
-            padding: const EdgeInsets.all(6),
-            child: img == null ? const Center(child: Text('?', style: TextStyle(color: cSecondary))) : RawImage(image: img, fit: BoxFit.contain),
-          ),
+          child: Stack(fit: StackFit.expand, children: [
+            Container(
+              decoration: BoxDecoration(color: on ? const Color(0xFFF2F7FD) : cCard, borderRadius: BorderRadius.circular(10), border: Border.all(color: on ? cAccent : cLine, width: on ? 2 : 1)),
+              padding: const EdgeInsets.all(6),
+              child: img == null ? const Center(child: Text('?', style: TextStyle(color: cSecondary))) : RawImage(image: img, fit: BoxFit.contain),
+            ),
+            if (on)
+              Positioned(
+                right: 5,
+                top: 5,
+                child: Container(
+                  width: 18,
+                  height: 18,
+                  alignment: Alignment.center,
+                  decoration: const BoxDecoration(color: cAccent, shape: BoxShape.circle),
+                  child: Text('${_picked.indexOf(f.id) + 1}', style: const TextStyle(color: cCard, fontSize: 10.5, fontWeight: FontWeight.w700)),
+                ),
+              ),
+          ]),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 3),
         Text(f.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: on ? cAccent : cText, fontSize: 12, fontWeight: on ? FontWeight.w700 : FontWeight.w400)),
       ]),
     );
@@ -8678,24 +9864,49 @@ class _FigurePickerState extends State<_FigurePicker> {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
+    final compact = size.height < 500;
     final match = widget.entries.where((f) => f.name.toLowerCase().contains(_filter.toLowerCase())).toList();
-    final lists = [[...match.where((f) => !f.mine && !f.effect), ...match.where((f) => !f.mine && f.effect)], match.where((f) => f.mine).toList()];
+    final hasEffects = match.any((f) => !f.mine && f.effect) && match.any((f) => !f.mine && !f.effect);
+    final stockList = switch (_cat) {
+      1 => match.where((f) => !f.mine && !f.effect).toList(),
+      2 => match.where((f) => !f.mine && f.effect).toList(),
+      _ => [...match.where((f) => !f.mine && !f.effect), ...match.where((f) => !f.mine && f.effect)],
+    };
+    final lists = [stockList, match.where((f) => f.mine).toList()];
     final list = lists[_tab];
     return Dialog(
       backgroundColor: cCard,
-      insetPadding: const EdgeInsets.all(12),
+      insetPadding: EdgeInsets.all(compact ? 8 : 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       child: SizedBox(
-        width: math.min(760, size.width * 0.9),
-        height: math.min(560, size.height * 0.9),
+        width: math.min(760, size.width * 0.94),
+        height: math.min(580, size.height * (compact ? 0.94 : 0.9)),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
+          padding: EdgeInsets.fromLTRB(compact ? 14 : 20, compact ? 8 : 12, compact ? 14 : 20, compact ? 10 : 14),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Text(widget.movieclip ? 'Add a movieclip' : 'Add a stick figure', textAlign: TextAlign.center, style: const TextStyle(color: cTitle, fontSize: 17, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 10),
+            SizedBox(
+              height: compact ? 32 : 36,
+              child: Stack(alignment: Alignment.center, children: [
+                Text(widget.movieclip ? 'Add a movieclip' : 'Add a stick figure', textAlign: TextAlign.center, style: TextStyle(color: cTitle, fontSize: compact ? 15.5 : 17, fontWeight: FontWeight.w700)),
+                if (!compact)
+                  Positioned(
+                    left: 0,
+                    child: Text(_picked.isEmpty ? 'Tap to add · Hold to pick several' : '${_picked.length} selected', style: TextStyle(color: _picked.isEmpty ? cSecondary : cAccent, fontSize: 12, fontWeight: _picked.isEmpty ? FontWeight.w400 : FontWeight.w600)),
+                  ),
+                Positioned(
+                  right: -6,
+                  child: kit.Tap(label: 'Close', minSize: 36, onTap: () => Navigator.pop(context), child: const Pictogram('x', size: 18, color: cSecondary)),
+                ),
+              ]),
+            ),
+            SizedBox(height: compact ? 4 : 6),
             Row(children: [
-              SizedBox(width: 240, child: kit.Segmented(const ['Stock', 'Yours'], _tab, onSelect: (i) => setState(() => _tab = i))),
-              const SizedBox(width: 12),
+              SizedBox(width: compact ? 190 : 220, child: kit.Segmented(const ['Stock', 'Yours'], _tab, onSelect: (i) => setState(() => _tab = i))),
+              if (_tab == 0 && hasEffects && size.width >= 620) ...[
+                const SizedBox(width: 8),
+                SizedBox(width: 210, child: kit.Segmented(const ['All', 'Figures', 'FX'], _cat, onSelect: (i) => setState(() => _cat = i))),
+              ],
+              const SizedBox(width: 10),
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.only(bottom: 6),
@@ -8707,7 +9918,10 @@ class _FigurePickerState extends State<_FigurePicker> {
                       fillColor: cControl,
                       hintText: widget.movieclip ? 'Search movieclips' : 'Search figures',
                       prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF8A9099)),
-                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                      suffixIcon: _filter.isEmpty
+                          ? null
+                          : GestureDetector(onTap: () => setState(() => _filter = ''), child: const Icon(Icons.close, size: 16, color: Color(0xFF8A9099))),
+                      contentPadding: EdgeInsets.symmetric(vertical: compact ? 7 : 10),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
                     ),
                     onChanged: (v) => setState(() => _filter = v),
@@ -8715,7 +9929,7 @@ class _FigurePickerState extends State<_FigurePicker> {
                 ),
               ),
             ]),
-            const SizedBox(height: 8),
+            SizedBox(height: compact ? 4 : 6),
             Expanded(
               child: list.isEmpty
                   ? Center(
@@ -8724,32 +9938,51 @@ class _FigurePickerState extends State<_FigurePicker> {
                             ? (widget.movieclip
                                 ? 'Put movieclip files (.nodemc) in the "Barkfart Figures" folder, or tap "New movieclip" below to make one.'
                                 : 'Put figure files (.nodes, .nodemc, .stknds) in the "Barkfart Figures" folder (Files app) and they show up here.')
-                            : 'Nothing matches.',
+                            : 'Nothing matches "$_filter".',
                         textAlign: TextAlign.center,
                         style: const TextStyle(color: cSecondary, fontSize: 13),
                       ),
                     )
-                  : GridView.builder(
-                      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 140, mainAxisSpacing: 12, crossAxisSpacing: 10, childAspectRatio: 0.95),
-                      itemCount: list.length,
-                      itemBuilder: (c, i) => _tile(list[i]),
+                  : RawScrollbar(
+                      thumbVisibility: true,
+                      thickness: 4,
+                      radius: const Radius.circular(2),
+                      thumbColor: const Color(0x666B7078),
+                      child: GridView.builder(
+                        gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                          maxCrossAxisExtent: compact ? 118 : 136,
+                          mainAxisSpacing: compact ? 8 : 12,
+                          crossAxisSpacing: compact ? 8 : 10,
+                          childAspectRatio: compact ? 1.05 : 0.95,
+                        ),
+                        itemCount: list.length,
+                        itemBuilder: (c, i) => _tile(list[i]),
+                      ),
                     ),
             ),
             Container(
-              padding: const EdgeInsets.only(top: 10),
+              padding: EdgeInsets.only(top: compact ? 6 : 10),
               decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFFE6E8EB)))),
               // the board's footer: Import from Files… and Paste figure (figures)
               // or New movieclip (movieclips); the project's library beside them
               child: Row(children: [
-                kit.WordButton('Import from Files…', size: 14, onTap: () => Navigator.pop(context, ['#import'])),
-                kit.WordButton('This project\u2019s library…', size: 14, onTap: () => Navigator.pop(context, ['#library'])),
-                const Spacer(),
-                if (_picked.isNotEmpty)
-                  kit.WordButton('Add ${_picked.length}', size: 14, primary: true, onTap: () => Navigator.pop(context, List<String>.from(_picked)))
-                else if (widget.movieclip)
-                  kit.WordButton('New movieclip', size: 14, primary: true, onTap: widget.editing ? null : () => Navigator.pop(context, ['#newclip']))
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(children: [
+                      kit.WordButton('Import from Files…', size: 13.5, height: compact ? 32 : 36, onTap: () => Navigator.pop(context, ['#import'])),
+                      kit.WordButton('This project\u2019s library…', size: 13.5, height: compact ? 32 : 36, onTap: () => Navigator.pop(context, ['#library'])),
+                    ]),
+                  ),
+                ),
+                if (_picked.isNotEmpty) ...[
+                  kit.WordButton('Clear', size: 13.5, height: compact ? 32 : 36, onTap: () => setState(_picked.clear)),
+                  const SizedBox(width: 6),
+                  kit.WordButton('Add ${_picked.length}', size: 14, height: compact ? 32 : 36, primary: true, onTap: () => Navigator.pop(context, List<String>.from(_picked))),
+                ] else if (widget.movieclip)
+                  kit.WordButton('New movieclip', size: 14, height: compact ? 32 : 36, primary: true, onTap: widget.editing ? null : () => Navigator.pop(context, ['#newclip']))
                 else
-                  kit.WordButton('Paste figure', size: 14, onTap: widget.canPaste ? () => Navigator.pop(context, ['#paste']) : null),
+                  kit.WordButton('Paste figure', size: 14, height: compact ? 32 : 36, onTap: widget.canPaste ? () => Navigator.pop(context, ['#paste']) : null),
               ]),
             ),
           ]),
@@ -8800,76 +10033,114 @@ class _ExportDialogState extends State<_ExportDialog> {
   // shown in the redesign's order (REDESIGN §8); the engine's codes stay 0 GIF, 1 PNG frames, 2 video
   static const _order = [2, 0, 1];
 
+  late final ScrollController _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    _name.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final screenH = MediaQuery.sizeOf(context).height;
     final w = _widths[_size], h = (w * widget.h / widget.w).round();
     final last = _end == 0 ? widget.frames : _end;
     final count = last - _start + 1;
+    final canTransparent = _format == 0 || _format == 1;
     return Dialog(
       backgroundColor: cCard,
-      insetPadding: const EdgeInsets.all(12),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      clipBehavior: Clip.antiAlias,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 460),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            const Padding(padding: EdgeInsets.only(bottom: 8), child: Text('Export', textAlign: TextAlign.center, style: TextStyle(color: cTitle, fontSize: 17, fontWeight: FontWeight.w700))),
-            const kit.PropRow('File name', height: 24),
-            TextField(
-              controller: _name,
-              style: const TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w600),
-              decoration: InputDecoration(
-                isDense: true,
-                filled: true,
-                fillColor: cCard,
-                hintText: 'File name',
-                suffixIcon: const Icon(Icons.edit_outlined, size: 16, color: cSecondary),
-                suffixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: cLine)),
-                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: cAccent, width: 1.5)),
+        constraints: BoxConstraints(maxWidth: 460, maxHeight: math.max(240.0, screenH - 20)),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
+            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFEEF0F2)))),
+            child: const Text('Export', textAlign: TextAlign.center, style: TextStyle(color: cTitle, fontSize: 17, fontWeight: FontWeight.w700)),
+          ),
+          Flexible(
+            child: RawScrollbar(
+              controller: _scroll,
+              thumbVisibility: true,
+              thickness: 3.5,
+              radius: const Radius.circular(2),
+              thumbColor: const Color(0x556B7078),
+              padding: const EdgeInsets.only(top: 4, bottom: 4, right: 2),
+              child: SingleChildScrollView(
+                controller: _scroll,
+                padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
+                child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  const kit.PropRow('File name', height: 24),
+                  TextField(
+                    controller: _name,
+                    style: const TextStyle(color: cText, fontSize: 15, fontWeight: FontWeight.w600),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      filled: true,
+                      fillColor: cCard,
+                      hintText: 'File name',
+                      suffixIcon: const Icon(Icons.edit_outlined, size: 16, color: cSecondary),
+                      suffixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: cLine)),
+                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: cAccent, width: 1.5)),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const kit.PropRow('Format', height: 26),
+                  kit.Segmented(const ['Video', 'GIF', 'PNG frames'], _order.indexOf(_format), onSelect: (i) => setState(() => _format = _order[i])),
+                  const kit.PropRow('Size', height: 26),
+                  kit.Segmented(const ['320', '640', '1280', '1920'], _size, onSelect: (i) => setState(() => _size = i)),
+                  kit.PropRow('Picture size', trailing: Text('$w × $h', style: const TextStyle(color: cSecondary, fontSize: 13))),
+                  kit.StepRow('From frame', '$_start', onMinus: _start > 1 ? () => setState(() => _start--) : null, onPlus: _start < last ? () => setState(() => _start++) : null),
+                  kit.StepRow('To frame', '$last', onMinus: last > _start ? () => setState(() => _end = last - 1) : null, onPlus: last < widget.frames ? () => setState(() => _end = last + 1 >= widget.frames ? 0 : last + 1) : null),
+                  if (_format == 2)
+                    kit.TickRow('Include sound', _sound, onChanged: (v) => setState(() => _sound = v)),
+                  if (canTransparent)
+                    kit.TickRow('Transparent background', _transparent, onChanged: (v) => setState(() => _transparent = v)),
+                  kit.TickRow('Show watermark', _wmOn, onChanged: (v) {
+                    widget.cmd({'op': 'watermark', 'on': v});
+                    setState(() => _wmOn = v);
+                  }),
+                  if (_wmOn) ...[
+                    const kit.Hint('Drawn small at the top right of the exported pictures. Saved with the animation.'),
+                    _TextFieldBox(oneLine: true, text: _wm['text'] as String? ?? ':)', onChanged: (v) {
+                      widget.cmd({'op': 'watermark', 'text': v});
+                      _wm = {..._wm, 'text': v};
+                    }),
+                    const SizedBox(height: 6),
+                    widget.swatches((_wm['color'] as num?)?.toInt() ?? 0xff3b30ff, (c) {
+                      widget.cmd({'op': 'watermark', 'color': c});
+                      setState(() => _wm = {..._wm, 'color': c});
+                    }),
+                    const SizedBox(height: 4),
+                  ],
+                  kit.TickRow('Make vertical (phone video)', _vertical, onChanged: (v) {
+                    widget.onVertical(v);
+                    setState(() => _vertical = v);
+                  }),
+                  if (_vertical) ...[
+                    const kit.Hint('Turns the camera of every frame a quarter turn, so the right edge becomes the top of the video. It changes the animation; Undo turns them back.'),
+                    kit.WordButton('Turn the cameras 90°', filled: true, expand: true, height: 36, onTap: () => widget.cmd({'op': 'rotate_cameras'})),
+                    const SizedBox(height: 4),
+                  ],
+                  kit.Hint('${_seconds(count)} at ${widget.fps == widget.fps.roundToDouble() ? widget.fps.round() : widget.fps} fps. ${_format == 2 ? 'Videos have a solid background; switch to GIF or PNG frames for transparency.' : _format == 1 ? '$count PNG pictures${_transparent ? ' (transparent)' : ''}, with the soundtrack as a WAV when there is sound.' : 'An animated GIF${_transparent ? ' (transparent)' : ''} in Barkfart Exports, with the soundtrack as a WAV when there is sound.'}'),
+                ]),
               ),
             ),
-            const SizedBox(height: 8),
-            const kit.PropRow('Format', height: 26),
-            kit.Segmented(const ['Video', 'GIF', 'PNG frames'], _order.indexOf(_format), onSelect: (i) => setState(() => _format = _order[i])),
-            const kit.PropRow('Size', height: 26),
-            kit.Segmented(const ['320', '640', '1280', '1920'], _size, onSelect: (i) => setState(() => _size = i)),
-            kit.PropRow('Picture size', trailing: Text('$w × $h', style: const TextStyle(color: cSecondary, fontSize: 13))),
-            kit.StepRow('From frame', '$_start', onMinus: _start > 1 ? () => setState(() => _start--) : null, onPlus: _start < last ? () => setState(() => _start++) : null),
-            kit.StepRow('To frame', '$last', onMinus: last > _start ? () => setState(() => _end = last - 1) : null, onPlus: last < widget.frames ? () => setState(() => _end = last + 1 >= widget.frames ? 0 : last + 1) : null),
-            kit.TickRow('Include sound', _format == 2 ? _sound : false, onChanged: _format == 2 ? (v) => setState(() => _sound = v) : null),
-            kit.TickRow('Transparent background', _format == 1 ? _transparent : false, onChanged: _format == 1 ? (v) => setState(() => _transparent = v) : null),
-            kit.TickRow('Show watermark', _wmOn, onChanged: (v) {
-              widget.cmd({'op': 'watermark', 'on': v});
-              setState(() => _wmOn = v);
-            }),
-            if (_wmOn) ...[
-              const kit.Hint('Drawn small at the top right of the exported pictures. Saved with the animation.'),
-              _TextFieldBox(oneLine: true, text: _wm['text'] as String? ?? ':)', onChanged: (v) {
-                widget.cmd({'op': 'watermark', 'text': v});
-                _wm = {..._wm, 'text': v};
-              }),
-              const SizedBox(height: 6),
-              widget.swatches((_wm['color'] as num?)?.toInt() ?? 0xff3b30ff, (c) {
-                widget.cmd({'op': 'watermark', 'color': c});
-                setState(() => _wm = {..._wm, 'color': c});
-              }),
-              const SizedBox(height: 4),
-            ],
-            kit.TickRow('Make vertical (phone video)', _vertical, onChanged: (v) {
-              widget.onVertical(v);
-              setState(() => _vertical = v);
-            }),
-            if (_vertical) ...[
-              const kit.Hint('Turns the camera of every frame a quarter turn, so the right edge becomes the top of the video. It changes the animation; Undo turns them back.'),
-              kit.WordButton('Turn the cameras 90°', filled: true, expand: true, height: 36, onTap: () => widget.cmd({'op': 'rotate_cameras'})),
-              const SizedBox(height: 4),
-            ],
-            // the board's summary: how long, then what the format can't do
-            kit.Hint('${_seconds(count)} at ${widget.fps == widget.fps.roundToDouble() ? widget.fps.round() : widget.fps} fps. ${_format == 2 ? 'Videos can’t be transparent; GIF and PNG frames can.' : _format == 1 ? '$count pictures, with the soundtrack as a WAV when there is sound.' : 'A GIF in the Barkfart Exports folder, with the soundtrack as a WAV when there is sound.'}'),
-            Row(children: [
+          ),
+          Container(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
+            decoration: const BoxDecoration(
+              color: cCard,
+              border: Border(top: BorderSide(color: Color(0xFFE0E3E8))),
+              boxShadow: [BoxShadow(color: Color(0x0A000000), blurRadius: 6, offset: Offset(0, -2))],
+            ),
+            child: Row(children: [
               Expanded(child: kit.WordButton('Cancel', onTap: () => Navigator.pop(context), filled: true, expand: true, height: 40)),
               const SizedBox(width: 8),
               Expanded(
@@ -8884,7 +10155,7 @@ class _ExportDialogState extends State<_ExportDialog> {
                     'h': h,
                     'start': _start - 1,
                     'count': count,
-                    'transparent': _format == 1 && _transparent,
+                    'transparent': canTransparent && _transparent,
                     // video: the engine's flag argument means "without sound"
                     'silent': _format == 2 && !_sound,
                     'name': _name.text,
@@ -8892,8 +10163,8 @@ class _ExportDialogState extends State<_ExportDialog> {
                 ),
               ),
             ]),
-          ]),
-        ),
+          ),
+        ]),
       ),
     );
   }

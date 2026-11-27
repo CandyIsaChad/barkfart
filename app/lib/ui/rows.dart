@@ -51,11 +51,13 @@ class DStep extends Desc {
 
 /// Words in equal parts, one chosen; an optional label above.
 class DSeg extends Desc {
-  const DSeg(this.options, this.selected, {this.label, this.onSelect});
+  const DSeg(this.options, this.selected, {this.label, this.onSelect, this.changed = false, this.reset});
   final String? label;
   final List<String> options;
   final int selected;
   final ValueChanged<int>? onSelect;
+  final bool changed;
+  final DReset? reset;
 }
 
 /// One or two word buttons.
@@ -163,10 +165,12 @@ Widget renderDesc(Desc d) {
     DTitle() => SectionTitle(d.text, onAdd: d.onAdd, addLabel: d.addLabel),
     DTick() => swipe(TickRow(d.label, d.value, onChanged: d.onChanged, changed: d.changed), d.reset),
     DStep() => swipe(StepRow(d.label, d.value, onMinus: d.onMinus, onPlus: d.onPlus, changed: d.changed), d.reset),
-    DSeg() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        if (d.label != null) PropRow(d.label!, height: 26),
-        Segmented(d.options, d.selected, onSelect: d.onSelect),
-      ]),
+    DSeg() => swipe(
+        Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          if (d.label != null) PropRow(d.label!, height: 26, changed: d.changed),
+          Segmented(d.options, d.selected, onSelect: d.onSelect),
+        ]),
+        d.reset),
     DButtons() => ButtonPair(d.a, d.onA, d.b, d.onB),
     DSwatch() => swipe(
         Padding(

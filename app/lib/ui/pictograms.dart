@@ -200,6 +200,9 @@ const _strokeIcons = <String, List<_Shape>>{
   'unlock': [_R(5.0, 10.5, 14.0, 9.5, 2.0, dashed: false), _P(r'M8 10.5V7.8a4 4 0 0 1 7.6-1.7', dashed: false)],
   'loop': [_P(r'M17.5 8A6.5 6.5 0 0 0 6 9', dashed: false), _P(r'M6.5 16a6.5 6.5 0 0 0 11.5-1', dashed: false), _P(r'M18 4.2v4h-4', dashed: false), _P(r'M6 19.8v-4h4', dashed: false)],
   'loopmod': [_P(r'M8.5 7.5A6 6 0 1 0 12 6', dashed: false), _P(r'm12 2.8 0 6.2-3.4-1.6', dashed: false)],
+  'minus': [_P(r'M5.5 12h13', dashed: false)],
+  'copy': [_R(8.5, 8.5, 11.0, 11.0, 2.0, dashed: false), _P(r'M5.5 15.5H5a1.5 1.5 0 0 1-1.5-1.5V5A1.5 1.5 0 0 1 5 3.5h9A1.5 1.5 0 0 1 15.5 5v.5', dashed: false)],
+  'edit': [_P(r'M4.5 19.5h3.8L18.8 9a1.8 1.8 0 0 0 0-2.5l-1.3-1.3a1.8 1.8 0 0 0-2.5 0L4.5 15.7zM13.8 6.4l3.8 3.8', dashed: false)],
   'next': [_P(r'm9 5 7 7-7 7', dashed: false)],
   'onion': [_C(9.0, 12.0, 5.6, dashed: true), _C(15.0, 12.0, 5.6, dashed: false)],
   'parts': [_P(r'M8.5 6.5h11M8.5 12h11M8.5 17.5h11', dashed: false), _C(4.8, 6.5, 1.2, dashed: false), _C(4.8, 12.0, 1.2, dashed: false), _C(4.8, 17.5, 1.2, dashed: false)],
@@ -222,6 +225,7 @@ const _strokeIcons = <String, List<_Shape>>{
 };
 
 const _fillIcons = <String, List<_Shape>>{
+  'more': [_C(6.0, 12.0, 1.7, dashed: false), _C(12.0, 12.0, 1.7, dashed: false), _C(18.0, 12.0, 1.7, dashed: false)],
   'pause': [_R(6.0, 5.0, 4.2, 14.0, 1.2, dashed: false), _R(13.8, 5.0, 4.2, 14.0, 1.2, dashed: false)],
   'play': [_P(r'M7 5.4v13.2a.8.8 0 0 0 1.23.67l10.3-6.6a.8.8 0 0 0 0-1.34L8.23 4.73A.8.8 0 0 0 7 5.4z', dashed: false)],
   'stepBack': [_R(5.0, 5.5, 2.6, 13.0, 1.0, dashed: false), _P(r'M19 6.6v10.8a.8.8 0 0 1-1.25.66l-7.9-5.4a.8.8 0 0 1 0-1.32l7.9-5.4A.8.8 0 0 1 19 6.6z', dashed: false)],
