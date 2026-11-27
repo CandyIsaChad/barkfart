@@ -3419,7 +3419,21 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                     final dy = d.localPosition.dy;
                     for (var k = 0; k < rows.length; k++) {
                       if (dy >= ys[k] && dy < ys[k] + rowH) {
-                        _onEmptyTimelineCellTap(rows[k], f, d.globalPosition);
+                        _onEmptyTimelineCellTap(rows[k], f, d.globalPosition, menu: false);
+                        return;
+                      }
+                    }
+                  },
+                  // a hold on an empty cell offers Extend / New pose there
+                  onLongPressStart: (d) {
+                    if (_boxActive || _boxPath != null) return;
+                    final f = ((d.localPosition.dx - left) / cell).floor();
+                    if (f < 0 || f >= displayCells) return;
+                    final dy = d.localPosition.dy;
+                    for (var k = 0; k < rows.length; k++) {
+                      if (dy >= ys[k] && dy < ys[k] + rowH) {
+                        if (AppSettings.flag('haptics')) unawaited(HapticFeedback.selectionClick());
+                        _onEmptyTimelineCellTap(rows[k], f, d.globalPosition, menu: true);
                         return;
                       }
                     }
@@ -3615,7 +3629,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             behavior: HitTestBehavior.translucent,
             onPointerDown: (e) {
               final now = DateTime.now();
-              final quick = now.difference(_lastDown) < const Duration(milliseconds: 450) && (e.localPosition - _lastDownAt).distance < 28;
+              final quick = now.difference(_lastDown) < const Duration(milliseconds: 240) && (e.localPosition - _lastDownAt).distance < 24;
               _taps = quick ? _taps + 1 : 1;
               _lastDown = now;
               _lastDownAt = e.localPosition;
@@ -3655,6 +3669,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 _dragPointerGlobal = null;
                 _finishBox(rows, ys, props, cell, rowH, propH, headerH: headerH);
               }
+              _endOrphanedDrag();
             },
             onPointerCancel: (_) {
               if (_boxActive) {
@@ -3664,6 +3679,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                   _boxPath = null;
                 });
               }
+              _endOrphanedDrag(cancel: true);
             },
             child: Stack(children: [
               rightTrackColumn,
@@ -3925,10 +3941,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     }
   }
 
-  /// Tapping an empty timeline cell (or trailing runway cell) on a layer row:
-  /// selects the layer, moves the playhead (when within active frames), and
-  /// offers 1-tap "Extend to frame N" (`extend_to`) or "New pose at frame N"!
-  Future<void> _onEmptyTimelineCellTap(Map r, int f, Offset globalPos) async {
+  /// An empty timeline cell (or trailing runway cell) on a layer row: a tap
+  /// selects the layer and moves the playhead there (within the animation);
+  /// a hold (`menu`) also offers "Extend to frame N" or "New pose at frame N".
+  Future<void> _onEmptyTimelineCellTap(Map r, int f, Offset globalPos, {required bool menu}) async {
     final kind = '${r['kind']}';
     final id = '${r['id']}';
     final name = '${r['name']}';
@@ -3963,6 +3979,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (f < _frames && f != _frame) _cmd({'op': 'frame', 'i': f});
     _cmd({'op': 'select', 'layer': id});
 
+    if (!menu) return;
     final canExtend = hasVisibleSpan;
     final isFigure = kind == 'figure';
     if (!canExtend && !isFigure) return;
@@ -3994,10 +4011,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                   kit.WordButton('Paste pose here', filled: true, expand: true, height: 34, size: 13, onTap: () => Navigator.pop(c, 'paste')),
                 ],
               ],
-              const Padding(
-                padding: EdgeInsets.only(top: 6),
-                child: Text('Tip: double-tap an empty cell to extend right away.', textAlign: TextAlign.center, style: TextStyle(color: cSecondary, fontSize: 11.5)),
-              ),
             ]),
           ),
         ),
@@ -4270,10 +4283,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       final figure = r['kind'] == 'figure';
       final extensible = figure || r['kind'] == 'picture' || r['kind'] == 'movieclip' || r['kind'] == 'text' || r['kind'] == 'adjustment';
       final multiSelectedHere = boxSel && (_selPoseKeys.length + _selPropKeys.length) >= 2;
-      final hasLeftGrip = strong && extensible && a > 0;
-      final hasRightGrip = strong && extensible;
-      final rightHitW = math.max(24.0, math.min(30.0, w * (hasLeftGrip ? 0.44 : 0.55) + 10));
-      final leftHitW = math.max(20.0, math.min(26.0, w * 0.4 + 8));
+      // a grip being dragged stays put even when the playhead leaves its pose
+      final gripDrag = drag != null && drag.block == bi && (drag.kind == 'block_start' || drag.kind == 'block_end');
+      final hasLeftGrip = !_playing && extensible && ((strong && a > 0) || (gripDrag && drag.kind == 'block_start'));
+      final hasRightGrip = !_playing && extensible && (strong || (gripDrag && drag.kind == 'block_end'));
+      // grips are big touch targets: 16 px past the block's end, up to 16 px
+      // into it, and 9 px above and below the bar
+      const gripOut = 16.0, gripPadY = 9.0;
+      final gripIn = math.min(16.0, w * (hasLeftGrip && hasRightGrip ? 0.45 : 0.6));
 
       void tapBlock(Offset globalPos, double localDx) {
         if (_boxActive || _boxPath != null || DateTime.now().difference(_boxEndedAt) < const Duration(milliseconds: 80)) return;
@@ -4299,12 +4316,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         }
       }
 
+      // in track coordinates, not inside the bar: a touch outside a widget's
+      // own box never reaches it, so a grip inside the bar lost its outer half
       Widget grip(bool atStart) => Positioned(
-            left: atStart ? -6 : null,
-            right: atStart ? null : -10,
-            top: -3,
-            bottom: -3,
-            width: atStart ? leftHitW : rightHitW,
+            key: ValueKey('grip:$layerId:$bi:${atStart ? 'start' : 'end'}'),
+            left: atStart ? x - gripOut : x + w - gripIn,
+            top: y + (rowH - 26) / 2 - gripPadY,
+            width: gripOut + gripIn,
+            height: 26 + gripPadY * 2,
             child: Listener(
               onPointerDown: (e) => _gripDownX = e.position.dx,
               child: GestureDetector(
@@ -4322,6 +4341,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                       cell,
                       edge: atStart ? 2 : 0,
                       kind: atStart ? 'block_start' : 'block_end',
+                      block: bi,
                       minStart: atStart ? math.max(1, prevStart + 1) : null,
                       maxStart: atStart ? a + visLen - 1 : null,
                     ),
@@ -4346,7 +4366,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                   child: Align(
                     alignment: atStart ? Alignment.centerLeft : Alignment.centerRight,
                     child: Padding(
-                      padding: EdgeInsets.only(left: atStart ? 4 : 0, right: atStart ? 0 : 8),
+                      padding: EdgeInsets.only(left: atStart ? gripOut - 3 : 0, right: atStart ? 0 : gripOut - 3),
                       child: _gripPill(),
                     ),
                   ),
@@ -4382,6 +4402,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           ),
       ];
       out.add(Positioned(
+        key: ValueKey('pose:$layerId:$bi'),
         left: x,
         top: y + (rowH - 26) / 2,
         child: _playing
@@ -4428,13 +4449,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                     child: Stack(clipBehavior: Clip.none, children: [
                       bar(w, strong: strong, boxSel: boxSel, tween: tween, cells: visLen),
                       ...pics,
-                      if (hasLeftGrip) grip(true),
-                      if (hasRightGrip) grip(false),
                     ]),
                   ),
                 ),
               ),
       ));
+      if (hasLeftGrip) out.add(grip(true));
+      if (hasRightGrip) out.add(grip(false));
     }
     // I2: joins over time: a grey chain where it joins, a red broken chain
     // where it lets go (round 10 board); tap one for what it is
@@ -4466,8 +4487,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   Widget _gripPill() => Container(
-        width: 7,
-        height: 18,
+        width: 8,
+        height: 20,
         decoration: BoxDecoration(
           color: cAccent,
           borderRadius: BorderRadius.circular(3.5),
@@ -4514,7 +4535,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       if (point) {
         if (path.first.dy >= y0 && path.first.dy < y0 + rowH) {
           final f = ((path.first.dx + off - 8) / cell).floor();
-          var inVisibleBlock = false;
           for (final b in blocks) {
             final st = (b[0] as num).toInt(), len = (b[1] as num).toInt();
             var a = st, z = st + len - 1;
@@ -4524,29 +4544,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             while (z >= a && on.elementAtOrNull(z) == false) {
               z--;
             }
-            if (a <= z && f >= a && f <= z) {
-              inVisibleBlock = true;
-              hitPoses.add((id, a));
-            }
-          }
-          // Double-tapping an empty/runway cell on a layer row extends the layer right away!
-          if (!inVisibleBlock && f >= 0) {
-            setState(() {
-              _selPoseKeys.clear();
-              _selPropKeys.clear();
-              _frameSelected = false;
-            });
-            _cmd({'op': 'extend_to', 'layer': id, 'frame': f});
-            _cmd({'op': 'frame', 'i': f.clamp(0, _frames - 1)});
-            _cmd({'op': 'select', 'layer': id});
-            _thumbsChanged('extend_to', force: true);
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              _ensureFrameVisible(_frame);
-              if (mounted) {
-                kit.showToast(context, '${r['name']} extended to frame ${f + 1}', light: true, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
-              }
-            });
-            return;
+            if (a <= z && f >= a && f <= z) hitPoses.add((id, a));
           }
           hitLayers.add(id);
           if (kind == 'figure') hitFigures.add(id);
@@ -4894,6 +4892,18 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       }
     }
     setState(() {});
+  }
+
+  /// Every finger is off the timeline but a drag is still on: the widget that
+  /// started it was rebuilt mid-drag, so its end never came, and the timeline
+  /// stayed locked (no scrolling). Finish it once this pointer event is done:
+  /// a drag that ended normally has cleared `_blockDrag` by then.
+  void _endOrphanedDrag({bool cancel = false}) {
+    if (_blockDrag == null) return;
+    scheduleMicrotask(() {
+      if (!mounted || _blockDrag == null || _tlPinch.isNotEmpty) return;
+      _endBlockDrag(cancel: cancel);
+    });
   }
 
   /// A grip or held block/key let go: commits the live drag (1 undo step) or cancels it.
@@ -10386,6 +10396,7 @@ class _BlockDrag {
     this.scaleAnchor,
     this.scaleBaseSpan = 1,
     this.scaleFromLeft = false,
+    this.block,
   });
   final String layer;
   final int start, length, edge;
@@ -10402,6 +10413,8 @@ class _BlockDrag {
   final int? scaleAnchor;
   final int scaleBaseSpan;
   final bool scaleFromLeft;
+  /// The pose block's index in its row, for a grip drag.
+  final int? block;
   double dx = 0;
   double? rawStartX;
   double startScrollX = 0;
