@@ -4785,22 +4785,29 @@ fn a_figure_keyed_on_some_frames_only_stays_that_way() {
     s.command(&json!({"op": "frame", "i": 1}));
     s.command(&json!({"op": "camera", "zoom": 1.5}));
     assert_eq!(rot(&s), vec![0, 3], "the camera edit did not key the figure");
-    // posing it on frame 2 changes the pose it is in (frame 1's), not a new
-    // one (the user, 2026-11-24); it tweens there, so the playhead goes to it
+    // Round 3: posing mid-tween on frame 2 (index 1) bakes the exact interpolated
+    // pose there, splits the block at the playhead (`[0, 1, 3]`), and leaves
+    // frame 3 (index 2) unkeyed — all in 1 atomic undo step.
+    let mid_pos = figure_at(&s, "L2", 1.0 / fps);
     let st = s.command(&json!({"op": "state"}));
     let (x, y) = handle(&st, 6);
     s.command(&json!({"op": "down", "x": x, "y": y, "r": 20}));
     s.command(&json!({"op": "move", "x": x + 30.0, "y": y}));
     s.command(&json!({"op": "up"}));
-    assert_eq!(s.frame, 0);
+    assert_eq!(s.frame, 1);
     {
         let p = s.project();
         let f = p.root().unwrap().layer("L2").unwrap().as_figure().unwrap();
         for n in f.nodes() {
-            assert_eq!(keyed_frames_of(&n.rotation, fps), vec![0, 3], "{}: no new pose", n.id);
+            assert_eq!(keyed_frames_of(&n.rotation, fps), vec![0, 1, 3], "{}: auto-keyed mid-tween at playhead", n.id);
         }
     }
-    // "New pose" on frame 2 starts one: posing there keys all of it there,
+    let after_pos = figure_at(&s, "L2", 1.0 / fps);
+    assert!((after_pos.0 - mid_pos.0).abs() < 1e-3 && (after_pos.1 - mid_pos.1).abs() < 1e-3, "unedited root did not jump");
+    // 1 single Undo removes both the split pose and the edit
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(rot(&s), vec![0, 3]);
+    // "New pose" on frame 2 also starts one: posing there keys all of it there,
     // and nothing on frame 3
     s.command(&json!({"op": "frame", "i": 1}));
     s.command(&json!({"op": "select", "layer": "L2"}));
