@@ -7892,12 +7892,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       }
     }
 
-    final diamond = _fxKeyDiamond(
-      keyed: keyed,
-      animated: animated,
-      label: label,
-      onTap: () => _cmd({'op': 'fx_key', 'id': fxId, 'param': pName, ...target}),
-    );
+    // a group's effects aren't keyed (set_fx_prop sets them outright): no diamond
+    final diamond = target.containsKey('group')
+        ? const SizedBox.shrink()
+        : _fxKeyDiamond(
+            keyed: keyed,
+            animated: animated,
+            label: label,
+            onTap: () => _cmd({'op': 'fx_key', 'id': fxId, 'param': pName, ...target}),
+          );
 
     if (kind == 'color' || kind == 'colour') {
       final col = ((p['value'] as num?) ?? 0xffffffff).toInt();
@@ -8255,8 +8258,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     };
 
     void addBuiltIn(String ty) {
-      final cmd = <String, Object?>{'op': 'fx_add', 'type': ty, ...target};
-      final st = _st['multi'] != null ? _cmd({'op': 'each', 'label': 'Add effect', 'cmd': cmd}) : _cmd(cmd);
+      // several figures: no layer named, so `each` adds one to every figure
+      // (a named layer would win over each figure's turn: N copies on one)
+      final multi = _st['multi'] != null && !isGroup;
+      final cmd = <String, Object?>{'op': 'fx_add', 'type': ty, if (!multi) ...target};
+      final st = multi ? _cmd({'op': 'each', 'label': 'Add effect', 'cmd': cmd}) : _cmd(cmd);
       final stack = _stackFromState(st, group: isGroup);
       final newId = stack.isNotEmpty ? '${stack.last['id']}' : ty;
       setState(() {

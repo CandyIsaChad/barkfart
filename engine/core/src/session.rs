@@ -612,7 +612,10 @@ impl Session {
                 self.sync_tools();
                 if let Some(child) = self.joining.clone() {
                     // pick a joint of another figure (the figure itself and what hangs off it excluded)
-                    let own = layer_ops::with_joined(self.project().root().expect("root"), &child);
+                    // (a join from this frame on rules out what hangs off it now, as
+                    // switch_at_mode does; a whole-timeline join, what ever does)
+                    let root = self.project().root().expect("root");
+                    let own = if t > 1e-9 { layer_ops::with_joined_at(root, &child, t) } else { layer_ops::with_joined(root, &child) };
                     let near = self.tools.handles(self.project(), t).into_iter().filter(|h| !own.contains(&h.layer)).min_by(|a, b| {
                         let d = |h: &Handle| (h.x - x).hypot(h.y - y);
                         d(a).partial_cmp(&d(b)).unwrap_or(std::cmp::Ordering::Equal)
@@ -1128,6 +1131,7 @@ impl Session {
                     let made = self.step("Paste frame", |s| {
                         for k in 0..count {
                             frame_ops::insert_after(s, fr + k, true)?;
+                            shift_joins_insert(s, fr + k, 1);
                         }
                         let at = frame_ops::time(s, fr + 1);
                         let fps = st_fps(&s.project);
@@ -1718,7 +1722,13 @@ impl Session {
                     }
                     let Some(root) = layer.as_figure().and_then(|f| f.nodes().first().map(|n| n.id.clone())) else { continue };
                     self.selected = Some((l.clone(), root));
-                    self.command(&inner);
+                    // a layer named in the command means each figure in turn
+                    // (else every pass would hit the one named)
+                    let mut one = inner.clone();
+                    if one.get("layer").is_some() {
+                        one["layer"] = J::from(l.as_str());
+                    }
+                    self.command(&one);
                     if said.is_empty() {
                         said = self.message.clone();
                     }
@@ -3444,12 +3454,12 @@ impl Session {
                 if let Some(l) = self.sel_layer() {
                     let all = c["all"].as_bool().unwrap_or(false);
                     let fps = st_fps(self.project());
-                    let shown_before = self
-                        .project()
-                        .root()
-                        .and_then(|r| r.layer(&l))
-                        .is_some_and(|x| (0..self.frame).any(|fr| crate::edit::block_ops::shown_at(x, fr, fps)));
-                    if all || t <= 1e-9 || !shown_before {
+                    let layer = self.project().root().and_then(|r| r.layer(&l));
+                    let shown_before = layer.is_some_and(|x| (0..self.frame).any(|fr| crate::edit::block_ops::shown_at(x, fr, fps)));
+                    // a whole-timeline unjoin clears every timed switch: not when
+                    // the figure joins something later on (review, 2026-11-28)
+                    let joins_later = layer.is_some_and(|x| x.joins.iter().any(|j| j.time > t + 0.25 / fps));
+                    if all || t <= 1e-9 || (!shown_before && !joins_later) {
                         self.step("Unjoin", |s| crate::edit::join_ops::unjoin(s, &sym, &l, t));
                     } else {
                         self.step("Let go", |s| crate::edit::join_ops::switch_at_mode(s, &sym, &l, None, None, true, false, t));
@@ -4155,9 +4165,9 @@ impl Session {
             }
             "copy_filters" => {
                 if let Some(l) = self.sel_layer() {
-                    if let Some(snap) = crate::edit::filters::snapshot(self.project(), &sym, &l, t) {
+                    if let Some(snap) = crate::edit::filters::snapshot_all(self.project(), &sym, &l, t) {
                         self.filter_clip = Some(snap);
-                        self.message = "Filters copied.".into();
+                        self.message = "Effects copied.".into();
                         self.rev += 1;
                     }
                 }
@@ -4242,9 +4252,10 @@ impl Session {
             }
             "paste_filters" => {
                 if let (Some(l), Some(snap)) = (self.sel_layer(), self.filter_clip.clone()) {
-                    self.step("Paste filters", |s| {
+                    self.step("Paste effects", |s| {
                         crate::edit::filters::clear(s, &sym, &l, t)?;
-                        crate::edit::filters::restore(s, &sym, &l, &snap, t)
+                        crate::edit::filters::restore(s, &sym, &l, &snap, t)?;
+                        crate::edit::filters::paste_stack(s, &sym, &l, &snap)
                     });
                 }
             }
@@ -5515,6 +5526,7 @@ pub fn add_tweened(st: &mut crate::edit::State, frame: i32, fracs: &[f64]) -> Ed
         }
     }
     frame_ops::insert_tweened(st, frame, k)?;
+    shift_joins_insert(st, frame, k);
     let fps = st_fps(&st.project);
     for (id, vals, interp) in poses {
         let Some(q) = st.project.property_mut(&id) else { continue };
@@ -5931,9 +5943,16 @@ fn shift_joins_delete(st: &mut crate::edit::State, frame: i32) {
     let ids: Vec<String> = st.project.root().map(|r| r.layers.iter().filter(|l| !l.joins.is_empty()).map(|l| l.id.clone()).collect()).unwrap_or_default();
     for id in ids {
         if let Some(l) = st.project.layer_mut(&sym, &id) {
+            // the next frame's switch moves onto this time and takes over
+            let next_takes_over = l.joins.iter().any(|j| (j.time - (t + dt)).abs() < eps);
             let mut next_joins = Vec::with_capacity(l.joins.len());
             for mut j in l.joins.drain(..) {
                 if (j.time - t).abs() < eps {
+                    if frame > 0 && !next_takes_over {
+                        // the frame after it (now on this time) still joins here
+                        next_joins.push(j);
+                        continue;
+                    }
                     if frame == 0 {
                         // Deleting frame 0 promotes a frame-0 switch if one existed
                         l.parent = j.parent;

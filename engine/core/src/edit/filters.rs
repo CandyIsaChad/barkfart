@@ -111,17 +111,20 @@ fn ensure(l: &mut Layer, n: i32, fps: f64, id: &str, ty: &str) {
     }
 }
 
-/// Filters run in the panel's order; anything else (stacked FX* effects, plugin
-/// effects, effects from files) stays in front of them, preserving its own chain order.
+/// Keeps the chain in the order it has (the effect stack lets the user move
+/// any effect, filters included: review, 2026-11-28); nodes off the chain
+/// join its end, and silent panel filters (mix 0, drawing nothing) wait at the
+/// very end in the panel's order, so a filter turned on joins the stack last.
 fn reorder(l: &mut Layer) {
     let ours: std::collections::HashSet<&str> = ORDER.into_iter().collect();
-    let mut chain: Vec<String> = l.effects.chain().into_iter().filter(|e| !ours.contains(e.id.as_str())).map(|e| e.id.clone()).collect();
-    for k in l.effects.nodes.keys() {
-        if !ours.contains(k.as_str()) && !chain.contains(k) {
+    let silent = |e: &EffectNode| ours.contains(e.id.as_str()) && !node_active(e);
+    let mut chain: Vec<String> = l.effects.chain().into_iter().filter(|e| !silent(e)).map(|e| e.id.clone()).collect();
+    for (k, e) in &l.effects.nodes {
+        if !silent(e) && !chain.contains(k) {
             chain.push(k.clone());
         }
     }
-    chain.extend(ORDER.iter().filter(|id| l.effects.nodes.contains_key(**id)).map(|id| id.to_string()));
+    chain.extend(ORDER.iter().filter(|id| l.effects.nodes.get(**id).is_some_and(|e| silent(e))).map(|id| id.to_string()));
     rewire_chain(&mut l.effects, &chain);
 }
 
@@ -375,6 +378,9 @@ pub fn clear(st: &mut State, sym: &str, id: &str, t: f64) -> EditResult<()> {
 pub struct Snapshot {
     opacity: f32,
     nodes: Vec<SnapNode>,
+    /// Copy effects: the stacked effects (FX*, plugin effects), in chain order.
+    /// Empty for a frame's copy.
+    stack: Vec<EffectNode>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -390,11 +396,18 @@ pub fn snapshot(p: &Project, sym: &str, id: &str, t: f64) -> Option<Snapshot> {
     // a figure with no filters and a plain opacity needs no evaluation (and a Resolver
     // indexes the whole project when it is made: this runs for every figure on a copy)
     if !ORDER.iter().any(|x| l.effects.nodes.contains_key(*x)) && l.opacity.track.is_empty() && l.opacity.modifiers.is_empty() {
-        return Some(Snapshot { opacity: l.opacity.value.f(), nodes: Vec::new() });
+        return Some(Snapshot { opacity: l.opacity.value.f(), nodes: Vec::new(), stack: Vec::new() });
     }
     let mut r = Resolver::new(p);
     let mut nodes = Vec::new();
+    // chain order, so a paste turns them on in the order they ran
+    let mut order: Vec<&EffectNode> = l.effects.chain();
     for e in l.effects.nodes.values() {
+        if !order.iter().any(|x| x.id == e.id) {
+            order.push(e);
+        }
+    }
+    for e in order {
         if !ORDER.contains(&e.id.as_str()) {
             continue;
         }
@@ -404,7 +417,50 @@ pub fn snapshot(p: &Project, sym: &str, id: &str, t: f64) -> Option<Snapshot> {
         }
         nodes.push(SnapNode { id: e.id.clone(), ty: e.ty.clone(), mix: r.f(&e.mix, t), params });
     }
-    Some(Snapshot { opacity: r.f(&l.opacity, t), nodes })
+    Some(Snapshot { opacity: r.f(&l.opacity, t), nodes, stack: Vec::new() })
+}
+
+/// Copy effects: the panel's filters (as `snapshot`) and every stacked effect.
+pub fn snapshot_all(p: &Project, sym: &str, id: &str, t: f64) -> Option<Snapshot> {
+    let mut snap = snapshot(p, sym, id, t)?;
+    let l = p.symbol(sym)?.layer(id)?;
+    snap.stack = l.effects.chain().into_iter().filter(|e| !ORDER.contains(&e.id.as_str())).cloned().collect();
+    Some(snap)
+}
+
+/// Paste effects: the copied stacked effects replace the layer's own (the
+/// panel's filters go through `clear` and `restore`). Each copy gets its own
+/// ids; a plugin effect keeps `plugin.<id>`, the id its panel finds it by.
+pub fn paste_stack(st: &mut State, sym: &str, id: &str, snap: &Snapshot) -> EditResult<()> {
+    let ids: Vec<String> = snap.stack.iter().map(|e| if e.id.starts_with("plugin.") { e.id.clone() } else { String::new() }).collect();
+    let ids: Vec<String> = ids.into_iter().map(|x| if x.is_empty() { st.project.new_id("FX") } else { x }).collect();
+    let Some(l) = st.project.layer_mut(sym, id) else { return fail("no layer") };
+    let owner = l.id.clone();
+    let gone: Vec<String> = l.effects.nodes.keys().filter(|k| !ORDER.contains(&k.as_str())).cloned().collect();
+    for k in gone {
+        l.effects.nodes.shift_remove(&k);
+    }
+    for (e, nid) in snap.stack.iter().zip(ids) {
+        let mut c = e.clone();
+        c.id = nid.clone();
+        c.mix.id = format!("{owner}/{nid}/mix");
+        for (name, q) in c.params.iter_mut() {
+            q.id = format!("{owner}/{nid}/{name}");
+        }
+        c.inputs.clear();
+        l.effects.nodes.insert(nid, c);
+    }
+    // the pasted stack first, in its order, then the layer's filters
+    let mut chain: Vec<String> = l.effects.nodes.keys().filter(|k| !ORDER.contains(&k.as_str())).cloned().collect();
+    chain.extend(l.effects.chain().into_iter().filter(|e| ORDER.contains(&e.id.as_str())).map(|e| e.id.clone()));
+    for x in ORDER {
+        if l.effects.nodes.contains_key(x) && !chain.iter().any(|c| c == x) {
+            chain.push(x.to_string());
+        }
+    }
+    rewire_chain(&mut l.effects, &chain);
+    reorder(l);
+    Ok(())
 }
 
 pub fn restore(st: &mut State, sym: &str, id: &str, snap: &Snapshot, t: f64) -> EditResult<()> {
@@ -1134,7 +1190,11 @@ fn toggle_prop_key(q: &mut Property, frame: i32, t: f64, fps: f64, tw: Interp, o
 /// Reorders an effect node in a layer or group's `EffectStack` chain.
 pub fn fx_reorder(st: &mut State, sym: &str, target: StackTarget<'_>, fx_id: &str, to: Option<usize>, dir: Option<i32>) -> EditResult<()> {
     with_stack_mut(st, sym, target, |stack, _, _| {
-        let mut chain: Vec<String> = stack.chain().into_iter().map(|e| e.id.clone()).collect();
+        // the order the stack shows: silent panel filters aren't in it (they
+        // wait at the end), so a move never swaps with one of them
+        let hidden = |e: &EffectNode| e.id.starts_with("filter.") && !node_active(e);
+        let tail: Vec<String> = stack.chain().into_iter().filter(|e| hidden(e)).map(|e| e.id.clone()).collect();
+        let mut chain: Vec<String> = stack.chain().into_iter().filter(|e| !hidden(e)).map(|e| e.id.clone()).collect();
         let Some(pos) = chain.iter().position(|id| id == fx_id) else { return fail("no such effect") };
         let len = chain.len();
         if len <= 1 {
@@ -1149,6 +1209,7 @@ pub fn fx_reorder(st: &mut State, sym: &str, target: StackTarget<'_>, fx_id: &st
         }
         let id = chain.remove(pos);
         chain.insert(target_idx, id);
+        chain.extend(tail);
         rewire_chain(stack, &chain);
         Ok(())
     })
