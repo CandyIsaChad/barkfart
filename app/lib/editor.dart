@@ -5774,7 +5774,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             height: 28,
             decoration: BoxDecoration(color: cControl, borderRadius: BorderRadius.circular(8)),
             alignment: Alignment.center,
-            child: const Pictogram('close', size: 13, color: cSecondary, stroke: 2.1),
+            child: const Pictogram('x', size: 13, color: cSecondary, stroke: 2.1),
           ),
         );
         final footBtn = foot == null
