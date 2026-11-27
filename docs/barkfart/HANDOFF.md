@@ -89,8 +89,8 @@ and `docs/barkfart/research/local/STICK_NODES_UI_REFERENCE.md` (the
 original's UI, control by control) before changing anything.
 
 ## Rules (hard)
-- Commit as `351002590+balsamiqvine@users.noreply.github.com`, name
-  `balsamiqvine` (use `git -c user.email=... -c user.name=... commit`).
+- Commit with your configured GitHub noreply email and username (never commit
+  a personal email; the old `balsamiqvine` account is retired).
   End every commit message with a Co-Authored-By line naming the model you
   are: `Co-Authored-By: Gemini 4 Hydrogen <noreply@google.com>` or
   `Co-Authored-By: DeepSeek V4.1 Flash <noreply@together.ai>`.
@@ -207,7 +207,7 @@ Known and left alone:
   it only as a reference; do not apply it.
 - No `get_usage` or `run_in_terminal` tool existed in the 2026-11-22 Claude
   review session; the terminal is `ptyxis` (Ubuntu), e.g.
-  `ptyxis --new-window -- /home/caleb/.claude/barkfart-handoff/after-reset.sh "<time>"`.
+  `ptyxis --new-window -- ~/.claude/barkfart-handoff/after-reset.sh "<time>"`.
 
 ## Next (no order; the user: "just keep writing the app. Don't stop.")
 - New rows in `toggle_rows()` need a set-up that really changes something (the
