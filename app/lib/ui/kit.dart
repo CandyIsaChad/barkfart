@@ -571,7 +571,7 @@ class Anchored extends StatelessWidget {
     final top = math.max(pad.top + margin, topMin);
     final bottom = screen.height - pad.bottom - margin;
     final roomAbove = anchor.top - gap - top, roomBelow = bottom - anchor.bottom - gap;
-    final tightBoth = roomAbove < 200 && roomBelow < 200 && bottom - top > math.max(roomAbove, roomBelow) + 60;
+    final tightBoth = roomAbove < 235 && roomBelow < 200 && bottom - top > math.max(roomAbove, roomBelow) + 50;
     final goAbove = below ? roomBelow < 160 && roomAbove > roomBelow : roomAbove >= 120 || roomAbove >= roomBelow;
     final room = math.max(96.0, tightBoth ? bottom - top : (goAbove ? roomAbove : roomBelow));
     final w = math.min(width, screen.width - pad.left - pad.right - 2 * margin);
