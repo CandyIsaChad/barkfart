@@ -2269,6 +2269,12 @@ fn every_command_undoes_and_redoes_exactly() {
         json!({"op": "group_set", "blend": "SCREEN"}),
         json!({"op": "reverse_range", "from": 0, "to": 1}),
         json!({"op": "ping_pong_range", "from": 0, "to": 1}),
+        // Round 3: separate_node, scale_keys, add_adjustment, stacked & keyable effects
+        json!({"op": "separate_node"}),
+        json!({"op": "scale_keys", "poses": [["L2", 0], ["L2", 1]], "props": [], "anchor": 0, "factor": 2.0}),
+        json!({"op": "add_adjustment", "name": "Grade"}),
+        json!({"op": "fx_add", "type": "chromatic.aberration"}),
+        json!({"op": "fx_preset", "name": "CRT", "effects": [{"type": "stylize.scanlines", "mix": 0.6}, {"type": "vignette", "mix": 0.5}]}),
     ];
     let text = |s: &Session| codec::encode(s.project()).lines().filter(|l| !l.contains("idCounter")).collect::<Vec<_>>().join("\n");
     let mut failures = Vec::new();
@@ -2372,6 +2378,15 @@ fn every_command_undoes_and_redoes_exactly() {
                 s.command(&json!({"op": "filter", "opacity": 0.4}));
                 s.command(&json!({"op": "frame", "i": 1}));
                 s.command(&json!({"op": "filter", "opacity": 0.8}));
+            }
+            "unjoin" | "let_go_here" => {
+                // a joined figure shown on both frames so unjoin / let_go_here detaches it
+                s.command(&json!({"op": "frame", "i": 0}));
+                s.command(&json!({"op": "add_figure", "kind": "ball"}));
+                s.command(&json!({"op": "extend_to", "frame": 1}));
+                s.command(&json!({"op": "frame", "i": 0}));
+                s.command(&json!({"op": "join_to", "layer": "L2", "node": "armR2"}));
+                s.command(&json!({"op": "frame", "i": 1}));
             }
             "paste_prop_key" => {
                 s.command(&json!({"op": "set", "k": "keying", "v": true}));

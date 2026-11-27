@@ -144,13 +144,16 @@ pub struct Group {
     pub blend: Blend,
     /// Adjustment layers: effects apply to everything before this group.
     pub adjustment: bool,
+    /// Optional explicit world-space bounds `[min_x, min_y, max_x, max_y]`
+    /// (used to clip Adjustment layers to the camera shot in stage view).
+    pub bounds: Option<[f32; 4]>,
     pub effects: Vec<ResolvedEffect>,
     pub children: Vec<Item>,
 }
 
 impl Group {
     pub fn new(source: impl Into<String>) -> Group {
-        Group { source: source.into(), opacity: 1.0, blend: Blend::Normal, adjustment: false, effects: Vec::new(), children: Vec::new() }
+        Group { source: source.into(), opacity: 1.0, blend: Blend::Normal, adjustment: false, bounds: None, effects: Vec::new(), children: Vec::new() }
     }
 }
 

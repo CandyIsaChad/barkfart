@@ -39,6 +39,8 @@ enum TimelineDragKind {
     BlockMove,
     PoseKey,
     PropKey,
+    MultiShift,
+    MultiScale,
 }
 
 #[derive(Clone, Debug)]
@@ -61,15 +63,22 @@ enum Gesture {
     /// D34 (the graph): a key's handle is dragged: `right` side, its offset
     /// (seconds, value) at the start.
     CurveHandle { prop: String, time: f64, right: bool, h0: (f64, f64), started: bool },
-    /// Live drag of a timeline block grip, block move, pose key, or property key.
+    /// Live drag of a timeline block grip, block move, pose key, property key,
+    /// or multi-key shift/scale.
     TimelineDrag {
         kind: TimelineDragKind,
         layer: String,
         frame: i32,
         property: Option<String>,
+        poses: Vec<(String, i32)>,
+        props: Vec<(String, i32)>,
+        anchor: i32,
         snapshot: crate::edit::State,
         orig_frame: i32,
         last_val: Option<i32>,
+        last_factor: Option<f64>,
+        moved_poses: Vec<(String, i32)>,
+        moved_props: Vec<(String, i32)>,
         started: bool,
     },
     All { x: f32, y: f32 },
@@ -98,6 +107,8 @@ pub struct Session {
     pub stretch_all: bool,
     /// "Join to...": the figure waiting for a joint to be tapped.
     pub joining: Option<String>,
+    /// Round 3: whether the pending join snaps root `(0,0)` to the target joint.
+    pub joining_absolute: bool,
     /// The figure open in the figure editor (structure tools, its joints only).
     pub building: Option<String>,
     /// Figure editor: the polyfill being edited (taps on joints add polynodes).
@@ -263,7 +274,7 @@ impl Session {
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
         let main_root = doc.project().root_symbol.clone();
-        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, selected_group: None, selected_script: None, drag_t: None, onion: true, stretch_all: false, joining: None, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, stock: None, size_ref: true, mirror: false, curves: false, curve_shown: Default::default(), draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, pose_clip_xf: None, prop_key_clip: None, poses_clip: Vec::new(), multi: Vec::new(), copy_edit: None, copy_edit_depth: 0, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, selected_group: None, selected_script: None, drag_t: None, onion: true, stretch_all: false, joining: None, joining_absolute: false, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, stock: None, size_ref: true, mirror: false, curves: false, curve_shown: Default::default(), draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, pose_clip_xf: None, prop_key_clip: None, poses_clip: Vec::new(), multi: Vec::new(), copy_edit: None, copy_edit_depth: 0, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
@@ -355,21 +366,35 @@ impl Session {
         let t = self.time();
         let mut p = self.project().clone();
         let sym = p.root_symbol.clone();
+        let is_adj = p.root().and_then(|r| r.layer(&l)).is_some_and(|x| matches!(x.kind, LayerKind::Adjustment));
         {
             let root = p.root_mut()?;
-            let keep = root.layers.iter().find(|x| x.id == l)?.clone();
-            let mut layer = (*keep).clone();
-            // placed by its own transform (a joined figure is fitted anyway)
-            layer.parent = None;
-            layer.parent_node = None;
-            root.layers = vec![std::sync::Arc::new(layer)];
+            if is_adj {
+                // Keep layers up through this adjustment layer so preview shows its effect on what sits below
+                if let Some(idx) = root.layers.iter().position(|x| x.id == l) {
+                    root.layers.truncate(idx + 1);
+                }
+            } else {
+                let keep = root.layers.iter().find(|x| x.id == l)?.clone();
+                let mut layer = (*keep).clone();
+                // placed by its own transform (a joined figure is fitted anyway)
+                layer.parent = None;
+                layer.parent_node = None;
+                layer.joins.clear();
+                root.layers = vec![std::sync::Arc::new(layer)];
+            }
         }
         let mut st = crate::edit::State { project: p, assets: Default::default() };
         if filter.is_object() {
-            // K2: {"plugin": id} previews a plugin effect with its defaults
-            match filter["plugin"].as_str() {
-                Some(pid) => crate::edit::filters::apply_plugin(&mut st, &sym, &l, &json!({"id": pid}), t, false).ok()?,
-                None => crate::edit::filters::apply(&mut st, &sym, &l, filter, t).ok()?,
+            // Round 3: {"type": "chromatic.aberration", "params"?: {...}} previews any built-in/plugin effect
+            if let Some(ty) = filter["type"].as_str() {
+                let mix = filter["mix"].as_f64().map(|v| v as f32);
+                let params = filter["params"].as_object();
+                crate::edit::filters::fx_add(&mut st, &sym, crate::edit::filters::StackTarget::Layer(&l), ty, mix, params).ok()?;
+            } else if let Some(pid) = filter["plugin"].as_str() {
+                crate::edit::filters::apply_plugin(&mut st, &sym, &l, &json!({"id": pid}), t, false).ok()?;
+            } else if !is_adj {
+                crate::edit::filters::apply(&mut st, &sym, &l, filter, t).ok()?;
             }
         }
         Some((st.project, t))
@@ -383,31 +408,10 @@ impl Session {
         frame_ops::time(&self.doc.state, self.frame)
     }
 
-    /// Where a drag on `layer` keys: a frame inside a pose (not its first)
-    /// changes that pose, so the drag keys on the pose's own frame; "New
-    /// pose" is how to start another (the user, 2026-11-24). A pose that
-    /// tweens into the next shows an in-between here, not the pose itself,
-    /// so the playhead goes to the pose first and the joint stays under the
-    /// finger; a held pose (or the last) is changed where it is.
-    fn pose_edit_time(&mut self, layer: &str) -> f64 {
-        let t = self.time();
-        if self.building.is_some() {
-            return t;
-        }
-        let fps = st_fps(self.project());
-        let Some(l) = self.project().root().and_then(|s| s.layer(layer)) else { return t };
-        if matches!(l.kind, LayerKind::Camera(_)) {
-            return t;
-        }
-        let Some((start, next)) = crate::edit::block_ops::block_at(l, fps, self.frame) else { return t };
-        if start == self.frame {
-            return t;
-        }
-        let tweens = next.is_some() && crate::edit::block_ops::pose_props_of(l).iter().any(|q| q.track.keys().iter().any(|k| (k.time * fps).round() as i32 == start && k.interp != Interp::Hold));
-        if tweens {
-            self.frame = start;
-        }
-        frame_ops::time(&self.doc.state, start)
+    /// Round 3: edits mid-tween or mid-hold always stay on the current playhead
+    /// frame and bake/split a new pose there inside the same undo transaction.
+    fn pose_edit_time(&mut self, _layer: &str) -> f64 {
+        self.time()
     }
 
     pub fn frame_count(&self) -> i32 {
@@ -420,10 +424,11 @@ impl Session {
         if let Some((l, node)) = &self.selected {
             let t = self.time();
             let p = self.project();
-            // a figure's joint, or (no joint) a movieclip or sprite
-            let ok = p.root().and_then(|s| s.layer(l)).filter(|x| Resolver::new(p).b(&x.shown, t)).is_some_and(|x| match &x.kind {
-                LayerKind::Figure(f) => f.node(node).is_some(),
-                LayerKind::Symbol(_) | LayerKind::Sprite(_) => node.is_empty(),
+            // a figure's joint, or (no joint) a movieclip, sprite, or adjustment layer
+            let ok = p.root().and_then(|s| s.layer(l)).is_some_and(|x| match &x.kind {
+                LayerKind::Adjustment => node.is_empty(),
+                LayerKind::Figure(f) => Resolver::new(p).b(&x.shown, t) && f.node(node).is_some(),
+                LayerKind::Symbol(_) | LayerKind::Sprite(_) => Resolver::new(p).b(&x.shown, t) && node.is_empty(),
                 _ => false,
             });
             if !ok {
@@ -614,14 +619,16 @@ impl Session {
                     });
                     if let Some(h) = near.filter(|h| (h.x - x).hypot(h.y - y) <= radius * 1.5) {
                         let sym = self.sym();
+                        let abs = self.joining_absolute;
                         // D8: joins are moments: from this frame on (on the first
                         // frame, for the whole animation, as before)
                         if t > 1e-9 {
-                            self.step("Join", |s| crate::edit::join_ops::switch_at(s, &sym, &child, Some(&h.layer), Some(&h.node), true, t));
+                            self.step("Join", |s| crate::edit::join_ops::switch_at_mode(s, &sym, &child, Some(&h.layer), Some(&h.node), true, abs, t));
                         } else {
-                            self.step("Join", |s| crate::edit::join_ops::join(s, &sym, &child, &h.layer, Some(&h.node), true, t));
+                            self.step("Join", |s| crate::edit::join_ops::join_mode(s, &sym, &child, &h.layer, Some(&h.node), true, abs, t));
                         }
                         self.joining = None;
+                        self.joining_absolute = false;
                         self.selected = self.project().root().and_then(|s| s.layer(&child)).and_then(|l| l.as_figure()).and_then(|f| f.nodes().first().map(|n| (child.clone(), n.id.clone())));
                     } else {
                         self.message = "Tap a joint on another figure.".into();
@@ -777,10 +784,15 @@ impl Session {
                     }
                     self.drag_t = Some(self.pose_edit_time(&hit.layer));
                     let t = self.drag_t.unwrap_or(t);
+                    let sym = self.sym();
+                    let fr = self.frame;
                     let stretchy = self.project().root().and_then(|s| s.layer(&hit.layer)).and_then(|l| l.as_figure()).and_then(|f| f.node(&hit.node)).is_some_and(|n| n.stretchy);
                     self.tools.stretch = self.stretch_all || stretchy;
                     self.doc.begin(if hit.root { "Move figure" } else { "Pose node" });
                     anchor_poses(&mut self.doc.state);
+                    if self.building.is_none() {
+                        let _ = crate::edit::block_ops::bake_pose_at(&mut self.doc.state, &sym, &hit.layer, fr);
+                    }
                     self.tools.begin(&mut self.doc, &hit, x0, y0, t);
                     self.gesture = Gesture::Handle { hit, x: x0, y: y0, slop, started: true };
                 }
@@ -1022,6 +1034,7 @@ impl Session {
                 let copy = c.get("copy").and_then(|v| v.as_bool()).unwrap_or(true);
                 let made = self.step("Insert frame", |s| {
                     frame_ops::insert_after(s, fr, copy)?;
+                    shift_joins_insert(s, fr, 1);
                     snap_keys(s);
                     if copy {
                         // a new frame is a whole pose (a snapshot), like the original's frames
@@ -1037,7 +1050,13 @@ impl Session {
             }
             "delete_frame" => {
                 let fr = self.frame;
-                self.step("Delete frame", |s| frame_ops::delete(s, fr));
+                self.step("Delete frame", |s| {
+                    let deleted = frame_ops::delete(s, fr)?;
+                    if deleted {
+                        shift_joins_delete(s, fr);
+                    }
+                    Ok(deleted)
+                });
             }
             "animation" => {
                 // Animation Tools: tweening on/off and tweened frames (playback and export only)
@@ -1560,23 +1579,24 @@ impl Session {
                 }
             }
             "delete_here" => {
-                // gone from this frame only (hold: with the figures joined to it)
+                // gone from this frame only (hold: with the figures joined to it at t)
                 if let Some(l) = self.sel_layer() {
                     let fr = self.frame;
                     let joined = b("joined");
                     self.step("Delete stickfigure", |s| {
-                        let block = if joined { layer_ops::with_joined(s.project.root().expect("root"), &l) } else { vec![l.clone()] };
+                        let block = if joined { layer_ops::with_joined_at(s.project.root().expect("root"), &l, t) } else { vec![l.clone()] };
                         for id in &block {
                             if let Some(x) = s.project.layer_mut(&sym, id) {
                                 x.shown.track.put(Key::new(t, Value::B(false), Interp::Hold));
                             }
                         }
-                        // a figure on no frame at all is removed
+                        // a figure on no frame at all is removed (detaching any followers first)
                         let n = frame_ops::frame_count(s);
                         let fps = st_fps(&s.project);
                         for id in &block {
                             let gone = s.project.root().and_then(|r| r.layer(id)).is_some_and(|x| (0..n).all(|i| !Resolver::new(&s.project).b(&x.shown, i as f64 / fps)));
                             if gone {
+                                crate::edit::join_ops::detach_deleted_parent(s, &sym, id, t)?;
                                 structure::remove_layer(s, &sym, id)?;
                             }
                         }
@@ -1600,6 +1620,9 @@ impl Session {
                     let ids: Vec<String> = s.project.root().map(|r| r.layers.iter().map(|l| l.id.clone()).collect()).unwrap_or_default();
                     for id in ids {
                         if let Some(l) = s.project.layer_mut(&root, &id) {
+                            for j in &mut l.joins {
+                                j.time *= k;
+                            }
                             for p in l.properties_mut() {
                                 // stored handles (D34) are in seconds too, so they scale with the keys
                                 let keys: Vec<Key> = p.track.keys().iter().map(|q| Key { time: q.time * k, lh: (q.lh.0 * k, q.lh.1), rh: (q.rh.0 * k, q.rh.1), ..q.clone() }).collect();
@@ -1728,7 +1751,7 @@ impl Session {
                     let kind = self.project().root().and_then(|s| s.layer(&l)).map(|x| match &x.kind {
                         LayerKind::Figure(f) => (0u8, f.nodes().first().map(|n| n.id.clone())),
                         LayerKind::Text(_) => (1u8, None),
-                        LayerKind::Sprite(_) | LayerKind::Symbol(_) => (2u8, None),
+                        LayerKind::Sprite(_) | LayerKind::Symbol(_) | LayerKind::Adjustment => (2u8, None),
                         LayerKind::Camera(_) => (3u8, None),
                         _ => (4u8, None),
                     });
@@ -1823,8 +1846,12 @@ impl Session {
                 } else if let Some(l) = self.sel_layer() {
                     let root = self.tools.handles(self.project(), t).into_iter().find(|h| h.layer == l && h.root);
                     if let (Some(h), false) = (root, self.dragging()) {
+                        let fr = self.frame;
                         self.doc.begin("Nudge figure");
                         anchor_poses(&mut self.doc.state);
+                        if self.building.is_none() {
+                            let _ = crate::edit::block_ops::bake_pose_at(&mut self.doc.state, &sym, &l, fr);
+                        }
                         let stretch = self.tools.stretch;
                         self.tools.stretch = false;
                         self.tools.begin(&mut self.doc, &h, h.x, h.y, t);
@@ -2245,9 +2272,82 @@ impl Session {
                     }
                 }
             }
+            "add_adjustment" | "add_effect_layer" => {
+                let custom = c["name"].as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+                let after_layer = self.sel_layer().or_else(|| self.selected_text.clone());
+                let made = self.step("Add effect layer", |s| {
+                    let sym = s.project.root_symbol.clone();
+                    let n_adj = s.project.root().map(|r| r.layers.iter().filter(|l| matches!(l.kind, LayerKind::Adjustment)).count()).unwrap_or(0) + 1;
+                    let name = custom.unwrap_or_else(|| format!("Effect {n_adj}"));
+                    let id = s.project.new_id("L");
+                    let l = Layer::adjustment(&id, Some(&name));
+                    let at = s
+                        .project
+                        .root()
+                        .map(|r| {
+                            after_layer
+                                .as_deref()
+                                .and_then(|aid| r.layer_index(aid))
+                                .map(|i| i + 1)
+                                .unwrap_or(r.layers.len())
+                        })
+                        .unwrap_or(0);
+                    structure::add_layer(s, &sym, l, at)?;
+                    Ok(id)
+                });
+                if let Some(id) = made {
+                    self.selected = Some((id, String::new()));
+                    self.selected_text = None;
+                    self.selected_group = None;
+                    self.selected_script = None;
+                    self.multi.clear();
+                    if self.mode == Mode::Camera {
+                        self.mode = Mode::Figure;
+                    }
+                    self.validate();
+                    self.rev += 1;
+                }
+            }
+            "adjustment" => {
+                if let Some(l) = c["layer"].as_str().map(str::to_string).or_else(|| self.sel_layer()) {
+                    let c2 = c.clone();
+                    let keyed = c["keyed"].as_bool().unwrap_or(self.keying);
+                    self.step("Effect layer", move |s| {
+                        let tw = s.project.settings.tween_interp;
+                        let Some(x) = s.project.layer_mut(&sym, &l) else { return crate::edit::fail("no layer") };
+                        if !matches!(x.kind, LayerKind::Adjustment) {
+                            return crate::edit::fail("not an effect layer");
+                        }
+                        if let Some(v) = c2["opacity"].as_f64() {
+                            if v.is_finite() {
+                                let val = Value::F(v.clamp(0.0, 1.0) as f32);
+                                if !x.opacity.track.is_empty() || keyed {
+                                    let interp = crate::edit::editor::interp_at(&x.opacity, t, tw);
+                                    x.opacity.track.put(Key::new(t, val, interp));
+                                } else {
+                                    x.opacity.value = val;
+                                }
+                            }
+                        }
+                        if let Some(v) = c2["blend"].as_str().and_then(Blend::from_name) {
+                            x.blend = v;
+                        }
+                        if let Some(v) = c2["locked"].as_bool() {
+                            x.locked = v;
+                        }
+                        Ok(())
+                    });
+                }
+            }
             "delete_everywhere" | "delete_figure" => {
                 if let Some(l) = c["layer"].as_str().map(str::to_string).or_else(|| self.sel_layer()).or_else(|| self.selected_text.clone()) {
-                    if self.step("Delete figure", |s| structure::remove_layer(s, &sym, &l)).is_some() {
+                    if self
+                        .step("Delete figure", |s| {
+                            crate::edit::join_ops::detach_deleted_parent(s, &sym, &l, t)?;
+                            structure::remove_layer(s, &sym, &l)
+                        })
+                        .is_some()
+                    {
                         self.validate();
                     }
                 }
@@ -2313,8 +2413,12 @@ impl Session {
             }
             "rotate_figure" => {
                 if let Some(l) = self.sel_layer() {
+                    let fr = self.frame;
                     self.doc.begin("Rotate figure");
                     anchor_poses(&mut self.doc.state);
+                    if self.building.is_none() {
+                        let _ = crate::edit::block_ops::bake_pose_at(&mut self.doc.state, &sym, &l, fr);
+                    }
                     let r = self.tools.rotate_figure(&mut self.doc, &l, f("deg") as f64, t);
                     self.doc.commit();
                     if let Err(e) = r {
@@ -2423,7 +2527,11 @@ impl Session {
                 // the Frame page's "Add time here": a frame after this one with no
                 // keys of its own; every layer holds or tweens across it
                 let (fr, n) = (self.frame, c["n"].as_i64().unwrap_or(1).clamp(1, 100) as i32);
-                self.step("Add time", |s| frame_ops::insert_tweened(s, fr, n));
+                self.step("Add time", |s| {
+                    frame_ops::insert_tweened(s, fr, n)?;
+                    shift_joins_insert(s, fr, n);
+                    Ok(())
+                });
             }
             "blend" => {
                 if let Some(l) = self.sel_layer().or_else(|| self.selected_text.clone()) {
@@ -2476,12 +2584,17 @@ impl Session {
                     "block_move" => Some(TimelineDragKind::BlockMove),
                     "pose_key" => Some(TimelineDragKind::PoseKey),
                     "prop_key" => Some(TimelineDragKind::PropKey),
+                    "multi_shift" => Some(TimelineDragKind::MultiShift),
+                    "multi_scale" => Some(TimelineDragKind::MultiScale),
                     _ => None,
                 };
                 if let Some(kind) = kind {
                     let layer = c["layer"].as_str().map(str::to_string).or_else(|| self.sel_layer()).or_else(|| self.selected_text.clone()).unwrap_or_default();
                     let frame = c["frame"].as_i64().map(|v| v as i32).unwrap_or(self.frame);
                     let property = c["property"].as_str().map(str::to_string);
+                    let poses = parse_key_pairs(&c["poses"]);
+                    let props = parse_key_pairs(&c["props"]);
+                    let anchor = c["anchor"].as_i64().map(|v| v as i32).unwrap_or(frame);
                     let init_val = match kind {
                         TimelineDragKind::BlockEnd => {
                             let fps = st_fps(self.project());
@@ -2495,77 +2608,185 @@ impl Session {
                                         .or_else(|| crate::edit::block_ops::block_at(l, fps, frame).map(|(st, next)| next.unwrap_or(n) - st))
                                 })
                         }
+                        TimelineDragKind::MultiShift => Some(0),
+                        TimelineDragKind::MultiScale => None,
                         _ => Some(frame),
                     };
+                    let moved_poses = poses.clone();
+                    let moved_props = props.clone();
                     self.gesture = Gesture::TimelineDrag {
                         kind,
                         layer,
                         frame,
                         property,
+                        poses,
+                        props,
+                        anchor,
                         snapshot: self.doc.state.clone(),
                         orig_frame: self.frame,
                         last_val: init_val,
+                        last_factor: (kind == TimelineDragKind::MultiScale).then_some(1.0),
+                        moved_poses,
+                        moved_props,
                         started: false,
                     };
                     self.rev += 1;
                 }
             }
             "timeline_drag_move" => {
-                let target_val = match &self.gesture {
-                    Gesture::TimelineDrag { kind: TimelineDragKind::BlockEnd, .. } => c["frames"].as_i64().map(|v| v as i32),
-                    Gesture::TimelineDrag { .. } => c["to"].as_i64().map(|v| v as i32),
-                    _ => None,
-                };
-                if let Some(val) = target_val {
-                    match std::mem::replace(&mut self.gesture, Gesture::None) {
-                        Gesture::TimelineDrag { kind, layer, frame, property, snapshot, orig_frame, mut last_val, mut started } => {
-                            if last_val != Some(val) {
-                                let label = match kind {
-                                    TimelineDragKind::BlockEnd => "Pose length",
-                                    TimelineDragKind::BlockStart | TimelineDragKind::BlockMove | TimelineDragKind::PoseKey => "Move pose",
-                                    TimelineDragKind::PropKey => "Move key",
-                                };
-                                let mut trial = snapshot.clone();
-                                let res = match kind {
-                                    TimelineDragKind::BlockEnd => crate::edit::block_ops::set_block_length(&mut trial, &sym, &layer, frame, val),
-                                    TimelineDragKind::BlockStart | TimelineDragKind::BlockMove => crate::edit::block_ops::move_block(&mut trial, &sym, &layer, frame, val),
-                                    TimelineDragKind::PoseKey => crate::edit::block_ops::move_pose_key(&mut trial, &sym, &layer, frame, val),
-                                    TimelineDragKind::PropKey => match property.as_deref() {
-                                        Some(pid) => crate::edit::block_ops::move_prop_key(&mut trial, pid, frame, val),
-                                        None => crate::edit::fail("no property"),
-                                    },
-                                };
-                                match res {
-                                    Ok(()) => {
-                                        if !started {
-                                            self.doc.begin(label);
-                                            started = true;
-                                        }
-                                        snap_keys(&mut trial);
-                                        anchor_poses(&mut trial);
-                                        crate::edit::group_ops::tidy(&mut trial);
-                                        self.doc.state = trial;
-                                        last_val = Some(val);
-                                        let n = self.frame_count();
-                                        match kind {
-                                            TimelineDragKind::BlockStart | TimelineDragKind::BlockMove | TimelineDragKind::PoseKey | TimelineDragKind::PropKey => {
-                                                self.frame = val.clamp(0, n - 1);
-                                            }
-                                            TimelineDragKind::BlockEnd => {
+                let mut ret_moved: Option<(Vec<(String, i32)>, Vec<(String, i32)>)> = None;
+                match std::mem::replace(&mut self.gesture, Gesture::None) {
+                    Gesture::TimelineDrag {
+                        kind,
+                        layer,
+                        frame,
+                        property,
+                        poses,
+                        props,
+                        anchor,
+                        snapshot,
+                        orig_frame,
+                        mut last_val,
+                        mut last_factor,
+                        mut moved_poses,
+                        mut moved_props,
+                        mut started,
+                    } => {
+                        match kind {
+                            TimelineDragKind::MultiScale => {
+                                if let Some(fac) = c["factor"].as_f64().filter(|x| x.is_finite() && *x > 0.0) {
+                                    let fac = fac.clamp(0.05, 20.0);
+                                    if last_factor.is_none_or(|prev| (prev - fac).abs() > 1e-4) {
+                                        let mut trial = snapshot.clone();
+                                        match crate::edit::block_ops::scale_keys(&mut trial, &sym, &poses, &props, anchor, fac, true) {
+                                            Ok((mp, mq)) => {
+                                                if !started {
+                                                    self.doc.begin("Scale keys");
+                                                    started = true;
+                                                }
+                                                snap_keys(&mut trial);
+                                                anchor_poses(&mut trial);
+                                                crate::edit::group_ops::tidy(&mut trial);
+                                                self.doc.state = trial;
+                                                last_factor = Some(fac);
+                                                moved_poses = mp;
+                                                moved_props = mq;
+                                                let n = self.frame_count();
                                                 self.frame = self.frame.clamp(0, n - 1);
+                                                self.rev += 1;
+                                            }
+                                            Err(_) => {}
+                                        }
+                                    }
+                                    ret_moved = Some((moved_poses.clone(), moved_props.clone()));
+                                }
+                            }
+                            TimelineDragKind::MultiShift => {
+                                if let Some(by) = c["by"].as_i64().map(|v| v as i32) {
+                                    if last_val != Some(by) {
+                                        let mut trial = snapshot.clone();
+                                        match crate::edit::block_ops::shift_keys_ex(&mut trial, &sym, &poses, &props, by, true) {
+                                            Ok((mp, mq)) => {
+                                                if !started {
+                                                    self.doc.begin("Shift keys");
+                                                    started = true;
+                                                }
+                                                snap_keys(&mut trial);
+                                                anchor_poses(&mut trial);
+                                                crate::edit::group_ops::tidy(&mut trial);
+                                                self.doc.state = trial;
+                                                last_val = Some(by);
+                                                moved_poses = mp;
+                                                moved_props = mq;
+                                                let n = self.frame_count();
+                                                self.frame = self.frame.clamp(0, n - 1);
+                                                self.rev += 1;
+                                            }
+                                            Err(_) => {}
+                                        }
+                                    }
+                                    ret_moved = Some((moved_poses.clone(), moved_props.clone()));
+                                }
+                            }
+                            _ => {
+                                let target_val = match kind {
+                                    TimelineDragKind::BlockEnd => c["frames"].as_i64().map(|v| v as i32),
+                                    _ => c["to"].as_i64().map(|v| v as i32),
+                                };
+                                if let Some(val) = target_val {
+                                    if last_val != Some(val) {
+                                        let label = match kind {
+                                            TimelineDragKind::BlockEnd => "Pose length",
+                                            TimelineDragKind::BlockStart | TimelineDragKind::BlockMove | TimelineDragKind::PoseKey => "Move pose",
+                                            TimelineDragKind::PropKey => "Move key",
+                                            _ => "Move keys",
+                                        };
+                                        let mut trial = snapshot.clone();
+                                        let res = match kind {
+                                            TimelineDragKind::BlockEnd => crate::edit::block_ops::set_block_length(&mut trial, &sym, &layer, frame, val),
+                                            TimelineDragKind::BlockStart | TimelineDragKind::BlockMove => crate::edit::block_ops::move_block(&mut trial, &sym, &layer, frame, val),
+                                            TimelineDragKind::PoseKey => crate::edit::block_ops::move_pose_key(&mut trial, &sym, &layer, frame, val),
+                                            TimelineDragKind::PropKey => match property.as_deref() {
+                                                Some(pid) => crate::edit::block_ops::move_prop_key(&mut trial, pid, frame, val),
+                                                None => crate::edit::fail("no property"),
+                                            },
+                                            _ => Ok(()),
+                                        };
+                                        match res {
+                                            Ok(()) => {
+                                                if !started {
+                                                    self.doc.begin(label);
+                                                    started = true;
+                                                }
+                                                snap_keys(&mut trial);
+                                                anchor_poses(&mut trial);
+                                                crate::edit::group_ops::tidy(&mut trial);
+                                                self.doc.state = trial;
+                                                last_val = Some(val);
+                                                let n = self.frame_count();
+                                                match kind {
+                                                    TimelineDragKind::BlockStart | TimelineDragKind::BlockMove | TimelineDragKind::PoseKey | TimelineDragKind::PropKey => {
+                                                        self.frame = val.clamp(0, n - 1);
+                                                    }
+                                                    TimelineDragKind::BlockEnd => {
+                                                        self.frame = self.frame.clamp(0, n - 1);
+                                                    }
+                                                    _ => {}
+                                                }
+                                                self.rev += 1;
+                                            }
+                                            Err(_) => {
+                                                // Silently hold previous valid preview state when crossing occupied frames mid-drag
                                             }
                                         }
-                                        self.rev += 1;
-                                    }
-                                    Err(_) => {
-                                        // Silently hold previous valid preview state when crossing occupied frames mid-drag
                                     }
                                 }
                             }
-                            self.gesture = Gesture::TimelineDrag { kind, layer, frame, property, snapshot, orig_frame, last_val, started };
                         }
-                        other => self.gesture = other,
+                        self.gesture = Gesture::TimelineDrag {
+                            kind,
+                            layer,
+                            frame,
+                            property,
+                            poses,
+                            props,
+                            anchor,
+                            snapshot,
+                            orig_frame,
+                            last_val,
+                            last_factor,
+                            moved_poses,
+                            moved_props,
+                            started,
+                        };
                     }
+                    other => self.gesture = other,
+                }
+                if let Some((mp, mq)) = ret_moved {
+                    let mut st = self.state();
+                    st["movedPoses"] = json!(mp.iter().map(|(l, f)| json!([l, f])).collect::<Vec<_>>());
+                    st["movedProps"] = json!(mq.iter().map(|(p, f)| json!([p, f])).collect::<Vec<_>>());
+                    return st;
                 }
             }
             "move_pose_key" => {
@@ -2646,9 +2867,34 @@ impl Session {
                 let poses = parse_key_pairs(&c["poses"]);
                 let props = parse_key_pairs(&c["props"]);
                 let by = c["by"].as_i64().unwrap_or(0) as i32;
+                let overwrite = c.get("overwrite").and_then(|v| v.as_bool()).unwrap_or(true);
+                let mut moved = (poses.clone(), props.clone());
                 if by != 0 && (!poses.is_empty() || !props.is_empty()) {
-                    self.step("Shift keys", |s| crate::edit::block_ops::shift_keys(s, &sym, &poses, &props, by));
+                    if let Some(m) = self.step("Shift keys", |s| crate::edit::block_ops::shift_keys_ex(s, &sym, &poses, &props, by, overwrite)) {
+                        moved = m;
+                    }
                 }
+                let mut st = self.state();
+                st["movedPoses"] = json!(moved.0.iter().map(|(l, f)| json!([l, f])).collect::<Vec<_>>());
+                st["movedProps"] = json!(moved.1.iter().map(|(p, f)| json!([p, f])).collect::<Vec<_>>());
+                return st;
+            }
+            "scale_keys" => {
+                let poses = parse_key_pairs(&c["poses"]);
+                let props = parse_key_pairs(&c["props"]);
+                let anchor = c["anchor"].as_i64().map(|v| v as i32).unwrap_or(self.frame);
+                let factor = c["factor"].as_f64().unwrap_or(1.0);
+                let overwrite = c.get("overwrite").and_then(|v| v.as_bool()).unwrap_or(true);
+                let mut moved = (poses.clone(), props.clone());
+                if (factor - 1.0).abs() > 1e-6 && (!poses.is_empty() || !props.is_empty()) {
+                    if let Some(m) = self.step("Scale keys", |s| crate::edit::block_ops::scale_keys(s, &sym, &poses, &props, anchor, factor, overwrite)) {
+                        moved = m;
+                    }
+                }
+                let mut st = self.state();
+                st["movedPoses"] = json!(moved.0.iter().map(|(l, f)| json!([l, f])).collect::<Vec<_>>());
+                st["movedProps"] = json!(moved.1.iter().map(|(p, f)| json!([p, f])).collect::<Vec<_>>());
+                return st;
             }
             "delete_keys" => {
                 let poses = parse_key_pairs(&c["poses"]);
@@ -2730,6 +2976,20 @@ impl Session {
                 // joined where it was (one step); the new figure is selected
                 if let Some((l, n)) = self.selected.clone() {
                     if let Some(id) = self.step("Break off", |s| crate::edit::join_ops::break_off(s, &sym, &l, &n)) {
+                        self.selected = Some((id, n));
+                        self.rev += 1;
+                    }
+                }
+            }
+            "separate_node" => {
+                // Round 3: extract non-root joint + descendant subtree into a new
+                // independent Stickfigure layer, Absolute-Joined to its former parent
+                let target = match (c["layer"].as_str(), c["node"].as_str()) {
+                    (Some(l), Some(n)) => Some((l.to_string(), n.to_string())),
+                    _ => self.selected.clone(),
+                };
+                if let Some((l, n)) = target {
+                    if let Some(id) = self.step("Separate joint", |s| crate::edit::join_ops::separate_node(s, &sym, &l, &n)) {
                         self.selected = Some((id, n));
                         self.rev += 1;
                     }
@@ -2892,7 +3152,13 @@ impl Session {
                     let Some(lay) = lay else { return self.state() };
                     let (x, y, rot, sx, sy) = (r.f(&lay.transform.x, t), r.f(&lay.transform.y, t), r.f(&lay.transform.rotation, t), r.f(&lay.transform.scale_x, t), r.f(&lay.transform.scale_y, t));
                     let ids = (lay.transform.x.id.clone(), lay.transform.y.id.clone(), lay.transform.rotation.id.clone(), lay.transform.scale_x.id.clone(), lay.transform.scale_y.id.clone());
+                    let fr = self.frame;
+                    let building = self.building.is_some();
                     self.step("Stickfigure", move |s| {
+                        let pose_edit = c2["scale"].is_number() || c2["angle"].is_number() || c2["turn"].is_number() || c2["center"].as_bool() == Some(true);
+                        if pose_edit && !building {
+                            crate::edit::block_ops::bake_pose_at(s, &sym, &l, fr)?;
+                        }
                         if let Some(v) = c2["scale"].as_f64() {
                             let v = v.clamp(0.01, 100.0) as f32;
                             // keep the sign (a flipped figure stays flipped)
@@ -2941,7 +3207,12 @@ impl Session {
                 if let Some((l, n)) = self.selected.clone() {
                     let c2 = c.clone();
                     let ed = self.tools.editor.clone();
+                    let fr = self.frame;
+                    let building = self.building.is_some();
                     self.step("Segment", move |s| {
+                        if (c2["length"].is_number() || c2["angle"].is_number()) && !building {
+                            crate::edit::block_ops::bake_pose_at(s, &sym, &l, fr)?;
+                        }
                         if let Some(v) = c2["length"].as_f64() {
                             let id = s.project.root().and_then(|r| r.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.node(&n)).map(|x| x.length.id.clone());
                             if let Some(id) = id {
@@ -3131,6 +3402,7 @@ impl Session {
             }
             "join" => {
                 self.joining = self.sel_layer();
+                self.joining_absolute = c["mode"].as_str() == Some("absolute");
                 self.rev += 1;
             }
             "join_to" => {
@@ -3138,8 +3410,10 @@ impl Session {
                 // `layer` at joint `node` (or the figure itself)
                 if let (Some(child), Some(target)) = (self.sel_layer(), c["layer"].as_str().map(str::to_string)) {
                     let node = c["node"].as_str().map(str::to_string);
-                    self.step("Join", |s| crate::edit::join_ops::join(s, &sym, &child, &target, node.as_deref(), true, t));
+                    let abs = c["mode"].as_str() == Some("absolute");
+                    self.step("Join", |s| crate::edit::join_ops::join_mode(s, &sym, &child, &target, node.as_deref(), true, abs, t));
                     self.joining = None;
+                    self.joining_absolute = false;
                 }
             }
             "join_here" | "let_go_here" => {
@@ -3149,25 +3423,36 @@ impl Session {
                     let let_go = c["op"] == "let_go_here";
                     let target = c["layer"].as_str().map(str::to_string);
                     let node = c["node"].as_str().map(str::to_string);
+                    let abs = !let_go && c["mode"].as_str() == Some("absolute");
                     if !let_go && target.is_none() {
                         self.message = "Pick the figure to join first.".into();
                     } else {
-                        self.step(if let_go { "Let go" } else { "Join" }, |s| crate::edit::join_ops::switch_at(s, &sym, &child, if let_go { None } else { target.as_deref() }, node.as_deref(), true, t));
+                        self.step(if let_go { "Let go" } else { "Join" }, |s| {
+                            crate::edit::join_ops::switch_at_mode(s, &sym, &child, if let_go { None } else { target.as_deref() }, node.as_deref(), true, abs, t)
+                        });
                     }
                 }
             }
             "join_cancel" => {
                 self.joining = None;
+                self.joining_absolute = false;
                 self.rev += 1;
             }
             "unjoin" => {
-                // D8: letting go is a moment too (from this frame on; on the
-                // first frame, for the whole animation)
+                // Round 3: full unjoin when `all == true`, on frame 0, or when the layer
+                // is not shown on any frame before `self.frame`; otherwise let go from here.
                 if let Some(l) = self.sel_layer() {
-                    if t > 1e-9 {
-                        self.step("Let go", |s| crate::edit::join_ops::switch_at(s, &sym, &l, None, None, true, t));
-                    } else {
+                    let all = c["all"].as_bool().unwrap_or(false);
+                    let fps = st_fps(self.project());
+                    let shown_before = self
+                        .project()
+                        .root()
+                        .and_then(|r| r.layer(&l))
+                        .is_some_and(|x| (0..self.frame).any(|fr| crate::edit::block_ops::shown_at(x, fr, fps)));
+                    if all || t <= 1e-9 || !shown_before {
                         self.step("Unjoin", |s| crate::edit::join_ops::unjoin(s, &sym, &l, t));
+                    } else {
+                        self.step("Let go", |s| crate::edit::join_ops::switch_at_mode(s, &sym, &l, None, None, true, false, t));
                     }
                 }
             }
@@ -3582,13 +3867,10 @@ impl Session {
             }
             "library_delete" => {
                 // Library Tools: a figure, movieclip or sprite off every frame (the
-                // ones joined to it stay where they are, unjoined)
+                // ones joined to it — static or timed — stay where they are, unjoined)
                 if let Some(id) = c["layer"].as_str().map(str::to_string) {
                     self.step("Delete from project", |s| {
-                        let kids: Vec<String> = s.project.root().map(|r| r.layers.iter().filter(|x| x.parent.as_deref() == Some(id.as_str())).map(|x| x.id.clone()).collect()).unwrap_or_default();
-                        for k in kids {
-                            crate::edit::join_ops::unjoin(s, &sym, &k, t)?;
-                        }
+                        crate::edit::join_ops::detach_deleted_parent(s, &sym, &id, t)?;
                         structure::remove_layer(s, &sym, &id)
                     });
                     if self.selected.as_ref().is_some_and(|(l, _)| l == c["layer"].as_str().unwrap_or("")) {
@@ -3966,6 +4248,125 @@ impl Session {
                     });
                 }
             }
+            "fx_add" => {
+                if let Some(ty) = c["type"].as_str().map(str::to_string) {
+                    let mix = c["mix"].as_f64().map(|v| v as f32);
+                    let params = c["params"].as_object().cloned();
+                    let target = self.fx_target(c);
+                    if let Some((is_group, tid)) = target {
+                        self.step("Add effect", |s| {
+                            let tgt = if is_group { crate::edit::filters::StackTarget::Group(&tid) } else { crate::edit::filters::StackTarget::Layer(&tid) };
+                            crate::edit::filters::fx_add(s, &sym, tgt, &ty, mix, params.as_ref()).map(|_| ())
+                        });
+                    }
+                }
+            }
+            "fx_set" => {
+                if let Some(fx_id) = c["id"].as_str().map(str::to_string) {
+                    let c2 = c.clone();
+                    let keyed = c["key"].as_bool().or_else(|| c["keyed"].as_bool()).unwrap_or(self.keying);
+                    if let Some((is_group, tid)) = self.fx_target(c) {
+                        self.step("Edit effect", move |s| {
+                            let tgt = if is_group { crate::edit::filters::StackTarget::Group(&tid) } else { crate::edit::filters::StackTarget::Layer(&tid) };
+                            crate::edit::filters::fx_set(s, &sym, tgt, &fx_id, &c2, t, keyed)
+                        });
+                    }
+                }
+            }
+            "fx_key" => {
+                let fx_id = c["id"].as_str().map(str::to_string);
+                let param = c["param"].as_str().map(str::to_string);
+                let prop_id = c["property"].as_str().or_else(|| c["propId"].as_str()).map(str::to_string);
+                let fr = c["frame"].as_i64().map(|v| v as i32).unwrap_or(self.frame);
+                let on = c["on"].as_bool();
+                let layer = c["layer"]
+                    .as_str()
+                    .map(str::to_string)
+                    .or_else(|| self.sel_layer())
+                    .or_else(|| self.selected_text.clone())
+                    .unwrap_or_default();
+                if let Some((pid, now_keyed)) = self.step("Keyframe effect", |s| {
+                    crate::edit::filters::fx_key(s, &sym, &layer, fx_id.as_deref(), param.as_deref(), prop_id.as_deref(), fr, on)
+                }) {
+                    if now_keyed {
+                        self.curve_shown.insert(pid);
+                    }
+                    self.rev += 1;
+                }
+            }
+            "fx_reorder" => {
+                if let Some(fx_id) = c["id"].as_str().map(str::to_string) {
+                    let to = c["to"].as_u64().map(|v| v as usize);
+                    let dir = c["dir"].as_i64().or_else(|| c["delta"].as_i64()).map(|v| v as i32);
+                    if let Some((is_group, tid)) = self.fx_target(c) {
+                        self.step("Reorder effect", |s| {
+                            let tgt = if is_group { crate::edit::filters::StackTarget::Group(&tid) } else { crate::edit::filters::StackTarget::Layer(&tid) };
+                            crate::edit::filters::fx_reorder(s, &sym, tgt, &fx_id, to, dir)
+                        });
+                    }
+                }
+            }
+            "fx_duplicate" => {
+                if let Some(fx_id) = c["id"].as_str().map(str::to_string) {
+                    if let Some((is_group, tid)) = self.fx_target(c) {
+                        self.step("Duplicate effect", |s| {
+                            let tgt = if is_group { crate::edit::filters::StackTarget::Group(&tid) } else { crate::edit::filters::StackTarget::Layer(&tid) };
+                            crate::edit::filters::fx_duplicate(s, &sym, tgt, &fx_id).map(|_| ())
+                        });
+                    }
+                }
+            }
+            "fx_remove" => {
+                if let Some(fx_id) = c["id"].as_str().map(str::to_string) {
+                    if let Some((is_group, tid)) = self.fx_target(c) {
+                        self.step("Remove effect", |s| {
+                            let tgt = if is_group { crate::edit::filters::StackTarget::Group(&tid) } else { crate::edit::filters::StackTarget::Layer(&tid) };
+                            crate::edit::filters::fx_remove(s, &sym, tgt, &fx_id)
+                        });
+                    }
+                }
+            }
+            "fx_preset" => {
+                let effects: Vec<J> = c["effects"].as_array().cloned().unwrap_or_default();
+                let replace = c["replace"].as_bool().unwrap_or(false);
+                let force_layer = c["createLayer"].as_bool().unwrap_or(false);
+                let preset_name = c["name"].as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+                if !effects.is_empty() {
+                    let target = if force_layer { None } else { self.fx_target(c) };
+                    let made_adj = self.step("Apply effect preset", |s| {
+                        match target {
+                            Some((is_group, tid)) => {
+                                let tgt = if is_group { crate::edit::filters::StackTarget::Group(&tid) } else { crate::edit::filters::StackTarget::Layer(&tid) };
+                                crate::edit::filters::fx_preset(s, &sym, tgt, &effects, replace)?;
+                                Ok(None)
+                            }
+                            None => {
+                                // Auto-create an Adjustment layer for 1-tap Workshop presets when nothing is selected!
+                                let n_adj = s.project.root().map(|r| r.layers.iter().filter(|l| matches!(l.kind, LayerKind::Adjustment)).count()).unwrap_or(0) + 1;
+                                let name = preset_name.unwrap_or_else(|| format!("Effect {n_adj}"));
+                                let id = s.project.new_id("L");
+                                let l = Layer::adjustment(&id, Some(&name));
+                                let at = s.project.root().map(|r| r.layers.len()).unwrap_or(0);
+                                structure::add_layer(s, &sym, l, at)?;
+                                crate::edit::filters::fx_preset(s, &sym, crate::edit::filters::StackTarget::Layer(&id), &effects, false)?;
+                                Ok(Some(id))
+                            }
+                        }
+                    });
+                    if let Some(Some(adj_id)) = made_adj {
+                        self.selected = Some((adj_id, String::new()));
+                        self.selected_text = None;
+                        self.selected_group = None;
+                        self.selected_script = None;
+                        self.multi.clear();
+                        if self.mode == Mode::Camera {
+                            self.mode = Mode::Figure;
+                        }
+                        self.validate();
+                        self.rev += 1;
+                    }
+                }
+            }
             _ => self.message = format!("unknown command {op}"),
         }
         // G5: the group lasts while its first figure stays selected
@@ -4114,7 +4515,21 @@ impl Session {
         Some((stock, [(sx0 + sx1) / 2.0 + dx, by0 - 34.0]))
     }
 
-    /// D34 (the graph): the selected figure's values that change (and those
+    /// Resolves target `(is_group, id)` for stacked effect ops (`fx_*`).
+    fn fx_target(&self, c: &J) -> Option<(bool, String)> {
+        if let Some(gid) = c["group"].as_str() {
+            return Some((true, gid.to_string()));
+        }
+        if let Some(lid) = c["layer"].as_str() {
+            return Some((false, lid.to_string()));
+        }
+        if self.selected_group.is_some() && self.sel_layer().is_none() && self.selected_text.is_none() {
+            return self.selected_group.clone().map(|g| (true, g));
+        }
+        self.sel_layer().or_else(|| self.selected_text.clone()).map(|l| (false, l))
+    }
+
+    /// D34 (the graph): the selected layer's values that change (and those
     /// shown on purpose), each with its keys, handles and the exact shape of
     /// every stretch; and the values that can be added. Only while Curves is
     /// open.
@@ -4122,30 +4537,31 @@ impl Session {
         if !self.curves {
             return None;
         }
-        let lid = self.sel_layer()?;
+        let lid = self.sel_layer().or_else(|| self.selected_text.clone())?;
         let l = p.root()?.layer(&lid)?;
-        let f = l.as_figure()?;
         let fps = st_fps(p);
         let sel_node = self.selected.as_ref().map(|(_, n)| n.clone()).unwrap_or_default();
-        let root = f.nodes().first().map(|n| n.id.clone()).unwrap_or_default();
+        let root = l.as_figure().and_then(|f| f.nodes().first().map(|n| n.id.clone())).unwrap_or_default();
         let fig = l.name.clone().unwrap_or_else(|| l.id.clone());
         // (value, name, group, unit, the joint it belongs to)
         let mut cands: Vec<(&Property, String, String, &str, String)> = Vec::new();
-        let tr = &l.transform;
-        for (q, name, unit) in [(&tr.x, "Main joint x", "size"), (&tr.y, "Main joint y", "size"), (&tr.rotation, "Figure turn", "deg"), (&tr.scale_x, "Figure scale x", "ratio"), (&tr.scale_y, "Figure scale y", "ratio")] {
-            cands.push((q, name.into(), "Main joint".into(), unit, root.clone()));
-        }
-        for (i, n) in f.nodes().iter().enumerate() {
-            if n.parent.is_none() {
-                continue;
+        if let Some(f) = l.as_figure() {
+            let tr = &l.transform;
+            for (q, name, unit) in [(&tr.x, "Main joint x", "size"), (&tr.y, "Main joint y", "size"), (&tr.rotation, "Figure turn", "deg"), (&tr.scale_x, "Figure scale x", "ratio"), (&tr.scale_y, "Figure scale y", "ratio")] {
+                cands.push((q, name.into(), "Main joint".into(), unit, root.clone()));
             }
-            let part = part_label(n, i);
-            for (q, what, unit) in [(&n.rotation, "angle", "deg"), (&n.length, "length", "size"), (&n.thickness, "thickness", "size"), (&n.scale, "scale", "ratio"), (&n.color, "colour", "colour"), (&n.outline_color, "outline colour", "colour"), (&n.gradient_color, "gradient colour", "colour")] {
-                cands.push((q, format!("{part} {what}"), part.clone(), unit, n.id.clone()));
+            for (i, n) in f.nodes().iter().enumerate() {
+                if n.parent.is_none() {
+                    continue;
+                }
+                let part = part_label(n, i);
+                for (q, what, unit) in [(&n.rotation, "angle", "deg"), (&n.length, "length", "size"), (&n.thickness, "thickness", "size"), (&n.scale, "scale", "ratio"), (&n.color, "colour", "colour"), (&n.outline_color, "outline colour", "colour"), (&n.gradient_color, "gradient colour", "colour")] {
+                    cands.push((q, format!("{part} {what}"), part.clone(), unit, n.id.clone()));
+                }
             }
         }
         cands.push((&l.opacity, "Opacity".into(), fig.clone(), "ratio", String::new()));
-        for e in l.effects.nodes.values() {
+        for e in l.effects.chain() {
             for q in std::iter::once(&e.mix).chain(e.params.values()) {
                 let unit = if matches!(q.value, Value::C(_)) { "colour" } else { "ratio" };
                 cands.push((q, prop_label(l, &q.id), fig.clone(), unit, String::new()));
@@ -4422,6 +4838,7 @@ impl Session {
                 "figureCount": p.root()?.layers.iter().filter(|x| x.as_figure().is_some()).count(),
                 "filters": crate::edit::filters::state(p, &p.root_symbol, l, t),
                 "pluginEffects": crate::edit::filters::plugin_state(p, layer, t),
+                "effectStack": crate::edit::filters::stack_state(p, &layer.effects, t, st_fps(p), self.frame),
             }))
         });
         let textfield = self.selected_text.as_ref().and_then(|id| {
@@ -4443,6 +4860,7 @@ impl Session {
                 "locked": layer.locked,
                 "x": round2(cx), "y": round2(cy),
                 "x0": round2(x0), "y0": round2(y0), "x1": round2(x1), "y1": round2(y1),
+                "effectStack": crate::edit::filters::stack_state(p, &layer.effects, t, st_fps(p), self.frame),
             }))
         });
         // Auto-camera starting on this frame: its end frame and ease
@@ -4464,7 +4882,8 @@ impl Session {
             let LayerKind::Symbol(sl) = &layer.kind else { return None };
             let mut r = Resolver::new(p);
             let mode = match sl.loop_mode { SymbolLoop::Once => "once", SymbolLoop::Loop => "loop", SymbolLoop::PingPong => "pingpong" };
-            Some(json!({"layer": l, "name": layer.name.clone().unwrap_or_else(|| l.clone()), "loop": mode, "speed": round2(r.d(&sl.speed, t) as f32), "offset": round2(r.d(&sl.time_offset, t) as f32), "frames": p.symbol(&sl.symbol).map(|s| (s.duration * st_fps(p)).round() as i64).unwrap_or(0)}))
+            Some(json!({"layer": l, "name": layer.name.clone().unwrap_or_else(|| l.clone()), "loop": mode, "speed": round2(r.d(&sl.speed, t) as f32), "offset": round2(r.d(&sl.time_offset, t) as f32), "frames": p.symbol(&sl.symbol).map(|s| (s.duration * st_fps(p)).round() as i64).unwrap_or(0),
+                "effectStack": crate::edit::filters::stack_state(p, &layer.effects, t, st_fps(p), self.frame)}))
         });
         // the motion path: the selected joint's place on every frame, and the
         // frames its figure has poses on (numbered on the stage)
@@ -4494,6 +4913,32 @@ impl Session {
                 "blend": layer.blend.name(), "locked": layer.locked,
                 "box": self.tools.sprite_box(p, l, t).map(|b| b.iter().map(|v| round2(*v)).collect::<Vec<_>>()),
                 "cameraLocked": layer.parent.as_ref().and_then(|pid| p.root()?.layer(pid)).is_some_and(|x| matches!(x.kind, LayerKind::Camera(_))),
+                "effectStack": crate::edit::filters::stack_state(p, &layer.effects, t, st_fps(p), self.frame),
+            }))
+        });
+        // Round 3: Effect (Adjustment) layer inspector state
+        let adjustment = self.selected.as_ref().and_then(|(l, n)| {
+            if !n.is_empty() {
+                return None;
+            }
+            let layer = p.root()?.layer(l)?;
+            if !matches!(layer.kind, LayerKind::Adjustment) {
+                return None;
+            }
+            let fps = st_fps(p);
+            let mut r = Resolver::new(p);
+            let op_keys: Vec<i32> = layer.opacity.track.keys().iter().map(|k| (k.time * fps).round() as i32).collect();
+            Some(json!({
+                "layer": l,
+                "name": layer.name.clone().unwrap_or_else(|| l.clone()),
+                "opacity": round2(r.f(&layer.opacity, t)),
+                "opacityPropId": layer.opacity.id,
+                "opacityKeyed": op_keys.contains(&self.frame),
+                "opacityAnimated": !op_keys.is_empty(),
+                "blend": layer.blend.name(),
+                "visible": layer.visible,
+                "locked": layer.locked,
+                "effectStack": crate::edit::filters::stack_state(p, &layer.effects, t, fps, self.frame),
             }))
         });
         // Lock Figure To Camera: the locked ones (parallax in the original's units)
@@ -4662,18 +5107,31 @@ impl Session {
                             LayerKind::Text(_) => "text",
                             LayerKind::Symbol(_) => "movieclip",
                             LayerKind::Camera(_) => "camera",
+                            LayerKind::Adjustment => "adjustment",
                             _ => "other",
                         };
-                        // H3: animated values other than the pose (effects, opacity,
-                        // colours): a thin row each, a diamond on every key
+                        // H3 / Round 3: animated values other than the pose (effects, opacity,
+                        // colours): a thin row each, a diamond on every key. Any stacked FX*
+                        // effect property (or explicitly shown curve) shows from its very first key!
                         let pose_ids: std::collections::HashSet<&str> = props.iter().map(|q| q.id.as_str()).collect();
+                        let fx_ids: std::collections::HashSet<&str> = l
+                            .effects
+                            .nodes
+                            .values()
+                            .filter(|e| !e.id.starts_with("filter."))
+                            .flat_map(|e| std::iter::once(e.mix.id.as_str()).chain(e.params.values().map(|q| q.id.as_str())))
+                            .collect();
                         let animated: Vec<J> = l
                             .properties()
                             .into_iter()
                             .filter(|q| q.id != l.shown.id && !pose_ids.contains(q.id.as_str()))
                             .filter_map(|q| {
                                 let keys = q.track.keys();
-                                let show = keys.len() > 1 && (keys.iter().any(|k| k.value != keys[0].value) || self.curve_shown.contains(&q.id));
+                                let show = if fx_ids.contains(q.id.as_str()) {
+                                    !keys.is_empty()
+                                } else {
+                                    (keys.len() > 1 && keys.iter().any(|k| k.value != keys[0].value)) || (!keys.is_empty() && self.curve_shown.contains(&q.id))
+                                };
                                 show.then(|| {
                                     let marks: Vec<i32> = keys.iter().map(|k| (k.time * fps).round() as i32).collect();
                                     let eases: Vec<&'static str> = keys.iter().map(key_ease_name).collect();
@@ -4681,9 +5139,10 @@ impl Session {
                                 })
                             })
                             .collect();
-                        json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone()), "kind": kind, "visible": l.visible, "locked": l.locked, "on": on, "blocks": blocks, "blockEases": block_eases, "joined": l.parent.is_some(),
-                            // M5: what it is joined to (the chain on its row)
-                            "joinedTo": l.parent.as_ref().and_then(|pid| s.layer(pid)).filter(|x| !matches!(x.kind, LayerKind::Camera(_))).map(|x| x.name.clone().unwrap_or_else(|| x.id.clone())),
+                        let cur_parent = l.parent_at(t).0;
+                        json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone()), "kind": kind, "visible": l.visible, "locked": l.locked, "on": on, "blocks": blocks, "blockEases": block_eases, "joined": cur_parent.is_some(),
+                            // M5 / Round 3: what it is joined to AT CURRENT TIME t (fixes stale joined status after unjoin!)
+                            "joinedTo": cur_parent.and_then(|pid| s.layer(pid)).filter(|x| !matches!(x.kind, LayerKind::Camera(_))).map(|x| x.name.clone().unwrap_or_else(|| x.id.clone())),
                             // I2: joins over time, [frame, joined to (null: lets go), what it let go of]
                             "joins": l.joins.iter().enumerate().map(|(i, j)| {
                                 let name = |id: Option<&str>| id.and_then(|pid| s.layer(pid)).map(|x| x.name.clone().unwrap_or_else(|| x.id.clone()));
@@ -4722,7 +5181,7 @@ impl Session {
             let k = self.keys_at(t, None);
             !k.is_empty() && k.iter().all(|r| p.property(&r.property).and_then(|q| q.track.keys().iter().find(|x| x.time == r.time)).is_some_and(|x| x.interp == Interp::Hold))
         };
-        json!({
+        let mut out = json!({
             "rev": self.rev, "frame": self.frame, "frames": frames, "fps": p.settings.fps,
             "w": p.settings.width, "h": p.settings.height, "keyed": keyed,
             "canUndo": self.doc.can_undo(), "canRedo": self.doc.can_redo(),
@@ -4788,6 +5247,7 @@ impl Session {
                     // the effects that are on (a switched-off one keeps its settings, silent)
                     "effects": group_on(p, gid),
                     "filters": crate::edit::filters::group_state(p, &p.root_symbol, gid),
+                    "effectStack": crate::edit::filters::stack_state(p, &g.effects, t, st_fps(p), self.frame),
                     "members": members.iter().map(|l| json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone())})).collect::<Vec<_>>()}))
             }),
             "groups": p.root().map(|r| r.groups.iter().map(|g| json!({
@@ -4815,7 +5275,11 @@ impl Session {
             "building": self.building.as_ref().and_then(|b| p.root()?.layer(b)).map(|l| json!({"layer": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone())})),
             "builtins": crate::figures::ALL.iter().map(|(id, name)| json!({"id": id, "name": name})).collect::<Vec<_>>(),
             "message": self.message,
-        })
+        });
+        out["adjustment"] = json!(adjustment);
+        out["effectCatalog"] = crate::edit::filters::catalog_json();
+        out["joiningMode"] = json!(if self.joining_absolute { "absolute" } else { "relative" });
+        out
     }
 
     /// Which frames have keys, in one pass over every key (hidden figures' keys don't count).
@@ -5379,7 +5843,7 @@ fn shape_handle(tr: &mut Track, i: usize, right: bool, h: (f64, f64), first: boo
 }
 
 /// A readable name for a layer's property (H3 property rows): "Glow amount",
-/// "Blur radius", "Opacity", "armR1 colour".
+/// "Blur radius", "Opacity", "armR1 colour", or stacked effect labels from `fx::meta`.
 fn prop_label(l: &Layer, id: &str) -> String {
     let rest = id.strip_prefix(&format!("{}/", l.id)).unwrap_or(id);
     let word = |p: &str| match p {
@@ -5408,9 +5872,91 @@ fn prop_label(l: &Layer, id: &str) -> String {
             };
             return if kind == "invert" && param == "mix" { name.into() } else { format!("{name} {}", word(param)) };
         }
+        if let Some(e) = l.effects.nodes.get(node) {
+            let base_name = crate::fx::meta(&e.ty)
+                .map(|m| m.label.to_string())
+                .or_else(|| e.ty.strip_prefix("plugin:").and_then(|pid| crate::plugins::definition(pid).map(|d| d.name)))
+                .unwrap_or_else(|| node.to_string());
+            let same_ty: Vec<&str> = l.effects.chain().into_iter().filter(|x| x.ty == e.ty).map(|x| x.id.as_str()).collect();
+            let fx_name = if same_ty.len() > 1 {
+                let idx = same_ty.iter().position(|x| *x == node).unwrap_or(0) + 1;
+                format!("{base_name} {idx}")
+            } else {
+                base_name
+            };
+            let p_label = if param == "mix" {
+                "mix".to_string()
+            } else {
+                crate::fx::meta(&e.ty)
+                    .and_then(|m| m.params.iter().find(|pm| pm.name == param))
+                    .map(|pm| pm.label.to_lowercase())
+                    .unwrap_or_else(|| word(param))
+            };
+            return format!("{fx_name} {p_label}");
+        }
         return format!("{node} {}", word(param));
     }
     rest.to_string()
+}
+
+/// Shifts timed `JoinSwitch` times forward when `count` frames are inserted after `frame`.
+fn shift_joins_insert(st: &mut crate::edit::State, frame: i32, count: i32) {
+    if count <= 0 {
+        return;
+    }
+    let fps = st_fps(&st.project);
+    let t = frame as f64 / fps;
+    let dt = count as f64 / fps;
+    let eps = 0.25 / fps;
+    let sym = st.project.root_symbol.clone();
+    let ids: Vec<String> = st.project.root().map(|r| r.layers.iter().filter(|l| !l.joins.is_empty()).map(|l| l.id.clone()).collect()).unwrap_or_default();
+    for id in ids {
+        if let Some(l) = st.project.layer_mut(&sym, &id) {
+            for j in &mut l.joins {
+                if j.time > t + eps {
+                    j.time += dt;
+                }
+            }
+        }
+    }
+}
+
+/// Updates timed `JoinSwitch` times when `frame` is deleted (keeping frame 0's `parent` accurate).
+fn shift_joins_delete(st: &mut crate::edit::State, frame: i32) {
+    let fps = st_fps(&st.project);
+    let t = frame as f64 / fps;
+    let dt = 1.0 / fps;
+    let eps = 0.25 / fps;
+    let sym = st.project.root_symbol.clone();
+    let ids: Vec<String> = st.project.root().map(|r| r.layers.iter().filter(|l| !l.joins.is_empty()).map(|l| l.id.clone()).collect()).unwrap_or_default();
+    for id in ids {
+        if let Some(l) = st.project.layer_mut(&sym, &id) {
+            let mut next_joins = Vec::with_capacity(l.joins.len());
+            for mut j in l.joins.drain(..) {
+                if (j.time - t).abs() < eps {
+                    if frame == 0 {
+                        // Deleting frame 0 promotes a frame-0 switch if one existed
+                        l.parent = j.parent;
+                        l.parent_node = j.node;
+                        l.parent_node_rotate = j.rotate;
+                    }
+                    continue;
+                }
+                if j.time > t {
+                    j.time = (j.time - dt).max(0.0);
+                    if j.time < eps {
+                        // A switch that shifted onto frame 0 becomes the base parent
+                        l.parent = j.parent;
+                        l.parent_node = j.node;
+                        l.parent_node_rotate = j.rotate;
+                        continue;
+                    }
+                }
+                next_joins.push(j);
+            }
+            l.joins = next_joins;
+        }
+    }
 }
 
 /// Every layer's pose keyed on one frame (frame tools that act on the whole

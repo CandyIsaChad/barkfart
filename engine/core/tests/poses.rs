@@ -47,32 +47,63 @@ fn drag_elbow(s: &mut Session, dx: f32, dy: f32) {
 }
 
 #[test]
-fn a_drag_inside_a_held_pose_changes_that_pose() {
+fn a_drag_inside_a_held_pose_splits_and_creates_new_pose_at_playhead() {
     let mut s = held_poses();
     assert_eq!(frames(&s), [0, 4]);
     s.command(&json!({"op": "frame", "i": 2}));
-    let before = arm(&s, 0);
+    let before0 = arm(&s, 0);
+    let before_leg = s.project().root().unwrap().layer("L2").unwrap().as_figure().unwrap().node("legR1").unwrap().rotation.key_value(0.2).f();
     drag_elbow(&mut s, 60.0, 90.0);
-    assert_eq!(frames(&s), [0, 4], "no new pose on frame 3");
-    assert_eq!(s.frame, 2, "the playhead stays: the pose looks the same here");
-    assert!((arm(&s, 0) - before).abs() > 20.0, "the pose itself changed");
-    assert_eq!(arm(&s, 2), arm(&s, 0));
+    assert_eq!(frames(&s), [0, 2, 4], "auto-created new pose at playhead frame 2");
+    assert_eq!(s.frame, 2, "playhead stays on frame 2");
+    assert!((arm(&s, 0) - before0).abs() < 1e-4, "frame 0 pose untouched");
+    assert!((arm(&s, 2) - before0).abs() > 20.0, "frame 2 pose changed");
+    let after_leg = s.project().root().unwrap().layer("L2").unwrap().as_figure().unwrap().node("legR1").unwrap().rotation.key_value(0.2).f();
+    assert!((after_leg - before_leg).abs() < 1e-4, "unedited joints do not jump");
     assert_eq!(s.state()["undo"], "Pose node");
-    // on a pose's own first frame it is as before
+    // 1 single Undo removes both the split pose and the edit!
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(frames(&s), [0, 4]);
+    assert!((arm(&s, 2) - before0).abs() < 1e-4);
+    s.command(&json!({"op": "redo"}));
+    assert_eq!(frames(&s), [0, 2, 4]);
+    // on a pose's own first frame it edits in place without adding a duplicate key
     s.command(&json!({"op": "frame", "i": 4}));
     drag_elbow(&mut s, -40.0, 30.0);
-    assert_eq!(frames(&s), [0, 4]);
+    assert_eq!(frames(&s), [0, 2, 4]);
 }
 
 #[test]
-fn a_drag_inside_a_tween_goes_to_its_pose_first() {
+fn a_drag_inside_a_tween_bakes_interpolated_pose_at_playhead() {
     let mut s = two_poses();
+    // Pose frame 4 differently on TWO joints (armR1 and legR1) so frame 2 is truly mid-tween
+    s.command(&json!({"op": "frame", "i": 4}));
+    s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    s.command(&json!({"op": "node", "angle": 90.0}));
+    s.command(&json!({"op": "select", "layer": "L2", "node": "legR1"}));
+    s.command(&json!({"op": "node", "angle": 60.0}));
+
     s.command(&json!({"op": "frame", "i": 2}));
-    let first = arm(&s, 0);
+    let arm0 = arm(&s, 0);
+    let arm4 = arm(&s, 4);
+    let arm2_mid = arm(&s, 2);
+    let leg2_mid = s.project().root().unwrap().layer("L2").unwrap().as_figure().unwrap().node("legR1").unwrap().rotation.key_value(0.2).f();
+    assert!((arm2_mid - arm0).abs() > 10.0 && (arm4 - arm2_mid).abs() > 10.0, "frame 2 is mid-tween");
+
     drag_elbow(&mut s, -50.0, 20.0);
-    assert_eq!(frames(&s), [0, 4], "no new pose on frame 3");
-    assert_eq!(s.frame, 0, "the playhead went to the pose being changed");
-    assert!((arm(&s, 0) - first).abs() > 10.0);
+    assert_eq!(frames(&s), [0, 2, 4], "split block at playhead frame 2");
+    assert_eq!(s.frame, 2, "playhead stayed on frame 2");
+    assert!((arm(&s, 0) - arm0).abs() < 1e-4, "frame 0 untouched");
+    assert!((arm(&s, 4) - arm4).abs() < 1e-4, "frame 4 untouched");
+    assert!((arm(&s, 2) - arm2_mid).abs() > 5.0, "arm changed at frame 2");
+    let leg2_after = s.project().root().unwrap().layer("L2").unwrap().as_figure().unwrap().node("legR1").unwrap().rotation.key_value(0.2).f();
+    assert!((leg2_after - leg2_mid).abs() < 1e-3, "unedited legR1 preserved exact mid-tween angle ({leg2_mid} vs {leg2_after})");
+
+    // 1 single undo returns to [0, 4] cleanly
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(frames(&s), [0, 4]);
+    s.command(&json!({"op": "redo"}));
+    assert_eq!(frames(&s), [0, 2, 4]);
 }
 
 #[test]

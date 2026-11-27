@@ -253,7 +253,7 @@ fn others_last(st: &State, sym: &str, id: &str, fps: f64, n: i32) -> i32 {
         .map(|s| {
             s.layers
                 .iter()
-                .filter(|x| x.id != id && matches!(x.kind, LayerKind::Figure(_) | LayerKind::Sprite(_) | LayerKind::Symbol(_) | LayerKind::Text(_)))
+                .filter(|x| x.id != id && matches!(x.kind, LayerKind::Figure(_) | LayerKind::Sprite(_) | LayerKind::Symbol(_) | LayerKind::Text(_) | LayerKind::Adjustment))
                 .filter_map(|x| {
                     let last_pose = pose_frames(x, fps).into_iter().filter(|&f| shown_at(x, f, fps)).last();
                     let last_shown = (0..n.max(1)).rev().find(|&f| shown_at(x, f, fps));
@@ -266,6 +266,60 @@ fn others_last(st: &State, sym: &str, id: &str, fps: f64, n: i32) -> i32 {
                 .unwrap_or(0)
         })
         .unwrap_or(0)
+}
+
+/// Captures/bakes the exact current interpolated pose of `id` at `frame` into
+/// pose keys on all `pose_props(l)` (if not already keyed there), so editing a
+/// figure mid-tween or mid-hold splits the block cleanly with zero snap-back on
+/// unedited joints.
+pub fn bake_pose_at(st: &mut State, sym: &str, id: &str, frame: i32) -> EditResult<()> {
+    if frame < 0 {
+        return Ok(());
+    }
+    let fps = fps(st);
+    let eps = 0.25 / fps;
+    let t = frame as f64 / fps;
+    let tw = st.project.settings.tween_interp;
+    // Pre-sample join-interval local transform if this layer has timed joins.
+    let join_local: Option<[f32; 5]> = {
+        let Some(l) = st.project.symbol(sym).and_then(|s| s.layer(id)) else { return Ok(()) };
+        if matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_) | LayerKind::Script(_) | LayerKind::Adjustment) {
+            return Ok(());
+        }
+        let all_keyed = pose_props_of(l).iter().all(|q| q.track.keys().iter().any(|k| (k.time - t).abs() < eps));
+        if all_keyed {
+            return Ok(());
+        }
+        if !l.joins.is_empty() {
+            let m = crate::eval::local_transform(&st.project, l, t);
+            let ax = l.transform.anchor_x.value.f() as f64;
+            let ay = l.transform.anchor_y.value.f() as f64;
+            let old_rot = l.transform.rotation.key_value(t).f() as f64;
+            let sx = m.a.hypot(m.b);
+            let mut rot = m.b.atan2(m.a).to_degrees();
+            let sy = if sx < 1e-12 { 0.0 } else { (m.a * m.d - m.b * m.c) / sx };
+            let x = m.tx + m.a * ax + m.c * ay;
+            let y = m.ty + m.b * ax + m.d * ay;
+            rot += 360.0 * java_round_f64((old_rot - rot) / 360.0);
+            Some([x as f32, y as f32, rot as f32, sx as f32, sy as f32])
+        } else {
+            None
+        }
+    };
+    let Some(l) = st.project.layer_mut(sym, id) else { return Ok(()) };
+    for (i, q) in pose_props(l).into_iter().enumerate() {
+        if q.track.keys().iter().any(|k| (k.time - t).abs() < eps) {
+            continue;
+        }
+        let v = if i < 5 {
+            if let Some(jl) = join_local { Value::F(jl[i]) } else { q.key_value(t) }
+        } else {
+            q.key_value(t)
+        };
+        let interp = crate::edit::editor::interp_at(q, t, tw);
+        q.track.put(Key::new(t, v, interp));
+    }
+    Ok(())
 }
 
 /// The block under `frame` lasts `frames` frames: the figure's later poses
@@ -673,84 +727,442 @@ pub fn paste_prop_key(st: &mut State, prop_id: &str, frame: i32, ty: ValueType, 
 }
 
 /// Shifts a batch of pose keys `(layer_id, frame)` and property keys `(prop_id, frame)`
-/// by `by` frames. Frame 0 poses are skipped; poses clamp >= 1 and props >= 0.
+/// by `by` frames. Frame 0 poses stay pinned at 0; poses clamp >= 1 and props >= 0.
 pub fn shift_keys(st: &mut State, sym: &str, poses: &[(String, i32)], props: &[(String, i32)], by: i32) -> EditResult<()> {
-    if by == 0 {
-        return Ok(());
-    }
-    let fps = fps(st);
-    let mut max_frame: Option<i32> = None;
+    shift_keys_ex(st, sym, poses, props, by, true).map(|_| ())
+}
 
+/// Shifts a batch of pose & property keys by one shared group-clamped `delta`
+/// (so tracks never shear when one hits frame 1/0), handling isolated `shown`-only
+/// blocks cleanly, and returning `(moved_poses, moved_props)`.
+pub fn shift_keys_ex(
+    st: &mut State,
+    sym: &str,
+    poses: &[(String, i32)],
+    props: &[(String, i32)],
+    by: i32,
+    overwrite: bool,
+) -> EditResult<(Vec<(String, i32)>, Vec<(String, i32)>)> {
+    let fps = fps(st);
+    let old_n = frame_count(st);
+    if by == 0 {
+        return Ok((poses.to_vec(), props.to_vec()));
+    }
+
+    // 1. Collect movable pose frames per layer (preserving frame 0 as pinned) and prop frames per prop.
+    let mut pinned_poses: Vec<(String, i32)> = Vec::new();
     let mut by_layer: indexmap::IndexMap<&str, Vec<i32>> = indexmap::IndexMap::new();
     for (lid, fr) in poses {
-        if *fr > 0 {
-            let v = by_layer.entry(lid.as_str()).or_default();
-            if !v.contains(fr) {
-                v.push(*fr);
+        if *fr <= 0 {
+            if *fr == 0 && !pinned_poses.iter().any(|(x, f)| x == lid && *f == 0) {
+                pinned_poses.push((lid.clone(), 0));
             }
-        }
-    }
-    for (lid, mut sel) in by_layer {
-        sel.sort_unstable();
-        let Ok(l) = layer(st, sym, lid) else { continue };
-        let existing = pose_frames(l, fps);
-        let moving: Vec<i32> = sel.into_iter().filter(|f| existing.contains(f)).collect();
-        if moving.is_empty() {
             continue;
         }
-        let delta = by.max(1 - moving[0]);
-        if delta == 0 {
-            continue;
+        let v = by_layer.entry(lid.as_str()).or_default();
+        if !v.contains(fr) {
+            v.push(*fr);
         }
-        for &fr in &moving {
-            let dst = fr + delta;
-            if existing.contains(&dst) && !moving.contains(&dst) {
-                return fail("Those poses would overlap another pose.");
-            }
-            max_frame = Some(max_frame.map_or(dst, |m| m.max(dst)));
-        }
-        retime(l, fps, |fr| if moving.contains(&fr) { fr + delta } else { fr });
     }
-
     let mut by_prop: indexmap::IndexMap<&str, Vec<i32>> = indexmap::IndexMap::new();
     for (pid, fr) in props {
+        if *fr < 0 {
+            continue;
+        }
         let v = by_prop.entry(pid.as_str()).or_default();
         if !v.contains(fr) {
             v.push(*fr);
         }
     }
+
+    // Resolve actual existing movable frames per layer (including shown-only visible blocks).
+    struct LayerPlan {
+        lid: String,
+        moving_keys: Vec<i32>,
+        isolated_spans: Vec<(i32, i32)>,
+        existing_keys: Vec<i32>,
+    }
+    let mut layer_plans: Vec<LayerPlan> = Vec::new();
+    let mut min_allowed = i32::MIN;
+    let mut any_movable = false;
+
+    for (lid, mut sel) in by_layer {
+        sel.sort_unstable();
+        let Some(l) = st.project.symbol(sym).and_then(|s| s.layer(lid)) else { continue };
+        if matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_) | LayerKind::Script(_)) {
+            continue;
+        }
+        let existing_keys = pose_frames(l, fps);
+        let vbs = visible_blocks(l, fps, old_n);
+        let mut moving_keys: Vec<i32> = Vec::new();
+        let mut isolated_spans: Vec<(i32, i32)> = Vec::new();
+        for fr in sel {
+            let has_key = existing_keys.contains(&fr);
+            if has_key {
+                moving_keys.push(fr);
+            }
+            // Detect isolated visible span starting at `fr` (e.g. newly added/imported mid-timeline or shown-only layer)
+            if let Some(&(_, vs, vl)) = vbs.iter().find(|&&(_, vs, _)| vs == fr) {
+                let before_off = vs > 0 && !shown_at(l, vs - 1, fps);
+                let after_off = vs + vl >= old_n || !shown_at(l, vs + vl, fps);
+                if before_off && after_off {
+                    isolated_spans.push((vs, vl));
+                }
+            }
+        }
+        let mut all_fr: Vec<i32> = moving_keys.iter().copied().chain(isolated_spans.iter().map(|(s, _)| *s)).collect();
+        all_fr.sort_unstable();
+        all_fr.dedup();
+        if let Some(&first) = all_fr.first() {
+            any_movable = true;
+            min_allowed = min_allowed.max(1 - first);
+            layer_plans.push(LayerPlan { lid: lid.to_string(), moving_keys, isolated_spans, existing_keys });
+        }
+    }
+
+    struct PropPlan {
+        pid: String,
+        moving: Vec<i32>,
+        existing: Vec<i32>,
+    }
+    let mut prop_plans: Vec<PropPlan> = Vec::new();
     for (pid, mut sel) in by_prop {
         sel.sort_unstable();
-        let Some(q) = st.project.property_mut(pid) else { continue };
+        let Some(q) = st.project.property(pid) else { continue };
         let existing: Vec<i32> = q.track.keys().iter().map(|k| (k.time * fps).round() as i32).collect();
         let moving: Vec<i32> = sel.into_iter().filter(|f| existing.contains(f)).collect();
-        if moving.is_empty() {
-            continue;
+        if let Some(&first) = moving.first() {
+            any_movable = true;
+            min_allowed = min_allowed.max(-first);
+            prop_plans.push(PropPlan { pid: pid.to_string(), moving, existing });
         }
-        let delta = by.max(-moving[0]);
-        if delta == 0 {
-            continue;
-        }
-        for &fr in &moving {
-            let dst = fr + delta;
-            if existing.contains(&dst) && !moving.contains(&dst) {
-                return fail("Those keys would overlap another key.");
+    }
+
+    if !any_movable {
+        return Ok((poses.to_vec(), props.to_vec()));
+    }
+    let delta = by.max(min_allowed);
+    if delta == 0 {
+        return Ok((poses.to_vec(), props.to_vec()));
+    }
+
+    // 2. Validate overlaps if !overwrite before mutating anything.
+    if !overwrite {
+        for lp in &layer_plans {
+            for &fr in &lp.moving_keys {
+                let dst = fr + delta;
+                if lp.existing_keys.contains(&dst) && !lp.moving_keys.contains(&dst) {
+                    return fail("Those poses would overlap another pose.");
+                }
             }
+        }
+        for pp in &prop_plans {
+            for &fr in &pp.moving {
+                let dst = fr + delta;
+                if pp.existing.contains(&dst) && !pp.moving.contains(&dst) {
+                    return fail("Those keys would overlap another key.");
+                }
+            }
+        }
+    }
+
+    // 3. Apply retiming cleanly across all planned layers and properties.
+    let mut max_frame: Option<i32> = None;
+    let mut moved_poses = pinned_poses;
+    let mut moved_props: Vec<(String, i32)> = Vec::new();
+
+    for lp in layer_plans {
+        let mut all_moved_fr: Vec<i32> = lp.moving_keys.iter().copied().chain(lp.isolated_spans.iter().map(|(s, _)| *s)).collect();
+        all_moved_fr.sort_unstable();
+        all_moved_fr.dedup();
+        for &fr in &all_moved_fr {
+            let dst = fr + delta;
+            moved_poses.push((lp.lid.clone(), dst));
             max_frame = Some(max_frame.map_or(dst, |m| m.max(dst)));
         }
-        let keys: Vec<Key> = q.track.keys().to_vec();
+        for &(vs, vl) in &lp.isolated_spans {
+            let end_f = vs + delta + vl - 1;
+            max_frame = Some(max_frame.map_or(end_f, |m| m.max(end_f)));
+        }
+        if !lp.moving_keys.is_empty() {
+            let dsts: std::collections::HashSet<i32> = lp.moving_keys.iter().map(|&fr| fr + delta).collect();
+            let l = layer(st, sym, &lp.lid)?;
+            for q in pose_props(l) {
+                let orig: Vec<Key> = q.track.keys().to_vec();
+                q.track.clear();
+                let mut moved = Vec::new();
+                for k in orig {
+                    let fr = (k.time * fps).round() as i32;
+                    if lp.moving_keys.contains(&fr) {
+                        moved.push(Key { time: (fr + delta) as f64 / fps, ..k });
+                    } else if !overwrite || !dsts.contains(&fr) {
+                        q.track.put(k);
+                    }
+                }
+                for k in moved {
+                    q.track.put(k);
+                }
+            }
+        }
+        if !lp.isolated_spans.is_empty() {
+            let max_end = lp.isolated_spans.iter().map(|&(vs, vl)| vs + delta + vl).max().unwrap_or(old_n);
+            ensure_length(st, max_end);
+            let new_n = frame_count(st);
+            let l = layer(st, sym, &lp.lid)?;
+            for &(vs, vl) in &lp.isolated_spans {
+                set_shown_range(l, vs, (vs + vl).min(new_n), fps, false);
+            }
+            for &(vs, vl) in &lp.isolated_spans {
+                let dst = vs + delta;
+                if dst > old_n && !shown_at(l, old_n - 1, fps) {
+                    set_shown_range(l, old_n, dst, fps, false);
+                }
+                set_shown_range(l, dst, (dst + vl).min(new_n), fps, true);
+            }
+        }
+    }
+
+    for pp in prop_plans {
+        let dsts: std::collections::HashSet<i32> = pp.moving.iter().map(|&fr| fr + delta).collect();
+        for &fr in &pp.moving {
+            let dst = fr + delta;
+            moved_props.push((pp.pid.clone(), dst));
+            max_frame = Some(max_frame.map_or(dst, |m| m.max(dst)));
+        }
+        let Some(q) = st.project.property_mut(&pp.pid) else { continue };
+        let orig: Vec<Key> = q.track.keys().to_vec();
         q.track.clear();
-        for k in keys {
+        let mut moved = Vec::new();
+        for k in orig {
             let fr = (k.time * fps).round() as i32;
-            let nfr = if moving.contains(&fr) { fr + delta } else { fr };
-            q.track.put(Key { time: nfr as f64 / fps, ..k });
+            if pp.moving.contains(&fr) {
+                moved.push(Key { time: (fr + delta) as f64 / fps, ..k });
+            } else if !overwrite || !dsts.contains(&fr) {
+                q.track.put(k);
+            }
+        }
+        for k in moved {
+            q.track.put(k);
         }
     }
 
     if let Some(m) = max_frame {
         ensure_length(st, m + 1);
     }
-    Ok(())
+    Ok((moved_poses, moved_props))
+}
+
+/// Maps sorted unique frame indices around `anchor` by `factor`, clamping `>= min_frame`
+/// and enforcing strict monotonic spacing `>= 1` frame so distinct keys NEVER collapse.
+fn scale_frames_monotonic(sorted: &[i32], anchor: i32, factor: f64, min_frame: i32) -> Vec<(i32, i32)> {
+    let k = sorted.len();
+    if k == 0 {
+        return Vec::new();
+    }
+    let mut dst: Vec<i32> = sorted.iter().map(|&f| (anchor as f64 + (f - anchor) as f64 * factor).round() as i32).collect();
+    // If anchoring on the right edge, push left first so the right anchor stays pinned.
+    if anchor >= sorted[k - 1] {
+        dst[k - 1] = dst[k - 1].max(min_frame + (k as i32 - 1));
+        for i in (0..k - 1).rev() {
+            dst[i] = dst[i].min(dst[i + 1] - 1);
+        }
+    }
+    // Forward pass enforces `>= min_frame` and strict `+1` separation.
+    dst[0] = dst[0].max(min_frame);
+    for i in 1..k {
+        dst[i] = dst[i].max(dst[i - 1] + 1);
+    }
+    sorted.iter().copied().zip(dst).collect()
+}
+
+/// Proportionally scales selected pose & property keys around `anchor` by `factor` (> 0).
+/// Frame 0 poses stay pinned at 0; poses clamp >= 1, props >= 0; strict per-track monotonic
+/// spacing prevents distinct keys from ever collapsing together; stored Bezier/Smooth
+/// handle time offsets scale with `factor`. Returns `(moved_poses, moved_props)`.
+pub fn scale_keys(
+    st: &mut State,
+    sym: &str,
+    poses: &[(String, i32)],
+    props: &[(String, i32)],
+    anchor: i32,
+    factor: f64,
+    overwrite: bool,
+) -> EditResult<(Vec<(String, i32)>, Vec<(String, i32)>)> {
+    if !(factor.is_finite() && factor > 0.0) {
+        return fail("Scale factor must be positive.");
+    }
+    let factor = factor.clamp(0.05, 20.0);
+    let fps = fps(st);
+    let old_n = frame_count(st);
+
+    let mut pinned_poses: Vec<(String, i32)> = Vec::new();
+    let mut by_layer: indexmap::IndexMap<&str, Vec<i32>> = indexmap::IndexMap::new();
+    for (lid, fr) in poses {
+        if *fr <= 0 {
+            if *fr == 0 && !pinned_poses.iter().any(|(x, f)| x == lid && *f == 0) {
+                pinned_poses.push((lid.clone(), 0));
+            }
+            continue;
+        }
+        let v = by_layer.entry(lid.as_str()).or_default();
+        if !v.contains(fr) {
+            v.push(*fr);
+        }
+    }
+    let mut by_prop: indexmap::IndexMap<&str, Vec<i32>> = indexmap::IndexMap::new();
+    for (pid, fr) in props {
+        if *fr < 0 {
+            continue;
+        }
+        let v = by_prop.entry(pid.as_str()).or_default();
+        if !v.contains(fr) {
+            v.push(*fr);
+        }
+    }
+
+    let mut max_frame: Option<i32> = None;
+    let mut moved_poses = pinned_poses;
+    let mut moved_props: Vec<(String, i32)> = Vec::new();
+
+    for (lid, mut sel) in by_layer {
+        sel.sort_unstable();
+        let Some(l_ro) = st.project.symbol(sym).and_then(|s| s.layer(lid)) else { continue };
+        if matches!(l_ro.kind, LayerKind::Camera(_) | LayerKind::Audio(_) | LayerKind::Script(_)) {
+            continue;
+        }
+        let existing_keys = pose_frames(l_ro, fps);
+        let vbs = visible_blocks(l_ro, fps, old_n);
+        let mut movable: Vec<i32> = Vec::new();
+        let mut isolated_map: std::collections::HashMap<i32, i32> = std::collections::HashMap::new();
+        for fr in sel {
+            let has_key = existing_keys.contains(&fr);
+            let iso = vbs.iter().find(|&&(_, vs, _)| vs == fr).and_then(|&(_, vs, vl)| {
+                let before_off = vs > 0 && !shown_at(l_ro, vs - 1, fps);
+                let after_off = vs + vl >= old_n || !shown_at(l_ro, vs + vl, fps);
+                (before_off && after_off).then_some(vl)
+            });
+            if has_key || iso.is_some() {
+                movable.push(fr);
+                if let Some(vl) = iso {
+                    isolated_map.insert(fr, vl);
+                }
+            }
+        }
+        if movable.is_empty() {
+            continue;
+        }
+        let mapping = scale_frames_monotonic(&movable, anchor, factor, 1);
+        let src_to_dst: std::collections::HashMap<i32, i32> = mapping.iter().copied().collect();
+        let dsts: std::collections::HashSet<i32> = mapping.iter().map(|&(_, d)| d).collect();
+        if !overwrite {
+            for &(_, dst) in &mapping {
+                if existing_keys.contains(&dst) && !src_to_dst.contains_key(&dst) {
+                    return fail("Those poses would overlap another pose.");
+                }
+            }
+        }
+        for &(_, dst) in &mapping {
+            moved_poses.push((lid.to_string(), dst));
+            max_frame = Some(max_frame.map_or(dst, |m| m.max(dst)));
+        }
+        if mapping.iter().any(|&(s, d)| s != d) {
+            let l = layer(st, sym, lid)?;
+            for q in pose_props(l) {
+                let orig: Vec<Key> = q.track.keys().to_vec();
+                q.track.clear();
+                let mut moved = Vec::new();
+                for k in orig {
+                    let fr = (k.time * fps).round() as i32;
+                    if let Some(&dst) = src_to_dst.get(&fr) {
+                        let nk = if k.handle.stored() {
+                            Key { time: dst as f64 / fps, lh: (k.lh.0 * factor, k.lh.1), rh: (k.rh.0 * factor, k.rh.1), ..k }
+                        } else {
+                            Key { time: dst as f64 / fps, ..k }
+                        };
+                        moved.push(nk);
+                    } else if !overwrite || !dsts.contains(&fr) {
+                        q.track.put(k);
+                    }
+                }
+                for k in moved {
+                    q.track.put(k);
+                }
+            }
+            if !isolated_map.is_empty() {
+                let max_end = mapping
+                    .iter()
+                    .filter_map(|&(s, d)| isolated_map.get(&s).map(|&vl| d + vl))
+                    .max()
+                    .unwrap_or(old_n);
+                max_frame = Some(max_frame.map_or(max_end - 1, |m| m.max(max_end - 1)));
+                ensure_length(st, max_end);
+                let new_n = frame_count(st);
+                let l = layer(st, sym, lid)?;
+                for (&s, &vl) in &isolated_map {
+                    set_shown_range(l, s, (s + vl).min(new_n), fps, false);
+                }
+                for &(s, d) in &mapping {
+                    if let Some(&vl) = isolated_map.get(&s) {
+                        if d > old_n && !shown_at(l, old_n - 1, fps) {
+                            set_shown_range(l, old_n, d, fps, false);
+                        }
+                        set_shown_range(l, d, (d + vl).min(new_n), fps, true);
+                    }
+                }
+            }
+        }
+    }
+
+    for (pid, mut sel) in by_prop {
+        sel.sort_unstable();
+        let Some(q) = st.project.property(pid) else { continue };
+        let existing: Vec<i32> = q.track.keys().iter().map(|k| (k.time * fps).round() as i32).collect();
+        let movable: Vec<i32> = sel.into_iter().filter(|f| existing.contains(f)).collect();
+        if movable.is_empty() {
+            continue;
+        }
+        let mapping = scale_frames_monotonic(&movable, anchor, factor, 0);
+        let src_to_dst: std::collections::HashMap<i32, i32> = mapping.iter().copied().collect();
+        let dsts: std::collections::HashSet<i32> = mapping.iter().map(|&(_, d)| d).collect();
+        if !overwrite {
+            for &(_, dst) in &mapping {
+                if existing.contains(&dst) && !src_to_dst.contains_key(&dst) {
+                    return fail("Those keys would overlap another key.");
+                }
+            }
+        }
+        for &(_, dst) in &mapping {
+            moved_props.push((pid.to_string(), dst));
+            max_frame = Some(max_frame.map_or(dst, |m| m.max(dst)));
+        }
+        if mapping.iter().any(|&(s, d)| s != d) {
+            let Some(q) = st.project.property_mut(pid) else { continue };
+            let orig: Vec<Key> = q.track.keys().to_vec();
+            q.track.clear();
+            let mut moved = Vec::new();
+            for k in orig {
+                let fr = (k.time * fps).round() as i32;
+                if let Some(&dst) = src_to_dst.get(&fr) {
+                    let nk = if k.handle.stored() {
+                        Key { time: dst as f64 / fps, lh: (k.lh.0 * factor, k.lh.1), rh: (k.rh.0 * factor, k.rh.1), ..k }
+                    } else {
+                        Key { time: dst as f64 / fps, ..k }
+                    };
+                    moved.push(nk);
+                } else if !overwrite || !dsts.contains(&fr) {
+                    q.track.put(k);
+                }
+            }
+            for k in moved {
+                q.track.put(k);
+            }
+        }
+    }
+
+    if let Some(m) = max_frame {
+        ensure_length(st, m + 1);
+    }
+    Ok((moved_poses, moved_props))
 }
 
 /// Deletes a batch of pose keys (skipping frame 0) and property keys.

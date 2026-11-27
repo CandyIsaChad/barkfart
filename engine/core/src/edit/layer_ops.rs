@@ -8,8 +8,38 @@ use crate::eval::Resolver;
 use crate::model::*;
 use std::sync::Arc;
 
-/// The layer and every layer joined to it (directly or not), in stack order.
+/// The layer and every layer joined to it (directly or not, via static parent or
+/// timed joins), in stack order.
 pub fn with_joined(s: &Symbol, id: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for x in &s.layers {
+        let mut stack = vec![x.id.as_str()];
+        let mut seen = std::collections::HashSet::new();
+        while let Some(cid) = stack.pop() {
+            if !seen.insert(cid) {
+                continue;
+            }
+            if cid == id {
+                out.push(x.id.clone());
+                break;
+            }
+            if let Some(c) = s.layer(cid) {
+                if let Some(p) = c.parent.as_deref() {
+                    stack.push(p);
+                }
+                for j in &c.joins {
+                    if let Some(p) = j.parent.as_deref() {
+                        stack.push(p);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The layer and every layer joined to it at time `t`, in stack order.
+pub fn with_joined_at(s: &Symbol, id: &str, t: f64) -> Vec<String> {
     let mut out = Vec::new();
     for x in &s.layers {
         let mut cur: Option<&Layer> = Some(x);
@@ -23,7 +53,7 @@ pub fn with_joined(s: &Symbol, id: &str) -> Vec<String> {
                 out.push(x.id.clone());
                 break;
             }
-            cur = c.parent.as_deref().and_then(|p| s.layer(p));
+            cur = c.parent_at(t).0.and_then(|p| s.layer(p));
         }
     }
     out

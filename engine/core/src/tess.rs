@@ -281,6 +281,11 @@ fn layered_walk(g: &Group, opacity: f32, blend: Blend, out: &mut DrawList, is_ro
         }
         let fx: Vec<ResolvedEffect> = g.effects.iter().filter(|e| e.mix > 0.0).cloned().collect();
         out.open(&g.source, (gop * opacity).min(1.0), g.blend, g.adjustment, fx);
+        if let Some([x0, y0, x1, y1]) = g.bounds {
+            if let Some(c) = out.current {
+                out.isolates[c].include(x0, y0, x1, y1);
+            }
+        }
         for o in &g.children {
             match o {
                 Item::Group(c) => layered_walk(c, 1.0, Blend::Normal, out, false, glyphs),

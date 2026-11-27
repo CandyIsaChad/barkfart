@@ -111,20 +111,29 @@ fn ensure(l: &mut Layer, n: i32, fps: f64, id: &str, ty: &str) {
     }
 }
 
-/// Filters run in the panel's order; anything else (plugin effects, effects
-/// from files) stays in front of them, in the order it was added.
+/// Filters run in the panel's order; anything else (stacked FX* effects, plugin
+/// effects, effects from files) stays in front of them, preserving its own chain order.
 fn reorder(l: &mut Layer) {
     let ours: std::collections::HashSet<&str> = ORDER.into_iter().collect();
-    let mut chain: Vec<String> = l.effects.nodes.keys().filter(|k| !ours.contains(k.as_str())).cloned().collect();
-    chain.extend(ORDER.iter().filter(|id| l.effects.nodes.contains_key(**id)).map(|id| id.to_string()));
-    let mut prev: Option<String> = None;
-    for id in &chain {
-        if let Some(e) = l.effects.nodes.get_mut(id) {
-            e.inputs = prev.iter().cloned().collect();
+    let mut chain: Vec<String> = l.effects.chain().into_iter().filter(|e| !ours.contains(e.id.as_str())).map(|e| e.id.clone()).collect();
+    for k in l.effects.nodes.keys() {
+        if !ours.contains(k.as_str()) && !chain.contains(k) {
+            chain.push(k.clone());
         }
-        prev = Some(id.clone());
     }
-    l.effects.output = prev;
+    chain.extend(ORDER.iter().filter(|id| l.effects.nodes.contains_key(**id)).map(|id| id.to_string()));
+    rewire_chain(&mut l.effects, &chain);
+}
+
+fn rewire_chain(stack: &mut EffectStack, chain: &[String]) {
+    let mut prev: Option<String> = None;
+    for id in chain {
+        if let Some(e) = stack.nodes.get_mut(id) {
+            e.inputs = prev.iter().cloned().collect();
+            prev = Some(id.clone());
+        }
+    }
+    stack.output = prev;
 }
 
 fn set_mix(l: &mut Layer, id: &str, t: f64, v: f32) {
@@ -158,9 +167,9 @@ pub fn apply_keyed(st: &mut State, sym: &str, id: &str, c: &J, t: f64, keyed: bo
 pub fn apply(st: &mut State, sym: &str, id: &str, c: &J, t: f64) -> EditResult<()> {
     let (n, fps) = (super::frame_ops::frame_count(st), fps_of(st));
     TWEEN.with(|x| x.set(st.project.settings.tween_interp));
-    let Some(l) = st.project.layer_mut(sym, id) else { return fail("no figure") };
-    if l.as_figure().is_none() {
-        return fail("not a figure");
+    let Some(l) = st.project.layer_mut(sym, id) else { return fail("no layer") };
+    if !matches!(l.kind, LayerKind::Figure(_) | LayerKind::Adjustment | LayerKind::Sprite(_) | LayerKind::Symbol(_) | LayerKind::Text(_)) {
+        return fail("not a drawable layer");
     }
     apply_to(l, n, fps, c, t)
 }
@@ -514,8 +523,8 @@ pub fn any_active(l: &Layer) -> bool {
     stack_active(&l.effects)
 }
 
-/// The same for any effect stack (a group's, D33).
-pub fn stack_active(effects: &EffectStack) -> bool {
+/// Whether a single effect node produces a visible change on any frame.
+pub fn node_active(e: &EffectNode) -> bool {
     let values = |q: &Property| -> Vec<f32> {
         let mut v: Vec<f32> = q.track.keys().iter().map(|k| k.value.f()).collect();
         if v.is_empty() {
@@ -523,19 +532,22 @@ pub fn stack_active(effects: &EffectStack) -> bool {
         }
         v
     };
-    effects.nodes.values().any(|e| {
-        if !values(&e.mix).iter().any(|m| *m > 0.0) {
-            return false;
-        }
-        let param_off = |name: &str, off: f32| e.params.get(name).is_none_or(|q| values(q).iter().all(|v| (v - off).abs() < 1e-4));
-        match e.id.as_str() {
-            BLUR_ID => !param_off("radius", 0.0),
-            PIXELATE_ID => !param_off("size", 1.0),
-            ADJUST_ID => !(param_off("hue", 0.0) && param_off("saturation", 1.0)),
-            TINT_ID => !param_off("amount", 0.0),
-            _ => true,
-        }
-    })
+    if !values(&e.mix).iter().any(|m| *m > 0.0) {
+        return false;
+    }
+    let param_off = |name: &str, off: f32| e.params.get(name).is_none_or(|q| values(q).iter().all(|v| (v - off).abs() < 1e-4));
+    match e.id.as_str() {
+        BLUR_ID => !param_off("radius", 0.0),
+        PIXELATE_ID => !param_off("size", 1.0),
+        ADJUST_ID => !(param_off("hue", 0.0) && param_off("saturation", 1.0)),
+        TINT_ID => !param_off("amount", 0.0),
+        _ => true,
+    }
+}
+
+/// The same for any effect stack (a group's, D33).
+pub fn stack_active(effects: &EffectStack) -> bool {
+    effects.nodes.values().any(node_active)
 }
 
 
@@ -699,4 +711,512 @@ pub fn plugin_state(p: &Project, l: &Layer, t: f64) -> J {
         })
         .collect();
     serde_json::json!(list)
+}
+
+// ---------------------------------------------------------------- Round 3: stacked & keyable effects
+
+/// Where a stacked effect operation targets: a layer or a layer group.
+#[derive(Clone, Copy, Debug)]
+pub enum StackTarget<'a> {
+    Layer(&'a str),
+    Group(&'a str),
+}
+
+fn param_kind_name(k: crate::fx::ParamKind) -> &'static str {
+    match k {
+        crate::fx::ParamKind::Float => "float",
+        crate::fx::ParamKind::Angle => "angle",
+        crate::fx::ParamKind::Color => "color",
+    }
+}
+
+/// Full built-in effect catalog from `barkfart_core::fx::catalog()`, serialized for the UI.
+pub fn catalog_json() -> J {
+    let list: Vec<J> = crate::fx::catalog()
+        .iter()
+        .map(|m| {
+            let params: Vec<J> = m
+                .params
+                .iter()
+                .map(|pm| {
+                    let def = match pm.kind {
+                        crate::fx::ParamKind::Color => serde_json::json!(pm.default_c.to_rgba8888()),
+                        _ => serde_json::json!(round2(pm.default_f)),
+                    };
+                    serde_json::json!({
+                        "name": pm.name,
+                        "label": pm.label,
+                        "kind": param_kind_name(pm.kind),
+                        "default": def,
+                        "min": pm.min,
+                        "max": pm.max,
+                        "step": pm.step,
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "type": m.ty,
+                "label": m.label,
+                "category": m.category,
+                "params": params,
+            })
+        })
+        .collect();
+    serde_json::json!(list)
+}
+
+fn prop_key_info(r: &mut Resolver, q: &Property, t: f64, fps: f64, frame: i32) -> (J, bool, bool, Vec<i32>) {
+    let val = match r.resolve(q, t) {
+        Value::F(x) => serde_json::json!(round2(x)),
+        Value::D(x) => serde_json::json!(round2(x as f32)),
+        Value::C(c) => serde_json::json!(c.to_rgba8888()),
+        Value::B(b) => serde_json::json!(b),
+    };
+    let keys: Vec<i32> = q.track.keys().iter().map(|k| (k.time * fps).round() as i32).collect();
+    let keyed = keys.contains(&frame);
+    let animated = !keys.is_empty();
+    (val, keyed, animated, keys)
+}
+
+/// Serializes an `EffectStack` for the Round 3 stacked effects UI (`effectStack`).
+/// Preserves exact chain execution order; hides silent legacy `filter.*` placeholders
+/// while showing all explicitly added `FX*` / plugin / active effects.
+pub fn stack_state(p: &Project, effects: &EffectStack, t: f64, fps: f64, frame: i32) -> J {
+    let mut r = Resolver::new(p);
+    let mut out: Vec<J> = Vec::new();
+    for e in effects.chain() {
+        if e.id.starts_with("filter.") && !node_active(e) {
+            continue;
+        }
+        let (mix_val, mix_keyed, mix_anim, mix_keys) = prop_key_info(&mut r, &e.mix, t, fps, frame);
+        let mix_obj = serde_json::json!({
+            "propId": e.mix.id,
+            "value": mix_val,
+            "default": 1.0,
+            "min": 0.0,
+            "max": 1.0,
+            "step": 0.05,
+            "keyed": mix_keyed,
+            "animated": mix_anim,
+            "keys": mix_keys,
+        });
+        if let Some(meta) = crate::fx::meta(&e.ty) {
+            let mut params: Vec<J> = Vec::with_capacity(meta.params.len());
+            for pm in meta.params {
+                let def_json = match pm.kind {
+                    crate::fx::ParamKind::Color => serde_json::json!(pm.default_c.to_rgba8888()),
+                    _ => serde_json::json!(round2(pm.default_f)),
+                };
+                if let Some(q) = e.params.get(pm.name) {
+                    let (val, keyed, animated, keys) = prop_key_info(&mut r, q, t, fps, frame);
+                    params.push(serde_json::json!({
+                        "name": pm.name,
+                        "label": pm.label,
+                        "kind": param_kind_name(pm.kind),
+                        "propId": q.id,
+                        "value": val,
+                        "default": def_json,
+                        "min": pm.min,
+                        "max": pm.max,
+                        "step": pm.step,
+                        "keyed": keyed,
+                        "animated": animated,
+                        "keys": keys,
+                    }));
+                } else {
+                    // Legacy node that omitted an optional param (e.g. brightness on color.adjust)
+                    params.push(serde_json::json!({
+                        "name": pm.name,
+                        "label": pm.label,
+                        "kind": param_kind_name(pm.kind),
+                        "propId": format!("{}/{}/{}", e.mix.id.split('/').next().unwrap_or(""), e.id, pm.name),
+                        "value": def_json,
+                        "default": def_json,
+                        "min": pm.min,
+                        "max": pm.max,
+                        "step": pm.step,
+                        "keyed": false,
+                        "animated": false,
+                        "keys": [],
+                    }));
+                }
+            }
+            out.push(serde_json::json!({
+                "id": e.id,
+                "type": e.ty,
+                "label": meta.label,
+                "category": meta.category,
+                "enabled": e.enabled,
+                "mix": mix_obj,
+                "params": params,
+            }));
+        } else if let Some(pid) = e.ty.strip_prefix("plugin:") {
+            use barkfart_script::PropKind as K;
+            let def = crate::plugins::definition(pid);
+            let label = def.as_ref().map(|d| d.name.clone()).unwrap_or_else(|| pid.to_string());
+            let mut params: Vec<J> = Vec::new();
+            if let Some(d) = &def {
+                for pd in &d.props {
+                    let p_label = pd.label.clone().unwrap_or_else(|| pd.name.clone());
+                    match &pd.kind {
+                        K::Number { default, min, max, step } => {
+                            if let Some(q) = e.params.get(&pd.name) {
+                                let (val, keyed, animated, keys) = prop_key_info(&mut r, q, t, fps, frame);
+                                params.push(serde_json::json!({"name": pd.name, "label": p_label, "kind": "float", "propId": q.id, "value": val, "default": default, "min": min, "max": max, "step": step, "keyed": keyed, "animated": animated, "keys": keys}));
+                            }
+                        }
+                        K::Angle { default } => {
+                            if let Some(q) = e.params.get(&pd.name) {
+                                let (val, keyed, animated, keys) = prop_key_info(&mut r, q, t, fps, frame);
+                                params.push(serde_json::json!({"name": pd.name, "label": p_label, "kind": "angle", "propId": q.id, "value": val, "default": default, "min": -3600.0, "max": 3600.0, "step": 5.0, "keyed": keyed, "animated": animated, "keys": keys}));
+                            }
+                        }
+                        K::Toggle { default } => {
+                            if let Some(q) = e.params.get(&pd.name) {
+                                let (val, keyed, animated, keys) = prop_key_info(&mut r, q, t, fps, frame);
+                                params.push(serde_json::json!({"name": pd.name, "label": p_label, "kind": "bool", "propId": q.id, "value": val, "default": default, "min": 0.0, "max": 1.0, "step": 1.0, "keyed": keyed, "animated": animated, "keys": keys}));
+                            }
+                        }
+                        K::Colour { default } => {
+                            if let Some(q) = e.params.get(&pd.name) {
+                                let (val, keyed, animated, keys) = prop_key_info(&mut r, q, t, fps, frame);
+                                let dc = Color::new(default[0], default[1], default[2], default[3]).to_rgba8888();
+                                params.push(serde_json::json!({"name": pd.name, "label": p_label, "kind": "color", "propId": q.id, "value": val, "default": dc, "min": 0.0, "max": 1.0, "step": 0.0, "keyed": keyed, "animated": animated, "keys": keys}));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            out.push(serde_json::json!({
+                "id": e.id,
+                "type": e.ty,
+                "label": label,
+                "category": "Plugins",
+                "enabled": e.enabled,
+                "missing": def.is_none(),
+                "mix": mix_obj,
+                "params": params,
+            }));
+        }
+    }
+    serde_json::json!(out)
+}
+
+fn with_stack_mut<T>(st: &mut State, sym: &str, target: StackTarget<'_>, f: impl FnOnce(&mut EffectStack, &str, bool) -> EditResult<T>) -> EditResult<T> {
+    match target {
+        StackTarget::Layer(id) => {
+            let Some(l) = st.project.layer_mut(sym, id) else { return fail("no layer") };
+            let owner = l.id.clone();
+            f(&mut l.effects, &owner, false)
+        }
+        StackTarget::Group(gid) => {
+            let Some(s) = st.project.symbol_mut(sym) else { return fail("no symbol") };
+            let Some(g) = s.groups.iter_mut().find(|g| g.id == gid) else { return fail("no group") };
+            let owner = g.id.clone();
+            f(&mut g.effects, &owner, true)
+        }
+    }
+}
+
+fn build_effect_node(owner: &str, fx_id: &str, ty: &str) -> EditResult<EffectNode> {
+    let mut e = EffectNode::new(owner, fx_id, ty);
+    if let Some(meta) = crate::fx::meta(ty) {
+        for pm in meta.params {
+            match pm.kind {
+                crate::fx::ParamKind::Color => {
+                    e.param(owner, pm.name, ValueType::Color, Value::C(pm.default_c));
+                }
+                crate::fx::ParamKind::Float | crate::fx::ParamKind::Angle => {
+                    e.param(owner, pm.name, ValueType::Float, Value::F(pm.default_f));
+                }
+            }
+        }
+        return Ok(e);
+    }
+    if let Some(pid) = ty.strip_prefix("plugin:") {
+        use barkfart_script::PropKind as K;
+        let Some(def) = crate::plugins::definition(pid) else { return fail("That plugin isn't installed.") };
+        if def.kind != barkfart_script::Kind::Effect {
+            return fail(format!("{} isn't an effect.", def.name));
+        }
+        for p in &def.props {
+            match &p.kind {
+                K::Number { default, .. } | K::Angle { default } => {
+                    e.param(owner, &p.name, ValueType::Float, Value::F(*default as f32));
+                }
+                K::Toggle { default } => {
+                    e.param(owner, &p.name, ValueType::Bool, Value::B(*default));
+                }
+                K::Colour { default } => {
+                    e.param(owner, &p.name, ValueType::Color, Value::C(Color::new(default[0], default[1], default[2], default[3])));
+                }
+                K::Choice { default, .. } => {
+                    e.param(owner, &p.name, ValueType::Float, Value::F(*default as f32));
+                }
+                K::Point { default } => {
+                    e.param(owner, &format!("{}.x", p.name), ValueType::Float, Value::F(default.0 as f32));
+                    e.param(owner, &format!("{}.y", p.name), ValueType::Float, Value::F(default.1 as f32));
+                }
+                K::Text { .. } => {}
+            }
+        }
+        return Ok(e);
+    }
+    fail(format!("unknown effect type {ty}"))
+}
+
+fn parse_fx_value(ty: &str, name: &str, q_ty: ValueType, v: &J) -> Option<Value> {
+    match q_ty {
+        ValueType::Bool => v.as_bool().map(Value::B),
+        ValueType::Color => v.as_u64().map(|u| Value::C(Color::rgba8888(u as u32))),
+        ValueType::Float | ValueType::Angle => {
+            let x = v.as_f64()? as f32;
+            if !x.is_finite() {
+                return None;
+            }
+            let clamped = if let Some(pm) = crate::fx::meta(ty).and_then(|m| m.params.iter().find(|p| p.name == name)) {
+                x.clamp(pm.min, pm.max)
+            } else {
+                x
+            };
+            Some(Value::F(clamped))
+        }
+        ValueType::Double => v.as_f64().filter(|x| x.is_finite()).map(Value::D),
+    }
+}
+
+fn set_fx_prop(q: &mut Property, v: Value, t: f64, keyed: bool, is_group: bool, tw: Interp) {
+    if is_group {
+        q.track.clear();
+        q.value = v;
+        return;
+    }
+    if !q.track.is_empty() || keyed {
+        let interp = if q.ty.continuous() { crate::edit::editor::interp_at(q, t, tw) } else { Interp::Hold };
+        q.track.put(Key::new(t, v, interp));
+    } else {
+        q.value = v;
+    }
+}
+
+/// Adds a new stacked effect node (`FX*`) to a layer or group (duplicates allowed!).
+pub fn fx_add(st: &mut State, sym: &str, target: StackTarget<'_>, ty: &str, mix: Option<f32>, params: Option<&serde_json::Map<String, J>>) -> EditResult<String> {
+    let fx_id = st.project.new_id("FX");
+    let fx_id2 = fx_id.clone();
+    with_stack_mut(st, sym, target, |stack, owner, _| {
+        let mut e = build_effect_node(owner, &fx_id2, ty)?;
+        if let Some(m) = mix {
+            if m.is_finite() {
+                e.mix.value = Value::F(m.clamp(0.0, 1.0));
+            }
+        }
+        if let Some(map) = params {
+            for (k, v) in map {
+                if let Some(q) = e.params.get_mut(k.as_str()) {
+                    if let Some(val) = parse_fx_value(ty, k, q.ty, v) {
+                        q.value = val;
+                    }
+                }
+            }
+        }
+        stack.append(e).map_err(super::EditError)?;
+        Ok(())
+    })?;
+    Ok(fx_id)
+}
+
+/// Updates enabled, mix, and/or parameters on a stacked effect node (keyed or static).
+pub fn fx_set(st: &mut State, sym: &str, target: StackTarget<'_>, fx_id: &str, c: &J, t: f64, keyed: bool) -> EditResult<()> {
+    let tw = st.project.settings.tween_interp;
+    with_stack_mut(st, sym, target, |stack, owner, is_group| {
+        let Some(e) = stack.nodes.get_mut(fx_id) else { return fail("no such effect") };
+        let ty = e.ty.clone();
+        if let Some(en) = c["enabled"].as_bool() {
+            e.enabled = en;
+        }
+        if let Some(m) = c["mix"].as_f64() {
+            if m.is_finite() {
+                set_fx_prop(&mut e.mix, Value::F(m.clamp(0.0, 1.0) as f32), t, keyed, is_group, tw);
+            }
+        }
+        if let Some(map) = c["params"].as_object() {
+            for (k, v) in map {
+                // Ensure param exists if it's defined in fx::meta (e.g. brightness on legacy color.adjust)
+                if !e.params.contains_key(k.as_str()) {
+                    if let Some(pm) = crate::fx::meta(&ty).and_then(|m| m.params.iter().find(|p| p.name == k.as_str())) {
+                        match pm.kind {
+                            crate::fx::ParamKind::Color => {
+                                e.param(owner, pm.name, ValueType::Color, Value::C(pm.default_c));
+                            }
+                            _ => {
+                                e.param(owner, pm.name, ValueType::Float, Value::F(pm.default_f));
+                            }
+                        }
+                    }
+                }
+                if let Some(q) = e.params.get_mut(k.as_str()) {
+                    if let Some(val) = parse_fx_value(&ty, k, q.ty, v) {
+                        set_fx_prop(q, val, t, keyed, is_group, tw);
+                    }
+                }
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Toggles or sets a keyframe at `frame` for an effect parameter (or `mix`, or any `prop_id`).
+/// Returns `(property_id, now_keyed)`.
+pub fn fx_key(
+    st: &mut State,
+    sym: &str,
+    layer: &str,
+    fx_id: Option<&str>,
+    param: Option<&str>,
+    prop_id: Option<&str>,
+    frame: i32,
+    on: Option<bool>,
+) -> EditResult<(String, bool)> {
+    let fps = fps_of(st);
+    let t = frame as f64 / fps;
+    let tw = st.project.settings.tween_interp;
+    if let Some(pid) = prop_id {
+        let Some(q) = st.project.property_mut(pid) else { return fail("no such property") };
+        return toggle_prop_key(q, frame, t, fps, tw, on);
+    }
+    let (Some(fid), Some(pname)) = (fx_id, param) else { return fail("which effect parameter?") };
+    let Some(l) = st.project.layer_mut(sym, layer) else { return fail("no layer") };
+    let owner = l.id.clone();
+    let Some(e) = l.effects.nodes.get_mut(fid) else { return fail("no such effect") };
+    let ty = e.ty.clone();
+    if pname == "mix" {
+        return toggle_prop_key(&mut e.mix, frame, t, fps, tw, on);
+    }
+    if !e.params.contains_key(pname) {
+        if let Some(pm) = crate::fx::meta(&ty).and_then(|m| m.params.iter().find(|p| p.name == pname)) {
+            match pm.kind {
+                crate::fx::ParamKind::Color => {
+                    e.param(&owner, pm.name, ValueType::Color, Value::C(pm.default_c));
+                }
+                _ => {
+                    e.param(&owner, pm.name, ValueType::Float, Value::F(pm.default_f));
+                }
+            }
+        }
+    }
+    let Some(q) = e.params.get_mut(pname) else { return fail(format!("no param {pname}")) };
+    toggle_prop_key(q, frame, t, fps, tw, on)
+}
+
+fn toggle_prop_key(q: &mut Property, frame: i32, t: f64, fps: f64, tw: Interp, on: Option<bool>) -> EditResult<(String, bool)> {
+    let idx = q.track.keys().iter().position(|k| (k.time * fps).round() as i32 == frame);
+    let want = on.unwrap_or(idx.is_none());
+    if want {
+        if idx.is_none() {
+            let v = q.key_value(t);
+            let interp = if q.ty.continuous() { crate::edit::editor::interp_at(q, t, tw) } else { Interp::Hold };
+            q.track.put(Key::new(t, v, interp));
+        }
+        Ok((q.id.clone(), true))
+    } else {
+        if let Some(i) = idx {
+            let removed = q.track.keys()[i];
+            q.track.remove_at(i);
+            if q.track.is_empty() {
+                q.value = removed.value;
+            }
+        }
+        Ok((q.id.clone(), false))
+    }
+}
+
+/// Reorders an effect node in a layer or group's `EffectStack` chain.
+pub fn fx_reorder(st: &mut State, sym: &str, target: StackTarget<'_>, fx_id: &str, to: Option<usize>, dir: Option<i32>) -> EditResult<()> {
+    with_stack_mut(st, sym, target, |stack, _, _| {
+        let mut chain: Vec<String> = stack.chain().into_iter().map(|e| e.id.clone()).collect();
+        let Some(pos) = chain.iter().position(|id| id == fx_id) else { return fail("no such effect") };
+        let len = chain.len();
+        if len <= 1 {
+            return Ok(());
+        }
+        let target_idx = match to {
+            Some(i) => i.min(len - 1),
+            None => (pos as i32 + dir.unwrap_or(0)).clamp(0, len as i32 - 1) as usize,
+        };
+        if target_idx == pos {
+            return Ok(());
+        }
+        let id = chain.remove(pos);
+        chain.insert(target_idx, id);
+        rewire_chain(stack, &chain);
+        Ok(())
+    })
+}
+
+/// Duplicates an effect node (including all tracks, eases, handles & modifiers)
+/// right after the original in the chain. Returns the new effect node id.
+pub fn fx_duplicate(st: &mut State, sym: &str, target: StackTarget<'_>, fx_id: &str) -> EditResult<String> {
+    let new_id = st.project.new_id("FX");
+    let new_id2 = new_id.clone();
+    with_stack_mut(st, sym, target, |stack, owner, _| {
+        let Some(src) = stack.nodes.get(fx_id).cloned() else { return fail("no such effect") };
+        let mut chain: Vec<String> = stack.chain().into_iter().map(|e| e.id.clone()).collect();
+        let pos = chain.iter().position(|id| id == fx_id).unwrap_or(chain.len().saturating_sub(1));
+        let mut dup = src;
+        dup.id = new_id2.clone();
+        dup.mix.id = format!("{owner}/{new_id2}/mix");
+        for (name, p) in dup.params.iter_mut() {
+            p.id = format!("{owner}/{new_id2}/{name}");
+        }
+        stack.nodes.insert(new_id2.clone(), dup);
+        chain.insert((pos + 1).min(chain.len()), new_id2);
+        rewire_chain(stack, &chain);
+        Ok(())
+    })?;
+    Ok(new_id)
+}
+
+/// Removes an effect node from a layer or group's `EffectStack` and rewires the chain.
+pub fn fx_remove(st: &mut State, sym: &str, target: StackTarget<'_>, fx_id: &str) -> EditResult<()> {
+    with_stack_mut(st, sym, target, |stack, _, _| {
+        let Some(removed) = stack.nodes.shift_remove(fx_id) else { return fail("no such effect") };
+        for n in stack.nodes.values_mut() {
+            if n.inputs.iter().any(|x| x == fx_id) {
+                let mut ins = Vec::new();
+                for x in &n.inputs {
+                    if x == fx_id {
+                        ins.extend(removed.inputs.iter().cloned());
+                    } else {
+                        ins.push(x.clone());
+                    }
+                }
+                n.inputs = ins;
+            }
+        }
+        if stack.output.as_deref() == Some(fx_id) {
+            stack.output = removed.inputs.first().cloned();
+        }
+        Ok(())
+    })
+}
+
+/// Applies an array of stacked effects (`[{"type", "mix"?, "params"?}, ...]`) in one step.
+pub fn fx_preset(st: &mut State, sym: &str, target: StackTarget<'_>, effects: &[J], replace: bool) -> EditResult<Vec<String>> {
+    if replace {
+        with_stack_mut(st, sym, target, |stack, _, _| {
+            stack.nodes.clear();
+            stack.output = None;
+            Ok(())
+        })?;
+    }
+    let mut added = Vec::with_capacity(effects.len());
+    for item in effects {
+        let Some(ty) = item["type"].as_str() else { continue };
+        let mix = item["mix"].as_f64().map(|v| v as f32);
+        let params = item["params"].as_object();
+        let id = fx_add(st, sym, target, ty, mix, params)?;
+        added.push(id);
+    }
+    Ok(added)
 }

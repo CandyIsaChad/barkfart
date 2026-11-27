@@ -89,7 +89,7 @@ pub fn evaluate_redirected(project: &Project, symbol_id: &str, t: f64, onion_onl
     let mut stack = vec![Work { symbol: sym, time: t, xf: view, into: Vec::new(), path: vec![sym.id.as_str()] }];
     while let Some(w) = stack.pop() {
         let top = w.path.len() == 1;
-        eval_symbol(&mut ctx, w, &mut stack, onion_only && top);
+        eval_symbol(&mut ctx, w, &mut stack, onion_only && top, apply_camera);
     }
     if !onion_only {
         background(&mut ctx, sym, t, apply_camera);
@@ -320,10 +320,28 @@ fn lock_view(c: &CameraLayer, parallax: f32, move_only: bool, t: f64, r: &mut Re
     Affine::scale(zoom, zoom).mul(&Affine::rotate_deg(-rot as f64 * k)).mul(&Affine::translate(-x as f64 * k, -y as f64 * k))
 }
 
-fn eval_symbol<'p>(ctx: &mut Ctx<'p>, w: Work<'p>, stack: &mut Vec<Work<'p>>, onion_only: bool) {
+fn eval_symbol<'p>(ctx: &mut Ctx<'p>, w: Work<'p>, stack: &mut Vec<Work<'p>>, onion_only: bool, apply_camera: bool) {
     let sym = w.symbol;
     let t = w.time;
     let any_solo = sym.layers.iter().any(|l| l.solo);
+    let cam_bounds = if !apply_camera && w.path.len() == 1 {
+        let hw = ctx.project.settings.width as f32 / 2.0;
+        let hh = ctx.project.settings.height as f32 / 2.0;
+        let mut pts = [-hw, -hh, hw, -hh, hw, hh, -hw, hh];
+        if let Some(cam) = active_camera(sym, t, &mut ctx.r) {
+            let inv = camera_of(cam, t, &mut ctx.r).inverse();
+            for i in (0..8).step_by(2) {
+                map_point(&inv, &mut pts, i);
+            }
+        }
+        let min_x = pts[0].min(pts[2]).min(pts[4]).min(pts[6]);
+        let max_x = pts[0].max(pts[2]).max(pts[4]).max(pts[6]);
+        let min_y = pts[1].min(pts[3]).min(pts[5]).min(pts[7]);
+        let max_y = pts[1].max(pts[3]).max(pts[5]).max(pts[7]);
+        Some([min_x, min_y, max_x, max_y])
+    } else {
+        None
+    };
     // K / D33: the open group (its id and its scene group's slot) members are drawn into
     let mut open: Option<(&str, Slot)> = None;
     for l in &sym.layers {
@@ -367,6 +385,7 @@ fn eval_symbol<'p>(ctx: &mut Ctx<'p>, w: Work<'p>, stack: &mut Vec<Work<'p>>, on
         }
         if adjustment {
             g.adjustment = true;
+            g.bounds = cam_bounds;
         }
         // a group's members go into one scene group with the group's opacity
         // and effects (made with its first member that draws)
