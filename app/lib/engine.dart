@@ -51,6 +51,10 @@ typedef _BytesD = int Function(Pointer<Void>, Pointer<Uint8>, int);
 typedef _ImportC2 = Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, IntPtr);
 typedef _ImportD2 = int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>, int);
 typedef _SaveC = Pointer<Uint8> Function(Pointer<Void>, Pointer<IntPtr>);
+typedef _ThumbReqC = Int32 Function(Pointer<Void>, Int32, Pointer<Utf8>, Double, Uint32, Uint32, Uint64);
+typedef _ThumbReqD = int Function(Pointer<Void>, int, Pointer<Utf8>, double, int, int, int);
+typedef _ThumbPollC = Int32 Function(Pointer<Void>, Pointer<Uint64>, Pointer<Uint32>, Pointer<Uint32>, Pointer<Uint8>, Size);
+typedef _ThumbPollD = int Function(Pointer<Void>, Pointer<Uint64>, Pointer<Uint32>, Pointer<Uint32>, Pointer<Uint8>, int);
 
 DynamicLibrary _open() {
   final override = Platform.environment['BARKFART_ENGINE'];
@@ -81,6 +85,14 @@ class Engine {
   Pointer<Uint8> _buf = nullptr;
   int _bufLen = 0;
   final Pointer<Uint32> _micros = calloc<Uint32>();
+  Pointer<Uint8> _thumbBuf = nullptr;
+  int _thumbBufLen = 0;
+  final Pointer<Uint64> _thumbTag = calloc<Uint64>();
+  final Pointer<Uint32> _thumbW = calloc<Uint32>();
+  final Pointer<Uint32> _thumbH = calloc<Uint32>();
+  late final _ThumbReqD _thumbReq = _lib.lookupFunction<_ThumbReqC, _ThumbReqD>('bf_thumb_request');
+  late final _ThumbPollD _thumbPoll = _lib.lookupFunction<_ThumbPollC, _ThumbPollD>('bf_thumb_poll');
+  late final _FreeD _thumbClear = _lib.lookupFunction<_FreeC, _FreeD>('bf_thumb_clear');
 
   Engine._(this._lib, this._handle);
 
@@ -354,10 +366,47 @@ class Engine {
     return r == 0;
   }
 
+  /// User list #9: enqueue a thumbnail render on the engine's background thread.
+  /// kind: 0 = preview strip, 1 = layer alone, 2 = group alone.
+  bool requestThumb(int kind, String? id, double t, int w, int h, int tag) {
+    final p = id == null ? nullptr : id.toNativeUtf8();
+    final r = _thumbReq(_handle, kind, p, t, w, h, tag);
+    if (p != nullptr) calloc.free(p);
+    return r == 0;
+  }
+
+  /// User list #9: non-blocking poll for the next completed thumbnail RGBA buffer.
+  ({int tag, int w, int h, Uint8List rgba})? pollThumb() {
+    if (_thumbBuf == nullptr) {
+      _thumbBufLen = 256 * 256 * 4;
+      _thumbBuf = calloc<Uint8>(_thumbBufLen);
+    }
+    var r = _thumbPoll(_handle, _thumbTag, _thumbW, _thumbH, _thumbBuf, _thumbBufLen);
+    if (r == -1) {
+      final need = _thumbW.value * _thumbH.value * 4;
+      if (need <= 0) return null;
+      calloc.free(_thumbBuf);
+      _thumbBuf = calloc<Uint8>(need);
+      _thumbBufLen = need;
+      r = _thumbPoll(_handle, _thumbTag, _thumbW, _thumbH, _thumbBuf, _thumbBufLen);
+    }
+    if (r != 1) return null;
+    final w = _thumbW.value, h = _thumbH.value;
+    return (tag: _thumbTag.value, w: w, h: h, rgba: Uint8List.fromList(_thumbBuf.asTypedList(w * h * 4)));
+  }
+
+  /// Drops all queued and completed off-UI-thread thumbnails.
+  void clearThumbs() => _thumbClear(_handle);
+
   void dispose() {
     stop();
     if (_buf != nullptr) calloc.free(_buf);
     _buf = nullptr;
+    if (_thumbBuf != nullptr) calloc.free(_thumbBuf);
+    _thumbBuf = nullptr;
+    calloc.free(_thumbTag);
+    calloc.free(_thumbW);
+    calloc.free(_thumbH);
     calloc.free(_micros);
     _free(_handle);
   }

@@ -273,6 +273,20 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _ticker.dispose();
     _reminder?.cancel();
     _clearCache();
+    for (final img in _thumbs.values) {
+      img.dispose();
+    }
+    _thumbs.clear();
+    for (final img in _rowPics.values) {
+      img.dispose();
+    }
+    _rowPics.clear();
+    for (final m in _groupThumbs.values) {
+      for (final img in m.values) {
+        img.dispose();
+      }
+    }
+    _groupThumbs.clear();
     if (_imageOwned) _image?.dispose();
     _engine?.dispose();
     super.dispose();
@@ -2216,6 +2230,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   // rows show the same)
   final Map<String, Map<int, ui.Image>> _groupThumbs = {};
   final Set<String> _groupDirty = {};
+  // User list #9: off-UI-thread thumbnail queue state
+  int _thumbNextTag = 1;
+  final Map<int, ({int kind, String key, int rev})> _thumbInFlight = {};
+  final Set<String> _thumbPendingKeys = {};
+  static const _thumbMaxInFlight = 6;
 
   Iterable<String> get _foldedGroups => ((_st['rows'] as List?) ?? const []).cast<Map>().where((r) => r['kind'] == 'group' && r['open'] == false).map((r) => '${r['id']}');
 
@@ -2235,6 +2254,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       }
       return;
     }
+    _engine?.clearThumbs();
+    _thumbInFlight.clear();
+    _thumbPendingKeys.clear();
     for (var i = 0; i < _frames; i++) {
       _thumbDirty.add(i);
       for (final g in folded) {
@@ -2245,8 +2267,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   // M4: the pictures inside timeline blocks, per layer and frame ("id@frame"):
-  // a tween block shows the pose on every frame, a hold block once. Redrawn a
-  // few at a time after a change; the old picture shows until then.
+  // a tween block shows the pose on every frame, a hold block once. Rendered on
+  // the engine's background thread and drained non-blockingly per tick.
   final Map<String, ui.Image> _rowPics = {};
   // M5: waveforms, by asset, clip range and bar count
   final Map<String, List<double>> _peaks = {};
@@ -2272,9 +2294,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     return out;
   }
 
+  /// Enqueues stale per-layer block thumbnails onto the engine's worker thread.
   void _rowPicTick() {
     final e = _engine;
-    if (e == null || _playing || _oneFinger == 1 || _st.isEmpty || !_layersOpen) return;
+    if (e == null || _playing || _oneFinger == 1 || _blockDrag != null || _st.isEmpty || !_layersOpen) return;
     final rev = (_st['rev'] as num?)?.toInt() ?? 0;
     final wanted = _rowPicsWanted();
     if (rev != _rowPicRev) {
@@ -2287,30 +2310,77 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _rowPics.remove(k)?.dispose();
       }
     }
-    if (_rowPicDirty.isEmpty) return;
-    // nearest the playhead first, a few per tick
+    if (_rowPicDirty.isEmpty || _thumbInFlight.length >= _thumbMaxInFlight) return;
+    // nearest the playhead first, bounded by in-flight cap
     final order = _rowPicDirty.toList()..sort((a, b) => (int.parse(a.split('@').last) - _frame).abs().compareTo((int.parse(b.split('@').last) - _frame).abs()));
-    for (final k in order.take(3)) {
+    final px = (44 * math.min(_dpr, 2.0)).round();
+    for (final k in order) {
+      if (_thumbInFlight.length >= _thumbMaxInFlight) break;
       _rowPicDirty.remove(k);
+      final pkey = '1:$k';
+      if (_thumbPendingKeys.contains(pkey)) continue;
       final at = k.lastIndexOf('@');
       final id = k.substring(0, at), f = int.parse(k.substring(at + 1));
-      final px = (44 * math.min(_dpr, 2.0)).round();
-      final pic = e.renderLayer(id, f / _fps, px, px);
-      if (pic == null) continue;
-      ui.decodeImageFromPixels(pic, px, px, ui.PixelFormat.rgba8888, (img) {
-        if (!mounted) return;
-        setState(() {
-          _rowPics.remove(k)?.dispose();
-          _rowPics[k] = img;
-        });
-      });
+      final tag = _thumbNextTag++;
+      if (e.requestThumb(1, id, f / _fps, px, px, tag)) {
+        _thumbInFlight[tag] = (kind: 1, key: k, rev: rev);
+        _thumbPendingKeys.add(pkey);
+      }
     }
   }
 
-  /// Draws one stale frame picture (nearest the current frame first).
+  /// Drains completed off-UI-thread thumbnails (<= 2 per tick) and enqueues
+  /// stale preview & folded-group thumbnails nearest the playhead first.
   void _thumbTick() {
     final e = _engine;
-    if (e == null || _playing || _oneFinger == 1 || _st.isEmpty) return;
+    if (e == null || _st.isEmpty) return;
+    final curRev = (_st['rev'] as num?)?.toInt() ?? 0;
+    // Always drain up to 2 ready thumbnails non-blockingly per frame.
+    for (var n = 0; n < 2; n++) {
+      final res = e.pollThumb();
+      if (res == null) break;
+      final meta = _thumbInFlight.remove(res.tag);
+      if (meta == null) continue;
+      _thumbPendingKeys.remove('${meta.kind}:${meta.key}');
+      if (meta.rev != curRev) continue;
+      ui.decodeImageFromPixels(res.rgba, res.w, res.h, ui.PixelFormat.rgba8888, (img) {
+        if (!mounted) {
+          img.dispose();
+          return;
+        }
+        if (meta.kind == 0) {
+          final i = int.tryParse(meta.key);
+          if (i == null || i >= _frames) {
+            img.dispose();
+            return;
+          }
+          setState(() {
+            _thumbs.remove(i)?.dispose();
+            _thumbs[i] = img;
+          });
+        } else if (meta.kind == 1) {
+          setState(() {
+            _rowPics.remove(meta.key)?.dispose();
+            _rowPics[meta.key] = img;
+          });
+        } else if (meta.kind == 2) {
+          final at = meta.key.lastIndexOf('@');
+          final g = meta.key.substring(0, at), i = int.tryParse(meta.key.substring(at + 1));
+          final m = _groupThumbs[g];
+          if (m == null || i == null || i >= _frames) {
+            img.dispose();
+            return;
+          }
+          setState(() {
+            m.remove(i)?.dispose();
+            m[i] = img;
+          });
+        } else {
+          img.dispose();
+        }
+      });
+    }
+    if (_playing || _oneFinger == 1 || _blockDrag != null) return;
     // groups just folded get their strip; groups opened or gone drop theirs
     final folded = _foldedGroups.toSet();
     for (final g in _groupThumbs.keys.where((g) => !folded.contains(g)).toList()) {
@@ -2327,51 +2397,34 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         }
       }
     }
-    if (_thumbDirty.isEmpty) {
-      _groupThumbTick(e);
-      return;
-    }
-    final i = _thumbDirty.reduce((a, b) => (a - _frame).abs() <= (b - _frame).abs() ? a : b);
-    _thumbDirty.remove(i);
-    if (i >= _frames) return;
     final sw = (_st['w'] as num).toDouble(), sh = (_st['h'] as num).toDouble();
-    final w = (120 * math.min(_dpr, 2.0)).round(), h = (w * sh / sw).round();
-    final px = e.renderView(i / _fps, w, h, -sw / 2, -sh / 2, sw / 2, sh / 2, camera: true);
-    if (px == null) return;
-    ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, (img) {
-      if (!mounted) return;
-      setState(() {
-        _thumbs.remove(i)?.dispose();
-        _thumbs[i] = img;
-      });
-    });
-  }
-
-  /// Draws one stale picture of a folded group's strip (nearest the current
-  /// frame first), the same framing as the Preview row.
-  void _groupThumbTick(Engine e) {
-    if (_groupDirty.isEmpty) return;
-    int frameOf(String k) => int.parse(k.substring(k.lastIndexOf('@') + 1));
-    final k = _groupDirty.reduce((a, b) => (frameOf(a) - _frame).abs() <= (frameOf(b) - _frame).abs() ? a : b);
-    _groupDirty.remove(k);
-    final g = k.substring(0, k.lastIndexOf('@')), i = frameOf(k);
-    if (i >= _frames) return;
-    final sw = (_st['w'] as num).toDouble(), sh = (_st['h'] as num).toDouble();
-    final w = (120 * math.min(_dpr, 2.0)).round(), h = (w * sh / sw).round();
-    final px = e.renderGroup(g, i / _fps, w, h);
-    if (px == null) return;
-    ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, (img) {
-      if (!mounted) return;
-      final m = _groupThumbs[g];
-      if (m == null) {
-        img.dispose();
-        return;
+    final w = (120 * math.min(_dpr, 2.0)).round(), h = math.max(1, (w * sh / sw).round());
+    while (_thumbDirty.isNotEmpty && _thumbInFlight.length < _thumbMaxInFlight) {
+      final i = _thumbDirty.reduce((a, b) => (a - _frame).abs() <= (b - _frame).abs() ? a : b);
+      _thumbDirty.remove(i);
+      if (i >= _frames) continue;
+      final pkey = '0:$i';
+      if (_thumbPendingKeys.contains(pkey)) continue;
+      final tag = _thumbNextTag++;
+      if (e.requestThumb(0, null, i / _fps, w, h, tag)) {
+        _thumbInFlight[tag] = (kind: 0, key: '$i', rev: curRev);
+        _thumbPendingKeys.add(pkey);
       }
-      setState(() {
-        m.remove(i)?.dispose();
-        m[i] = img;
-      });
-    });
+    }
+    while (_groupDirty.isNotEmpty && _thumbInFlight.length < _thumbMaxInFlight) {
+      int frameOf(String k) => int.parse(k.substring(k.lastIndexOf('@') + 1));
+      final k = _groupDirty.reduce((a, b) => (frameOf(a) - _frame).abs() <= (frameOf(b) - _frame).abs() ? a : b);
+      _groupDirty.remove(k);
+      final g = k.substring(0, k.lastIndexOf('@')), i = frameOf(k);
+      if (i >= _frames) continue;
+      final pkey = '2:$k';
+      if (_thumbPendingKeys.contains(pkey)) continue;
+      final tag = _thumbNextTag++;
+      if (e.requestThumb(2, g, i / _fps, w, h, tag)) {
+        _thumbInFlight[tag] = (kind: 2, key: k, rev: curRev);
+        _thumbPendingKeys.add(pkey);
+      }
+    }
   }
 
   int _copyCount = 1;
@@ -3295,12 +3348,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                   onTapUp: (d) {
                     if (_boxActive || _boxPath != null || DateTime.now().difference(_boxEndedAt) < const Duration(milliseconds: 80)) return;
                     if (strong && figure) {
-                      _poseKeyPopover(r, b, Rect.fromCenter(center: d.globalPosition, width: 24, height: 24));
+                      _poseKeyPopover(r, b, bi, Rect.fromCenter(center: d.globalPosition, width: 24, height: 24));
                     } else {
                       select(d.localPosition.dx);
                     }
                   },
-                  onSecondaryTapUp: figure ? (d) => _poseKeyPopover(r, b, Rect.fromCenter(center: d.globalPosition, width: 24, height: 24)) : null,
+                  onSecondaryTapUp: figure ? (d) => _poseKeyPopover(r, b, bi, Rect.fromCenter(center: d.globalPosition, width: 24, height: 24)) : null,
                   onLongPressStart: figure && st > 0
                       ? (d) {
                           if (_boxActive || _boxPath != null) return;
@@ -3587,12 +3640,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   /// User list #3: anchored popover for a pose keyframe (copy, paste, duplicate, easing, delete).
-  Future<void> _poseKeyPopover(Map r, List b, Rect anchor) async {
+  Future<void> _poseKeyPopover(Map r, List b, int blockIndex, Rect anchor) async {
     final layerId = '${r['id']}';
     final name = '${r['name']}';
     final st = (b[0] as num).toInt();
     final isHold = b[2] == true;
-    var ease = b.length > 3 && b[3] is String ? '${b[3]}' : (isHold ? 'hold' : 'auto');
+    final blockEases = (r['blockEases'] as List?) ?? const [];
+    final rawEase = blockIndex < blockEases.length ? blockEases[blockIndex] : (b.length > 3 ? b[3] : null);
+    var ease = rawEase is String ? rawEase : (isHold ? 'hold' : 'auto');
     const eases = ['auto', 'linear', 'out', 'smooth', 'bounce'];
     await showGeneralDialog<void>(
       context: context,
