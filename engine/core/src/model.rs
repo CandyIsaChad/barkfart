@@ -966,6 +966,42 @@ impl Node {
     pub fn properties(&self) -> [&Property; 8] {
         [&self.rotation, &self.length, &self.thickness, &self.scale, &self.color, &self.shown, &self.gradient_color, &self.outline_color]
     }
+
+    /// Effective `(reverse, sideways, linear)` gradient flags, accounting for
+    /// Stick Nodes `.nodes` / `.stknds` legacy fields (`L.type == "i:1"` square
+    /// segments and `L.gradientMode` 0/1/2) while keeping Java-parity JSON intact.
+    pub fn effective_gradient(&self) -> (bool, bool, bool) {
+        let legacy_sq = self.shape == Shape::SquareLine && self.legacy_extras.get("L.type").map(String::as_str) == Some("i:1");
+        let reverse = self.gradient_reverse ^ legacy_sq;
+        let round = matches!(self.shape, Shape::Circle | Shape::Polygon | Shape::Ellipse);
+        let (sideways, linear) = match self.legacy_extras.get("L.gradientMode").map(String::as_str) {
+            Some("i:0") => (true, round),
+            Some("i:1") => (false, round),
+            Some("i:2") => (false, false),
+            _ => (self.gradient_sideways, self.gradient_linear),
+        };
+        (reverse, sideways, linear)
+    }
+
+    /// Updates `(reverse, sideways, linear)` gradient flags and syncs any
+    /// legacy `L.gradientMode` extra so UI edits and `.nodes` re-exports match.
+    pub fn set_effective_gradient(&mut self, reverse: bool, sideways: bool, linear: bool) {
+        let legacy_sq = self.shape == Shape::SquareLine && self.legacy_extras.get("L.type").map(String::as_str) == Some("i:1");
+        self.gradient_reverse = reverse ^ legacy_sq;
+        self.gradient_sideways = sideways;
+        self.gradient_linear = linear;
+        if self.legacy_extras.contains_key("L.gradientMode") {
+            let round = matches!(self.shape, Shape::Circle | Shape::Polygon | Shape::Ellipse);
+            let mode = if round && !linear {
+                "i:2"
+            } else if sideways {
+                "i:0"
+            } else {
+                "i:1"
+            };
+            self.legacy_extras.insert("L.gradientMode".into(), mode.into());
+        }
+    }
 }
 
 /// A segment's look as its figure came into the project (D7b): what
@@ -988,6 +1024,7 @@ pub struct NodeBase {
     pub gradient_color: Color,
     pub gradient_reverse: bool,
     pub gradient_sideways: bool,
+    pub gradient_linear: bool,
     pub circle_outline: bool,
     pub outline_color: Color,
     pub circle_hollow: bool,
@@ -1003,6 +1040,7 @@ pub struct NodeBase {
 impl NodeBase {
     /// The node's values on the first frame.
     pub fn of(n: &Node) -> NodeBase {
+        let (grad_rev, grad_side, grad_lin) = n.effective_gradient();
         NodeBase {
             shape: n.shape,
             length: if n.rest_length > 0.0 { n.rest_length } else { n.length.key_value(0.0).f() },
@@ -1016,8 +1054,9 @@ impl NodeBase {
             smart_stretch: n.smart_stretch,
             gradient: n.gradient,
             gradient_color: n.gradient_color.key_value(0.0).color(),
-            gradient_reverse: n.gradient_reverse,
-            gradient_sideways: n.gradient_sideways,
+            gradient_reverse: grad_rev,
+            gradient_sideways: grad_side,
+            gradient_linear: grad_lin,
             circle_outline: n.circle_outline,
             outline_color: n.outline_color.key_value(0.0).color(),
             circle_hollow: n.circle_hollow,

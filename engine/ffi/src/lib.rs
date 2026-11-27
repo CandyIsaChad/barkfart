@@ -669,7 +669,7 @@ pub extern "C" fn bf_export_begin(e: *mut Engine, format: i32, path: *const c_ch
             }
             _ => return Err(format!("unknown export format {format}")),
         };
-        Ok(Export { writer: Some(writer), path, w, h, start, count, next: 0, transparent: transparent != 0 && format == 1, error: vec![0], pics })
+        Ok(Export { writer: Some(writer), path, w, h, start, count, next: 0, transparent: transparent != 0 && (format == 0 || format == 1), error: vec![0], pics })
     })();
     match r {
         Ok(x) => Box::into_raw(Box::new(x)),
@@ -721,12 +721,15 @@ pub extern "C" fn bf_export_step(e: *const Engine, x: *mut Export) -> i32 {
             let shape = eval::Shape::new(eval::ShapeKind::Text { text: text.clone(), font: None, size, xf: eval::Affine::translate(hw - margin, hh - margin), corner: 2, align: 2 }, *color, "watermark");
             scene.root.children.push(eval::Item::Shape(shape));
         }
+        let transparent = job.transparent && matches!(job.writer, Some(Writer::Png(_) | Writer::Gif(_)));
+        if transparent {
+            scene.root.children.retain(|o| !matches!(o, eval::Item::Group(g) if g.source == "background"));
+        }
         let glyphs = engine.glyphs.read().expect("glyphs");
         let list = tess::layered(&scene, Some(&*glyphs));
         let (hw, hh) = (p.settings.width as f32 / 2.0, p.settings.height as f32 / 2.0);
         let bg = p.settings.background;
         let view = View { x0: -hw, y0: -hh, x1: hw, y1: hh, background: [bg.r, bg.g, bg.b, bg.a] };
-        let transparent = job.transparent && matches!(job.writer, Some(Writer::Png(_)));
         let px = engine.renderer.render_export(&list, job.w, job.h, view, 2, transparent);
         match job.writer.as_mut() {
             Some(Writer::Gif(g)) => g.frame_held(&px, extra).map_err(|e| e.to_string())?,

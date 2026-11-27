@@ -359,3 +359,189 @@ fn reverse_range_and_ping_pong_range_mirror_poses_and_properties() {
     s.command(&json!({"op": "redo"}));
     assert_eq!(canonical(&s), after_pp);
 }
+
+#[test]
+fn extend_default_figure_then_add_or_import_new_figure_and_extend_shorten_move() {
+    let mut s = Session::new(Document::new(new_editor_project()));
+    // Fresh unposed figure immediately reports a 1-frame visible block and selected.pose!
+    let init_st = s.command(&json!({"op": "select", "layer": "L2"}));
+    assert_eq!(init_st["selected"]["pose"]["start"], 0);
+    assert_eq!(init_st["selected"]["pose"]["length"], 1);
+    let init_row = init_st["rows"].as_array().unwrap().iter().find(|r| r["id"] == "L2").unwrap();
+    assert_eq!(init_row["blocks"], json!([[0, 1, false]]));
+
+    // 1. Extend unposed default stick figure from 1 frame to 8 frames
+    let st = s.command(&json!({"op": "block_length", "layer": "L2", "frame": 0, "frames": 8}));
+    assert_eq!(st["frames"], 8);
+
+    // 2. Add a second stick figure on frame 0
+    let st = s.command(&json!({"op": "add_figure", "kind": "stickman"}));
+    let fig2 = st["selected"]["layer"].as_str().unwrap().to_string();
+    assert_eq!(st["selected"]["pose"]["start"], 0);
+    assert_eq!(st["selected"]["pose"]["length"], 1, "newly added figure starts as 1-frame visible block");
+    let row2 = st["rows"].as_array().unwrap().iter().find(|r| r["id"] == fig2).unwrap();
+    assert_eq!(row2["blocks"], json!([[0, 1, false]]));
+    assert_eq!(row2["on"], json!([true, false, false, false, false, false, false, false]));
+
+    // 3. Live-drag right grip to extend fig2 into existing timeline (5 frames), past end (10 frames), then shorten to 6 frames
+    let before_drag = canonical(&s);
+    s.command(&json!({"op": "timeline_drag_start", "kind": "block_end", "layer": fig2, "frame": 0}));
+    let mid5 = s.command(&json!({"op": "timeline_drag_move", "frames": 5}));
+    assert_eq!(mid5["frames"], 8, "default figure still holds 8 frames");
+    let r5 = mid5["rows"].as_array().unwrap().iter().find(|r| r["id"] == fig2).unwrap();
+    assert_eq!(r5["blocks"], json!([[0, 5, false]]));
+    assert_eq!(r5["on"], json!([true, true, true, true, true, false, false, false]));
+
+    let mid10 = s.command(&json!({"op": "timeline_drag_move", "frames": 10}));
+    assert_eq!(mid10["frames"], 10);
+    let r10 = mid10["rows"].as_array().unwrap().iter().find(|r| r["id"] == fig2).unwrap();
+    assert_eq!(r10["blocks"], json!([[0, 10, false]]));
+
+    let mid6 = s.command(&json!({"op": "timeline_drag_move", "frames": 6}));
+    assert_eq!(mid6["frames"], 8, "shrunk back to L2's 8 frames without chopping L2");
+    let done = s.command(&json!({"op": "up"}));
+    assert_eq!(done["undo"], "Pose length");
+    let r6 = done["rows"].as_array().unwrap().iter().find(|r| r["id"] == fig2).unwrap();
+    assert_eq!(r6["blocks"], json!([[0, 6, false]]));
+    assert_eq!(r6["on"], json!([true, true, true, true, true, true, false, false]));
+
+    // Exact 1-step undo and redo
+    let after_drag = canonical(&s);
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(canonical(&s), before_drag);
+    s.command(&json!({"op": "redo"}));
+    assert_eq!(canonical(&s), after_drag);
+
+    // 4. Hold longer grows visible length by +1 (6 -> 7), and extend_to extends onto empty/runway cells
+    let st = s.command(&json!({"op": "hold_longer", "layer": fig2, "frame": 0}));
+    let r7 = st["rows"].as_array().unwrap().iter().find(|r| r["id"] == fig2).unwrap();
+    assert_eq!(r7["blocks"], json!([[0, 7, false]]));
+
+    let before_ext_to = canonical(&s);
+    let st = s.command(&json!({"op": "extend_to", "layer": fig2, "frame": 9}));
+    assert_eq!(st["undo"], "Extend layer");
+    assert_eq!(st["frames"], 10);
+    assert_eq!(st["frame"], 9);
+    let r_ext = st["rows"].as_array().unwrap().iter().find(|r| r["id"] == fig2).unwrap();
+    assert_eq!(r_ext["blocks"], json!([[0, 10, false]]));
+    s.command(&json!({"op": "undo"}));
+    assert_eq!(canonical(&s), before_ext_to);
+
+    // Textfield added mid-timeline also emits a single extendable/movable block
+    s.command(&json!({"op": "frame", "i": 2}));
+    let st_txt = s.command(&json!({"op": "add_textfield"}));
+    let tid = st_txt["textfield"]["layer"].as_str().unwrap().to_string();
+    let r_txt = st_txt["rows"].as_array().unwrap().iter().find(|r| r["id"] == tid).unwrap();
+    assert_eq!(r_txt["blocks"], json!([[2, 1, false]]));
+    let st_txt = s.command(&json!({"op": "extend_to", "layer": tid, "frame": 5}));
+    let r_txt = st_txt["rows"].as_array().unwrap().iter().find(|r| r["id"] == tid).unwrap();
+    assert_eq!(r_txt["blocks"], json!([[2, 4, false]]));
+
+    // 5. Import a stock .nodes figure mid-timeline (frame 3), extend, move, and add pose on runway cell
+    let stock_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../app/assets/stock/figures/Stickfigure.nodes");
+    if let Ok(bytes) = std::fs::read(stock_path) {
+        s.command(&json!({"op": "frame", "i": 3}));
+        let st = s.import("Stickfigure.nodes", &bytes);
+        let fig3 = st["selected"]["layer"].as_str().unwrap().to_string();
+        assert_eq!(st["selected"]["pose"]["start"], 3);
+        assert_eq!(st["selected"]["pose"]["length"], 1);
+        let r3 = st["rows"].as_array().unwrap().iter().find(|r| r["id"] == fig3).unwrap();
+        assert_eq!(r3["blocks"], json!([[3, 1, false]]));
+
+        // Extend mid-timeline imported figure to 3 frames (frames 3, 4, 5)
+        let before_ext3 = canonical(&s);
+        let st = s.command(&json!({"op": "block_length", "layer": fig3, "frame": 3, "frames": 3}));
+        let r3 = st["rows"].as_array().unwrap().iter().find(|r| r["id"] == fig3).unwrap();
+        assert_eq!(r3["blocks"], json!([[3, 3, false]]));
+        assert_eq!(r3["on"], json!([false, false, false, true, true, true, false, false]));
+        s.command(&json!({"op": "undo"}));
+        assert_eq!(canonical(&s), before_ext3);
+        s.command(&json!({"op": "redo"}));
+
+        // Move mid-timeline block from frame 3 to frame 1
+        let st = s.command(&json!({"op": "move_pose_key", "layer": fig3, "from": 3, "to": 1}));
+        let r3 = st["rows"].as_array().unwrap().iter().find(|r| r["id"] == fig3).unwrap();
+        assert_eq!(r3["blocks"], json!([[1, 3, false]]));
+        assert_eq!(r3["on"], json!([false, true, true, true, false, false, false, false]));
+
+        // Add new pose on a runway cell (frame 10 > current 8 frames)
+        let st = s.command(&json!({"op": "new_pose", "layer": fig3, "frame": 10}));
+        assert_eq!(st["frames"], 11);
+        let r3 = st["rows"].as_array().unwrap().iter().find(|r| r["id"] == fig3).unwrap();
+        assert_eq!(r3["blocks"], json!([[1, 3, false], [10, 1, false]]));
+    }
+}
+
+#[test]
+fn gradient_ball_and_legacy_gradient_modes_evaluate_and_tessellate_smoothly() {
+    use barkfart_core::{eval, figures, model::Shape, tess};
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../app/assets/stock/figures/Gradient Ball.nodes");
+    let bytes = std::fs::read(path).expect("Gradient Ball.nodes");
+
+    // Preview project (figure picker) and Session::import both render smooth radial pink->white
+    let prev = figures::preview_file("Gradient Ball.nodes", &bytes).expect("preview_file");
+    let scene = eval::evaluate(&prev, &prev.root_symbol, 0.0);
+    let dl = tess::tessellate(&scene, None);
+    assert!(dl.triangle_count() > 100);
+
+    // Ball center in stage coords (node n12 circle center ~ (7.9, -54.1), clear_spot keeps x=0 on empty preview)
+    let (cx, cy) = (7.9f32, -54.1f32);
+    let mut inner_pink = 0usize;
+    let mut outer_white = 0usize;
+    for b in &dl.batches {
+        for i in 0..b.vertex_count() {
+            let (x, y) = (b.xy[i * 2], b.xy[i * 2 + 1]);
+            let d = (x - cx).hypot(y - cy);
+            let rgba = b.rgba[i];
+            let (r, g, bl) = ((rgba >> 24) & 0xff, (rgba >> 16) & 0xff, (rgba >> 8) & 0xff);
+            if d < 56.0 {
+                // Every inner vertex (center disc + inner ends of both SquareLine & Triangle spokes) is pink!
+                assert!(r > 230 && g < 110, "inner vertex at r={d:.1} was not pink: rgba=({r},{g},{bl})");
+                inner_pink += 1;
+            } else if d > 315.0 {
+                // Every outer rim vertex of both SquareLine & Triangle spokes is white!
+                assert!(r > 245 && g > 245 && bl > 245, "outer vertex at r={d:.1} was not white: rgba=({r},{g},{bl})");
+                outer_white += 1;
+            }
+        }
+    }
+    assert!(inner_pink >= 50 && outer_white >= 100, "inner={inner_pink}, outer={outer_white}");
+
+    // Toggling gradientReverse on an imported SquareLine spoke flips cleanly and resets to defaults
+    let mut s = Session::new(Document::new(new_editor_project()));
+    let st = s.import("Gradient Ball.nodes", &bytes);
+    let lid = st["selected"]["layer"].as_str().unwrap().to_string();
+    let st = s.command(&json!({"op": "select", "layer": lid, "node": "n81"}));
+    assert_eq!(st["selected"]["shape"], "square");
+    assert_eq!(st["selected"]["gradientReverse"], false);
+    assert_eq!(st["selected"]["defaults"]["gradientReverse"], false);
+    let before = canonical(&s);
+    let st = s.command(&json!({"op": "segment", "gradientReverse": true}));
+    assert_eq!(st["selected"]["gradientReverse"], true);
+    let st = s.command(&json!({"op": "reset_segment"}));
+    assert_eq!(st["selected"]["gradientReverse"], false);
+    assert_eq!(canonical(&s), before);
+
+    // Zero-length circle with legacy L.gradientMode = i:1 (vertical linear, like Snowman Head)
+    let mut p = new_editor_project();
+    {
+        let fig = p.root_mut().unwrap().layers[0].clone();
+        let mut layer = (*fig).clone();
+        let barkfart_core::model::LayerKind::Figure(f) = &mut layer.kind else { unreachable!() };
+        let head = f.node_mut("head").unwrap();
+        head.shape = Shape::Circle;
+        head.length.value = barkfart_core::model::Value::F(0.0);
+        head.thickness.value = barkfart_core::model::Value::F(200.0);
+        head.gradient = true;
+        head.color.value = barkfart_core::model::Value::C(barkfart_core::model::Color::rgba8888(0xff0000ff));
+        head.gradient_color.value = barkfart_core::model::Value::C(barkfart_core::model::Color::rgba8888(0x0000ffff));
+        head.legacy_extras.insert("L.type".into(), "i:2".into());
+        head.legacy_extras.insert("L.gradientMode".into(), "i:1".into());
+        p.root_mut().unwrap().layers[0] = std::sync::Arc::new(layer);
+    }
+    let sc = eval::evaluate(&p, &p.root_symbol, 0.0);
+    let dl2 = tess::tessellate(&sc, None);
+    let has_red = dl2.batches.iter().any(|b| b.rgba.iter().any(|&c| ((c >> 24) & 0xff) > 220 && ((c >> 8) & 0xff) < 40));
+    let has_blue = dl2.batches.iter().any(|b| b.rgba.iter().any(|&c| ((c >> 8) & 0xff) > 220 && ((c >> 24) & 0xff) < 40));
+    assert!(has_red && has_blue, "zero-length linear gradient circle spans red to blue");
+}

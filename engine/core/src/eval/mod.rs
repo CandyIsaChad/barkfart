@@ -674,10 +674,11 @@ fn emit_figure(ctx: &mut Ctx, layer_id: &str, f: &Figure, jump: bool, xf: &Affin
         let (ax, ay) = (xf.map_x(px[pi], py[pi]) as f32, xf.map_y(px[pi], py[pi]) as f32);
         let (bx, by) = (xf.map_x(px[i], py[i]) as f32, xf.map_y(px[i], py[i]) as f32);
         let w = (ctx.r.f(&node.thickness, t).abs() as f64 * sf) as f32;
+        let (grad_reverse, grad_sideways, grad_linear) = node.effective_gradient();
         let mut g_end: Option<Color> = None;
         if node.gradient {
             let mut e = figure_color(ctx, jump, &node.gradient_color, t);
-            if node.gradient_reverse {
+            if grad_reverse {
                 std::mem::swap(&mut c, &mut e);
             }
             g_end = Some(e);
@@ -732,23 +733,66 @@ fn emit_figure(ctx: &mut Ctx, layer_id: &str, f: &Figure, jump: bool, xf: &Affin
             use crate::model::Shape as S;
             let round = matches!(node.shape, S::Circle | S::Polygon | S::Ellipse);
             let hyp = ((bx - ax) as f64).hypot((by - ay) as f64);
-            let grad = if round && node.gradient_linear {
-                let len = 1e-6f64.max(hyp) as f32;
-                let half = if node.shape == S::Ellipse { w / 2.0 } else { len / 2.0 };
-                if node.gradient_sideways {
-                    let (nx, ny) = (-(by - ay) / len * half, (bx - ax) / len * half);
-                    Gradient::linear(mx - nx, my - ny, mx + nx, my + ny, end)
+            let is_legacy_circle = node.shape == S::Circle && node.legacy_extras.contains_key("L.type");
+            let circle_full_r = (hyp / 2.0) as f32 + w / 2.0;
+            // Unit direction along the node in view space (preserving pose angle when length == 0).
+            let unit_dir = || -> (f32, f32) {
+                if hyp > 1e-6 {
+                    (((bx - ax) as f64 / hyp) as f32, ((by - ay) as f64 / hyp) as f32)
                 } else {
-                    Gradient::linear(ax, ay, bx, by, end)
+                    let rad = pose.angle[i].to_radians();
+                    let dx = (xf.a * rad.cos() + xf.c * rad.sin()) as f32;
+                    let dy = (xf.b * rad.cos() + xf.d * rad.sin()) as f32;
+                    let d = dx.hypot(dy).max(1e-6);
+                    (dx / d, dy / d)
+                }
+            };
+            let grad = if round && grad_linear {
+                if node.shape == S::Circle && (hyp <= 1e-6 || is_legacy_circle) {
+                    let (ux, uy) = unit_dir();
+                    let half = circle_full_r;
+                    if grad_sideways {
+                        let (nx, ny) = (-uy * half, ux * half);
+                        Gradient::linear(mx - nx, my - ny, mx + nx, my + ny, end)
+                    } else {
+                        let (lx, ly) = (ux * half, uy * half);
+                        Gradient::linear(mx - lx, my - ly, mx + lx, my + ly, end)
+                    }
+                } else {
+                    let len = 1e-6f64.max(hyp) as f32;
+                    let half = if node.shape == S::Ellipse { w / 2.0 } else { len / 2.0 };
+                    if grad_sideways {
+                        let (nx, ny) = (-(by - ay) / len * half, (bx - ax) / len * half);
+                        Gradient::linear(mx - nx, my - ny, mx + nx, my + ny, end)
+                    } else {
+                        Gradient::linear(ax, ay, bx, by, end)
+                    }
                 }
             } else if matches!(node.shape, S::Circle | S::Polygon) {
-                Gradient::radial(mx, my, (hyp / 2.0) as f32, end)
+                let r = if node.shape == S::Circle && (hyp <= 1e-6 || is_legacy_circle) {
+                    circle_full_r
+                } else {
+                    (hyp / 2.0) as f32
+                };
+                Gradient::radial(mx, my, r, end)
             } else if node.shape == S::Ellipse {
-                Gradient::elliptical(mx, my, (bx - ax) / 2.0, (by - ay) / 2.0, w / 2.0, end)
-            } else if node.gradient_sideways {
-                let len = 1e-6f64.max(hyp) as f32;
-                let (nx, ny) = (-(by - ay) / len * w / 2.0, (bx - ax) / len * w / 2.0);
-                Gradient::linear(mx - nx, my - ny, mx + nx, my + ny, end)
+                let (ax_half, ay_half) = if hyp <= 1e-6 {
+                    let (ux, uy) = unit_dir();
+                    (ux * w / 2.0, uy * w / 2.0)
+                } else {
+                    ((bx - ax) / 2.0, (by - ay) / 2.0)
+                };
+                Gradient::elliptical(mx, my, ax_half, ay_half, w / 2.0, end)
+            } else if grad_sideways {
+                if hyp <= 1e-6 {
+                    let (ux, uy) = unit_dir();
+                    let (nx, ny) = (-uy * w / 2.0, ux * w / 2.0);
+                    Gradient::linear(mx - nx, my - ny, mx + nx, my + ny, end)
+                } else {
+                    let len = 1e-6f64.max(hyp) as f32;
+                    let (nx, ny) = (-(by - ay) / len * w / 2.0, (bx - ax) / len * w / 2.0);
+                    Gradient::linear(mx - nx, my - ny, mx + nx, my + ny, end)
+                }
             } else {
                 Gradient::linear(ax, ay, bx, by, end)
             };

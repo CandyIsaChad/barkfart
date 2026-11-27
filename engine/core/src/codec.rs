@@ -321,6 +321,7 @@ fn node_base(m: &Obj) -> R<NodeBase> {
         gradient_color: col("gradientColor", Color::WHITE)?,
         gradient_reverse: b(m, "gradientReverse", false)?,
         gradient_sideways: b(m, "gradientSideways", false)?,
+        gradient_linear: b(m, "gradientLinear", false)?,
         circle_outline: b(m, "outline", false)?,
         outline_color: col("outlineColor", Color::BLACK)?,
         circle_hollow: b(m, "hollow", false)?,
@@ -999,8 +1000,11 @@ fn node_base_json(id: &str, nb: &NodeBase) -> Json {
         .put("gradient", Json::Bool(nb.gradient))
         .put("gradientColor", color_hex(&nb.gradient_color))
         .put("gradientReverse", Json::Bool(nb.gradient_reverse))
-        .put("gradientSideways", Json::Bool(nb.gradient_sideways))
-        .put("outline", Json::Bool(nb.circle_outline))
+        .put("gradientSideways", Json::Bool(nb.gradient_sideways));
+    if nb.gradient_linear {
+        m.put("gradientLinear", Json::Bool(true));
+    }
+    m.put("outline", Json::Bool(nb.circle_outline))
         .put("outlineColor", color_hex(&nb.outline_color))
         .put("hollow", Json::Bool(nb.circle_hollow))
         .put("halfArc", json::int(nb.half_arc as i64))

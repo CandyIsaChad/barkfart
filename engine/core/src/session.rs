@@ -2435,8 +2435,8 @@ impl Session {
                     });
                 }
             }
-            "new_pose" | "hold_longer" | "block_length" | "move_block" => {
-                let layer = c["layer"].as_str().map(str::to_string).or_else(|| self.sel_layer());
+            "new_pose" | "hold_longer" | "block_length" | "move_block" | "extend_to" => {
+                let layer = c["layer"].as_str().map(str::to_string).or_else(|| self.sel_layer()).or_else(|| self.selected_text.clone());
                 if let Some(l) = layer {
                     let fr = c["frame"].as_i64().map(|v| v as i32).unwrap_or(self.frame);
                     let op = c["op"].as_str().unwrap_or("").to_string();
@@ -2445,17 +2445,25 @@ impl Session {
                         "new_pose" => "New pose",
                         "hold_longer" => "Hold longer",
                         "block_length" => "Pose length",
+                        "extend_to" => "Extend layer",
                         _ => "Move pose",
                     };
                     let done = self.step(label, |s| match op.as_str() {
                         "new_pose" => crate::edit::block_ops::new_pose(s, &sym, &l, fr),
                         "hold_longer" => crate::edit::block_ops::hold_longer(s, &sym, &l, fr),
                         "block_length" => crate::edit::block_ops::set_block_length(s, &sym, &l, fr, frames),
+                        "extend_to" => crate::edit::block_ops::extend_to(s, &sym, &l, fr),
                         _ => crate::edit::block_ops::move_block(s, &sym, &l, fr, to),
                     });
-                    if done.is_some() && op == "move_block" {
-                        self.frame = to;
-                        self.changed();
+                    if done.is_some() {
+                        if op == "move_block" {
+                            self.frame = to;
+                            self.changed();
+                        } else if (op == "extend_to" || op == "new_pose") && c.get("frame").is_some() {
+                            self.frame = fr.clamp(0, self.frame_count() - 1);
+                            self.validate();
+                            self.changed();
+                        }
                     }
                 } else {
                     self.message = "Select a figure first.".into();
@@ -2471,7 +2479,7 @@ impl Session {
                     _ => None,
                 };
                 if let Some(kind) = kind {
-                    let layer = c["layer"].as_str().map(str::to_string).or_else(|| self.sel_layer()).unwrap_or_default();
+                    let layer = c["layer"].as_str().map(str::to_string).or_else(|| self.sel_layer()).or_else(|| self.selected_text.clone()).unwrap_or_default();
                     let frame = c["frame"].as_i64().map(|v| v as i32).unwrap_or(self.frame);
                     let property = c["property"].as_str().map(str::to_string);
                     let init_val = match kind {
@@ -2481,8 +2489,11 @@ impl Session {
                             self.project()
                                 .root()
                                 .and_then(|r| r.layer(&layer))
-                                .and_then(|l| crate::edit::block_ops::block_at(l, fps, frame))
-                                .map(|(st, next)| next.unwrap_or(n) - st)
+                                .and_then(|l| {
+                                    crate::edit::block_ops::visible_block_at(l, fps, n, frame)
+                                        .map(|(_, _, vl, _)| vl)
+                                        .or_else(|| crate::edit::block_ops::block_at(l, fps, frame).map(|(st, next)| next.unwrap_or(n) - st))
+                                })
                         }
                         _ => Some(frame),
                     };
@@ -2820,11 +2831,12 @@ impl Session {
                         if let Some(v) = c2["gradientColor"].as_u64() {
                             set_static(&mut node.gradient_color, Value::C(Color::rgba8888(v as u32)));
                         }
-                        if let Some(v) = c2["gradientReverse"].as_bool() {
-                            node.gradient_reverse = v;
-                        }
-                        if let Some(v) = c2["gradientSideways"].as_bool() {
-                            node.gradient_sideways = v;
+                        if c2.get("gradientReverse").is_some() || c2.get("gradientSideways").is_some() || c2.get("gradientLinear").is_some() {
+                            let (cur_rev, cur_side, cur_lin) = node.effective_gradient();
+                            let rev = c2["gradientReverse"].as_bool().unwrap_or(cur_rev);
+                            let side = c2["gradientSideways"].as_bool().unwrap_or(cur_side);
+                            let lin = c2["gradientLinear"].as_bool().unwrap_or(cur_lin);
+                            node.set_effective_gradient(rev, side, lin);
                         }
                         if let Some(v) = c2["segScale"].as_f64() {
                             set_static(&mut node.scale, Value::F(v.clamp(0.01, 100.0) as f32));
@@ -2989,8 +3001,7 @@ impl Session {
                         node.smart_stretch = base.smart_stretch;
                         node.gradient = base.gradient;
                         set_static(&mut node.gradient_color, Value::C(base.gradient_color));
-                        node.gradient_reverse = base.gradient_reverse;
-                        node.gradient_sideways = base.gradient_sideways;
+                        node.set_effective_gradient(base.gradient_reverse, base.gradient_sideways, base.gradient_linear);
                         node.circle_outline = base.circle_outline;
                         set_static(&mut node.outline_color, Value::C(base.outline_color));
                         node.circle_hollow = base.circle_hollow;
@@ -4346,28 +4357,31 @@ impl Session {
                 let fps = st_fps(p);
                 let fr = (t * fps).round() as i32;
                 let n = (p.root().map(|r| r.duration).unwrap_or(0.0) * fps).round().max(1.0) as i32;
-                crate::edit::block_ops::block_at(layer, fps, fr).map(|(start, next)| {
-                    let key = node.rotation.track.keys().iter().find(|k| ((k.time * fps).round() as i32) == start).copied();
-                    json!({
-                        "start": start, "length": next.unwrap_or(n) - start, "last": next.is_none(),
-                        "hold": key.is_some_and(|k| k.interp == Interp::Hold),
-                        // the "easing" command's names
-                        "ease": key.map(|k| match k.interp {
-                            Interp::Hold => "hold",
-                            Interp::Linear => "linear",
-                            Interp::Smooth => "auto",
-                            _ if k.ease == Ease::new(0.42, 0.0, 1.0, 1.0) => "in",
-                            _ if k.ease == Ease::new(0.0, 0.0, 0.58, 1.0) => "out",
-                            _ if k.ease.kind == EaseKind::BounceOut => "bounce",
-                            _ => "custom",
-                        }),
-                        "here": start == fr,
-                        // D34: the pose's handles (the Smooth curve's shape here)
-                        "handles": key.map(|k| k.handle.name()),
+                crate::edit::block_ops::visible_block_at(layer, fps, n, fr)
+                    .or_else(|| crate::edit::block_ops::block_at(layer, fps, fr).map(|(st, nx)| (st, st, nx.unwrap_or(n) - st, nx)))
+                    .map(|(raw_start, vis_start, vis_len, next)| {
+                        let key = node.rotation.track.keys().iter().find(|k| ((k.time * fps).round() as i32) == raw_start).copied();
+                        json!({
+                            "start": vis_start, "length": vis_len, "last": next.is_none(),
+                            "hold": key.is_some_and(|k| k.interp == Interp::Hold),
+                            // the "easing" command's names
+                            "ease": key.map(|k| match k.interp {
+                                Interp::Hold => "hold",
+                                Interp::Linear => "linear",
+                                Interp::Smooth => "auto",
+                                _ if k.ease == Ease::new(0.42, 0.0, 1.0, 1.0) => "in",
+                                _ if k.ease == Ease::new(0.0, 0.0, 0.58, 1.0) => "out",
+                                _ if k.ease.kind == EaseKind::BounceOut => "bounce",
+                                _ => "custom",
+                            }),
+                            "here": vis_start == fr,
+                            // D34: the pose's handles (the Smooth curve's shape here)
+                            "handles": key.map(|k| k.handle.name()),
+                        })
                     })
-                })
             };
             let mut r = Resolver::new(p);
+            let (grad_reverse, grad_sideways, grad_linear) = node.effective_gradient();
             Some(json!({
                 "layer": l, "node": n, "name": layer.name.clone().unwrap_or_else(|| l.clone()),
                 // D35: the part as the Parts list and the graph name it, and whether it was named
@@ -4378,7 +4392,7 @@ impl Session {
                 "shape": shape_name(node.shape),
                 "thickness": r.f(&node.thickness, t), "color": color_of(&mut r, &node.color, t),
                 "angle": round2(r.f(&node.rotation, t)), "length": round2(r.f(&node.length, t)), "restLength": round2(node.rest_length),
-                "gradient": node.gradient, "gradientColor": color_of(&mut r, &node.gradient_color, t), "gradientReverse": node.gradient_reverse, "gradientSideways": node.gradient_sideways,
+                "gradient": node.gradient, "gradientColor": color_of(&mut r, &node.gradient_color, t), "gradientReverse": grad_reverse, "gradientSideways": grad_sideways, "gradientLinear": grad_linear,
                 "segScale": round2(r.f(&node.scale, t)), "curve": round2(node.curve), "outline": node.circle_outline, "outlineColor": color_of(&mut r, &node.outline_color, t),
                 "hollow": node.circle_hollow, "halfArc": node.half_arc, "sides": node.polygon_sides, "trapRatio": round2(node.trapezoid_ratio), "trapRoundStart": node.trapezoid_round_start, "trapRoundEnd": node.trapezoid_round_end, "rightTriangle": node.right_triangle, "upsideDown": node.triangle_upside_down, "angleLock": node.angle_lock,
                 "stretchy": node.stretchy, "ownColor": node.own_color,
@@ -4387,7 +4401,7 @@ impl Session {
                 "defaults": f.base_of(n).map(|b| json!({
                     "shape": shape_name(b.shape), "length": round2(b.length), "thickness": b.thickness, "segScale": round2(b.scale), "color": b.color.to_rgba8888(),
                     "ownColor": b.own_color, "curve": round2(b.curve), "static": b.is_static, "stretchy": b.stretchy, "smart": b.smart_stretch,
-                    "gradient": b.gradient, "gradientColor": b.gradient_color.to_rgba8888(), "gradientReverse": b.gradient_reverse, "gradientSideways": b.gradient_sideways,
+                    "gradient": b.gradient, "gradientColor": b.gradient_color.to_rgba8888(), "gradientReverse": b.gradient_reverse, "gradientSideways": b.gradient_sideways, "gradientLinear": b.gradient_linear,
                     "outline": b.circle_outline, "outlineColor": b.outline_color.to_rgba8888(), "hollow": b.circle_hollow, "halfArc": b.half_arc, "sides": b.polygon_sides,
                     "trapRatio": round2(b.trapezoid_ratio), "trapRoundStart": b.trapezoid_round_start, "trapRoundEnd": b.trapezoid_round_end, "rightTriangle": b.right_triangle, "upsideDown": b.triangle_upside_down,
                 })),
@@ -4629,32 +4643,19 @@ impl Session {
                             starts = kept;
                         }
                         let props = crate::edit::block_ops::pose_props_of(l);
-                        let blocks: Vec<J> = starts
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, st)| **st < n)
-                            .map(|(i, st)| {
-                                let next = starts.get(i + 1).copied().unwrap_or(n).min(n);
-                                let hold = props.iter().find_map(|q| q.track.keys().iter().find(|k| ((k.time * fps).round() as i32) == *st)).is_some_and(|k| k.interp == Interp::Hold);
-                                json!([st, next - st, hold])
-                            })
-                            .collect();
-                        let block_eases: Vec<&'static str> = if matches!(l.kind, LayerKind::Camera(_)) {
-                            Vec::new()
-                        } else {
-                            starts
-                                .iter()
-                                .filter(|st| **st < n)
-                                .map(|st| {
-                                    props
-                                        .iter()
-                                        .find_map(|q| q.track.keys().iter().find(|k| ((k.time * fps).round() as i32) == *st))
-                                        .map(key_ease_name)
-                                        .unwrap_or("auto")
-                                })
-                                .collect()
-                        };
                         let on: Vec<bool> = (0..n.min(2000)).map(|f| r.b(&l.shown, f as f64 / fps)).collect();
+                        let is_cam = matches!(l.kind, LayerKind::Camera(_));
+                        let vbs = crate::edit::block_ops::visible_blocks(l, fps, n);
+                        let mut blocks: Vec<J> = Vec::with_capacity(vbs.len());
+                        let mut block_eases: Vec<&'static str> = Vec::with_capacity(if is_cam { 0 } else { vbs.len() });
+                        for (raw_st, vis_start, vis_len) in vbs {
+                            let key = props.iter().find_map(|q| q.track.keys().iter().find(|k| ((k.time * fps).round() as i32) == raw_st));
+                            let hold = key.is_some_and(|k| k.interp == Interp::Hold);
+                            blocks.push(json!([vis_start, vis_len, hold]));
+                            if !is_cam {
+                                block_eases.push(key.map(key_ease_name).unwrap_or("auto"));
+                            }
+                        }
                         let kind = match &l.kind {
                             LayerKind::Figure(_) => "figure",
                             LayerKind::Sprite(_) => "picture",
@@ -5456,10 +5457,19 @@ fn key_every_frame(q: &mut Property, n: i32, fps: f64) {
 fn only_on_frame(st: &mut crate::edit::State, sym: &str, id: &str, frame: i32) {
     let n = frame_ops::frame_count(st);
     let fps = st_fps(&st.project);
+    let tw = st.project.settings.tween_interp;
     let Some(l) = st.project.layer_mut(sym, id) else { return };
     l.shown.track.clear();
     for i in 0..n {
         l.shown.track.put(Key::new(i as f64 / fps, Value::B(i == frame), Interp::Hold));
+    }
+    if frame > 0 && !matches!(l.kind, LayerKind::Camera(_) | LayerKind::Text(_) | LayerKind::Audio(_) | LayerKind::Script(_)) {
+        let t = frame as f64 / fps;
+        for q in crate::edit::block_ops::pose_props(l) {
+            let v = q.key_value(t);
+            let interp = crate::edit::editor::interp_at(q, t, tw);
+            q.track.put(Key::new(t, v, interp));
+        }
     }
 }
 

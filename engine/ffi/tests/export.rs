@@ -32,6 +32,8 @@ fn exports_gif_png_frames_and_soundtrack_through_the_c_interface() {
     let g = std::fs::read(&gif).unwrap();
     assert_eq!(&g[..6], b"GIF89a");
     assert_eq!(*g.last().unwrap(), 0x3B);
+    let dec_gif = barkfart_core::image::decode_gif(&g).expect("decoded gif");
+    assert!(dec_gif.frames[0].rgba.chunks_exact(4).any(|p| p[3] == 0), "transparent GIF background");
     let (zip_path, _) = run(1, "demo.zip");
     let mut z = zip::ZipArchive::new(std::fs::File::open(&zip_path).unwrap()).unwrap();
     assert_eq!(z.len(), 60);

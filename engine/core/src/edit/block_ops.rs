@@ -71,12 +71,119 @@ fn layer<'a>(st: &'a mut State, sym: &str, id: &str) -> EditResult<&'a mut Layer
     }
 }
 
+/// Whether `l` is shown on `frame` (cameras are always on).
+pub fn shown_at(l: &Layer, frame: i32, fps: f64) -> bool {
+    if matches!(l.kind, LayerKind::Camera(_)) {
+        true
+    } else {
+        l.shown.key_value(frame as f64 / fps).b()
+    }
+}
+
+fn set_shown_range(l: &mut Layer, from: i32, to: i32, fps: f64, want: bool) {
+    if matches!(l.kind, LayerKind::Camera(_)) {
+        return;
+    }
+    for f in from..to {
+        if shown_at(l, f, fps) != want {
+            l.shown.track.put(Key::new(f as f64 / fps, Value::B(want), Interp::Hold));
+        }
+    }
+}
+
 /// The frames a layer's pose is keyed on, in order.
 pub fn pose_frames(l: &Layer, fps: f64) -> Vec<i32> {
     let mut v: Vec<i32> = pose_props_of(l).iter().flat_map(|q| q.track.keys().iter().map(|k| (k.time * fps).round() as i32)).collect();
     v.sort_unstable();
     v.dedup();
     v
+}
+
+/// Distinct pose start frames for block layout: `Camera` and `Text` are keyed on
+/// every frame by `anchor_poses`, so equal consecutive frames merge into one span.
+pub fn effective_pose_starts(l: &Layer, fps: f64) -> Vec<i32> {
+    let starts = pose_frames(l, fps);
+    if matches!(l.kind, LayerKind::Camera(_) | LayerKind::Text(_)) {
+        let props = pose_props_of(l);
+        let at = |f: i32| props.iter().map(|q| q.key_value(f as f64 / fps)).collect::<Vec<_>>();
+        let mut kept: Vec<i32> = Vec::new();
+        for f in starts {
+            if kept.last().is_none_or(|&prev| at(prev) != at(f)) {
+                kept.push(f);
+            }
+        }
+        kept
+    } else {
+        starts
+    }
+}
+
+fn push_shown_runs(l: &Layer, fps: f64, from: i32, to: i32, raw_key: Option<i32>, out: &mut Vec<(i32, i32, i32)>) {
+    let mut f = from.max(0);
+    while f < to {
+        if !shown_at(l, f, fps) {
+            f += 1;
+            continue;
+        }
+        let a = f;
+        while f < to && shown_at(l, f, fps) {
+            f += 1;
+        }
+        let raw = match raw_key {
+            Some(st) if a == from.max(0) => st,
+            _ => a,
+        };
+        out.push((raw, a, f - a));
+    }
+}
+
+/// Visible pose blocks on `[0, n)`: `(pose_key_frame, vis_start, vis_len)`.
+/// Unposed layers (`pose_frames` empty) fall back to contiguous `shown == true` runs
+/// so fresh/newly-added figures, pictures, movieclips, and textfields are extendable.
+pub fn visible_blocks(l: &Layer, fps: f64, n: i32) -> Vec<(i32, i32, i32)> {
+    if matches!(l.kind, LayerKind::Audio(_) | LayerKind::Script(_)) {
+        return Vec::new();
+    }
+    let n = n.max(1);
+    let starts = effective_pose_starts(l, fps);
+    let mut out = Vec::new();
+    if starts.is_empty() {
+        push_shown_runs(l, fps, 0, n, None, &mut out);
+        return out;
+    }
+    if starts[0] > 0 {
+        push_shown_runs(l, fps, 0, starts[0].min(n), None, &mut out);
+    }
+    for (i, &st) in starts.iter().enumerate() {
+        if st >= n {
+            break;
+        }
+        let raw_end = starts.get(i + 1).copied().unwrap_or(n).min(n);
+        push_shown_runs(l, fps, st, raw_end, Some(st), &mut out);
+    }
+    out
+}
+
+/// The visible block covering `frame` (or the pose span starting at/before `frame`):
+/// `(pose_key_frame, vis_start, vis_len, next_bound_frame)`.
+pub fn visible_block_at(l: &Layer, fps: f64, n: i32, frame: i32) -> Option<(i32, i32, i32, Option<i32>)> {
+    let n = n.max(1);
+    let vbs = visible_blocks(l, fps, n);
+    if vbs.is_empty() {
+        return None;
+    }
+    let idx = vbs
+        .iter()
+        .position(|&(rs, vs, vl)| (frame >= vs && frame < vs + vl) || rs == frame)
+        .or_else(|| vbs.iter().rposition(|&(_, vs, _)| vs <= frame))?;
+    let (raw_start, vis_start, vis_len) = vbs[idx];
+    let next_vis = vbs.get(idx + 1).map(|&(_, vs, _)| vs);
+    let next_pose = effective_pose_starts(l, fps).into_iter().find(|&k| k > raw_start.max(vis_start));
+    let next = match (next_vis, next_pose) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    };
+    Some((raw_start, vis_start, vis_len, next))
 }
 
 /// The block under `frame`: (its key's frame, the next key's frame, if any).
@@ -110,32 +217,51 @@ fn ensure_length(st: &mut State, frames: i32) {
 }
 
 /// "New pose": the figure gets a key of its own on this frame (the start of
-/// a new block), with the pose it has there.
+/// a new block), with the pose it has there. Works on empty/runway frames too.
 pub fn new_pose(st: &mut State, sym: &str, id: &str, frame: i32) -> EditResult<()> {
+    if frame < 0 {
+        return fail("Invalid frame.");
+    }
     let fps = fps(st);
+    let old_n = frame_count(st);
     let t = frame as f64 / fps;
     let tw = st.project.settings.tween_interp;
-    let l = layer(st, sym, id)?;
-    if pose_frames(l, fps).contains(&frame) {
-        return fail("There is a pose on this frame already.");
+    {
+        let l = layer(st, sym, id)?;
+        let was_shown = frame < old_n && shown_at(l, frame, fps);
+        if pose_frames(l, fps).contains(&frame) && was_shown {
+            return fail("There is a pose on this frame already.");
+        }
+        if frame > old_n && !shown_at(l, old_n - 1, fps) {
+            set_shown_range(l, old_n, frame, fps, false);
+        }
+        set_shown_range(l, frame, frame + 1, fps, true);
+        for q in pose_props(l) {
+            let v = q.key_value(t);
+            let interp = crate::edit::editor::interp_at(q, t, tw);
+            q.track.put(Key::new(t, v, interp));
+        }
     }
-    for q in pose_props(l) {
-        let v = q.key_value(t);
-        let interp = crate::edit::editor::interp_at(q, t, tw);
-        q.track.put(Key::new(t, v, interp));
-    }
+    ensure_length(st, frame + 1);
     Ok(())
 }
 
-/// The last pose frame of any other drawn/timed layer in `sym` (0 when none).
-fn others_last(st: &State, sym: &str, id: &str, fps: f64) -> i32 {
+/// The last occupied frame (pose or shown) of any other drawn/timed layer in `sym` (0 when none).
+fn others_last(st: &State, sym: &str, id: &str, fps: f64, n: i32) -> i32 {
     st.project
         .symbol(sym)
         .map(|s| {
             s.layers
                 .iter()
-                .filter(|x| x.id != id && matches!(x.kind, LayerKind::Figure(_) | LayerKind::Sprite(_) | LayerKind::Symbol(_)))
-                .filter_map(|x| pose_frames(x, fps).last().copied())
+                .filter(|x| x.id != id && matches!(x.kind, LayerKind::Figure(_) | LayerKind::Sprite(_) | LayerKind::Symbol(_) | LayerKind::Text(_)))
+                .filter_map(|x| {
+                    let last_pose = pose_frames(x, fps).into_iter().filter(|&f| shown_at(x, f, fps)).last();
+                    let last_shown = (0..n.max(1)).rev().find(|&f| shown_at(x, f, fps));
+                    match (last_pose, last_shown) {
+                        (Some(a), Some(b)) => Some(a.max(b)),
+                        (a, b) => a.or(b),
+                    }
+                })
                 .max()
                 .unwrap_or(0)
         })
@@ -143,43 +269,83 @@ fn others_last(st: &State, sym: &str, id: &str, fps: f64) -> i32 {
 }
 
 /// The block under `frame` lasts `frames` frames: the figure's later poses
-/// move with its end. A last block grows or shrinks the animation as needed.
+/// move with its end, and `shown` updates across `[start .. start + frames)` so
+/// newly added one-frame figures extend and shorten cleanly on any timeline.
 pub fn set_block_length(st: &mut State, sym: &str, id: &str, frame: i32, frames: i32) -> EditResult<()> {
     if frames < 1 {
         return fail("A pose lasts at least one frame.");
     }
     let fps = fps(st);
     let n = frame_count(st);
-    let (start, next, last) = {
+    let (raw_start, vis_start, vis_len, next, last) = {
         let l = layer(st, sym, id)?;
-        let Some((start, next)) = block_at(l, fps, frame) else { return fail("This figure has no pose here.") };
-        (start, next, pose_frames(l, fps).last().copied().unwrap_or(start))
+        if let Some((rs, vs, vl, nx)) = visible_block_at(l, fps, n, frame) {
+            let last_pose = pose_frames(l, fps).last().copied().unwrap_or(rs);
+            let last_vis = (0..n).rev().find(|&f| shown_at(l, f, fps)).unwrap_or(last_pose);
+            (rs, vs, vl, nx, last_pose.max(last_vis))
+        } else {
+            let Some((rs, nx)) = block_at(l, fps, frame) else { return fail("This figure has no pose here.") };
+            let last_pose = pose_frames(l, fps).last().copied().unwrap_or(rs);
+            (rs, rs, nx.unwrap_or(n).max(rs + 1) - rs, nx, last_pose)
+        }
     };
-    let end = next.unwrap_or(n); // first frame after the block
-    let by = start + frames - end;
-    if by == 0 {
+    let _ = raw_start;
+    let start = vis_start;
+    let vis_end = start + vis_len;
+    let new_vis_end = start + frames;
+    if new_vis_end == vis_end {
         return Ok(());
     }
-    let others = others_last(st, sym, id, fps);
+    let others = others_last(st, sym, id, fps, n);
     if next.is_none() {
-        // the last block: runs to the end of the animation, both lengthening and shortening
-        if start + frames > n {
-            ensure_length(st, start + frames);
-        } else {
-            let to = (start + frames).max(others + 1).max(start + 1).max(1);
+        let final_n = if new_vis_end > n {
+            ensure_length(st, new_vis_end);
+            new_vis_end
+        } else if vis_end >= n {
+            // previously ran to the end of the animation: shrink animation down to other layers' end
+            let to = new_vis_end.max(others + 1).max(start + 1).max(1);
             if let Some(r) = st.project.root_mut() {
                 r.duration = to as f64 / fps;
             }
+            to
+        } else {
+            // previously ended inside a longer timeline: keep timeline length, update shown
+            n
+        };
+        let l = layer(st, sym, id)?;
+        set_shown_range(l, start, new_vis_end, fps, true);
+        if new_vis_end < final_n {
+            set_shown_range(l, new_vis_end, final_n, fps, false);
         }
         return Ok(());
     }
-    // the poses after it move with its end; a figure whose last pose is the
-    // animation's last moves the animation's end with it, both ways, so
-    // lengthening and then shortening a pose is a round trip (the bughunt,
-    // 2026-11-24); otherwise the end stays, growing only when it must
+    let end = next.unwrap();
+    // If there is an unshown gap before `end` and `new_vis_end <= end`, fill/trim inside the gap
+    // without disturbing later pose keys.
+    if vis_end < end && new_vis_end <= end {
+        let l = layer(st, sym, id)?;
+        set_shown_range(l, start, new_vis_end, fps, true);
+        set_shown_range(l, new_vis_end, end, fps, false);
+        return Ok(());
+    }
+    let by = new_vis_end - end;
     let owns_end = last >= others;
-    let l = layer(st, sym, id)?;
-    retime(l, fps, |fr| if fr >= end { fr + by } else { fr });
+    {
+        let l = layer(st, sym, id)?;
+        retime(l, fps, |fr| if fr >= end { fr + by } else { fr });
+        if !l.shown.track.is_empty() {
+            let old_shown: Vec<(i32, bool)> = (0..n).map(|f| (f, shown_at(l, f, fps))).collect();
+            for (f, val) in old_shown {
+                if f >= end {
+                    let nf = f + by;
+                    if nf >= 0 {
+                        l.shown.track.put(Key::new(nf as f64 / fps, Value::B(val), Interp::Hold));
+                    }
+                }
+            }
+        }
+        set_shown_range(l, start, new_vis_end, fps, true);
+    }
     if owns_end {
         let to = (n + by).max(last + by + 1).max(others + 1).max(1);
         if let Some(r) = st.project.root_mut() {
@@ -195,12 +361,53 @@ pub fn set_block_length(st: &mut State, sym: &str, id: &str, frame: i32, frames:
 pub fn hold_longer(st: &mut State, sym: &str, id: &str, frame: i32) -> EditResult<()> {
     let fps = fps(st);
     let n = frame_count(st);
-    let (start, next) = {
+    let vis_len = {
         let l = layer(st, sym, id)?;
-        let Some(b) = block_at(l, fps, frame) else { return fail("This figure has no pose here.") };
-        b
+        if let Some((_, _, vl, _)) = visible_block_at(l, fps, n, frame) {
+            vl
+        } else {
+            let Some((start, next)) = block_at(l, fps, frame) else { return fail("This figure has no pose here.") };
+            next.unwrap_or(n) - start
+        }
     };
-    set_block_length(st, sym, id, frame, next.unwrap_or(n) - start + 1)
+    set_block_length(st, sym, id, frame, vis_len + 1)
+}
+
+/// Extends a layer's visible block to cover `target_frame` (1-tap "Extend here" on empty/runway cells).
+pub fn extend_to(st: &mut State, sym: &str, id: &str, target_frame: i32) -> EditResult<()> {
+    if target_frame < 0 {
+        return fail("Invalid frame.");
+    }
+    let fps = fps(st);
+    let n = frame_count(st);
+    let vbs = {
+        let l = layer(st, sym, id)?;
+        visible_blocks(l, fps, n)
+    };
+    if let Some(&(_, vis_start, vis_len)) = vbs.iter().rfind(|&&(_, vs, _)| vs <= target_frame) {
+        if target_frame < vis_start + vis_len {
+            return Ok(());
+        }
+        return set_block_length(st, sym, id, vis_start, target_frame - vis_start + 1);
+    }
+    if let Some(&(first_raw, first_vis_start, _)) = vbs.first() {
+        // target_frame < first_vis_start: extend backwards to target_frame
+        let l = layer(st, sym, id)?;
+        set_shown_range(l, target_frame, first_vis_start, fps, true);
+        if first_raw == first_vis_start && first_raw > 0 && target_frame > 0 && pose_frames(l, fps).contains(&first_raw) && !pose_frames(l, fps).contains(&target_frame) {
+            retime(l, fps, |fr| if fr == first_raw { target_frame } else { fr });
+        }
+        return Ok(());
+    }
+    // Layer had no visible frames at all: show it on target_frame
+    ensure_length(st, target_frame + 1);
+    let new_n = frame_count(st);
+    let l = layer(st, sym, id)?;
+    if target_frame > n && !shown_at(l, n - 1, fps) {
+        set_shown_range(l, n, target_frame, fps, false);
+    }
+    set_shown_range(l, target_frame, (target_frame + 1).min(new_n), fps, true);
+    Ok(())
 }
 
 /// Moves the block under `frame` so it starts on `to`, between the poses
@@ -208,21 +415,55 @@ pub fn hold_longer(st: &mut State, sym: &str, id: &str, frame: i32) -> EditResul
 pub fn move_block(st: &mut State, sym: &str, id: &str, frame: i32, to: i32) -> EditResult<()> {
     let fps = fps(st);
     let n = frame_count(st);
-    let l = layer(st, sym, id)?;
-    let keys = pose_frames(l, fps);
-    let Some((start, next)) = block_at(l, fps, frame) else { return fail("This figure has no pose here.") };
-    if to == start {
-        return Ok(());
+    let vis_info = {
+        let l = layer(st, sym, id)?;
+        let keys = effective_pose_starts(l, fps);
+        let (start, next, has_key) = if let Some((_, vs, vl, nx)) = visible_block_at(l, fps, n, frame) {
+            if keys.is_empty() || !pose_frames(l, fps).contains(&vs) {
+                (vs, nx, false)
+            } else {
+                let _ = vl;
+                let nx_key = keys.iter().find(|k| **k > vs).copied();
+                (vs, nx_key.or(nx), true)
+            }
+        } else {
+            let Some((start, next)) = block_at(l, fps, frame) else { return fail("This figure has no pose here.") };
+            (start, next, true)
+        };
+        if to == start {
+            return Ok(());
+        }
+        if start == 0 {
+            // every figure is keyed on the first frame (D25)
+            return fail("The first pose stays on the first frame.");
+        }
+        let prev = visible_blocks(l, fps, n)
+            .into_iter()
+            .filter_map(|(_, vs, vl)| (vs + vl - 1 < start).then_some(if has_key { vs } else { vs + vl - 1 }))
+            .last()
+            .or_else(|| keys.iter().rev().find(|k| **k < start).copied());
+        if to < 0 || prev.is_some_and(|p| to <= p) || next.is_some_and(|x| to >= x) || to >= n {
+            return fail("A pose can move only as far as the poses on either side.");
+        }
+        let isolated = (!shown_at(l, start - 1, fps))
+            .then(|| visible_block_at(l, fps, n, start))
+            .flatten()
+            .filter(|(_, vs, _, _)| *vs == start)
+            .map(|(_, _, vl, _)| (vl, start + vl >= n || !shown_at(l, start + vl, fps)))
+            .filter(|(_, after_off)| *after_off)
+            .map(|(vl, _)| vl);
+        if has_key {
+            retime(l, fps, |fr| if fr == start { to } else { fr });
+        }
+        isolated.map(|vl| (start, vl))
+    };
+    if let Some((start, vl)) = vis_info {
+        ensure_length(st, to + vl);
+        let new_n = frame_count(st);
+        let l = layer(st, sym, id)?;
+        set_shown_range(l, start, (start + vl).min(new_n), fps, false);
+        set_shown_range(l, to, (to + vl).min(new_n), fps, true);
     }
-    if start == 0 {
-        // every figure is keyed on the first frame (D25)
-        return fail("The first pose stays on the first frame.");
-    }
-    let prev = keys.iter().rev().find(|k| **k < start).copied();
-    if to < 0 || prev.is_some_and(|p| to <= p) || next.is_some_and(|x| to >= x) || to >= n {
-        return fail("A pose can move only as far as the poses on either side.");
-    }
-    retime(l, fps, |fr| if fr == start { to } else { fr });
     Ok(())
 }
 
@@ -258,18 +499,41 @@ pub fn move_pose_key(st: &mut State, sym: &str, id: &str, from: i32, to: i32) ->
         return fail("A pose cannot move to the first frame.");
     }
     let fps = fps(st);
-    {
+    let old_n = frame_count(st);
+    let vis_info = {
         let l = layer(st, sym, id)?;
         let keys = pose_frames(l, fps);
-        if !keys.contains(&from) {
+        let has_key = keys.contains(&from);
+        let isolated = (!shown_at(l, from - 1, fps))
+            .then(|| visible_block_at(l, fps, old_n, from))
+            .flatten()
+            .filter(|(_, vs, _, _)| *vs == from)
+            .map(|(_, _, vl, _)| (vl, from + vl >= old_n || !shown_at(l, from + vl, fps)))
+            .filter(|(_, after_off)| *after_off)
+            .map(|(vl, _)| vl);
+        if !has_key && isolated.is_none() {
             return fail("There is no pose on this frame.");
         }
-        if keys.contains(&to) {
+        if keys.contains(&to) || (!has_key && to < old_n && shown_at(l, to, fps) && !(to >= from && to < from + isolated.unwrap_or(1))) {
             return fail("There is already a pose on that frame.");
         }
-        retime(l, fps, |fr| if fr == from { to } else { fr });
+        if has_key {
+            retime(l, fps, |fr| if fr == from { to } else { fr });
+        }
+        isolated
+    };
+    if let Some(vl) = vis_info {
+        ensure_length(st, to + vl);
+        let new_n = frame_count(st);
+        let l = layer(st, sym, id)?;
+        if to > old_n && !shown_at(l, old_n - 1, fps) {
+            set_shown_range(l, old_n, to, fps, false);
+        }
+        set_shown_range(l, from, (from + vl).min(new_n), fps, false);
+        set_shown_range(l, to, (to + vl).min(new_n), fps, true);
+    } else {
+        ensure_length(st, to + 1);
     }
-    ensure_length(st, to + 1);
     Ok(())
 }
 
