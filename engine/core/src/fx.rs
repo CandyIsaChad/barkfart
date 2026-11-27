@@ -348,6 +348,248 @@ pub fn smear(src: &Image, angle_deg: f32, distance: f32) -> Image {
     out
 }
 
+/// Bilinear sample in pixel-index space (texel `(i, j)` sits at `(i, j)`),
+/// out-of-bounds reads transparent. Matches `sample_bilinear` in `fx.wgsl`.
+fn sample_bilinear(im: &Image, x: f32, y: f32) -> [f32; 4] {
+    let fx = x.floor();
+    let fy = y.floor();
+    let tx = x - fx;
+    let ty = y - fy;
+    let ix = fx as i32;
+    let iy = fy as i32;
+    let c00 = at(im, ix, iy);
+    let c10 = at(im, ix + 1, iy);
+    let c01 = at(im, ix, iy + 1);
+    let c11 = at(im, ix + 1, iy + 1);
+    let mut out = [0f32; 4];
+    for c in 0..4 {
+        let top = c00[c] + (c10[c] - c00[c]) * tx;
+        let bot = c01[c] + (c11[c] - c01[c]) * tx;
+        out[c] = top + (bot - top) * ty;
+    }
+    out
+}
+
+/// Deterministic 32-bit integer hash (identical bitwise math to `fx.wgsl`).
+#[inline]
+fn hash_u32(mut x: u32) -> u32 {
+    x = (x ^ 61) ^ (x >> 16);
+    x = x.wrapping_add(x << 3);
+    x = x ^ (x >> 4);
+    x = x.wrapping_mul(0x27d4_eb2d);
+    x = x ^ (x >> 15);
+    x
+}
+
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = clamp01((x - edge0) / (edge1 - edge0));
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Chromatic aberration: shifts R forward and B backward along `angle_deg` by
+/// `amount_px` pixels (y up in angle space, y down in pixel space).
+pub fn chromatic(src: &Image, amount_px: f32, angle_deg: f32) -> Image {
+    if !(amount_px > 0.01) {
+        return src.clone();
+    }
+    let rad = (angle_deg as f64).to_radians();
+    let dx = (rad.cos() * amount_px as f64) as f32;
+    let dy = -(rad.sin() * amount_px as f64) as f32;
+    let mut out = src.blank();
+    for y in 0..src.h {
+        let fy = y as f32;
+        for x in 0..src.w {
+            let fx = x as f32;
+            let cr = sample_bilinear(src, fx + dx, fy + dy);
+            let cg = at(src, x as i32, y as i32);
+            let cb = sample_bilinear(src, fx - dx, fy - dy);
+            let a = cr[3].max(cg[3].max(cb[3]));
+            let o = (y * src.w + x) * 4;
+            out.px[o] = cr[0];
+            out.px[o + 1] = cg[1];
+            out.px[o + 2] = cb[2];
+            out.px[o + 3] = a;
+        }
+    }
+    out
+}
+
+/// Cinematic vignette. On an adjustment layer (`full_frame = true`) it shades
+/// transparent canvas too so the stage background darkens cleanly; on a normal
+/// layer it masks to `src.a` so no bounding-box rectangle appears.
+/// `frame_rect` is `(x0, y0, w, h)` in pixels (camera shot rect or full image).
+pub fn vignette(src: &Image, amount: f32, softness: f32, cr: f32, cg: f32, cb: f32, ca: f32, full_frame: bool, frame_rect: [f32; 4]) -> Image {
+    if !(amount > 0.0) || !(ca > 0.0) {
+        return src.clone();
+    }
+    let mut out = src.blank();
+    let (rx, ry, rw, rh) = (frame_rect[0], frame_rect[1], frame_rect[2].max(1.0), frame_rect[3].max(1.0));
+    let inner = 0.95 - softness * 0.85;
+    let outer = 1.05;
+    for y in 0..src.h {
+        let v = (y as f32 + 0.5 - ry) / rh * 2.0 - 1.0;
+        for x in 0..src.w {
+            let u = (x as f32 + 0.5 - rx) / rw * 2.0 - 1.0;
+            let dist = (u * u + v * v).sqrt() * 0.70710678;
+            let t = smoothstep(inner, outer, dist);
+            let va = t * amount * ca;
+            let o = (y * src.w + x) * 4;
+            let (sr, sg, sb, sa) = (src.px[o], src.px[o + 1], src.px[o + 2], src.px[o + 3]);
+            if full_frame {
+                let k = 1.0 - va;
+                out.px[o] = cr * va + sr * k;
+                out.px[o + 1] = cg * va + sg * k;
+                out.px[o + 2] = cb * va + sb * k;
+                out.px[o + 3] = va + sa * k;
+            } else {
+                out.px[o] = sr + (cr * sa - sr) * va;
+                out.px[o + 1] = sg + (cg * sa - sg) * va;
+                out.px[o + 2] = sb + (cb * sa - sb) * va;
+                out.px[o + 3] = sa;
+            }
+        }
+    }
+    out
+}
+
+/// Sinusoidal wave distortion anchored in view units; keyframe `phase_deg` for
+/// continuous looping ripples.
+pub fn wave(src: &Image, amplitude: f32, frequency: f32, phase_deg: f32, angle_deg: f32) -> Image {
+    let amp_px = amplitude * src.scale;
+    if !(amp_px > 0.01) {
+        return src.clone();
+    }
+    let rad = (angle_deg as f64).to_radians();
+    let cos_a = rad.cos() as f32;
+    let sin_a = rad.sin() as f32;
+    let k_freq = frequency * std::f32::consts::TAU / 400.0;
+    let phase_rad = (phase_deg as f64).to_radians() as f32;
+    let inv_s = 1.0 / src.scale.max(1e-6);
+    let mut out = src.blank();
+    for y in 0..src.h {
+        let vy = src.y0 - (y as f32 + 0.5) * inv_s;
+        for x in 0..src.w {
+            let vx = src.x0 + (x as f32 + 0.5) * inv_s;
+            let along = vx * (-sin_a) + vy * cos_a;
+            let off = (along * k_freq + phase_rad).sin() * amp_px;
+            let c = sample_bilinear(src, x as f32 + cos_a * off, y as f32 - sin_a * off);
+            let o = (y * src.w + x) * 4;
+            out.px[o..o + 4].copy_from_slice(&c);
+        }
+    }
+    out
+}
+
+/// Film grain / procedural noise (deterministic integer hash; matches `fx.wgsl`).
+pub fn grain(src: &Image, amount: f32, size: f32, seed: f32, full_frame: bool) -> Image {
+    if !(amount > 0.0) {
+        return src.clone();
+    }
+    let size = size.max(1.0);
+    let sd = (crate::model::java_round(seed)) as u32;
+    let sd_h = hash_u32(sd.wrapping_mul(0x9e37_79b9).wrapping_add(1));
+    let mut out = src.blank();
+    for y in 0..src.h {
+        let gy = ((y as f32 / size).floor() as i32) as u32;
+        let gy_h = hash_u32(gy ^ sd_h);
+        for x in 0..src.w {
+            let gx = ((x as f32 / size).floor() as i32) as u32;
+            let h = hash_u32(gx ^ gy_h);
+            let n = (h & 0xffff) as f32 / 32767.5 - 1.0;
+            let o = (y * src.w + x) * 4;
+            let (sr, sg, sb, sa) = (src.px[o], src.px[o + 1], src.px[o + 2], src.px[o + 3]);
+            let (mut rr, mut rg, mut rb) = (0.0f32, 0.0f32, 0.0f32);
+            if sa > 0.0 {
+                let d = n * amount * 0.5;
+                rr = clamp01(sr / sa + d) * sa;
+                rg = clamp01(sg / sa + d) * sa;
+                rb = clamp01(sb / sa + d) * sa;
+            }
+            if full_frame {
+                let ga = n.abs() * amount * 0.22 * (1.0 - sa);
+                let gc = if n > 0.0 { ga } else { 0.0 };
+                out.px[o] = rr + gc;
+                out.px[o + 1] = rg + gc;
+                out.px[o + 2] = rb + gc;
+                out.px[o + 3] = sa + ga;
+            } else {
+                out.px[o] = rr;
+                out.px[o + 1] = rg;
+                out.px[o + 2] = rb;
+                out.px[o + 3] = sa;
+            }
+        }
+    }
+    out
+}
+
+/// Exposure (EV stops), contrast (around 0.5), and midtone gamma.
+pub fn grade(im: &mut Image, exposure: f32, contrast: f32, gamma: f32) {
+    let exp_mul = 2.0f32.powf(exposure);
+    let inv_g = 1.0 / gamma.max(0.1);
+    for p in im.px.chunks_exact_mut(4) {
+        let a = p[3];
+        if a <= 0.0 {
+            continue;
+        }
+        for c in 0..3 {
+            let mut s = clamp01(p[c] / a);
+            s *= exp_mul;
+            s = (s - 0.5) * contrast + 0.5;
+            s = clamp01(s);
+            s = if s <= 0.0 { 0.0 } else { s.powf(inv_g) };
+            p[c] = clamp01(s) * a;
+        }
+    }
+}
+
+/// CRT scanlines with optional horizontal glitch slice displacement & RGB split.
+pub fn scanlines(src: &Image, amount: f32, lines: f32, offset_px: f32, phase: f32, full_frame: bool, frame_rect: [f32; 4]) -> Image {
+    if !(amount > 0.0) && !(offset_px > 0.0) {
+        return src.clone();
+    }
+    let ry = frame_rect[1];
+    let rh = frame_rect[3].max(1.0);
+    let band_h = (rh / (lines * 0.25).max(4.0)).max(2.0);
+    let sd = (crate::model::java_round(phase)) as u32;
+    let sd_h = hash_u32(sd.wrapping_mul(0x9e37_79b9).wrapping_add(7));
+    let mut out = src.blank();
+    for y in 0..src.h {
+        let local_y = y as f32 - ry;
+        let band = ((local_y / band_h).floor() as i32) as u32;
+        let hb = hash_u32(band ^ sd_h);
+        let u = (hb & 0xffff) as f32 / 65535.0;
+        let shift_px = if offset_px > 0.0 && amount > 0.0 && u > (1.0 - amount * 0.55) {
+            let dir = ((hb >> 16) & 0xffff) as f32 / 32767.5 - 1.0;
+            dir * offset_px
+        } else {
+            0.0
+        };
+        let y_norm = (local_y + 0.5) / rh;
+        let scan = 0.5 + 0.5 * ((y_norm * lines + phase * 0.25) * std::f32::consts::TAU).sin();
+        let darken = (1.0 - scan) * amount * 0.65;
+        let keep = 1.0 - darken;
+        for x in 0..src.w {
+            let c = if shift_px.abs() > 0.01 {
+                let fx = x as f32;
+                let fy = y as f32;
+                let cr = sample_bilinear(src, fx + shift_px * 1.25, fy);
+                let cg = sample_bilinear(src, fx + shift_px, fy);
+                let cb = sample_bilinear(src, fx + shift_px * 0.75, fy);
+                [cr[0], cg[1], cb[2], cr[3].max(cg[3].max(cb[3]))]
+            } else {
+                at(src, x as i32, y as i32)
+            };
+            let o = (y * src.w + x) * 4;
+            out.px[o] = c[0] * keep;
+            out.px[o + 1] = c[1] * keep;
+            out.px[o + 2] = c[2] * keep;
+            out.px[o + 3] = if full_frame { c[3] + darken * 0.45 * (1.0 - c[3]) } else { c[3] };
+        }
+    }
+    out
+}
+
 // ---------------------------------------------------------------- effect types
 
 pub const BLUR: &str = "blur.gaussian";
@@ -359,9 +601,145 @@ pub const TINT: &str = "tint";
 pub const PIXELATE: &str = "pixelate";
 pub const OUTLINE: &str = "outline";
 pub const MOTION: &str = "blur.motion";
-pub const ALL: [&str; 9] = [BLUR, GLOW, SHADOW, INVERT, ADJUST, TINT, PIXELATE, OUTLINE, MOTION];
+pub const CHROMATIC: &str = "chromatic.aberration";
+pub const VIGNETTE: &str = "vignette";
+pub const WAVE: &str = "distort.wave";
+pub const GRAIN: &str = "noise.grain";
+pub const GRADE: &str = "color.grade";
+pub const SCANLINES: &str = "stylize.scanlines";
+pub const ALL: [&str; 15] = [BLUR, GLOW, SHADOW, INVERT, ADJUST, TINT, PIXELATE, OUTLINE, MOTION, CHROMATIC, VIGNETTE, WAVE, GRAIN, GRADE, SCANLINES];
 /// Largest radius or offset, project pixels.
 pub const MAX_LENGTH: f32 = 400.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParamKind {
+    Float,
+    Angle,
+    Color,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ParamMeta {
+    pub name: &'static str,
+    pub label: &'static str,
+    pub kind: ParamKind,
+    pub default_f: f32,
+    pub default_c: Color,
+    pub min: f32,
+    pub max: f32,
+    pub step: f32,
+}
+
+impl ParamMeta {
+    const fn float(name: &'static str, label: &'static str, default_f: f32, min: f32, max: f32, step: f32) -> ParamMeta {
+        ParamMeta { name, label, kind: ParamKind::Float, default_f, default_c: Color::WHITE, min, max, step }
+    }
+    const fn angle(name: &'static str, label: &'static str, default_f: f32, min: f32, max: f32, step: f32) -> ParamMeta {
+        ParamMeta { name, label, kind: ParamKind::Angle, default_f, default_c: Color::WHITE, min, max, step }
+    }
+    const fn color(name: &'static str, label: &'static str, default_c: Color) -> ParamMeta {
+        ParamMeta { name, label, kind: ParamKind::Color, default_f: 0.0, default_c, min: 0.0, max: 1.0, step: 0.0 }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct EffectMeta {
+    pub ty: &'static str,
+    pub label: &'static str,
+    pub category: &'static str,
+    pub params: &'static [ParamMeta],
+}
+
+pub const CATEGORIES: [&str; 5] = ["Blur", "Light & Glow", "Color", "Distort", "Stylize"];
+
+const P_BLUR: &[ParamMeta] = &[ParamMeta::float("radius", "Radius", 6.0, 0.0, MAX_LENGTH, 0.5)];
+const P_MOTION: &[ParamMeta] = &[
+    ParamMeta::float("distance", "Distance", 30.0, 0.0, MAX_LENGTH, 2.0),
+    ParamMeta::angle("angle", "Angle", 0.0, -3600.0, 3600.0, 5.0),
+];
+const P_GLOW: &[ParamMeta] = &[
+    ParamMeta::color("color", "Color", Color::WHITE),
+    ParamMeta::float("radius", "Radius", 8.0, 0.0, MAX_LENGTH, 1.0),
+    ParamMeta::float("strength", "Strength", 1.0, 0.0, 4.0, 0.1),
+];
+const P_SHADOW: &[ParamMeta] = &[
+    ParamMeta::color("color", "Color", SHADOW_COLOR),
+    ParamMeta::float("dx", "Offset X", 8.0, -MAX_LENGTH, MAX_LENGTH, 1.0),
+    ParamMeta::float("dy", "Offset Y", -8.0, -MAX_LENGTH, MAX_LENGTH, 1.0),
+    ParamMeta::float("radius", "Blur", 6.0, 0.0, MAX_LENGTH, 0.5),
+];
+const P_VIGNETTE: &[ParamMeta] = &[
+    ParamMeta::float("amount", "Amount", 0.65, 0.0, 1.0, 0.05),
+    ParamMeta::float("softness", "Softness", 0.55, 0.05, 1.0, 0.05),
+    ParamMeta::color("color", "Color", Color::BLACK),
+];
+const P_ADJUST: &[ParamMeta] = &[
+    ParamMeta::angle("hue", "Hue", 0.0, -3600.0, 3600.0, 5.0),
+    ParamMeta::float("saturation", "Saturation", 1.0, 0.0, 4.0, 0.05),
+    ParamMeta::float("brightness", "Brightness", 0.0, -1.0, 1.0, 0.05),
+];
+const P_GRADE: &[ParamMeta] = &[
+    ParamMeta::float("exposure", "Exposure", 0.0, -4.0, 4.0, 0.1),
+    ParamMeta::float("contrast", "Contrast", 1.0, 0.0, 4.0, 0.05),
+    ParamMeta::float("gamma", "Gamma", 1.0, 0.1, 4.0, 0.05),
+];
+const P_TINT: &[ParamMeta] = &[
+    ParamMeta::color("color", "Color", TINT_COLOR),
+    ParamMeta::float("amount", "Amount", 0.5, 0.0, 1.0, 0.05),
+];
+const P_INVERT: &[ParamMeta] = &[];
+const P_CHROMATIC: &[ParamMeta] = &[
+    ParamMeta::float("amount", "Amount", 8.0, 0.0, 120.0, 1.0),
+    ParamMeta::angle("angle", "Angle", 0.0, -3600.0, 3600.0, 5.0),
+];
+const P_WAVE: &[ParamMeta] = &[
+    ParamMeta::float("amplitude", "Amplitude", 12.0, 0.0, 160.0, 1.0),
+    ParamMeta::float("frequency", "Frequency", 3.0, 0.1, 40.0, 0.25),
+    ParamMeta::angle("phase", "Phase", 0.0, -3600.0, 3600.0, 15.0),
+    ParamMeta::angle("angle", "Angle", 0.0, -3600.0, 3600.0, 5.0),
+];
+const P_OUTLINE: &[ParamMeta] = &[
+    ParamMeta::color("color", "Color", Color::BLACK),
+    ParamMeta::float("width", "Width", 4.0, 0.0, 64.0, 1.0),
+];
+const P_PIXELATE: &[ParamMeta] = &[ParamMeta::float("size", "Size", 8.0, 1.0, MAX_LENGTH, 1.0)];
+const P_GRAIN: &[ParamMeta] = &[
+    ParamMeta::float("amount", "Amount", 0.25, 0.0, 1.0, 0.05),
+    ParamMeta::float("size", "Size", 2.0, 1.0, 24.0, 0.5),
+    ParamMeta::float("seed", "Seed", 0.0, -10000.0, 10000.0, 1.0),
+];
+const P_SCANLINES: &[ParamMeta] = &[
+    ParamMeta::float("amount", "Amount", 0.45, 0.0, 1.0, 0.05),
+    ParamMeta::float("lines", "Lines", 80.0, 8.0, 400.0, 4.0),
+    ParamMeta::float("offset", "Glitch", 6.0, 0.0, 80.0, 1.0),
+    ParamMeta::float("phase", "Phase", 0.0, -10000.0, 10000.0, 1.0),
+];
+
+const CATALOG: [EffectMeta; 15] = [
+    EffectMeta { ty: BLUR, label: "Gaussian blur", category: "Blur", params: P_BLUR },
+    EffectMeta { ty: MOTION, label: "Motion blur", category: "Blur", params: P_MOTION },
+    EffectMeta { ty: GLOW, label: "Glow", category: "Light & Glow", params: P_GLOW },
+    EffectMeta { ty: SHADOW, label: "Drop shadow", category: "Light & Glow", params: P_SHADOW },
+    EffectMeta { ty: VIGNETTE, label: "Vignette", category: "Light & Glow", params: P_VIGNETTE },
+    EffectMeta { ty: ADJUST, label: "Hue & saturation", category: "Color", params: P_ADJUST },
+    EffectMeta { ty: GRADE, label: "Exposure & contrast", category: "Color", params: P_GRADE },
+    EffectMeta { ty: TINT, label: "Tint", category: "Color", params: P_TINT },
+    EffectMeta { ty: INVERT, label: "Invert", category: "Color", params: P_INVERT },
+    EffectMeta { ty: CHROMATIC, label: "Chromatic aberration", category: "Distort", params: P_CHROMATIC },
+    EffectMeta { ty: WAVE, label: "Wave distort", category: "Distort", params: P_WAVE },
+    EffectMeta { ty: OUTLINE, label: "Outline", category: "Stylize", params: P_OUTLINE },
+    EffectMeta { ty: PIXELATE, label: "Pixelate", category: "Stylize", params: P_PIXELATE },
+    EffectMeta { ty: GRAIN, label: "Film grain", category: "Stylize", params: P_GRAIN },
+    EffectMeta { ty: SCANLINES, label: "Scanlines & glitch", category: "Stylize", params: P_SCANLINES },
+];
+
+pub fn catalog() -> &'static [EffectMeta] {
+    &CATALOG
+}
+
+pub fn meta(ty: &str) -> Option<&'static EffectMeta> {
+    CATALOG.iter().find(|m| m.ty == ty)
+}
 
 pub fn known(t: &str) -> bool {
     ALL.contains(&t)
@@ -397,7 +775,12 @@ pub fn f(e: &ResolvedEffect, name: &str, def: f32, min: f32, max: f32) -> f32 {
 
 pub fn c(e: &ResolvedEffect, name: &str, def: Color) -> Color {
     match e.params.iter().find(|(k, _)| k == name).map(|(_, v)| v) {
-        Some(ParamValue::C(c)) => *c,
+        Some(ParamValue::C(col)) => Color {
+            r: clampf(col.r, 0.0, 1.0, def.r),
+            g: clampf(col.g, 0.0, 1.0, def.g),
+            b: clampf(col.b, 0.0, 1.0, def.b),
+            a: clampf(col.a, 0.0, 1.0, def.a),
+        },
         _ => def,
     }
 }
@@ -413,6 +796,9 @@ pub fn padding(e: &ResolvedEffect) -> f32 {
         }
         OUTLINE => f(e, "width", 4.0, 0.0, 64.0) + 1.0,
         MOTION => f(e, "distance", 30.0, 0.0, MAX_LENGTH) / 2.0 + 1.0,
+        CHROMATIC => f(e, "amount", 8.0, 0.0, 120.0) + 1.0,
+        WAVE => f(e, "amplitude", 12.0, 0.0, 160.0) + 1.0,
+        SCANLINES => f(e, "offset", 6.0, 0.0, 80.0) + 1.0,
         _ => 0.0,
     }
 }
@@ -425,8 +811,20 @@ pub fn mix(e: &ResolvedEffect) -> f32 {
 pub const SHADOW_COLOR: Color = Color { r: 0.0, g: 0.0, b: 0.0, a: 0.6 };
 pub const TINT_COLOR: Color = Color { r: 1.0, g: 0.0, b: 0.0, a: 1.0 };
 
-/// Runs one effect (mix applied).
+/// Runs one effect on a normal layer (mix applied).
 pub fn apply(e: &ResolvedEffect, input: Image) -> Image {
+    let rect = [0.0, 0.0, input.w as f32, input.h as f32];
+    apply_mode(e, input, false, rect)
+}
+
+/// Runs one effect on an adjustment layer (full-frame effects like Vignette,
+/// Film grain, and Scanlines cover the canvas too).
+pub fn apply_adjustment(e: &ResolvedEffect, input: Image) -> Image {
+    let rect = [0.0, 0.0, input.w as f32, input.h as f32];
+    apply_mode(e, input, true, rect)
+}
+
+fn apply_mode(e: &ResolvedEffect, input: Image, full_frame: bool, frame_rect: [f32; 4]) -> Image {
     let m = mix(e);
     if m <= 0.0 || !known(&e.ty) {
         return input;
@@ -458,18 +856,46 @@ pub fn apply(e: &ResolvedEffect, input: Image) -> Image {
             adjust(&mut o, f(e, "hue", 0.0, -3600.0, 3600.0), f(e, "saturation", 1.0, 0.0, 4.0), f(e, "brightness", 0.0, -1.0, 1.0));
             o
         }
+        TINT => {
+            let c = c(e, "color", TINT_COLOR);
+            let mut o = input.clone();
+            tint(&mut o, c.r, c.g, c.b, f(e, "amount", 0.5, 0.0, 1.0) * c.a);
+            o
+        }
         PIXELATE => pixelate(&input, f(e, "size", 8.0, 1.0, MAX_LENGTH)),
         OUTLINE => {
             let c = c(e, "color", Color::BLACK);
             outline(&input, f(e, "width", 4.0, 0.0, 64.0) * s, c.r, c.g, c.b, c.a)
         }
         MOTION => smear(&input, f(e, "angle", 0.0, -3600.0, 3600.0), f(e, "distance", 30.0, 0.0, MAX_LENGTH) * s),
-        _ => {
-            let c = c(e, "color", TINT_COLOR);
+        CHROMATIC => chromatic(&input, f(e, "amount", 8.0, 0.0, 120.0) * s, f(e, "angle", 0.0, -3600.0, 3600.0)),
+        VIGNETTE => {
+            let c = c(e, "color", Color::BLACK);
+            vignette(&input, f(e, "amount", 0.65, 0.0, 1.0), f(e, "softness", 0.55, 0.05, 1.0), c.r, c.g, c.b, c.a, full_frame, frame_rect)
+        }
+        WAVE => wave(
+            &input,
+            f(e, "amplitude", 12.0, 0.0, 160.0),
+            f(e, "frequency", 3.0, 0.1, 40.0),
+            f(e, "phase", 0.0, -3600.0, 3600.0),
+            f(e, "angle", 0.0, -3600.0, 3600.0),
+        ),
+        GRAIN => grain(&input, f(e, "amount", 0.25, 0.0, 1.0), f(e, "size", 2.0, 1.0, 24.0), f(e, "seed", 0.0, -10000.0, 10000.0), full_frame),
+        GRADE => {
             let mut o = input.clone();
-            tint(&mut o, c.r, c.g, c.b, f(e, "amount", 0.5, 0.0, 1.0) * c.a);
+            grade(&mut o, f(e, "exposure", 0.0, -4.0, 4.0), f(e, "contrast", 1.0, 0.0, 4.0), f(e, "gamma", 1.0, 0.1, 4.0));
             o
         }
+        SCANLINES => scanlines(
+            &input,
+            f(e, "amount", 0.45, 0.0, 1.0),
+            f(e, "lines", 80.0, 8.0, 400.0),
+            f(e, "offset", 6.0, 0.0, 80.0) * s,
+            f(e, "phase", 0.0, -10000.0, 10000.0),
+            full_frame,
+            frame_rect,
+        ),
+        _ => input.clone(),
     };
     lerp(&input, out, m)
 }
@@ -496,12 +922,37 @@ fn draw(dl: &DrawList, iso: usize, canvas: &mut Image) {
             IsoItem::Isolate(ci) => {
                 let child = &dl.isolates[ci];
                 if child.adjustment {
-                    let mut img = canvas.clone();
-                    for e in &child.effects {
-                        img = apply(e, img);
+                    let (rx0, ry0, rx1, ry1) = if !child.empty() {
+                        let x0 = ((child.min_x - canvas.x0) * canvas.scale).floor().clamp(0.0, canvas.w as f32) as usize;
+                        let x1 = ((child.max_x - canvas.x0) * canvas.scale).ceil().clamp(0.0, canvas.w as f32) as usize;
+                        let y0 = ((canvas.y0 - child.max_y) * canvas.scale).floor().clamp(0.0, canvas.h as f32) as usize;
+                        let y1 = ((canvas.y0 - child.min_y) * canvas.scale).ceil().clamp(0.0, canvas.h as f32) as usize;
+                        if x1 <= x0 || y1 <= y0 {
+                            continue;
+                        }
+                        (x0, y0, x1, y1)
+                    } else {
+                        (0, 0, canvas.w, canvas.h)
+                    };
+                    let frame_rect = [rx0 as f32, ry0 as f32, (rx1 - rx0) as f32, (ry1 - ry0) as f32];
+                    let mut img = canvas.blank();
+                    for y in ry0..ry1 {
+                        let row_start = (y * canvas.w + rx0) * 4;
+                        let row_end = (y * canvas.w + rx1) * 4;
+                        img.px[row_start..row_end].copy_from_slice(&canvas.px[row_start..row_end]);
                     }
-                    let mixed = lerp(canvas, img, child.opacity);
-                    canvas.px.copy_from_slice(&mixed.px);
+                    for e in &child.effects {
+                        img = apply_mode(e, img, true, frame_rect);
+                    }
+                    let op = clampf(child.opacity, 0.0, 1.0, 1.0);
+                    for y in ry0..ry1 {
+                        for x in rx0..rx1 {
+                            let o = (y * canvas.w + x) * 4;
+                            for c in 0..4 {
+                                canvas.px[o + c] += (img.px[o + c] - canvas.px[o + c]) * op;
+                            }
+                        }
+                    }
                     continue;
                 }
                 let mut buf = canvas.blank();
@@ -509,7 +960,7 @@ fn draw(dl: &DrawList, iso: usize, canvas: &mut Image) {
                 for e in &child.effects {
                     buf = apply(e, buf);
                 }
-                composite(canvas, &buf, child.opacity, child.blend);
+                composite(canvas, &buf, clampf(child.opacity, 0.0, 1.0, 1.0), child.blend);
             }
         }
     }
@@ -609,5 +1060,76 @@ fn blend_pixel(im: &mut Image, o: usize, r: f32, g: f32, b: f32, a: f32, mode: B
             p[o + 2] = sb + p[o + 2] * (1.0 - a);
             p[o + 3] = a + p[o + 3] * (1.0 - a);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_image() -> Image {
+        let mut im = Image::new(64, 64, -32.0, 32.0, 1.0);
+        for y in 16..48 {
+            for x in 16..48 {
+                let o = (y * im.w + x) * 4;
+                let a = if x == 16 || x == 47 { 0.5 } else { 1.0 };
+                im.px[o] = 0.8 * a;
+                im.px[o + 1] = 0.4 * a;
+                im.px[o + 2] = 0.2 * a;
+                im.px[o + 3] = a;
+            }
+        }
+        im
+    }
+
+    fn check_premultiplied(im: &Image, label: &str) {
+        for (i, p) in im.px.chunks_exact(4).enumerate() {
+            for c in 0..4 {
+                assert!(p[c].is_finite(), "{label} px {i} ch {c} non-finite: {}", p[c]);
+                assert!(p[c] >= -1e-5 && p[c] <= 1.0 + 1e-5, "{label} px {i} ch {c} out of range: {}", p[c]);
+            }
+            assert!(
+                p[0] <= p[3] + 1e-4 && p[1] <= p[3] + 1e-4 && p[2] <= p[3] + 1e-4,
+                "{label} px {i} breaks premultiplied alpha: {p:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn catalog_covers_all_known_effects_and_categories() {
+        assert_eq!(catalog().len(), ALL.len());
+        for &ty in &ALL {
+            let m = meta(ty).unwrap_or_else(|| panic!("missing catalog meta for {ty}"));
+            assert!(CATEGORIES.contains(&m.category), "unknown category {}", m.category);
+            assert!(!m.label.is_empty());
+        }
+    }
+
+    #[test]
+    fn all_new_effects_preserve_premultiplied_alpha_and_clamp_nan() {
+        let src = test_image();
+        let cases: Vec<ResolvedEffect> = vec![
+            ResolvedEffect { ty: CHROMATIC.into(), mix: 1.0, params: vec![("amount".into(), ParamValue::F(6.0)), ("angle".into(), ParamValue::F(25.0))] },
+            ResolvedEffect { ty: VIGNETTE.into(), mix: 1.0, params: vec![("amount".into(), ParamValue::F(0.7)), ("softness".into(), ParamValue::F(0.5)), ("color".into(), ParamValue::C(Color::BLACK))] },
+            ResolvedEffect { ty: WAVE.into(), mix: 1.0, params: vec![("amplitude".into(), ParamValue::F(6.0)), ("frequency".into(), ParamValue::F(4.0)), ("phase".into(), ParamValue::F(90.0)), ("angle".into(), ParamValue::F(15.0))] },
+            ResolvedEffect { ty: GRAIN.into(), mix: 1.0, params: vec![("amount".into(), ParamValue::F(0.4)), ("size".into(), ParamValue::F(2.0)), ("seed".into(), ParamValue::F(7.0))] },
+            ResolvedEffect { ty: GRADE.into(), mix: 1.0, params: vec![("exposure".into(), ParamValue::F(0.6)), ("contrast".into(), ParamValue::F(1.4)), ("gamma".into(), ParamValue::F(0.8))] },
+            ResolvedEffect { ty: SCANLINES.into(), mix: 1.0, params: vec![("amount".into(), ParamValue::F(0.6)), ("lines".into(), ParamValue::F(32.0)), ("offset".into(), ParamValue::F(5.0)), ("phase".into(), ParamValue::F(2.0))] },
+            // NaN parameter stress test
+            ResolvedEffect { ty: GRADE.into(), mix: f32::NAN, params: vec![("exposure".into(), ParamValue::F(f32::NAN)), ("contrast".into(), ParamValue::F(f32::INFINITY)), ("gamma".into(), ParamValue::F(-5.0))] },
+            ResolvedEffect { ty: WAVE.into(), mix: f32::NAN, params: vec![("amplitude".into(), ParamValue::F(f32::NAN)), ("frequency".into(), ParamValue::F(f32::NAN))] },
+        ];
+        for e in &cases {
+            let normal = apply(e, src.clone());
+            check_premultiplied(&normal, &format!("normal {}", e.ty));
+            let adj = apply_adjustment(e, src.clone());
+            check_premultiplied(&adj, &format!("adj {}", e.ty));
+        }
+        // Normal vignette must NOT darken transparent corner pixels (no bbox artifact)
+        let vig = ResolvedEffect { ty: VIGNETTE.into(), mix: 1.0, params: vec![("amount".into(), ParamValue::F(0.9)), ("softness".into(), ParamValue::F(0.6))] };
+        let n = apply(&vig, src.clone());
+        assert_eq!(n.px[3], 0.0, "normal layer vignette keeps transparent corners clear");
+        let a = apply_adjustment(&vig, src);
+        assert!(a.px[3] > 0.5, "adjustment layer vignette darkens corners over background");
     }
 }

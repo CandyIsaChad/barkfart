@@ -257,7 +257,10 @@ impl Renderer {
             })
         };
         let mut fx = std::collections::HashMap::new();
-        for e in ["fs_copy", "fs_lerp", "fs_blur", "fs_shift", "fs_under", "fs_invert", "fs_adjust", "fs_tint", "fs_pixelate", "fs_outline", "fs_motion"] {
+        for e in [
+            "fs_copy", "fs_lerp", "fs_blur", "fs_shift", "fs_under", "fs_invert", "fs_adjust", "fs_tint", "fs_pixelate", "fs_outline", "fs_motion",
+            "fs_chromatic", "fs_vignette", "fs_wave", "fs_grain", "fs_grade", "fs_scanlines",
+        ] {
             fx.insert(e, full_pipe(e, None, 1));
         }
         let pipes = Pipelines {
@@ -763,20 +766,35 @@ impl<'a> Frame<'a> {
                     }
                     let child = &list.isolates[ci];
                     if child.adjustment {
-                        // effects on what is drawn so far, mixed back in by the layer's opacity
-                        let before = self.copy(&t.color, clip);
-                        // effects() releases `before` when an effect replaces it; otherwise fx is `before`
-                        let fx = self.effects(before.clone(), &child.effects, clip);
-                        let bind = self.fx_bind(&[[child.opacity.clamp(0.0, 1.0), 0.0, 0.0, 0.0]], &before, Some(&fx));
+                        // effects on what is drawn so far, mixed back in by the layer's opacity.
+                        // Keep `before` separate from the texture consumed by `effects()` so
+                        // multi-pass / stacked effects never recycle `before` from the pool!
+                        // When the adjustment isolate has explicit camera-shot bounds (!empty()),
+                        // clip tightly to that shot rect; otherwise affect full `clip`.
+                        let has_active = child.effects.iter().any(|e| rfx::mix(e) > 0.0 && (rfx::known(&e.ty) || e.ty.starts_with("plugin:")));
+                        let op = if child.opacity.is_nan() { 1.0 } else { child.opacity.clamp(0.0, 1.0) };
+                        if !has_active || op <= 0.0 {
+                            continue;
+                        }
+                        let adj_rect = if !child.empty() {
+                            let Some(r) = self.tight_rect(child, clip) else { continue };
+                            r
+                        } else {
+                            clip
+                        };
+                        let before = self.copy(&t.color, adj_rect);
+                        let start = self.copy(&before, adj_rect);
+                        let fx = self.effects(start, &child.effects, adj_rect, true, adj_rect);
+                        let bind = self.fx_bind(&[[op, 0.0, 0.0, 0.0]], &before, Some(&fx));
                         {
                             let mut pass = Self::pass(&mut self.enc, t, false);
                             pass.set_pipeline(&self.r.pipes.replace);
                             pass.set_bind_group(0, &bind, &[]);
-                            pass.set_scissor_rect(clip.x, clip.y, clip.w, clip.h);
+                            pass.set_scissor_rect(adj_rect.x, adj_rect.y, adj_rect.w, adj_rect.h);
                             pass.draw(0..3, 0..1);
                         }
                         self.release(fx, 1);
-                        drop(before);
+                        self.release(before, 1);
                         continue;
                     }
                     let Some(rect) = self.rect(list, child, clip) else { continue };
@@ -787,8 +805,10 @@ impl<'a> Frame<'a> {
                     if let Some(m) = msaa {
                         self.release(m, self.r.options.samples);
                     }
-                    let done = self.effects(color, &child.effects, rect);
-                    let bind = self.fx_bind(&[[child.opacity.clamp(0.0, 1.0), 0.0, 0.0, 0.0]], &done, None);
+                    let full_rect = Rect { x: 0, y: 0, w: self.w, h: self.h };
+                    let done = self.effects(color, &child.effects, rect, false, full_rect);
+                    let op = if child.opacity.is_nan() { 1.0 } else { child.opacity.clamp(0.0, 1.0) };
+                    let bind = self.fx_bind(&[[op, 0.0, 0.0, 0.0]], &done, None);
                     {
                         let mut pass = Self::pass(&mut self.enc, t, false);
                         pass.set_pipeline(&self.r.pipes.composite[blend_index(child.blend)]);
@@ -810,14 +830,14 @@ impl<'a> Frame<'a> {
     }
 
     /// Runs effects in order on src (consumed); returns the result.
-    fn effects(&mut self, src: wgpu::Texture, list: &[ResolvedEffect], rect: Rect) -> wgpu::Texture {
+    fn effects(&mut self, src: wgpu::Texture, list: &[ResolvedEffect], rect: Rect, full_frame: bool, frame_rect: Rect) -> wgpu::Texture {
         let mut cur = src;
         for e in list {
             let m = rfx::mix(e);
             if m <= 0.0 || !(rfx::known(&e.ty) || e.ty.starts_with("plugin:")) {
                 continue;
             }
-            let out = self.one(e, &cur, rect);
+            let out = self.one(e, &cur, rect, full_frame, frame_rect);
             let out = if m < 1.0 {
                 let mixed = self.fx_pass("fs_lerp", &[[m, 0.0, 0.0, 0.0]], &cur, Some(&out), rect);
                 self.release(out, 1);
@@ -844,10 +864,12 @@ impl<'a> Frame<'a> {
     }
 
     /// One effect: a new texture from src.
-    fn one(&mut self, e: &ResolvedEffect, src: &wgpu::Texture, rect: Rect) -> wgpu::Texture {
+    fn one(&mut self, e: &ResolvedEffect, src: &wgpu::Texture, rect: Rect, full_frame: bool, frame_rect: Rect) -> wgpu::Texture {
         let s = self.s;
         let f = |n: &str, d: f32, lo: f32, hi: f32| rfx::f(e, n, d, lo, hi);
         let col = |c: Color| [c.r, c.g, c.b, c.a];
+        let ff = if full_frame { 1.0 } else { 0.0 };
+        let fr = [frame_rect.x as f32, frame_rect.y as f32, frame_rect.w as f32, frame_rect.h as f32];
         match e.ty.as_str() {
             plugin if plugin.starts_with("plugin:") => self.plugin(e, &plugin["plugin:".len()..], src, rect),
             rfx::BLUR => self.blurred(src, rfx::sigma(f("radius", 6.0, 0.0, rfx::MAX_LENGTH)) * s, rect),
@@ -875,6 +897,10 @@ impl<'a> Frame<'a> {
                 let b = f("brightness", 0.0, -1.0, 1.0);
                 self.fx_pass("fs_adjust", &[[b, 0.0, 0.0, 0.0], [m[0], m[1], m[2], 0.0], [m[3], m[4], m[5], 0.0], [m[6], m[7], m[8], 0.0]], src, None, rect)
             }
+            rfx::TINT => {
+                let c = rfx::c(e, "color", rfx::TINT_COLOR);
+                self.fx_pass("fs_tint", &[col(c), [f("amount", 0.5, 0.0, 1.0) * c.a, 0.0, 0.0, 0.0]], src, None, rect)
+            }
             rfx::PIXELATE => {
                 let size = f("size", 8.0, 1.0, rfx::MAX_LENGTH);
                 if !(size * s >= 1.5) {
@@ -899,11 +925,79 @@ impl<'a> Frame<'a> {
                 }
                 self.fx_pass("fs_motion", &p, src, None, rect)
             }
-            _ => {
-                let c = rfx::c(e, "color", rfx::TINT_COLOR);
-                self.fx_pass("fs_tint", &[col(c), [f("amount", 0.5, 0.0, 1.0) * c.a, 0.0, 0.0, 0.0]], src, None, rect)
+            rfx::CHROMATIC => {
+                let amount_px = f("amount", 8.0, 0.0, 120.0) * s;
+                if !(amount_px > 0.01) {
+                    return self.copy(src, rect);
+                }
+                let rad = (f("angle", 0.0, -3600.0, 3600.0) as f64).to_radians();
+                let dx = (rad.cos() * amount_px as f64) as f32;
+                let dy = -(rad.sin() * amount_px as f64) as f32;
+                self.fx_pass("fs_chromatic", &[[dx, dy, 0.0, 0.0]], src, None, rect)
             }
+            rfx::VIGNETTE => {
+                let c = rfx::c(e, "color", Color::BLACK);
+                let amount = f("amount", 0.65, 0.0, 1.0);
+                if !(amount > 0.0) || !(c.a > 0.0) {
+                    return self.copy(src, rect);
+                }
+                let softness = f("softness", 0.55, 0.05, 1.0);
+                self.fx_pass("fs_vignette", &[col(c), [amount, softness, ff, 0.0], fr], src, None, rect)
+            }
+            rfx::WAVE => {
+                let amp_px = f("amplitude", 12.0, 0.0, 160.0) * s;
+                if !(amp_px > 0.01) {
+                    return self.copy(src, rect);
+                }
+                let freq = f("frequency", 3.0, 0.1, 40.0);
+                let phase_rad = (f("phase", 0.0, -3600.0, 3600.0) as f64).to_radians() as f32;
+                let rad = (f("angle", 0.0, -3600.0, 3600.0) as f64).to_radians();
+                let k_freq = freq * std::f32::consts::TAU / 400.0;
+                self.fx_pass("fs_wave", &[[self.x0, self.y0, s, amp_px], [k_freq, phase_rad, rad.cos() as f32, rad.sin() as f32]], src, None, rect)
+            }
+            rfx::GRAIN => {
+                let amount = f("amount", 0.25, 0.0, 1.0);
+                if !(amount > 0.0) {
+                    return self.copy(src, rect);
+                }
+                let size = f("size", 2.0, 1.0, 24.0);
+                let seed_i = barkfart_core::model::java_round(f("seed", 0.0, -10000.0, 10000.0)) as f32;
+                self.fx_pass("fs_grain", &[[amount, size, seed_i, ff]], src, None, rect)
+            }
+            rfx::GRADE => {
+                let exp_mul = 2.0f32.powf(f("exposure", 0.0, -4.0, 4.0));
+                let contrast = f("contrast", 1.0, 0.0, 4.0);
+                let inv_g = 1.0 / f("gamma", 1.0, 0.1, 4.0).max(0.1);
+                self.fx_pass("fs_grade", &[[exp_mul, contrast, inv_g, 0.0]], src, None, rect)
+            }
+            rfx::SCANLINES => {
+                let amount = f("amount", 0.45, 0.0, 1.0);
+                let offset_px = f("offset", 6.0, 0.0, 80.0) * s;
+                if !(amount > 0.0) && !(offset_px > 0.0) {
+                    return self.copy(src, rect);
+                }
+                let lines = f("lines", 80.0, 8.0, 400.0);
+                let phase = f("phase", 0.0, -10000.0, 10000.0);
+                let phase_i = barkfart_core::model::java_round(phase) as f32;
+                self.fx_pass("fs_scanlines", &[[amount, lines, offset_px, phase_i], [phase, ff, fr[1], fr[3]]], src, None, rect)
+            }
+            _ => self.copy(src, rect),
         }
+    }
+
+    /// Tight pixel rectangle for an adjustment isolate's explicit world bounds
+    /// (camera shot), intersected with `clip` (None when outside `clip`).
+    fn tight_rect(&self, iso: &Isolate, clip: Rect) -> Option<Rect> {
+        let (x0, x1) = ((iso.min_x - self.x0) * self.s, (iso.max_x - self.x0) * self.s);
+        let (y0, y1) = ((self.y0 - iso.max_y) * self.s, (self.y0 - iso.min_y) * self.s);
+        let rx0 = (clip.x as i64).max(x0.floor() as i64);
+        let ry0 = (clip.y as i64).max(y0.floor() as i64);
+        let rx1 = ((clip.x + clip.w) as i64).min(x1.ceil() as i64);
+        let ry1 = ((clip.y + clip.h) as i64).min(y1.ceil() as i64);
+        if rx1 <= rx0 || ry1 <= ry0 {
+            return None;
+        }
+        Some(Rect { x: rx0 as u32, y: ry0 as u32, w: (rx1 - rx0) as u32, h: (ry1 - ry0) as u32 })
     }
 
     /// An isolate's padded bounds in pixels within clip (None when empty).
@@ -1022,4 +1116,153 @@ fn fs_plugin(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {{
 }}
 "
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use barkfart_core::eval::{Group, Item, Scene, Shape, ShapeKind};
+    use barkfart_core::tess;
+
+    fn rect_shape(x0: f32, y0: f32, x1: f32, y1: f32, color: Color) -> Item {
+        Item::Shape(Shape {
+            kind: ShapeKind::Polygon { points: vec![x0, y0, x1, y0, x1, y1, x0, y1], convex: true },
+            color,
+            gradient: None,
+            source: "r".into(),
+        })
+    }
+
+    fn compare(gpu: &[u8], cpu: &[u8], label: &str) {
+        assert_eq!(gpu.len(), cpu.len());
+        let n = gpu.len() / 4;
+        let (mut sum, mut bad, mut covered) = (0u64, 0usize, 0usize);
+        for i in 0..n {
+            if gpu[i * 4 + 3] == 0 && cpu[i * 4 + 3] == 0 {
+                continue;
+            }
+            covered += 1;
+            let mut worst = 0u8;
+            for c in 0..4 {
+                let d = gpu[i * 4 + c].abs_diff(cpu[i * 4 + c]);
+                sum += d as u64;
+                worst = worst.max(d);
+            }
+            if worst > 12 {
+                bad += 1;
+            }
+        }
+        assert!(covered > 0, "{label}: nothing rendered");
+        let mean = sum as f64 / (4.0 * covered as f64);
+        let bad_pct = bad as f64 / covered as f64;
+        assert!(mean < 0.8 && bad_pct < 0.008, "{label}: mean={mean:.3}, bad={:.3}%", bad_pct * 100.0);
+    }
+
+    fn dl_with_effects(effects: Vec<ResolvedEffect>, adjustment: bool, adj_bounds: Option<[f32; 4]>, opacity: f32) -> DrawList {
+        let s1 = rect_shape(-30.0, -30.0, 30.0, 30.0, Color { r: 0.2, g: 0.67, b: 0.93, a: 1.0 });
+        let s2 = rect_shape(-12.0, -18.0, 18.0, 22.0, Color { r: 1.0, g: 0.4, b: 0.2, a: 1.0 });
+        let root = if adjustment {
+            Group {
+                source: "root".into(),
+                opacity: 1.0,
+                blend: Blend::Normal,
+                adjustment: false,
+                bounds: None,
+                effects: vec![],
+                children: vec![
+                    s1,
+                    s2,
+                    Item::Group(Group {
+                        source: "adj".into(),
+                        opacity,
+                        blend: Blend::Normal,
+                        adjustment: true,
+                        bounds: adj_bounds,
+                        effects,
+                        children: vec![],
+                    }),
+                ],
+            }
+        } else {
+            Group {
+                source: "root".into(),
+                opacity: 1.0,
+                blend: Blend::Normal,
+                adjustment: false,
+                bounds: None,
+                effects: vec![],
+                children: vec![Item::Group(Group {
+                    source: "fig".into(),
+                    opacity,
+                    blend: Blend::Normal,
+                    adjustment: false,
+                    bounds: None,
+                    effects,
+                    children: vec![s1, s2],
+                })],
+            }
+        };
+        let scene = Scene { root, diagnostics: vec![], primitives: 2, time: 0.0 };
+        tess::layered(&scene, None)
+    }
+
+    #[test]
+    fn new_effects_and_stacked_adjustment_match_cpu_reference() {
+        let Ok(r) = Renderer::headless_with(&[wgpu::Backends::PRIMARY, wgpu::Backends::GL], Options { samples: 1 }) else {
+            return;
+        };
+        let (w, h, scale) = (128usize, 128usize, 1.0f32);
+        let (x0, y0) = (-64.0f32, 64.0f32);
+        let view = View { x0, y0: y0 - h as f32 / scale, x1: x0 + w as f32 / scale, y1: y0, background: [0.0; 4] };
+
+        let cases: Vec<(&str, Vec<ResolvedEffect>, bool, Option<[f32; 4]>, f32)> = vec![
+            ("chromatic", vec![ResolvedEffect { ty: rfx::CHROMATIC.into(), mix: 1.0, params: vec![("amount".into(), ParamValue::F(7.0)), ("angle".into(), ParamValue::F(20.0))] }], false, None, 1.0),
+            ("vignette_layer", vec![ResolvedEffect { ty: rfx::VIGNETTE.into(), mix: 1.0, params: vec![("amount".into(), ParamValue::F(0.7)), ("softness".into(), ParamValue::F(0.5))] }], false, None, 1.0),
+            ("vignette_adj", vec![ResolvedEffect { ty: rfx::VIGNETTE.into(), mix: 1.0, params: vec![("amount".into(), ParamValue::F(0.7)), ("softness".into(), ParamValue::F(0.55)), ("color".into(), ParamValue::C(Color { r: 0.05, g: 0.0, b: 0.1, a: 1.0 }))] }], true, None, 0.85),
+            ("wave", vec![ResolvedEffect { ty: rfx::WAVE.into(), mix: 1.0, params: vec![("amplitude".into(), ParamValue::F(8.0)), ("frequency".into(), ParamValue::F(5.0)), ("phase".into(), ParamValue::F(45.0)), ("angle".into(), ParamValue::F(15.0))] }], false, None, 1.0),
+            ("grain_layer", vec![ResolvedEffect { ty: rfx::GRAIN.into(), mix: 1.0, params: vec![("amount".into(), ParamValue::F(0.35)), ("size".into(), ParamValue::F(2.0)), ("seed".into(), ParamValue::F(5.0))] }], false, None, 1.0),
+            ("grain_adj", vec![ResolvedEffect { ty: rfx::GRAIN.into(), mix: 1.0, params: vec![("amount".into(), ParamValue::F(0.35)), ("size".into(), ParamValue::F(3.0)), ("seed".into(), ParamValue::F(9.0))] }], true, None, 1.0),
+            ("grade", vec![ResolvedEffect { ty: rfx::GRADE.into(), mix: 1.0, params: vec![("exposure".into(), ParamValue::F(0.4)), ("contrast".into(), ParamValue::F(1.35)), ("gamma".into(), ParamValue::F(0.85))] }], false, None, 1.0),
+            ("scanlines_adj", vec![ResolvedEffect { ty: rfx::SCANLINES.into(), mix: 1.0, params: vec![("amount".into(), ParamValue::F(0.55)), ("lines".into(), ParamValue::F(40.0)), ("offset".into(), ParamValue::F(5.0)), ("phase".into(), ParamValue::F(3.0))] }], true, None, 1.0),
+            // Stacked multi-pass adjustment layer with partial mix and opacity + camera-shot clip!
+            ("stacked_adj_clipped", vec![
+                ResolvedEffect { ty: rfx::BLUR.into(), mix: 0.6, params: vec![("radius".into(), ParamValue::F(6.0))] },
+                ResolvedEffect { ty: rfx::CHROMATIC.into(), mix: 0.8, params: vec![("amount".into(), ParamValue::F(5.0)), ("angle".into(), ParamValue::F(0.0))] },
+                ResolvedEffect { ty: rfx::GRADE.into(), mix: 1.0, params: vec![("exposure".into(), ParamValue::F(0.2)), ("contrast".into(), ParamValue::F(1.3)), ("gamma".into(), ParamValue::F(1.0))] },
+                ResolvedEffect { ty: rfx::VIGNETTE.into(), mix: 0.9, params: vec![("amount".into(), ParamValue::F(0.6)), ("softness".into(), ParamValue::F(0.5))] },
+            ], true, Some([-44.0, -40.0, 44.0, 40.0]), 0.75),
+        ];
+
+        for (name, effects, adj, bounds, opacity) in cases {
+            let dl = dl_with_effects(effects, adj, bounds, opacity);
+            let mut im = rfx::Image::new(w, h, x0, y0, scale);
+            rfx::render(&dl, &mut im);
+            let cpu = im.to_premultiplied_u8();
+            let gpu = r.render_raw(&dl, w as u32, h as u32, view);
+            compare(&gpu, &cpu, name);
+        }
+    }
+
+    #[test]
+    fn stock_wgsl_effect_plugins_compile_cleanly() {
+        let Ok(r) = Renderer::headless_with(&[wgpu::Backends::PRIMARY, wgpu::Backends::GL], Options { samples: 1 }) else {
+            return;
+        };
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/barkfart/plugins");
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&dir).expect("plugins dir") {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|s| s.to_str()) != Some("luau") {
+                continue;
+            }
+            let src = std::fs::read_to_string(&path).unwrap();
+            let def = barkfart_core::plugins::install(&src, path.file_name().unwrap().to_str().unwrap()).unwrap();
+            if def.kind == barkfart_script::Kind::Effect {
+                assert!(r.plugin_pipeline(&def.id).is_some(), "stock shader failed to compile: {}", def.id);
+                checked += 1;
+            }
+            barkfart_core::plugins::uninstall(&def.id);
+        }
+        assert!(checked >= 3, "expected at least 3 stock WGSL effect plugins, checked {checked}");
+    }
 }

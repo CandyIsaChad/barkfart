@@ -224,3 +224,83 @@ return bf.script { id = "x.bad", version = "1", targets = { a = bf.value() },
     assert!(matches!(host.load("local bf = require('@barkfart') return bf.script { id = 'x.y', version = '1', step = function() end }", "n"), Err(ScriptError::Invalid(_))));
     assert!(matches!(host.load("local bf = require('@barkfart') return bf.script { id = 'x.y', version = '1', targets = { a = bf.value() } }", "n"), Err(ScriptError::Invalid(_))));
 }
+
+#[test]
+fn every_stock_workshop_plugin_loads_and_runs_cleanly() {
+    let host = Host::new().unwrap();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/barkfart/plugins");
+    let mut scripts = 0;
+    let mut modifiers = 0;
+    let mut effects = 0;
+    for entry in std::fs::read_dir(&dir).expect("docs/barkfart/plugins exists") {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|s| s.to_str()) != Some("luau") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let src = std::fs::read_to_string(&path).unwrap();
+        let plugin = host.load(&src, name).unwrap_or_else(|e| panic!("{name} failed to load: {e}"));
+        let props: Vec<(String, PropValue)> = plugin
+            .def
+            .props
+            .iter()
+            .map(|p| {
+                let v = match &p.kind {
+                    PropKind::Number { default, .. } | PropKind::Angle { default } => PropValue::Number(*default),
+                    PropKind::Toggle { default } => PropValue::Toggle(*default),
+                    PropKind::Colour { default } => PropValue::Colour(*default),
+                    PropKind::Choice { options, default } => PropValue::Text(options.get(*default).cloned().unwrap_or_default()),
+                    PropKind::Text { default } => PropValue::Text(default.clone()),
+                    PropKind::Point { default } => PropValue::Point(default.0, default.1),
+                };
+                (p.name.clone(), v)
+            })
+            .collect();
+        match plugin.def.kind {
+            Kind::Script => {
+                let scene: Vec<Vec<(String, Seen)>> = (0..12)
+                    .map(|k| {
+                        plugin
+                            .def
+                            .targets
+                            .iter()
+                            .map(|tg| {
+                                let seen = match tg.kind {
+                                    TargetKind::Figure => Seen::Figure {
+                                        x: k as f64 * 12.0,
+                                        y: (k as f64).sin() * 5.0,
+                                        rotation: 0.0,
+                                        vx: 240.0,
+                                        vy: 0.0,
+                                        joints: vec![("root".into(), 0.0, 0.0, 0.0)],
+                                    },
+                                    TargetKind::Value => Seen::Value(k as f64 * 0.5),
+                                };
+                                (tg.name.clone(), seen)
+                            })
+                            .collect()
+                    })
+                    .collect();
+                let out = host.script_run(&plugin, &Run { seed: 42, props: &props, fps: 24.0, first_frame: 0, scene: &scene }).unwrap_or_else(|e| panic!("{name} script_run failed: {e}"));
+                assert_eq!(out.len(), 12, "{name}");
+                scripts += 1;
+            }
+            Kind::Modifier => {
+                let sample = |f: f64| f * 5.0;
+                for frame in [0.0, 1.0, 5.0, 12.0] {
+                    let v = host.modifier_value(&plugin, "L1/x", sample(frame), &props, Time { frame, seconds: frame / 24.0, fps: 24.0 }, &sample).unwrap_or_else(|e| panic!("{name} modifier failed: {e}"));
+                    assert!(v.is_finite(), "{name} non-finite output {v}");
+                }
+                modifiers += 1;
+            }
+            Kind::Effect => {
+                assert!(plugin.def.shader.is_some(), "{name} missing shader");
+                effects += 1;
+            }
+            Kind::Tool => {}
+        }
+    }
+    assert!(scripts >= 8, "expected >= 8 stock scripts, got {scripts}");
+    assert!(modifiers >= 3, "expected >= 3 stock modifiers, got {modifiers}");
+    assert!(effects >= 3, "expected >= 3 stock effects, got {effects}");
+}
