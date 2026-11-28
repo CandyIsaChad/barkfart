@@ -5554,7 +5554,7 @@ impl Session {
             let k: Vec<_> = self
                 .keys_at(t, None)
                 .into_iter()
-                .filter(|r| p.property(&r.property).is_some_and(|q| q.ty.continuous()))
+                .filter(|r| !frame_ops::is_frame_setting(&r.property) && p.property(&r.property).is_some_and(|q| q.ty.continuous()))
                 .collect();
             !k.is_empty() && k.iter().all(|r| p.property(&r.property).and_then(|q| q.track.keys().iter().find(|x| x.time == r.time)).is_some_and(|x| x.interp == Interp::Hold))
         };
@@ -5710,7 +5710,7 @@ impl Session {
         if let Some(s) = p.root() {
             for l in &s.layers {
                 for q in l.properties() {
-                    if !q.ty.continuous() {
+                    if !q.ty.continuous() || frame_ops::is_frame_setting(&q.id) {
                         continue;
                     }
                     for k in q.track.keys() {
