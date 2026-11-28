@@ -323,3 +323,91 @@ fn fs_scanlines(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     }
     return vec4<f32>(rgb, c.a);
 }
+
+// W3C Compositing & Blending Level 1 separable channel blend B(Cb, Cs).
+// Mode indices match barkfart_core::model::Blend::index() (0..12).
+fn blend_channel(b: f32, s: f32, mode: u32) -> f32 {
+    switch (mode) {
+        case 1u: { return min(b, s); } // Darken
+        case 2u: { return b * s; } // Multiply
+        case 3u: { // Color Burn
+            if (b >= 1.0) { return 1.0; }
+            if (s <= 0.0) { return 0.0; }
+            return 1.0 - min(1.0, (1.0 - b) / s);
+        }
+        case 4u: { return max(b, s); } // Lighten
+        case 5u: { return b + s - b * s; } // Screen
+        case 6u: { // Color Dodge
+            if (b <= 0.0) { return 0.0; }
+            if (s >= 1.0) { return 1.0; }
+            return min(1.0, b / (1.0 - s));
+        }
+        case 7u: { return min(1.0, b + s); } // Add
+        case 8u: { // Overlay
+            if (b <= 0.5) { return 2.0 * b * s; }
+            return 1.0 - 2.0 * (1.0 - b) * (1.0 - s);
+        }
+        case 9u: { // Soft Light (W3C piecewise)
+            if (s <= 0.5) {
+                return b - (1.0 - 2.0 * s) * b * (1.0 - b);
+            }
+            var d: f32;
+            if (b <= 0.25) {
+                d = ((16.0 * b - 12.0) * b + 4.0) * b;
+            } else {
+                d = sqrt(max(b, 0.0));
+            }
+            return b + (2.0 * s - 1.0) * (d - b);
+        }
+        case 10u: { // Hard Light
+            if (s <= 0.5) { return 2.0 * b * s; }
+            return 1.0 - 2.0 * (1.0 - b) * (1.0 - s);
+        }
+        case 11u: { return abs(b - s); } // Difference
+        case 12u: { return b + s - 2.0 * b * s; } // Exclusion
+        default: { return s; } // Normal
+    }
+}
+
+// Programmable W3C premultiplied-alpha blend compositor.
+// t0 = premultiplied source isolate, t1 = premultiplied backdrop snapshot.
+// v0.x = opacity (0..1), v0.y = blend mode index (0..12).
+@fragment
+fn fs_blend(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let q = px(pos);
+    let op = clamp(p.v[0].x, 0.0, 1.0);
+    let mode = u32(max(p.v[0].y, 0.0) + 0.5);
+    let dst_raw = ld1(q.x, q.y);
+    let da = clamp(dst_raw.a, 0.0, 1.0);
+    let d = clamp(dst_raw.rgb, vec3<f32>(0.0), vec3<f32>(da));
+    let src_raw = ld0(q.x, q.y) * op;
+    let sa = clamp(src_raw.a, 0.0, 1.0);
+    let s = clamp(src_raw.rgb, vec3<f32>(0.0), vec3<f32>(sa));
+
+    if (sa <= 0.0) {
+        return vec4<f32>(d, da);
+    }
+    if (mode == 0u) {
+        let out_a = clamp(sa + da * (1.0 - sa), 0.0, 1.0);
+        let out_rgb = clamp(s + d * (1.0 - sa), vec3<f32>(0.0), vec3<f32>(out_a));
+        return vec4<f32>(out_rgb, out_a);
+    }
+    if (mode == 7u) {
+        let out_a = clamp(da + sa, 0.0, 1.0);
+        let out_rgb = clamp(d + s, vec3<f32>(0.0), vec3<f32>(out_a));
+        return vec4<f32>(out_rgb, out_a);
+    }
+    if (da <= 0.0) {
+        return vec4<f32>(s, sa);
+    }
+    let cs = clamp(s / sa, vec3<f32>(0.0), vec3<f32>(1.0));
+    let cd = clamp(d / da, vec3<f32>(0.0), vec3<f32>(1.0));
+    let b_rgb = vec3<f32>(
+        clamp(blend_channel(cd.r, cs.r, mode), 0.0, 1.0),
+        clamp(blend_channel(cd.g, cs.g, mode), 0.0, 1.0),
+        clamp(blend_channel(cd.b, cs.b, mode), 0.0, 1.0),
+    );
+    let out_a = clamp(sa + da * (1.0 - sa), 0.0, 1.0);
+    let out_rgb = clamp((1.0 - da) * s + (1.0 - sa) * d + sa * da * b_rgb, vec3<f32>(0.0), vec3<f32>(out_a));
+    return vec4<f32>(out_rgb, out_a);
+}

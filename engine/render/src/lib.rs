@@ -18,7 +18,6 @@ use barkfart_core::DrawList;
 use wgpu::util::DeviceExt;
 
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
-const BLENDS: [Blend; 4] = [Blend::Normal, Blend::Add, Blend::Multiply, Blend::Screen];
 
 /// Which GPU and API the renderer ended up on.
 #[derive(Debug, Clone)]
@@ -62,24 +61,6 @@ impl Default for Options {
     }
 }
 
-fn blend_state(b: Blend) -> wgpu::BlendState {
-    use wgpu::{BlendComponent as C, BlendFactor as F, BlendOperation as O};
-    let alpha = C { src_factor: F::One, dst_factor: F::OneMinusSrcAlpha, operation: O::Add };
-    match b {
-        Blend::Normal => wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING,
-        Blend::Add => wgpu::BlendState {
-            color: C { src_factor: F::One, dst_factor: F::One, operation: O::Add },
-            alpha: C { src_factor: F::One, dst_factor: F::One, operation: O::Add },
-        },
-        Blend::Multiply => wgpu::BlendState { color: C { src_factor: F::Dst, dst_factor: F::OneMinusSrcAlpha, operation: O::Add }, alpha },
-        Blend::Screen => wgpu::BlendState { color: C { src_factor: F::One, dst_factor: F::OneMinusSrc, operation: O::Add }, alpha },
-    }
-}
-
-fn blend_index(b: Blend) -> usize {
-    BLENDS.iter().position(|x| *x == b).unwrap_or(0)
-}
-
 /// Pixel rectangle (x, y, w, h), top-left origin.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Rect {
@@ -96,10 +77,10 @@ struct Target {
 }
 
 struct Pipelines {
-    batch: Vec<wgpu::RenderPipeline>,
-    composite: Vec<wgpu::RenderPipeline>,
+    batch: wgpu::RenderPipeline,
+    composite_normal: wgpu::RenderPipeline,
+    blend: wgpu::RenderPipeline,
     replace: wgpu::RenderPipeline,
-    final_over: wgpu::RenderPipeline,
     fx: std::collections::HashMap<&'static str, wgpu::RenderPipeline>,
 }
 
@@ -211,33 +192,31 @@ impl Renderer {
         });
         let shape_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[Some(&shape_layout)], immediate_size: 0 });
         let fx_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[Some(&fx_layout)], immediate_size: 0 });
-        let shape_pipe = |blend: Blend| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("batch"),
-                layout: Some(&shape_pl),
-                vertex: wgpu::VertexState {
-                    module: &shape_mod,
-                    entry_point: Some("vs"),
-                    compilation_options: Default::default(),
-                    buffers: &[Some(wgpu::VertexBufferLayout {
-                        array_stride: 20,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Unorm8x4, 2 => Float32x2],
-                    })],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shape_mod,
-                    entry_point: Some("fs"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState { format: FORMAT, blend: Some(blend_state(blend)), write_mask: wgpu::ColorWrites::ALL })],
-                }),
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
-                multiview_mask: None,
-                cache: None,
-            })
-        };
+        let shape_pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("batch"),
+            layout: Some(&shape_pl),
+            vertex: wgpu::VertexState {
+                module: &shape_mod,
+                entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: 20,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Unorm8x4, 2 => Float32x2],
+                })],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shape_mod,
+                entry_point: Some("fs"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState { format: FORMAT, blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
+            multiview_mask: None,
+            cache: None,
+        });
         let full_pipe = |entry: &str, blend: Option<wgpu::BlendState>, count: u32| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(entry),
@@ -264,10 +243,10 @@ impl Renderer {
             fx.insert(e, full_pipe(e, None, 1));
         }
         let pipes = Pipelines {
-            batch: BLENDS.iter().map(|b| shape_pipe(*b)).collect(),
-            composite: BLENDS.iter().map(|b| full_pipe("fs_copy", Some(blend_state(*b)), samples)).collect(),
+            batch: shape_pipe,
+            composite_normal: full_pipe("fs_copy", Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), samples),
+            blend: full_pipe("fs_blend", None, samples),
             replace: full_pipe("fs_lerp", None, samples),
-            final_over: full_pipe("fs_copy", Some(blend_state(Blend::Normal)), 1),
             fx,
         };
         let white_tex = device.create_texture_with_data(
@@ -409,7 +388,8 @@ impl Renderer {
             k -= 1;
         }
         let bg = view.background;
-        let big = self.render_raw(list, w * k, h * k, View { background: [0.0; 4], ..view });
+        let export_bg = if transparent { [0.0; 4] } else { [bg[0], bg[1], bg[2], 1.0] };
+        let big = self.render_raw(list, w * k, h * k, View { background: export_bg, ..view });
         let (bw, n) = ((w * k) as usize, (k * k) as u32);
         let mut out = vec![0u8; (w * h * 4) as usize];
         for y in 0..h as usize {
@@ -500,39 +480,22 @@ impl Renderer {
         let mut f = Frame { r: self, enc, w, h, x0: view.x0, y0: view.y1, s, view_bind, tex_binds, vbuf, starts };
         let full = Rect { x: 0, y: 0, w, h };
         let root = f.target();
-        f.clear(&root);
+        let bg = view.background;
+        let clean = |v: f32| if v.is_nan() { 0.0 } else { v.clamp(0.0, 1.0) };
+        let bg_a = clean(bg[3]);
+        let clear_color = wgpu::Color {
+            r: (clean(bg[0]) * bg_a) as f64,
+            g: (clean(bg[1]) * bg_a) as f64,
+            b: (clean(bg[2]) * bg_a) as f64,
+            a: bg_a as f64,
+        };
+        f.clear_with(&root, clear_color);
         if list.isolates.is_empty() {
             // a flat list: every batch straight into the root
             let all: Vec<usize> = (0..list.batches.len()).collect();
             f.batches(list, &all, &root, full);
         } else {
             f.isolate(list, 0, &root, full);
-        }
-        // over the background
-        let out = f.texture(1);
-        {
-            let bind = f.fx_bind(&[[1.0, 0.0, 0.0, 0.0]], &root.color, None);
-            let bg = view.background;
-            let v = out.create_view(&Default::default());
-            let mut pass = f.enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("final"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &v,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color { r: (bg[0] * bg[3]) as f64, g: (bg[1] * bg[3]) as f64, b: (bg[2] * bg[3]) as f64, a: bg[3] as f64 }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            pass.set_pipeline(&self.pipes.final_over);
-            pass.set_bind_group(0, &bind, &[]);
-            pass.draw(0..3, 0..1);
         }
         let row = w * 4;
         let padded = row.div_ceil(256) * 256;
@@ -543,12 +506,11 @@ impl Renderer {
             mapped_at_creation: false,
         });
         f.enc.copy_texture_to_buffer(
-            out.as_image_copy(),
+            root.color.as_image_copy(),
             wgpu::TexelCopyBufferInfo { buffer: &readback, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded), rows_per_image: None } },
             wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
         );
         f.release_target(root);
-        f.release(out, 1);
         let Frame { enc, .. } = f;
         self.queue.submit([enc.finish()]);
         let slice = readback.slice(..);
@@ -620,10 +582,13 @@ impl<'a> Frame<'a> {
     }
 
     /// A render pass on a target (multisampled, resolving into its colour).
-    fn pass<'e>(enc: &'e mut wgpu::CommandEncoder, t: &Target, clear: bool) -> wgpu::RenderPass<'e> {
+    fn pass_with<'e>(enc: &'e mut wgpu::CommandEncoder, t: &Target, clear: Option<wgpu::Color>) -> wgpu::RenderPass<'e> {
         let cv = t.color.create_view(&Default::default());
         let mv = t.msaa.as_ref().map(|m| m.create_view(&Default::default()));
-        let load = if clear { wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT) } else { wgpu::LoadOp::Load };
+        let load = match clear {
+            Some(c) => wgpu::LoadOp::Clear(c),
+            None => wgpu::LoadOp::Load,
+        };
         let attachment = match &mv {
             Some(m) => wgpu::RenderPassColorAttachment { view: m, depth_slice: None, resolve_target: Some(&cv), ops: wgpu::Operations { load, store: wgpu::StoreOp::Store } },
             None => wgpu::RenderPassColorAttachment { view: &cv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load, store: wgpu::StoreOp::Store } },
@@ -638,8 +603,16 @@ impl<'a> Frame<'a> {
         })
     }
 
+    fn pass<'e>(enc: &'e mut wgpu::CommandEncoder, t: &Target, clear: bool) -> wgpu::RenderPass<'e> {
+        Self::pass_with(enc, t, clear.then_some(wgpu::Color::TRANSPARENT))
+    }
+
     fn clear(&mut self, t: &Target) {
-        let _ = Self::pass(&mut self.enc, t, true);
+        let _ = Self::pass_with(&mut self.enc, t, Some(wgpu::Color::TRANSPARENT));
+    }
+
+    fn clear_with(&mut self, t: &Target, color: wgpu::Color) {
+        let _ = Self::pass_with(&mut self.enc, t, Some(color));
     }
 
     fn fx_bind(&self, params: &[[f32; 4]], t0: &wgpu::Texture, t1: Option<&wgpu::Texture>) -> wgpu::BindGroup {
@@ -734,21 +707,86 @@ impl<'a> Frame<'a> {
         out
     }
 
+    /// Composites a premultiplied single-sample source texture into `dst` within `rect`.
+    /// `Blend::Normal` uses the fast hardware premultiplied alpha-blend path;
+    /// all other 12 modes snapshot the backdrop and run the exact W3C `fs_blend` shader.
+    fn composite_tex(&mut self, src: &wgpu::Texture, dst: &Target, op: f32, blend: Blend, rect: Rect) {
+        if !(op > 0.0) {
+            return;
+        }
+        if blend == Blend::Normal {
+            let bind = self.fx_bind(&[[op, 0.0, 0.0, 0.0]], src, None);
+            let mut pass = Self::pass(&mut self.enc, dst, false);
+            pass.set_pipeline(&self.r.pipes.composite_normal);
+            pass.set_bind_group(0, &bind, &[]);
+            pass.set_scissor_rect(rect.x, rect.y, rect.w, rect.h);
+            pass.draw(0..3, 0..1);
+            return;
+        }
+        let snap = self.copy(&dst.color, rect);
+        let bind = self.fx_bind(&[[op, blend.index() as f32, 0.0, 0.0]], src, Some(&snap));
+        {
+            let mut pass = Self::pass(&mut self.enc, dst, false);
+            pass.set_pipeline(&self.r.pipes.blend);
+            pass.set_bind_group(0, &bind, &[]);
+            pass.set_scissor_rect(rect.x, rect.y, rect.w, rect.h);
+            pass.draw(0..3, 0..1);
+        }
+        self.release(snap, 1);
+    }
+
     /// Draws batches (by index) into a target with their blend modes.
     fn batches(&mut self, list: &DrawList, idx: &[usize], t: &Target, clip: Rect) {
-        let mut pass = Self::pass(&mut self.enc, t, false);
-        pass.set_vertex_buffer(0, self.vbuf.slice(..));
-        pass.set_scissor_rect(clip.x, clip.y, clip.w, clip.h);
-        for &b in idx {
-            let n = list.batches[b].vertex_count() as u32;
-            if n == 0 {
+        let mut i = 0;
+        while i < idx.len() {
+            let b = idx[i];
+            if list.batches[b].vertex_count() == 0 {
+                i += 1;
                 continue;
             }
-            let bind = list.batches[b].texture.as_ref().and_then(|id| self.tex_binds.get(id)).unwrap_or(&self.view_bind);
-            pass.set_bind_group(0, bind, &[]);
-            pass.set_pipeline(&self.r.pipes.batch[blend_index(list.batches[b].blend())]);
-            let s = self.starts[b];
-            pass.draw(s..s + n, 0..1);
+            if list.batches[b].blend() == Blend::Normal {
+                let mut pass = Self::pass(&mut self.enc, t, false);
+                pass.set_vertex_buffer(0, self.vbuf.slice(..));
+                pass.set_scissor_rect(clip.x, clip.y, clip.w, clip.h);
+                pass.set_pipeline(&self.r.pipes.batch);
+                while i < idx.len() {
+                    let bi = idx[i];
+                    if list.batches[bi].blend() != Blend::Normal {
+                        break;
+                    }
+                    let n = list.batches[bi].vertex_count() as u32;
+                    if n > 0 {
+                        let bind = list.batches[bi].texture.as_ref().and_then(|id| self.tex_binds.get(id)).unwrap_or(&self.view_bind);
+                        pass.set_bind_group(0, bind, &[]);
+                        let s = self.starts[bi];
+                        pass.draw(s..s + n, 0..1);
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+            // Non-Normal flat batch: render into a temporary target with Normal, then
+            // composite with the exact programmable W3C blend shader.
+            let mode = list.batches[b].blend();
+            let n = list.batches[b].vertex_count() as u32;
+            let ct = self.target();
+            {
+                let mut pass = Self::pass(&mut self.enc, &ct, true);
+                pass.set_vertex_buffer(0, self.vbuf.slice(..));
+                pass.set_scissor_rect(clip.x, clip.y, clip.w, clip.h);
+                pass.set_pipeline(&self.r.pipes.batch);
+                let bind = list.batches[b].texture.as_ref().and_then(|id| self.tex_binds.get(id)).unwrap_or(&self.view_bind);
+                pass.set_bind_group(0, bind, &[]);
+                let s = self.starts[b];
+                pass.draw(s..s + n, 0..1);
+            }
+            let Target { msaa, color } = ct;
+            if let Some(m) = msaa {
+                self.release(m, self.r.options.samples);
+            }
+            self.composite_tex(&color, t, 1.0, mode, clip);
+            self.release(color, 1);
+            i += 1;
         }
     }
 
@@ -766,14 +804,14 @@ impl<'a> Frame<'a> {
                     }
                     let child = &list.isolates[ci];
                     if child.adjustment {
-                        // effects on what is drawn so far, mixed back in by the layer's opacity.
+                        // effects on what is drawn so far, mixed/blended back in by the layer's opacity & blend.
                         // Keep `before` separate from the texture consumed by `effects()` so
                         // multi-pass / stacked effects never recycle `before` from the pool!
                         // When the adjustment isolate has explicit camera-shot bounds (!empty()),
                         // clip tightly to that shot rect; otherwise affect full `clip`.
                         let has_active = child.effects.iter().any(|e| rfx::mix(e) > 0.0 && (rfx::known(&e.ty) || e.ty.starts_with("plugin:")));
                         let op = if child.opacity.is_nan() { 1.0 } else { child.opacity.clamp(0.0, 1.0) };
-                        if !has_active || op <= 0.0 {
+                        if (!has_active && child.blend == Blend::Normal) || op <= 0.0 {
                             continue;
                         }
                         let adj_rect = if !child.empty() {
@@ -785,10 +823,17 @@ impl<'a> Frame<'a> {
                         let before = self.copy(&t.color, adj_rect);
                         let start = self.copy(&before, adj_rect);
                         let fx = self.effects(start, &child.effects, adj_rect, true, adj_rect);
-                        let bind = self.fx_bind(&[[op, 0.0, 0.0, 0.0]], &before, Some(&fx));
-                        {
+                        if child.blend == Blend::Normal {
+                            let bind = self.fx_bind(&[[op, 0.0, 0.0, 0.0]], &before, Some(&fx));
                             let mut pass = Self::pass(&mut self.enc, t, false);
                             pass.set_pipeline(&self.r.pipes.replace);
+                            pass.set_bind_group(0, &bind, &[]);
+                            pass.set_scissor_rect(adj_rect.x, adj_rect.y, adj_rect.w, adj_rect.h);
+                            pass.draw(0..3, 0..1);
+                        } else {
+                            let bind = self.fx_bind(&[[op, child.blend.index() as f32, 0.0, 0.0]], &fx, Some(&before));
+                            let mut pass = Self::pass(&mut self.enc, t, false);
+                            pass.set_pipeline(&self.r.pipes.blend);
                             pass.set_bind_group(0, &bind, &[]);
                             pass.set_scissor_rect(adj_rect.x, adj_rect.y, adj_rect.w, adj_rect.h);
                             pass.draw(0..3, 0..1);
@@ -798,6 +843,10 @@ impl<'a> Frame<'a> {
                         continue;
                     }
                     let Some(rect) = self.rect(list, child, clip) else { continue };
+                    let op = if child.opacity.is_nan() { 1.0 } else { child.opacity.clamp(0.0, 1.0) };
+                    if op <= 0.0 {
+                        continue;
+                    }
                     let ct = self.target();
                     self.clear(&ct);
                     self.isolate(list, ci, &ct, rect);
@@ -807,15 +856,7 @@ impl<'a> Frame<'a> {
                     }
                     let full_rect = Rect { x: 0, y: 0, w: self.w, h: self.h };
                     let done = self.effects(color, &child.effects, rect, false, full_rect);
-                    let op = if child.opacity.is_nan() { 1.0 } else { child.opacity.clamp(0.0, 1.0) };
-                    let bind = self.fx_bind(&[[op, 0.0, 0.0, 0.0]], &done, None);
-                    {
-                        let mut pass = Self::pass(&mut self.enc, t, false);
-                        pass.set_pipeline(&self.r.pipes.composite[blend_index(child.blend)]);
-                        pass.set_bind_group(0, &bind, &[]);
-                        pass.set_scissor_rect(rect.x, rect.y, rect.w, rect.h);
-                        pass.draw(0..3, 0..1);
-                    }
+                    self.composite_tex(&done, t, op, child.blend, rect);
                     self.release(done, 1);
                 }
             }
@@ -1124,6 +1165,8 @@ mod tests {
     use barkfart_core::eval::{Group, Item, Scene, Shape, ShapeKind};
     use barkfart_core::tess;
 
+    static GPU: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn rect_shape(x0: f32, y0: f32, x1: f32, y1: f32, color: Color) -> Item {
         Item::Shape(Shape {
             kind: ShapeKind::Polygon { points: vec![x0, y0, x1, y0, x1, y1, x0, y1], convex: true },
@@ -1212,6 +1255,7 @@ mod tests {
 
     #[test]
     fn new_effects_and_stacked_adjustment_match_cpu_reference() {
+        let _gpu = GPU.lock().unwrap_or_else(|e| e.into_inner());
         let Ok(r) = Renderer::headless_with(&[wgpu::Backends::PRIMARY, wgpu::Backends::GL], Options { samples: 1 }) else {
             return;
         };
@@ -1249,6 +1293,7 @@ mod tests {
 
     #[test]
     fn stock_wgsl_effect_plugins_compile_cleanly() {
+        let _gpu = GPU.lock().unwrap_or_else(|e| e.into_inner());
         let Ok(r) = Renderer::headless_with(&[wgpu::Backends::PRIMARY, wgpu::Backends::GL], Options { samples: 1 }) else {
             return;
         };
@@ -1268,5 +1313,177 @@ mod tests {
             barkfart_core::plugins::uninstall(&def.id);
         }
         assert!(checked >= 3, "expected at least 3 stock WGSL effect plugins, checked {checked}");
+    }
+
+    fn cpu_with_bg(dl: &DrawList, w: usize, h: usize, x0: f32, y0: f32, scale: f32, bg: [f32; 4]) -> Vec<u8> {
+        let mut im = rfx::Image::new(w, h, x0, y0, scale);
+        let a = bg[3].clamp(0.0, 1.0);
+        if a > 0.0 {
+            for p in im.px.chunks_exact_mut(4) {
+                p[0] = bg[0] * a;
+                p[1] = bg[1] * a;
+                p[2] = bg[2] * a;
+                p[3] = a;
+            }
+        }
+        rfx::render(dl, &mut im);
+        im.to_premultiplied_u8()
+    }
+
+    fn blend_scene(blend: Blend, opacity: f32, effects: Vec<ResolvedEffect>, with_backdrop_shapes: bool) -> DrawList {
+        // Two overlapping limbs inside one figure group (tests whole-figure isolate with zero joint seam)
+        let limb_a = rect_shape(-24.0, -10.0, 6.0, 14.0, Color { r: 0.85, g: 0.35, b: 0.25, a: 1.0 });
+        let limb_b = rect_shape(-6.0, -14.0, 24.0, 10.0, Color { r: 0.85, g: 0.35, b: 0.25, a: 1.0 });
+        let fig = Item::Group(Group {
+            source: "fig".into(),
+            opacity,
+            blend,
+            adjustment: false,
+            whole: false,
+            bounds: None,
+            effects,
+            children: vec![limb_a, limb_b],
+        });
+        let mut children = Vec::new();
+        if with_backdrop_shapes {
+            // Bright right half + dark left half (exercises SoftLight b<=0.25 & b>0.25 and Overlay b<=0.5 & b>0.5)
+            children.push(rect_shape(-40.0, -40.0, 0.0, 40.0, Color { r: 0.16, g: 0.22, b: 0.12, a: 1.0 }));
+            children.push(rect_shape(0.0, -40.0, 40.0, 40.0, Color { r: 0.72, g: 0.42, b: 0.82, a: 1.0 }));
+        }
+        children.push(fig);
+        let root = Group {
+            source: "root".into(),
+            opacity: 1.0,
+            blend: Blend::Normal,
+            adjustment: false,
+            whole: false,
+            bounds: None,
+            effects: vec![],
+            children,
+        };
+        let scene = Scene { root, diagnostics: vec![], primitives: 4, time: 0.0 };
+        tess::layered(&scene, None)
+    }
+
+    #[test]
+    fn all_13_blend_modes_match_cpu_reference_at_full_and_partial_opacity() {
+        let _gpu = GPU.lock().unwrap_or_else(|e| e.into_inner());
+        let Ok(r) = Renderer::headless_with(&[wgpu::Backends::PRIMARY, wgpu::Backends::GL], Options { samples: 1 }) else {
+            return;
+        };
+        let (w, h, scale) = (96usize, 96usize, 1.0f32);
+        let (x0, y0) = (-48.0f32, 48.0f32);
+        let opaque_bg = [0.35f32, 0.55, 0.75, 1.0];
+        let clear_bg = [0.0f32; 4];
+        let view_opaque = View { x0, y0: y0 - h as f32 / scale, x1: x0 + w as f32 / scale, y1: y0, background: opaque_bg };
+        let view_clear = View { x0, y0: y0 - h as f32 / scale, x1: x0 + w as f32 / scale, y1: y0, background: clear_bg };
+
+        // Baseline Normal at 0.99 opacity over opaque stage (no backdrop shapes) to prove opacity never strips blend
+        let dl_normal_99 = blend_scene(Blend::Normal, 0.99, vec![], false);
+        let gpu_normal_99 = r.render_raw(&dl_normal_99, w as u32, h as u32, view_opaque);
+
+        for &mode in &Blend::ALL {
+            for &op in &[1.0f32, 0.99, 0.5] {
+                // 1. Opaque backdrop with varied dark/light shapes
+                let dl = blend_scene(mode, op, vec![], true);
+                let cpu = cpu_with_bg(&dl, w, h, x0, y0, scale, opaque_bg);
+                let gpu = r.render_raw(&dl, w as u32, h as u32, view_opaque);
+                compare(&gpu, &cpu, &format!("{mode:?} opaque op={op}"));
+
+                // 2. Transparent canvas (dst.a == 0): transparent PNG/GIF export
+                let dl_clear = blend_scene(mode, op, vec![], false);
+                let cpu_c = cpu_with_bg(&dl_clear, w, h, x0, y0, scale, clear_bg);
+                let gpu_c = r.render_raw(&dl_clear, w as u32, h as u32, view_clear);
+                compare(&gpu_c, &cpu_c, &format!("{mode:?} transparent op={op}"));
+                // Center pixel of limb must remain visible over transparent canvas (non-zero RGB & alpha)
+                let center = ((h / 2) * w + (w / 2)) * 4;
+                assert!(gpu_c[center + 3] > 100 && gpu_c[center] > 80, "{mode:?} op={op} vanished over transparent canvas: {:?}", &gpu_c[center..center + 4]);
+            }
+
+            // 3. Stage-only opaque background at opacity=0.99: non-Normal MUST preserve blend (not fall back to Normal!)
+            //    AND overlapping limbs must have ZERO joint overlap seam!
+            let dl_stage_99 = blend_scene(mode, 0.99, vec![], false);
+            let gpu_stage_99 = r.render_raw(&dl_stage_99, w as u32, h as u32, view_opaque);
+            let cpu_stage_99 = cpu_with_bg(&dl_stage_99, w, h, x0, y0, scale, opaque_bg);
+            compare(&gpu_stage_99, &cpu_stage_99, &format!("{mode:?} stage_bg op=0.99"));
+            let overlap_px = ((48) * w + (48)) * 4; // world (0, 0): inside BOTH limb_a & limb_b
+            let single_px = ((48) * w + (32)) * 4; // world (-16, 0): inside ONLY limb_a
+            for c in 0..4 {
+                assert!(
+                    gpu_stage_99[overlap_px + c].abs_diff(gpu_stage_99[single_px + c]) <= 1,
+                    "{mode:?} op=0.99 has internal joint overlap seam: overlap={:?} vs single={:?}",
+                    &gpu_stage_99[overlap_px..overlap_px + 4],
+                    &gpu_stage_99[single_px..single_px + 4]
+                );
+            }
+            if mode != Blend::Normal {
+                let diff: u32 = (0..3).map(|c| gpu_stage_99[overlap_px + c].abs_diff(gpu_normal_99[overlap_px + c]) as u32).sum();
+                assert!(
+                    diff > 20,
+                    "{mode:?} at opacity=0.99 collapsed to Normal! got {:?} vs normal {:?}",
+                    &gpu_stage_99[overlap_px..overlap_px + 4],
+                    &gpu_normal_99[overlap_px..overlap_px + 4]
+                );
+            }
+        }
+
+        // 4. Stacked effects + non-Normal blend + opacity < 1.0 matches CPU reference
+        let stacked_fx = vec![
+            ResolvedEffect { ty: rfx::GLOW.into(), mix: 1.0, params: vec![("radius".into(), ParamValue::F(6.0)), ("color".into(), ParamValue::C(Color { r: 0.2, g: 0.9, b: 1.0, a: 1.0 })), ("strength".into(), ParamValue::F(1.5))] },
+            ResolvedEffect { ty: rfx::TINT.into(), mix: 0.8, params: vec![("amount".into(), ParamValue::F(0.4)), ("color".into(), ParamValue::C(Color { r: 1.0, g: 0.8, b: 0.1, a: 1.0 }))] },
+        ];
+        let dl_fx_blend = blend_scene(Blend::Overlay, 0.75, stacked_fx, true);
+        let cpu_fx_blend = cpu_with_bg(&dl_fx_blend, w, h, x0, y0, scale, opaque_bg);
+        let gpu_fx_blend = r.render_raw(&dl_fx_blend, w as u32, h as u32, view_opaque);
+        compare(&gpu_fx_blend, &cpu_fx_blend, "stacked_fx_overlay_0.75");
+
+        // 5. Adjustment layer with non-Normal blend (Bloom: Blur + Screen @ 0.65) matches CPU reference
+        let adj_root = Group {
+            source: "root".into(),
+            opacity: 1.0,
+            blend: Blend::Normal,
+            adjustment: false,
+            whole: false,
+            bounds: None,
+            effects: vec![],
+            children: vec![
+                rect_shape(-24.0, -24.0, 24.0, 24.0, Color { r: 0.9, g: 0.3, b: 0.2, a: 1.0 }),
+                Item::Group(Group {
+                    source: "adj".into(),
+                    opacity: 0.65,
+                    blend: Blend::Screen,
+                    adjustment: true,
+                    whole: false,
+                    bounds: Some([-36.0, -36.0, 36.0, 36.0]),
+                    effects: vec![ResolvedEffect { ty: rfx::BLUR.into(), mix: 1.0, params: vec![("radius".into(), ParamValue::F(6.0))] }],
+                    children: vec![],
+                }),
+            ],
+        };
+        let dl_adj = tess::layered(&Scene { root: adj_root, diagnostics: vec![], primitives: 2, time: 0.0 }, None);
+        let cpu_adj = cpu_with_bg(&dl_adj, w, h, x0, y0, scale, opaque_bg);
+        let gpu_adj = r.render_raw(&dl_adj, w as u32, h as u32, view_opaque);
+        compare(&gpu_adj, &cpu_adj, "adjustment_blur_screen_0.65");
+
+        // 6. Default MSAA 4x path also preserves blend modes at 0.99 opacity with zero joint overlap seam
+        drop(r);
+        if let Ok(msaa) = Renderer::headless_with(&[wgpu::Backends::PRIMARY, wgpu::Backends::GL], Options { samples: 4 }) {
+            let overlap_px = (48 * w + 48) * 4;
+            let single_px = (48 * w + 32) * 4;
+            for &mode in &[Blend::Add, Blend::Multiply, Blend::Overlay, Blend::SoftLight, Blend::Difference] {
+                let dl = blend_scene(mode, 0.99, vec![], false);
+                let px = msaa.render_raw(&dl, w as u32, h as u32, view_opaque);
+                let cpu = cpu_with_bg(&dl, w, h, x0, y0, scale, opaque_bg);
+                compare(&px, &cpu, &format!("msaa4_{mode:?}_0.99"));
+                for c in 0..4 {
+                    assert!(
+                        px[overlap_px + c].abs_diff(px[single_px + c]) <= 1,
+                        "msaa4 {mode:?} overlap seam: {:?} vs {:?}",
+                        &px[overlap_px..overlap_px + 4],
+                        &px[single_px..single_px + 4]
+                    );
+                }
+            }
+        }
     }
 }

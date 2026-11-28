@@ -44,9 +44,10 @@ fn renders_the_kitchen_sink_project() {
     let (w, h) = (640u32, 360u32);
     let px = shot(&r, &p, 0.6, w, h);
     assert_eq!(px.len(), (w * h * 4) as usize);
-    let bg = p.settings.background.to_rgba8888().to_be_bytes();
-    assert_eq!(&px[0..4], &bg, "corner shows the project background");
-    let drawn = px.chunks_exact(4).filter(|c| *c != bg).count();
+    // kitchen-sink has a full-frame 0.75-opacity invert adjustment layer over #101820 -> #b7b3af
+    let corner = [183u8, 179, 175, 255];
+    assert_eq!(&px[0..4], &corner, "corner shows background through kitchen-sink's 0.75 invert adjustment");
+    let drawn = px.chunks_exact(4).filter(|c| *c != corner).count();
     assert!(drawn > 2000, "something is drawn: {drawn} pixels");
     let out = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("kitchen-sink.png");
     let mut enc = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(&out).unwrap()), w, h);
@@ -143,7 +144,7 @@ fn export_frames_are_supersampled_and_composited() {
     let view = View { x0: -hw, y0: -hh, x1: hw, y1: hh, background: [bg.r, bg.g, bg.b, bg.a] };
     let solid = r.render_export(&d, 320, 180, view, 2, false);
     assert!(solid.chunks_exact(4).all(|p| p[3] == 255), "opaque over the background");
-    assert_eq!(&solid[0..3], &bg.to_rgba8888().to_be_bytes()[0..3]);
+    assert_eq!(&solid[0..3], &[183, 179, 175]);
     let clear = r.render_export(&d, 320, 180, view, 2, true);
     assert_eq!(clear[3], 0, "transparent corner");
     // smooth edges: some partly covered pixels

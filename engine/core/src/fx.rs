@@ -905,13 +905,27 @@ fn apply_mode(e: &ResolvedEffect, input: Image, full_frame: bool, frame_rect: [f
 /// Largest buffer the reference renderer allocates.
 pub const MAX_PIXELS: usize = 4096 * 4096;
 
-/// Renders a layered draw list over target.
+/// Renders a layered draw list over target using full W3C Compositing & Blending
+/// Level 1 premultiplied-alpha math for all 13 blend modes.
+/// Composites directly onto `target` so layers with non-Normal blend modes
+/// blend cleanly against pre-filled stage backgrounds as well as transparent
+/// canvases (`target.a == 0`).
 pub fn render(dl: &DrawList, target: &mut Image) {
     if dl.isolates.is_empty() || target.w * target.h > MAX_PIXELS {
         return;
     }
+    draw(dl, 0, target);
+}
+
+/// Legacy v1 Java-parity compositor (4 hardware-approximated blend modes over
+/// an initially transparent root buffer). Used only by `reference.rs` against
+/// frozen Java golden dumps.
+pub fn render_legacy(dl: &DrawList, target: &mut Image) {
+    if dl.isolates.is_empty() || target.w * target.h > MAX_PIXELS {
+        return;
+    }
     let mut layer = target.blank();
-    draw(dl, 0, &mut layer);
+    draw_legacy(dl, 0, &mut layer);
     over(target, &layer, 1.0);
 }
 
@@ -919,6 +933,73 @@ fn draw(dl: &DrawList, iso: usize, canvas: &mut Image) {
     for item in &dl.isolates[iso].items {
         match *item {
             IsoItem::Batch(b) => fill(&dl.batches[b], canvas),
+            IsoItem::Isolate(ci) => {
+                let child = &dl.isolates[ci];
+                if child.adjustment {
+                    let op = clampf(child.opacity, 0.0, 1.0, 1.0);
+                    let has_active = child.effects.iter().any(|e| mix(e) > 0.0 && known(&e.ty));
+                    if (!has_active && child.blend == Blend::Normal) || op <= 0.0 {
+                        continue;
+                    }
+                    let (rx0, ry0, rx1, ry1) = if !child.empty() {
+                        let x0 = ((child.min_x - canvas.x0) * canvas.scale).floor().clamp(0.0, canvas.w as f32) as usize;
+                        let x1 = ((child.max_x - canvas.x0) * canvas.scale).ceil().clamp(0.0, canvas.w as f32) as usize;
+                        let y0 = ((canvas.y0 - child.max_y) * canvas.scale).floor().clamp(0.0, canvas.h as f32) as usize;
+                        let y1 = ((canvas.y0 - child.min_y) * canvas.scale).ceil().clamp(0.0, canvas.h as f32) as usize;
+                        if x1 <= x0 || y1 <= y0 {
+                            continue;
+                        }
+                        (x0, y0, x1, y1)
+                    } else {
+                        (0, 0, canvas.w, canvas.h)
+                    };
+                    let frame_rect = [rx0 as f32, ry0 as f32, (rx1 - rx0) as f32, (ry1 - ry0) as f32];
+                    let mut img = canvas.blank();
+                    for y in ry0..ry1 {
+                        let row_start = (y * canvas.w + rx0) * 4;
+                        let row_end = (y * canvas.w + rx1) * 4;
+                        img.px[row_start..row_end].copy_from_slice(&canvas.px[row_start..row_end]);
+                    }
+                    for e in &child.effects {
+                        img = apply_mode(e, img, true, frame_rect);
+                    }
+                    if child.blend == Blend::Normal {
+                        for y in ry0..ry1 {
+                            for x in rx0..rx1 {
+                                let o = (y * canvas.w + x) * 4;
+                                for c in 0..4 {
+                                    canvas.px[o + c] += (img.px[o + c] - canvas.px[o + c]) * op;
+                                }
+                            }
+                        }
+                    } else {
+                        for y in ry0..ry1 {
+                            for x in rx0..rx1 {
+                                let o = (y * canvas.w + x) * 4;
+                                let dst_px = [canvas.px[o], canvas.px[o + 1], canvas.px[o + 2], canvas.px[o + 3]];
+                                let src_px = [img.px[o], img.px[o + 1], img.px[o + 2], img.px[o + 3]];
+                                let out = blend_premul(dst_px, src_px, op, child.blend);
+                                canvas.px[o..o + 4].copy_from_slice(&out);
+                            }
+                        }
+                    }
+                    continue;
+                }
+                let mut buf = canvas.blank();
+                draw(dl, ci, &mut buf);
+                for e in &child.effects {
+                    buf = apply(e, buf);
+                }
+                composite(canvas, &buf, clampf(child.opacity, 0.0, 1.0, 1.0), child.blend);
+            }
+        }
+    }
+}
+
+fn draw_legacy(dl: &DrawList, iso: usize, canvas: &mut Image) {
+    for item in &dl.isolates[iso].items {
+        match *item {
+            IsoItem::Batch(b) => fill_legacy(&dl.batches[b], canvas),
             IsoItem::Isolate(ci) => {
                 let child = &dl.isolates[ci];
                 if child.adjustment {
@@ -956,18 +1037,161 @@ fn draw(dl: &DrawList, iso: usize, canvas: &mut Image) {
                     continue;
                 }
                 let mut buf = canvas.blank();
-                draw(dl, ci, &mut buf);
+                draw_legacy(dl, ci, &mut buf);
                 for e in &child.effects {
                     buf = apply(e, buf);
                 }
-                composite(canvas, &buf, clampf(child.opacity, 0.0, 1.0, 1.0), child.blend);
+                composite_legacy(canvas, &buf, clampf(child.opacity, 0.0, 1.0, 1.0), child.blend);
             }
         }
     }
 }
 
-/// Premultiplied composite with the four blend modes.
+/// W3C Compositing & Blending Level 1 separable channel blend function `B(Cb, Cs)`.
+/// Inputs `b` (backdrop) and `s` (source) are straight channel values in `[0, 1]`.
+#[inline]
+pub fn blend_channel(b: f32, s: f32, mode: Blend) -> f32 {
+    match mode {
+        Blend::Normal => s,
+        Blend::Darken => b.min(s),
+        Blend::Multiply => b * s,
+        Blend::ColorBurn => {
+            if b >= 1.0 {
+                1.0
+            } else if s <= 0.0 {
+                0.0
+            } else {
+                1.0 - ((1.0 - b) / s).min(1.0)
+            }
+        }
+        Blend::Lighten => b.max(s),
+        Blend::Screen => b + s - b * s,
+        Blend::ColorDodge => {
+            if b <= 0.0 {
+                0.0
+            } else if s >= 1.0 {
+                1.0
+            } else {
+                (b / (1.0 - s)).min(1.0)
+            }
+        }
+        Blend::Add => (b + s).min(1.0),
+        Blend::Overlay => {
+            if b <= 0.5 {
+                2.0 * b * s
+            } else {
+                1.0 - 2.0 * (1.0 - b) * (1.0 - s)
+            }
+        }
+        Blend::SoftLight => {
+            if s <= 0.5 {
+                b - (1.0 - 2.0 * s) * b * (1.0 - b)
+            } else {
+                let d = if b <= 0.25 {
+                    ((16.0 * b - 12.0) * b + 4.0) * b
+                } else {
+                    b.max(0.0).sqrt()
+                };
+                b + (2.0 * s - 1.0) * (d - b)
+            }
+        }
+        Blend::HardLight => {
+            if s <= 0.5 {
+                2.0 * b * s
+            } else {
+                1.0 - 2.0 * (1.0 - b) * (1.0 - s)
+            }
+        }
+        Blend::Difference => (b - s).abs(),
+        Blend::Exclusion => b + s - 2.0 * b * s,
+    }
+}
+
+/// Premultiplied RGBA composite of one source pixel (scaled by `op`) over one
+/// premultiplied backdrop pixel, using W3C Porter-Duff source-over blending
+/// (`c_out = (1 - a_d)*c_s + (1 - a_s)*c_d + a_s*a_d*B(C_d, C_s)`), and
+/// additive premultiplied blending (`min(1, d + s)`, `min(1, a_d + a_s)`) for `Blend::Add`.
+/// Guards against NaN/Inf/div-by-zero and strictly maintains `0 <= rgb <= a <= 1`.
+#[inline]
+pub fn blend_premul(dst: [f32; 4], src: [f32; 4], op: f32, blend: Blend) -> [f32; 4] {
+    let op = clampf(op, 0.0, 1.0, 1.0);
+    let da = clampf(dst[3], 0.0, 1.0, 0.0);
+    let d = [
+        clampf(dst[0], 0.0, da, 0.0),
+        clampf(dst[1], 0.0, da, 0.0),
+        clampf(dst[2], 0.0, da, 0.0),
+    ];
+    let sa = clampf(src[3] * op, 0.0, 1.0, 0.0);
+    if sa <= 0.0 {
+        return [d[0], d[1], d[2], da];
+    }
+    let s = [
+        clampf(src[0] * op, 0.0, sa, 0.0),
+        clampf(src[1] * op, 0.0, sa, 0.0),
+        clampf(src[2] * op, 0.0, sa, 0.0),
+    ];
+    match blend {
+        Blend::Normal => {
+            let k = 1.0 - sa;
+            let out_a = clamp01(sa + da * k);
+            [
+                clampf(s[0] + d[0] * k, 0.0, out_a, 0.0),
+                clampf(s[1] + d[1] * k, 0.0, out_a, 0.0),
+                clampf(s[2] + d[2] * k, 0.0, out_a, 0.0),
+                out_a,
+            ]
+        }
+        Blend::Add => {
+            let out_a = clamp01(da + sa);
+            [
+                clampf(d[0] + s[0], 0.0, out_a, 0.0),
+                clampf(d[1] + s[1], 0.0, out_a, 0.0),
+                clampf(d[2] + s[2], 0.0, out_a, 0.0),
+                out_a,
+            ]
+        }
+        _ => {
+            if da <= 0.0 {
+                return [s[0], s[1], s[2], sa];
+            }
+            let out_a = clamp01(sa + da * (1.0 - sa));
+            let one_m_da = 1.0 - da;
+            let one_m_sa = 1.0 - sa;
+            let sa_da = sa * da;
+            let mut out = [0.0f32; 4];
+            for c in 0..3 {
+                let cs = clamp01(s[c] / sa);
+                let cd = clamp01(d[c] / da);
+                let b = clampf(blend_channel(cd, cs, blend), 0.0, 1.0, 0.0);
+                out[c] = clampf(one_m_da * s[c] + one_m_sa * d[c] + sa_da * b, 0.0, out_a, 0.0);
+            }
+            out[3] = out_a;
+            out
+        }
+    }
+}
+
+/// Premultiplied composite for all 13 W3C/Photoshop blend modes (matches `fs_blend` in `fx.wgsl`).
 pub fn composite(dst: &mut Image, src: &Image, op: f32, blend: Blend) {
+    let op = clampf(op, 0.0, 1.0, 1.0);
+    if op <= 0.0 {
+        return;
+    }
+    if blend == Blend::Normal {
+        over(dst, src, op);
+        return;
+    }
+    for i in 0..dst.w * dst.h {
+        let o = i * 4;
+        let dst_px = [dst.px[o], dst.px[o + 1], dst.px[o + 2], dst.px[o + 3]];
+        let src_px = [src.px[o], src.px[o + 1], src.px[o + 2], src.px[o + 3]];
+        let out = blend_premul(dst_px, src_px, op, blend);
+        dst.px[o..o + 4].copy_from_slice(&out);
+    }
+}
+
+/// Legacy v1 Java-parity 4-mode composite (used only by `render_legacy`).
+fn composite_legacy(dst: &mut Image, src: &Image, op: f32, blend: Blend) {
     if blend == Blend::Normal {
         over(dst, src, op);
         return;
@@ -994,6 +1218,14 @@ fn ch(rgba: u32, shift: u32) -> f32 {
 
 /// Triangles sampled at pixel centres (one sample), vertex colours interpolated.
 pub fn fill(b: &Batch, im: &mut Image) {
+    fill_with(b, im, false);
+}
+
+fn fill_legacy(b: &Batch, im: &mut Image) {
+    fill_with(b, im, true);
+}
+
+fn fill_with(b: &Batch, im: &mut Image, legacy: bool) {
     let n = b.vertex_count() / 3 * 3;
     let s = im.scale;
     let mut t = 0;
@@ -1025,13 +1257,35 @@ pub fn fill(b: &Batch, im: &mut Image) {
                 let g = ch(ca, 16) * w0 + ch(cb, 16) * w1 + ch(cc, 16) * w2;
                 let bl = ch(ca, 8) * w0 + ch(cb, 8) * w1 + ch(cc, 8) * w2;
                 let a = (ch(ca, 0) * w0 + ch(cb, 0) * w1 + ch(cc, 0) * w2) * 4.0 / 4.0;
-                blend_pixel(im, (y as usize * im.w + x as usize) * 4, r, g, bl, a, b.blend());
+                let o = (y as usize * im.w + x as usize) * 4;
+                if legacy {
+                    blend_pixel_legacy(im, o, r, g, bl, a, b.blend());
+                } else {
+                    blend_pixel(im, o, r, g, bl, a, b.blend());
+                }
             }
         }
     }
 }
 
 fn blend_pixel(im: &mut Image, o: usize, r: f32, g: f32, b: f32, a: f32, mode: Blend) {
+    let p = &mut im.px;
+    if mode == Blend::Normal {
+        let (sr, sg, sb) = (r * a, g * a, b * a);
+        let k = 1.0 - a;
+        p[o] = sr + p[o] * k;
+        p[o + 1] = sg + p[o + 1] * k;
+        p[o + 2] = sb + p[o + 2] * k;
+        p[o + 3] = a + p[o + 3] * k;
+        return;
+    }
+    let dst = [p[o], p[o + 1], p[o + 2], p[o + 3]];
+    let src = [r * a, g * a, b * a, a];
+    let out = blend_premul(dst, src, 1.0, mode);
+    p[o..o + 4].copy_from_slice(&out);
+}
+
+fn blend_pixel_legacy(im: &mut Image, o: usize, r: f32, g: f32, b: f32, a: f32, mode: Blend) {
     let p = &mut im.px;
     let (sr, sg, sb) = (r * a, g * a, b * a);
     match mode {
@@ -1054,7 +1308,7 @@ fn blend_pixel(im: &mut Image, o: usize, r: f32, g: f32, b: f32, a: f32, mode: B
             p[o + 2] = sb + p[o + 2] - sb * p[o + 2];
             p[o + 3] = a + p[o + 3] * (1.0 - a);
         }
-        Blend::Normal => {
+        _ => {
             p[o] = sr + p[o] * (1.0 - a);
             p[o + 1] = sg + p[o + 1] * (1.0 - a);
             p[o + 2] = sb + p[o + 2] * (1.0 - a);
@@ -1131,5 +1385,77 @@ mod tests {
         assert_eq!(n.px[3], 0.0, "normal layer vignette keeps transparent corners clear");
         let a = apply_adjustment(&vig, src);
         assert!(a.px[3] > 0.5, "adjustment layer vignette darkens corners over background");
+    }
+
+    #[test]
+    fn all_13_blend_modes_math_edge_cases_and_invariants() {
+        // 1. Exact W3C separable channel checks + div-by-zero guards
+        assert!((blend_channel(1.0, 0.0, Blend::ColorBurn) - 1.0).abs() < 1e-6);
+        assert!((blend_channel(0.5, 0.0, Blend::ColorBurn) - 0.0).abs() < 1e-6);
+        assert!((blend_channel(0.0, 1.0, Blend::ColorDodge) - 0.0).abs() < 1e-6);
+        assert!((blend_channel(0.5, 1.0, Blend::ColorDodge) - 1.0).abs() < 1e-6);
+        assert!((blend_channel(0.3, 0.7, Blend::Darken) - 0.3).abs() < 1e-6);
+        assert!((blend_channel(0.3, 0.7, Blend::Lighten) - 0.7).abs() < 1e-6);
+        assert!((blend_channel(0.4, 0.5, Blend::Multiply) - 0.2).abs() < 1e-6);
+        assert!((blend_channel(0.4, 0.5, Blend::Screen) - 0.7).abs() < 1e-6);
+        assert!((blend_channel(0.6, 0.2, Blend::Difference) - 0.4).abs() < 1e-6);
+        assert!((blend_channel(0.4, 0.5, Blend::Exclusion) - 0.5).abs() < 1e-6);
+        // Overlay(b, s) == HardLight(s, b) for all b, s
+        for &b in &[0.0f32, 0.2, 0.5, 0.8, 1.0] {
+            for &s in &[0.0f32, 0.25, 0.5, 0.75, 1.0] {
+                let ov = blend_channel(b, s, Blend::Overlay);
+                let hl = blend_channel(s, b, Blend::HardLight);
+                assert!((ov - hl).abs() < 1e-6, "Overlay({b},{s})={ov} != HardLight({s},{b})={hl}");
+            }
+        }
+        // SoftLight W3C piecewise continuity at b = 0.25 and s = 0.5
+        let sl_lo = blend_channel(0.2499, 0.8, Blend::SoftLight);
+        let sl_hi = blend_channel(0.2501, 0.8, Blend::SoftLight);
+        assert!((sl_lo - sl_hi).abs() < 1e-3, "SoftLight continuous at b=0.25: {sl_lo} vs {sl_hi}");
+
+        // 2. Premultiplied edge cases across ALL 13 modes
+        let transparent = [0.0, 0.0, 0.0, 0.0];
+        let opaque_dst = [0.3, 0.6, 0.8, 1.0];
+        let semi_dst = [0.2, 0.4, 0.3, 0.5];
+        let src = [0.8, 0.3, 0.2, 1.0];
+        let semi_src = [0.4, 0.15, 0.1, 0.5];
+        for &mode in &Blend::ALL {
+            // dst.a == 0 (transparent canvas): ALL 13 modes preserve src * op cleanly
+            for &op in &[1.0f32, 0.99, 0.5] {
+                let out = blend_premul(transparent, src, op, mode);
+                for c in 0..4 {
+                    assert!(
+                        (out[c] - src[c] * op).abs() < 1e-5,
+                        "{mode:?} over transparent op={op} ch={c}: got {} want {}",
+                        out[c],
+                        src[c] * op
+                    );
+                }
+            }
+            // src.a == 0: ALL 13 modes preserve dst untouched
+            let kept = blend_premul(semi_dst, transparent, 1.0, mode);
+            for c in 0..4 {
+                assert!((kept[c] - semi_dst[c]).abs() < 1e-6, "{mode:?} zero src altered dst");
+            }
+            // NaN / Inf / out-of-range resilience + strict 0 <= rgb <= a <= 1 invariant
+            for &(d, s, op) in &[
+                (opaque_dst, src, 1.0f32),
+                (opaque_dst, src, 0.99),
+                (semi_dst, semi_src, 0.75),
+                ([f32::NAN, -1.0, f32::INFINITY, 1.0], [1.0, f32::NAN, 0.0, 1.0], 1.0),
+                (opaque_dst, src, f32::NAN),
+                ([0.0, 1.0, 0.5, 1.0], [1.0, 0.0, 0.5, 1.0], 1.0),
+            ] {
+                let out = blend_premul(d, s, op, mode);
+                for c in 0..4 {
+                    assert!(out[c].is_finite(), "{mode:?} non-finite ch {c}: {out:?}");
+                    assert!(out[c] >= 0.0 && out[c] <= 1.0, "{mode:?} out of [0,1]: {out:?}");
+                }
+                assert!(
+                    out[0] <= out[3] + 1e-6 && out[1] <= out[3] + 1e-6 && out[2] <= out[3] + 1e-6,
+                    "{mode:?} breaks premul invariant: {out:?}"
+                );
+            }
+        }
     }
 }
