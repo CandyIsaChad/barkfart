@@ -439,9 +439,27 @@ impl Session {
         frame_ops::frame_count(&self.doc.state)
     }
 
+    fn clear_selection(&mut self) {
+        self.selected = None;
+        self.selected_text = None;
+        self.selected_group = None;
+        self.selected_script = None;
+        self.multi.clear();
+    }
+
+    fn exit_camera_mode(&mut self) {
+        if self.mode == Mode::Camera {
+            self.mode = Mode::Figure;
+        }
+    }
+
     fn validate(&mut self) {
         let n = self.frame_count();
         self.frame = self.frame.clamp(0, n - 1);
+        if self.mode == Mode::Camera {
+            self.clear_selection();
+            return;
+        }
         if let Some((l, node)) = &self.selected {
             let t = self.time();
             let p = self.project();
@@ -454,6 +472,16 @@ impl Session {
             });
             if !ok {
                 self.selected = None;
+            }
+        }
+        if let Some(id) = &self.selected_text {
+            let t = self.time();
+            let p = self.project();
+            let ok = self.selected.is_none()
+                && self.multi.is_empty()
+                && p.root().and_then(|s| s.layer(id)).filter(|x| Resolver::new(p).b(&x.shown, t)).is_some_and(|l| matches!(l.kind, LayerKind::Text(_)));
+            if !ok {
+                self.selected_text = None;
             }
         }
         if let Some((l, run)) = self.selected_script.clone() {
@@ -470,17 +498,9 @@ impl Session {
         }
         if let Some(g) = &self.selected_group {
             // anything else selected since (a new figure, a cycle, a paste) wins
-            let other = self.selected.is_some() || self.selected_text.is_some() || !self.multi.is_empty();
+            let other = self.selected.is_some() || self.selected_text.is_some() || !self.multi.is_empty() || self.selected_script.is_some();
             if other || !self.project().root().is_some_and(|r| r.groups.iter().any(|x| x.id == *g)) {
                 self.selected_group = None;
-            }
-        }
-        if let Some(id) = &self.selected_text {
-            let t = self.time();
-            let p = self.project();
-            let ok = p.root().and_then(|s| s.layer(id)).filter(|x| Resolver::new(p).b(&x.shown, t)).is_some_and(|l| matches!(l.kind, LayerKind::Text(_)));
-            if !ok {
-                self.selected_text = None;
             }
         }
     }
@@ -624,8 +644,8 @@ impl Session {
         let t = self.time();
         match self.mode {
             Mode::Figure => {
-                // any press on the stage ends a group's selection
-                if self.selected_group.take().is_some() {
+                // any press on the stage ends a group's or script's selection
+                if self.selected_group.take().is_some() | self.selected_script.take().is_some() {
                     self.rev += 1;
                 }
                 let prev = self.last_tap.as_ref().filter(|(tx, ty, _, _)| (tx - x).hypot(ty - y) <= radius).map(|(_, _, l, n)| (l.clone(), n.clone()));
@@ -1382,10 +1402,8 @@ impl Session {
                         LayerKind::Script(sc) => sc.runs.first().map(|x| x.id.clone()),
                         _ => None,
                     });
-                    self.selected = None;
-                    self.selected_text = None;
-                    self.selected_group = None;
-                    self.multi.clear();
+                    self.clear_selection();
+                    self.exit_camera_mode();
                     self.selected_script = Some((id, run));
                 }
             }
@@ -1393,10 +1411,8 @@ impl Session {
                 // a script's row or one of its runs: the Script page
                 let Some(l) = c["layer"].as_str().map(str::to_string) else { return self.state() };
                 if matches!(self.project().root().and_then(|r| r.layer(&l)).map(|x| &x.kind), Some(LayerKind::Script(_))) {
-                    self.selected = None;
-                    self.selected_text = None;
-                    self.selected_group = None;
-                    self.multi.clear();
+                    self.clear_selection();
+                    self.exit_camera_mode();
                     self.selected_script = Some((l, c["run"].as_str().map(str::to_string)));
                     self.rev += 1;
                 }
@@ -1427,6 +1443,8 @@ impl Session {
                         let frame = c["frame"].as_i64().unwrap_or(self.frame as i64);
                         let len = c["len"].as_i64().unwrap_or(12);
                         if let Some(rid) = self.step("Add run", |s| crate::edit::script_ops::run_add(s, &sym, &l, frame, len)) {
+                            self.clear_selection();
+                            self.exit_camera_mode();
                             self.selected_script = Some((l, Some(rid)));
                         }
                     }
@@ -1728,6 +1746,9 @@ impl Session {
                     "camera" => Mode::Camera,
                     _ => Mode::Figure,
                 };
+                if self.mode == Mode::Camera {
+                    self.clear_selection();
+                }
                 self.rev += 1;
             }
             "set" => {
@@ -1754,16 +1775,18 @@ impl Session {
                 self.rev += 1;
             }
             "select_many" => {
-                self.selected_group = None;
+                self.clear_selection();
                 // G5: the selection box or lasso; figures only, in row order
                 let p = self.project();
                 let ids: Vec<String> = c["layers"].as_array().map(|a| a.iter().filter_map(|v| v.as_str()).filter(|id| p.root().and_then(|r| r.layer(id)).is_some_and(|l| l.as_figure().is_some())).map(str::to_string).collect()).unwrap_or_default();
                 let mut seen = std::collections::HashSet::new();
                 let ids: Vec<String> = ids.into_iter().filter(|x| seen.insert(x.clone())).collect();
                 let first = ids.first().and_then(|l| p.root()?.layer(l)?.as_figure()?.nodes().first().map(|n| (l.clone(), n.id.clone())));
-                self.selected_text = None;
                 self.selected = first;
                 self.multi = if ids.len() > 1 { ids } else { Vec::new() };
+                if self.selected.is_some() {
+                    self.exit_camera_mode();
+                }
                 self.rev += 1;
             }
             "each" => {
@@ -1815,48 +1838,54 @@ impl Session {
             }
             "select" => {
                 let l = c["layer"].as_str().map(str::to_string);
-                self.multi.clear();
-                self.selected_text = None;
-                self.selected_script = None;
-                // K: a group's folder row selects the group (the Group page)
-                self.selected_group = c["group"].as_str().filter(|g| self.project().root().is_some_and(|r| r.groups.iter().any(|x| x.id == *g))).map(str::to_string);
-                self.selected = None;
+                self.clear_selection();
                 if let Some(l) = l {
                     let kind = self.project().root().and_then(|s| s.layer(&l)).map(|x| match &x.kind {
                         LayerKind::Figure(f) => (0u8, f.nodes().first().map(|n| n.id.clone())),
                         LayerKind::Text(_) => (1u8, None),
                         LayerKind::Sprite(_) | LayerKind::Symbol(_) | LayerKind::Adjustment => (2u8, None),
                         LayerKind::Camera(_) => (3u8, None),
-                        _ => (4u8, None),
+                        LayerKind::Script(sc) => (4u8, sc.runs.first().map(|r| r.id.clone())),
+                        LayerKind::Audio(_) => (5u8, None),
                     });
                     match kind {
                         Some((0, root)) => {
                             let node = c["node"].as_str().map(str::to_string).or(root);
                             self.selected = node.map(|n| (l, n));
-                            if self.mode == Mode::Camera {
-                                self.mode = Mode::Figure;
-                            }
+                            self.exit_camera_mode();
                         }
                         Some((1, _)) => {
                             self.selected_text = Some(l);
-                            if self.mode == Mode::Camera {
-                                self.mode = Mode::Figure;
-                            }
+                            self.exit_camera_mode();
                         }
                         Some((2, _)) => {
                             self.selected = Some((l, String::new()));
-                            if self.mode == Mode::Camera {
-                                self.mode = Mode::Figure;
-                            }
+                            self.exit_camera_mode();
                         }
                         Some((3, _)) => {
-                            self.mode = Mode::Camera;
+                            self.clear_selection();
+                    self.mode = Mode::Camera;
+                        }
+                        Some((4, first_run)) => {
+                            let run = c["run"].as_str().map(str::to_string).or(first_run);
+                            self.selected_script = Some((l, run));
+                            self.exit_camera_mode();
+                        }
+                        Some((5, _)) => {
+                            self.exit_camera_mode();
                         }
                         _ => {
                             if let Some(node) = c["node"].as_str().map(str::to_string) {
                                 self.selected = Some((l, node));
+                                self.exit_camera_mode();
                             }
                         }
+                    }
+                } else {
+                    // K: a group's folder row selects the group (the Group page)
+                    self.selected_group = c["group"].as_str().filter(|g| self.project().root().is_some_and(|r| r.groups.iter().any(|x| x.id == *g))).map(str::to_string);
+                    if self.selected_group.is_some() {
+                        self.exit_camera_mode();
                     }
                 }
                 self.rev += 1;
@@ -1870,8 +1899,9 @@ impl Session {
                     let i = (((at + dir) % n) + n) % n;
                     let l = ids[i as usize].clone();
                     let root = self.project().root().and_then(|s| s.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
+                    self.clear_selection();
+                    self.exit_camera_mode();
                     self.selected = root.map(|r| (l, r));
-                    self.selected_text = None;
                     self.rev += 1;
                 }
             }
@@ -2421,8 +2451,9 @@ impl Session {
                 });
                 if let Some(id) = made {
                     let root = self.project().root().and_then(|s| s.layer(&id)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
+                    self.clear_selection();
+                    self.exit_camera_mode();
                     self.selected = root.map(|r| (id, r));
-                    self.selected_text = None;
                 }
             }
             "add_textfield" => {
@@ -2448,7 +2479,8 @@ impl Session {
                     Ok(id)
                 });
                 if let Some(id) = made {
-                    self.selected = None;
+                    self.clear_selection();
+                    self.exit_camera_mode();
                     self.selected_text = Some(id);
                 }
             }
@@ -2529,7 +2561,8 @@ impl Session {
                         Ok(id)
                     });
                     if let Some(id) = made {
-                        self.selected = None;
+                        self.clear_selection();
+                        self.exit_camera_mode();
                         self.selected_text = Some(id);
                     }
                 }
@@ -2558,14 +2591,9 @@ impl Session {
                     Ok(id)
                 });
                 if let Some(id) = made {
+                    self.clear_selection();
+                    self.exit_camera_mode();
                     self.selected = Some((id, String::new()));
-                    self.selected_text = None;
-                    self.selected_group = None;
-                    self.selected_script = None;
-                    self.multi.clear();
-                    if self.mode == Mode::Camera {
-                        self.mode = Mode::Figure;
-                    }
                     self.validate();
                     self.rev += 1;
                 }
@@ -2640,9 +2668,8 @@ impl Session {
                     });
                     if let Some(ids) = made {
                         if let Some(new_id) = ids.first().cloned() {
-                            self.selected_group = None;
-                            self.selected_script = None;
-                            self.multi.clear();
+                            self.clear_selection();
+                            self.exit_camera_mode();
                             let kind = self.project().root().and_then(|r| r.layer(&new_id)).map(|x| match &x.kind {
                                 LayerKind::Figure(f) => (0u8, f.nodes().first().map(|n| n.id.clone())),
                                 LayerKind::Text(_) => (1u8, None),
@@ -2650,15 +2677,12 @@ impl Session {
                             });
                             match kind {
                                 Some((0, root)) => {
-                                    self.selected_text = None;
                                     self.selected = Some((new_id, prev_node.or(root).unwrap_or_default()));
                                 }
                                 Some((1, _)) => {
-                                    self.selected = None;
                                     self.selected_text = Some(new_id);
                                 }
                                 _ => {
-                                    self.selected_text = None;
                                     self.selected = Some((new_id, String::new()));
                                 }
                             }
@@ -3674,6 +3698,8 @@ impl Session {
                     });
                     if let Some(Some(id)) = made {
                         let root = self.project().root().and_then(|s| s.layer(&id)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
+                        self.clear_selection();
+                        self.exit_camera_mode();
                         self.selected = root.map(|r| (id, r));
                         self.validate();
                     }
@@ -3878,9 +3904,8 @@ impl Session {
                         _ => "Grouped. They now sit together in the layer list.".into(),
                     };
                     // the new group is selected: its page opens
-                    self.selected = None;
-                    self.selected_text = None;
-                    self.multi.clear();
+                    self.clear_selection();
+                    self.exit_camera_mode();
                     self.selected_group = Some(gid);
                 }
             }
@@ -4251,6 +4276,7 @@ impl Session {
                         let at = s.project.root().map(|r| r.layers.len()).unwrap_or(0);
                         structure::add_layer(s, &sym, l, at)
                     });
+                    self.clear_selection();
                     self.mode = Mode::Camera;
                 }
             }
@@ -4716,14 +4742,9 @@ impl Session {
                         }
                     });
                     if let Some(Some(adj_id)) = made_adj {
+                        self.clear_selection();
+                        self.exit_camera_mode();
                         self.selected = Some((adj_id, String::new()));
-                        self.selected_text = None;
-                        self.selected_group = None;
-                        self.selected_script = None;
-                        self.multi.clear();
-                        if self.mode == Mode::Camera {
-                            self.mode = Mode::Figure;
-                        }
                         self.validate();
                         self.rev += 1;
                     }
@@ -4772,7 +4793,13 @@ impl Session {
         });
         if let Some((layer, msg)) = made {
             let root = self.project().root().and_then(|s| s.layer(&layer)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
-            self.selected = root.map(|r| (layer, r));
+            if let Some(r) = root {
+                self.clear_selection();
+                self.exit_camera_mode();
+                self.selected = Some((layer, r));
+            } else {
+                self.selected = None;
+            }
             self.validate();
             if !msg.is_empty() {
                 self.message = msg;
@@ -5043,6 +5070,9 @@ impl Session {
     /// what each target could be), its settings, its runs, the picked run.
     fn script_state(&self, p: &Project) -> Option<J> {
         use barkfart_script::TargetKind;
+        if self.mode == Mode::Camera || self.selected.is_some() || self.selected_text.is_some() || self.selected_group.is_some() || !self.multi.is_empty() {
+            return None;
+        }
         let (lid, picked) = self.selected_script.as_ref()?;
         let r = p.root()?;
         let l = r.layer(lid)?;
@@ -5623,7 +5653,7 @@ impl Session {
             // K2: the installed plugins
             "plugins": crate::plugins::list().into_iter().map(|x| json!({"id": x.def.id, "name": x.def.name, "version": x.def.version, "author": x.def.author, "kind": x.def.kind.name(), "off": x.off})).collect::<Vec<_>>(),
             "script": self.script_state(p),
-            "group": self.selected_group.as_ref().filter(|_| self.selected.is_none() && self.selected_text.is_none() && self.multi.is_empty()).and_then(|gid| {
+            "group": self.selected_group.as_ref().filter(|_| self.mode != Mode::Camera && self.selected.is_none() && self.selected_text.is_none() && self.selected_script.is_none() && self.multi.is_empty()).and_then(|gid| {
                 let r = p.root()?;
                 let g = r.groups.iter().find(|x| x.id == *gid)?;
                 let members: Vec<&std::sync::Arc<Layer>> = r.layers.iter().rev().filter(|l| l.group.as_deref() == Some(gid.as_str())).collect();

@@ -310,7 +310,25 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   void _refresh(Map<String, dynamic>? st) {
     if (st == null) return;
-    if (_soundPage && (st['selected']?['layer'] != _st['selected']?['layer'] || st['frame'] != _st['frame'] || st['frameSound'] == null)) _soundPage = false;
+    final selChanged = st['selected']?['layer'] != _st['selected']?['layer'] ||
+        st['script']?['id'] != _st['script']?['id'] ||
+        st['group']?['id'] != _st['group']?['id'] ||
+        st['textfield']?['layer'] != _st['textfield']?['layer'] ||
+        st['picture']?['layer'] != _st['picture']?['layer'] ||
+        st['movieclip']?['layer'] != _st['movieclip']?['layer'] ||
+        st['adjustment']?['layer'] != _st['adjustment']?['layer'] ||
+        st['mode'] != _st['mode'];
+    if (_soundPage && (selChanged || st['frame'] != _st['frame'] || st['frameSound'] == null)) _soundPage = false;
+    final hasAnySelection = st['mode'] == 'camera' ||
+        st['selected'] != null ||
+        st['script'] != null ||
+        st['group'] != null ||
+        st['textfield'] != null ||
+        st['picture'] != null ||
+        st['movieclip'] != null ||
+        st['adjustment'] != null ||
+        st['multi'] != null;
+    if (_frameSelected && selChanged && hasAnySelection) _frameSelected = false;
     final buildingChanged = (st['building'] != null) != (_st['building'] != null);
     final enteringBuilder = st['building'] != null && _st['building'] == null;
     // another figure selected: once the finger is up, keep it clear of the card
@@ -2723,9 +2741,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// The copy popup on a frame picture: copy it alone, or with N frames after it.
   Future<void> _copyPopup(int frame) async {
     if (_playing) return;
-    setState(() => _frameSelected = true);
+    setState(() {
+      _frameSelected = true;
+      _soundPage = false;
+    });
     _cmd({'op': 'frame', 'i': frame});
-    if (!AppSettings.flag('keepSelection')) _cmd({'op': 'select'});
+    if (!AppSettings.flag('keepSelection')) {
+      if (_st['mode'] == 'camera') _cmd({'op': 'mode', 'v': 'figure'});
+      _cmd({'op': 'select'});
+    }
     await kit.showSheet<void>(
       context,
       title: 'Frame ${frame + 1}',
@@ -2970,7 +2994,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     // K: a folded group hides its members' rows
     final folded = {for (final r in allRows) if (r['kind'] == 'group' && r['open'] == false) r['id']};
     final rows = folded.isEmpty ? allRows : allRows.where((r) => !folded.contains(r['group'])).toList();
-    final selLayer = _activeLayerId ?? (_st['group'] as Map?)?['id'] ?? (_st['script'] as Map?)?['id'];
+    final cameraSelected = _st['mode'] == 'camera';
+    final soundSelected = !cameraSelected && _soundPage && _st['frameSound'] != null;
+    final selLayer = (cameraSelected || soundSelected) ? null : (_activeLayerId ?? (_st['group'] as Map?)?['id'] ?? (_st['script'] as Map?)?['id']);
     final showPreview = AppSettings.values['previewRow'] != false;
     final headerH = rulerH + (showPreview ? stripH + gap : 0);
 
@@ -2999,11 +3025,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       if (_playing) _togglePlay();
       setState(() {
         _frameSelected = true;
+        _soundPage = false;
         _selPoseKeys.clear();
         _selPropKeys.clear();
       });
       _cmd({'op': 'frame', 'i': i});
-      if (!AppSettings.flag('keepSelection')) _cmd({'op': 'select'});
+      if (!AppSettings.flag('keepSelection')) {
+        if (_st['mode'] == 'camera') _cmd({'op': 'mode', 'v': 'figure'});
+        _cmd({'op': 'select'});
+      }
     }
 
     Widget mark(String icon, Color c) => Padding(padding: const EdgeInsets.only(right: 1), child: Icon(_markIcons[icon], size: 10, color: c));
@@ -3042,7 +3072,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       final locked = r['locked'] == true;
       final kind = '${r['kind']}';
       final id = '${r['id']}';
-      final selected = id == selLayer || (kind == 'camera' && _st['mode'] == 'camera') || (kind == 'sound' && _soundPage) || ((_st['multi'] as List?)?.any((m) => (m as Map)['id'] == id) ?? false);
+      final selected = (kind == 'camera' && cameraSelected) ||
+          (kind == 'sound' && soundSelected) ||
+          (!cameraSelected && !soundSelected && (id == selLayer || ((_st['multi'] as List?)?.any((m) => (m as Map)['id'] == id) ?? false)));
       const icons = {'figure': 'figure', 'picture': 'picture', 'text': 'text', 'movieclip': 'clip', 'adjustment': 'fx', 'camera': 'camera', 'sound': 'sound', 'group': 'folder', 'script': 'script'};
       final isGroup = kind == 'group';
       final canHide = kind != 'camera' && kind != 'sound';
@@ -3123,8 +3155,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           _setMode('camera');
         } else if (kind == 'sound') {
           final clips = ((r['clips'] as List?) ?? const []).cast<List>();
-          if (clips.isNotEmpty) _cmd({'op': 'frame', 'i': (clips.first[0] as num).floor()});
-          setState(() => _soundPage = true);
+          _pickSound(frame: clips.isNotEmpty ? (clips.first[0] as num).floor() : null);
         } else {
           final onList = (r['on'] as List?) ?? const [];
           if (onList.isNotEmpty && onList.elementAtOrNull(_frame) == false) {
@@ -4091,6 +4122,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (!hasVisibleSpan && on.any((v) => v == true)) hasVisibleSpan = true;
 
     // Select the layer immediately and jump playhead if tapping within existing frames
+    setState(() {
+      _frameSelected = false;
+      _soundPage = false;
+      _selPoseKeys.clear();
+      _selPropKeys.clear();
+    });
     if (f < _frames && f != _frame) _cmd({'op': 'frame', 'i': f});
     _cmd({'op': 'select', 'layer': id});
 
@@ -4175,7 +4212,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         height: rowH - 5,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: () => _cmd({'op': 'select', 'group': r['id']}),
+          onTap: () {
+            setState(() {
+              _frameSelected = false;
+              _soundPage = false;
+              _selPoseKeys.clear();
+              _selPropKeys.clear();
+            });
+            _cmd({'op': 'select', 'group': r['id']});
+          },
           child: selectedRow ? Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(5), border: Border.all(color: cAccent, width: 2))) : const SizedBox.expand(),
         ),
       ));
@@ -4190,7 +4235,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         width: w,
         height: 12,
         child: GestureDetector(
-          onTap: () => _cmd({'op': 'select', 'group': r['id']}),
+          onTap: () {
+            setState(() {
+              _frameSelected = false;
+              _soundPage = false;
+              _selPoseKeys.clear();
+              _selPropKeys.clear();
+            });
+            _cmd({'op': 'select', 'group': r['id']});
+          },
           child: Container(
             decoration: BoxDecoration(
               color: selectedRow ? const Color(0xFFE8F0FA) : const Color(0xFFEEF0F3),
@@ -4301,12 +4354,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           left: x,
           top: y + (rowH - 26) / 2,
           child: GestureDetector(
-            onTap: _playing
-                ? null
-                : () {
-                    _cmd({'op': 'frame', 'i': (c[0] as num).floor()});
-                    setState(() => _soundPage = true);
-                  },
+            onTap: _playing ? null : () => _pickSound(frame: (c[0] as num).floor()),
             child: Container(
               width: w,
               height: 26,
@@ -4378,6 +4426,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       void select(double dx) {
         setState(() {
           _frameSelected = false;
+          _soundPage = false;
           _selPoseKeys.clear();
           _selPropKeys.clear();
         });
@@ -6240,7 +6289,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   /// Switch between posing figures, moving everything and the camera.
   void _setMode(String m) {
-    setState(() => _frameSelected = false);
+    setState(() {
+      _frameSelected = false;
+      _soundPage = false;
+      if (m != 'figure') {
+        _selPoseKeys.clear();
+        _selPropKeys.clear();
+      }
+    });
     if (m == 'camera' && _st['hasCamera'] != true) {
       _cmd({'op': 'add_camera'});
     } else {
@@ -7160,7 +7216,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       for (final d in rows) rw.renderDesc(d),
       rw.renderDesc(const rw.DTitle('Sound')),
       rw.renderDesc(snd != null
-          ? rw.DLink('This frame plays', '${snd['name']}', onTap: () => setState(() => _soundPage = true))
+          ? rw.DLink('This frame plays', '${snd['name']}', onTap: () => _pickSound())
           : rw.DButtons('Add a sound here…', _importSounds)),
     ];
   }
@@ -7259,10 +7315,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final list = ((_st['soundList'] as List?) ?? const []).cast<Map>();
     if (chosen.isNotEmpty && list.isNotEmpty && _st['frameSound'] == null) {
       _cmd({'op': 'frame_sound', 'asset': list.last['id']});
-      setState(() {
-        _soundPage = true;
-        _panelOpen = true;
-      });
+      _pickSound();
+      setState(() => _panelOpen = true);
     }
   }
 
@@ -7410,11 +7464,28 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   // ---------------------------------------------------------------- script page
 
+  /// Select the Sound page cleanly, clearing any Camera / layer / script / group selection.
+  void _pickSound({int? frame}) {
+    if (_playing) return;
+    if (_st['mode'] == 'camera') _cmd({'op': 'mode', 'v': 'figure'});
+    _cmd({'op': 'select'});
+    if (frame != null) _cmd({'op': 'frame', 'i': frame});
+    setState(() {
+      _frameSelected = false;
+      _selPoseKeys.clear();
+      _selPropKeys.clear();
+      _soundPage = true;
+    });
+  }
+
   /// K2c: a script layer's row or one of its runs: the Script page.
   void _pickScript(String layer, String? run) {
     if (_playing) return;
     _cmd({'op': 'script_pick', 'layer': layer, 'run': ?run});
-    setState(() => _frameSelected = false);
+    setState(() {
+      _frameSelected = false;
+      _soundPage = false;
+    });
   }
 
   /// A plugin's settings as rows (modifiers on a value, scripts): numbers with
@@ -7557,6 +7628,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _cmd({'op': 'script_add', 'id': pick});
     setState(() {
       _frameSelected = false;
+      _soundPage = false;
       _panelOpen = true;
       _hidePanels = false;
       _layersOpen = true;
@@ -7763,6 +7835,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           _cmd({'op': 'script_add', 'id': id});
           setState(() {
             _frameSelected = false;
+            _soundPage = false;
             _panelOpen = true;
             _hidePanels = false;
             _layersOpen = true;
