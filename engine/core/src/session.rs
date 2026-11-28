@@ -519,6 +519,7 @@ impl Session {
             .building
             .as_ref()
             .map(|b| self.selected.clone().unwrap_or_else(|| (b.clone(), String::new())));
+        self.tools.suppress_smart_stretch = self.building.is_some();
     }
 
     fn changed(&mut self) {
@@ -3390,12 +3391,17 @@ impl Session {
                         }
                         if let Some(v) = c2["smart"].as_bool() {
                             node.smart_stretch = v;
+                            // Stick Nodes Pro (LR2/h;.B6): enabling smart stretch clears doNotApplySmartStretch
+                            if v {
+                                node.no_smart_stretch = false;
+                            }
                         }
                         // IK rigs (Stick Nodes' smart-stretch options): a part that
                         // keeps its length in a smart stretch, and one that stretches
                         // by its own amount (the "reset stretch impulse")
                         if let Some(v) = c2["noSmart"].as_bool() {
-                            node.no_smart_stretch = v;
+                            // Stick Nodes Pro (LR2/h;.f6): a smart-stretch root cannot also opt out
+                            node.no_smart_stretch = if node.smart_stretch { false } else { v };
                         }
                         if let Some(v) = c2["stretchReset"].as_bool() {
                             if v {
@@ -3558,9 +3564,14 @@ impl Session {
                             }
                         }
                         if let Some(v) = c2["length"].as_f64() {
-                            let si = s.project.root().and_then(|r| r.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.index_of(&n));
-                            if let Some(si) = si {
-                                crate::edit::canvas::apply_length_with_smart_stretch(&ed, s, &l, si, v.max(0.0) as f32, t, true)?;
+                            let len = v.max(0.0) as f32;
+                            if building {
+                                let id = s.project.root().and_then(|r| r.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.node(&n)).map(|x| x.length.id.clone());
+                                if let Some(id) = id {
+                                    ed.change_in(s, &id, Value::F(len), t)?;
+                                }
+                            } else if let Some(si) = s.project.root().and_then(|r| r.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.index_of(&n)) {
+                                crate::edit::canvas::apply_length_with_smart_stretch(&ed, s, &l, si, len, t, true)?;
                             }
                         }
                         Ok(())
@@ -5383,7 +5394,7 @@ impl Session {
                 "partName": part_label(node, f.index_of(n).unwrap_or(0)), "partNamed": node.name.is_some(),
                 "root": node.parent.is_none(), "static": node.is_static, "pinned": node.pinned,
                 "smart": node.smart_stretch, "noSmart": node.no_smart_stretch,
-                "stretchReset": crate::eval::pose::stretch_reset(node).is_some(), "stretchMultiplier": crate::eval::pose::stretch_reset(node).unwrap_or(1.0),
+                "stretchReset": crate::eval::pose::smart_stretch_reset_impulse(node), "stretchMultiplier": crate::eval::pose::smart_stretch_multiplier(node),
                 "shape": shape_name(node.shape),
                 "thickness": r.f(&node.thickness, t), "color": color_of(&mut r, &node.color, t),
                 "angle": round2(r.f(&node.rotation, t)), "length": round2(r.f(&node.length, t)), "restLength": round2(node.rest_length),

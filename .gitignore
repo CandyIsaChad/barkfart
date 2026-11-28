@@ -2,6 +2,7 @@
 /main/
 /reference/
 *.ipa
+*.apk
 build/
 .gradle/
 local.properties

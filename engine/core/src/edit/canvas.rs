@@ -68,6 +68,9 @@ pub struct CanvasTools {
     /// Full 2D affine smart-stretch (updates both lengths and angles of static
     /// details from their rest pose; off by default for Java reference parity).
     pub smart_stretch_angles: bool,
+    /// When true (e.g. editing rest geometry in Figure Studio), dragging a
+    /// segment does not trigger smart-stretch on its static descendants.
+    pub suppress_smart_stretch: bool,
     drag: Option<Drag>,
 }
 
@@ -87,6 +90,7 @@ impl Default for CanvasTools {
             snap_degrees: 0.0,
             layer_handles: false,
             smart_stretch_angles: false,
+            suppress_smart_stretch: false,
             drag: None,
         }
     }
@@ -194,13 +198,23 @@ fn base_angle_from(nodes: &[Node], angles: &[f64], parent: &[i32], i: usize, pi:
 }
 
 /// Computes smart-stretch property updates `(property_id, value)` for static
-/// detail descendants of `si` when `si` is stretched to `len`.
-/// With `with_angles == true`, performs exact 2D affine scaling along `si`'s
-/// axis from each node's rest pose:
-///   len' = rest * sqrt((k * cos b)^2 + sin^2 b)
-///   b'   = atan2(sin b, k * cos b)
-/// preserving perpendicular detail offsets with zero drift across repeated
-/// drags, resets, or frames.
+/// detail descendants of `si` when `si` is stretched to `len`, matching Stick
+/// Nodes Pro v4.3.1's exact traversal & math:
+/// - `k = len / rest_s`
+/// - Per-node `mSmartStretchMultiplier` (default 1.0, NOT inherited):
+///   `k_eff = (k - 1) * mult + 1` (0 -> 0.01; negative flips along the axis)
+/// - `no_smart_stretch` (`doNotApplySmartStretch`) skips scaling/rotating that
+///   node itself while compensating for parent rotation and STILL traversing
+///   its static children.
+/// - `mSmartStretchResetImpulse` stretches that node purely along its own axis
+///   (`b = 0`) and resets the smart-stretch origin to that node for its static
+///   descendants.
+/// - With `with_angles == true`, performs exact 2D affine scaling along the
+///   origin's axis from each node's rest pose:
+///     len' = rest * sqrt((k_eff * cos b)^2 + sin^2 b)
+///     b'   = atan2(sin b, k_eff * cos b)
+///   preserving perpendicular detail offsets with zero drift across repeated
+///   drags, resets, or frames.
 pub fn compute_smart_stretch(
     f: &Figure,
     pose: &FigurePose,
@@ -223,15 +237,15 @@ pub fn compute_smart_stretch(
             children[pj as usize].push(j);
         }
     }
-    let roots: Vec<usize> = children[si]
+    let initial_roots: Vec<usize> = children[si]
         .iter()
         .copied()
         .filter(|&c| {
             let nc = &nodes[c];
-            nc.is_static && !nc.no_smart_stretch && !links.contains_key(&c) && (s.smart_stretch || nc.smart_stretch)
+            nc.is_static && !links.contains_key(&c) && (s.smart_stretch || nc.smart_stretch)
         })
         .collect();
-    if roots.is_empty() {
+    if initial_roots.is_empty() {
         return Vec::new();
     }
     let rest_s = rest_length_of(f, s, start);
@@ -273,45 +287,105 @@ pub fn compute_smart_stretch(
 
     let mut stretched_wa = vec![0.0f64; n_count];
     stretched_wa[si] = si_world;
-    // (node index, inherited stretch multiplier, anchored to absolute world angle)
-    let mut queue: std::collections::VecDeque<(usize, f64, bool)> = std::collections::VecDeque::new();
-    for c in roots {
-        queue.push_back((c, 1.0, false));
-    }
     let mut out = Vec::new();
-    while let Some((j, parent_mult, parent_abs)) = queue.pop_front() {
-        let nj = &nodes[j];
-        let pj = pose.parent[j] as usize;
-        let mult = crate::eval::pose::stretch_reset(nj).map(|m| m as f64).unwrap_or(parent_mult);
-        let k_eff = if (mult - 1.0).abs() < 1e-9 { k } else { (1.0 + mult * (k - 1.0)).max(0.0) };
-        let rj = rest_length_of(f, nj, start);
-        let abs_anchored = match nj.angle_lock {
-            LOCK_ABSOLUTE => true,
-            LOCK_RELATIVE => false,
-            _ => parent_abs,
-        };
-        if with_angles {
-            let b_rest_deg = if abs_anchored { rest_wa[j] - si_world } else { rest_wa[j] - rest_wa[si] };
-            let b_rest = b_rest_deg.to_radians();
-            let sx = k_eff * b_rest.cos();
-            let sy = b_rest.sin();
-            let fct = sx.hypot(sy);
-            out.push((nj.length.id.clone(), (rj as f64 * fct) as f32));
-            let b_new_deg = if fct > 1e-9 { sy.atan2(sx).to_degrees() } else { b_rest_deg };
-            stretched_wa[j] = si_world + b_new_deg;
-            let base_j = base_angle_from(nodes, &stretched_wa, &pose.parent, j, pj);
-            let raw_rot = stretched_wa[j] - base_j;
-            let new_rot = raw_rot + 360.0 * java_round_f64((rest_local[j] - raw_rot) / 360.0);
-            out.push((nj.rotation.id.clone(), new_rot as f32));
+
+    // Waves: initial wave rooted at `si`, followed by secondary waves for any
+    // `mSmartStretchResetImpulse` nodes (matching Stick Nodes Pro `o(k)`).
+    let mut waves: std::collections::VecDeque<(usize, f64, bool)> = std::collections::VecDeque::new();
+    waves.push_back((si, si_world, true));
+
+    while let Some((origin, origin_wa, is_initial)) = waves.pop_front() {
+        let mut queue: std::collections::VecDeque<(usize, bool)> = std::collections::VecDeque::new();
+        if is_initial {
+            for &c in &initial_roots {
+                queue.push_back((c, false));
+            }
         } else {
-            let b = (pose.angle[j] - pose.angle[si]).to_radians();
-            let fct = (k_eff * k_eff * b.cos() * b.cos() + b.sin() * b.sin()).sqrt();
-            out.push((nj.length.id.clone(), (rj as f64 * fct) as f32));
+            for &c in &children[origin] {
+                let nc = &nodes[c];
+                if nc.is_static && !links.contains_key(&c) {
+                    queue.push_back((c, false));
+                }
+            }
         }
-        for &c in &children[j] {
-            let nc = &nodes[c];
-            if nc.is_static && !nc.no_smart_stretch && !links.contains_key(&c) {
-                queue.push_back((c, mult, abs_anchored));
+
+        while let Some((j, parent_abs)) = queue.pop_front() {
+            let nj = &nodes[j];
+            let pj = pose.parent[j] as usize;
+            let mult = crate::eval::pose::smart_stretch_multiplier(nj) as f64;
+            let reset_imp = crate::eval::pose::smart_stretch_reset_impulse(nj);
+            let mut k_eff = if (mult - 1.0).abs() < 1e-9 { k } else { 1.0 + mult * (k - 1.0) };
+            if k_eff.abs() < 1e-6 {
+                k_eff = 0.01;
+            }
+            let rj = rest_length_of(f, nj, start);
+            let abs_anchored = match nj.angle_lock {
+                LOCK_ABSOLUTE => true,
+                LOCK_RELATIVE => false,
+                _ => parent_abs,
+            };
+
+            if nj.no_smart_stretch {
+                // `doNotApplySmartStretch`: keep this node's own length and avoid
+                // adding stretch rotation, while compensating for any parent
+                // rotation delta and STILL traversing its static children.
+                if with_angles {
+                    stretched_wa[j] = if abs_anchored {
+                        rest_wa[j]
+                    } else {
+                        origin_wa + (rest_wa[j] - rest_wa[origin])
+                    };
+                    let base_j = base_angle_from(nodes, &stretched_wa, &pose.parent, j, pj);
+                    let raw_rot = stretched_wa[j] - base_j;
+                    let new_rot = raw_rot + 360.0 * java_round_f64((rest_local[j] - raw_rot) / 360.0);
+                    if (new_rot - rest_local[j]).abs() > 1e-6 {
+                        out.push((nj.rotation.id.clone(), new_rot as f32));
+                    }
+                }
+            } else if with_angles {
+                let b_rest_deg = if reset_imp {
+                    0.0
+                } else if abs_anchored {
+                    rest_wa[j] - origin_wa
+                } else {
+                    rest_wa[j] - rest_wa[origin]
+                };
+                let b_rest = b_rest_deg.to_radians();
+                let sx = k_eff * b_rest.cos();
+                let sy = b_rest.sin();
+                let fct = sx.hypot(sy);
+                out.push((nj.length.id.clone(), (rj as f64 * fct) as f32));
+                if reset_imp {
+                    let flip = if k_eff < 0.0 { 180.0 } else { 0.0 };
+                    stretched_wa[j] = if abs_anchored {
+                        rest_wa[j] + flip
+                    } else {
+                        origin_wa + (rest_wa[j] - rest_wa[origin]) + flip
+                    };
+                } else {
+                    let b_new_deg = if fct > 1e-9 { sy.atan2(sx).to_degrees() } else { b_rest_deg };
+                    stretched_wa[j] = origin_wa + b_new_deg;
+                }
+                let base_j = base_angle_from(nodes, &stretched_wa, &pose.parent, j, pj);
+                let raw_rot = stretched_wa[j] - base_j;
+                let new_rot = raw_rot + 360.0 * java_round_f64((rest_local[j] - raw_rot) / 360.0);
+                out.push((nj.rotation.id.clone(), new_rot as f32));
+            } else {
+                let b = if reset_imp { 0.0 } else { (pose.angle[j] - pose.angle[origin]).to_radians() };
+                let fct = (k_eff * k_eff * b.cos() * b.cos() + b.sin() * b.sin()).sqrt();
+                out.push((nj.length.id.clone(), (rj as f64 * fct) as f32));
+            }
+
+            if reset_imp {
+                let next_wa = if with_angles { stretched_wa[j] } else { pose.angle[j] };
+                waves.push_back((j, next_wa, false));
+            } else {
+                for &c in &children[j] {
+                    let nc = &nodes[c];
+                    if nc.is_static && !links.contains_key(&c) {
+                        queue.push_back((c, abs_anchored));
+                    }
+                }
             }
         }
     }
@@ -794,7 +868,11 @@ impl CanvasTools {
         let can_stretch = self.stretch || n.stretchy;
         let new_si_world = pose.base_angle(f.nodes(), i) + rel;
         // an IK rig: the stretchy segment has a smart-stretch connector under it
-        let ik = if can_stretch && scale > 1e-6 { connector_smart_stretch(f, i, ((dx * dx + dy * dy).sqrt() / scale as f64) as f32) } else { None };
+        let ik = if can_stretch && !self.suppress_smart_stretch && scale > 1e-6 {
+            connector_smart_stretch(f, i, ((dx * dx + dy * dy).sqrt() / scale as f64) as f32)
+        } else {
+            None
+        };
         ed.change_in(&mut d.state, &rot_id, Value::F(rel as f32), t)?;
         if can_stretch && scale > 1e-6 {
             let len = ((dx * dx + dy * dy).sqrt() / scale as f64) as f32;
@@ -806,7 +884,9 @@ impl CanvasTools {
                 return self.hold_pins(d, &drag, t);
             }
             ed.change_in(&mut d.state, &len_id, Value::F(len), t)?;
-            self.smart_stretch_in(d, &drag.hit.layer, &pose, i, len, new_si_world, t, &drag.start_length)?;
+            if !self.suppress_smart_stretch {
+                self.smart_stretch_in(d, &drag.hit.layer, &pose, i, len, new_si_world, t, &drag.start_length)?;
+            }
         }
         self.hold_pins(d, &drag, t)
     }

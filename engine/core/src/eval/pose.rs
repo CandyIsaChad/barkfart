@@ -135,10 +135,20 @@ pub fn connector_links(f: &Figure) -> std::collections::HashMap<usize, (usize, C
     out
 }
 
+/// Whether a node resets the smart-stretch impulse (Stick Nodes `mSmartStretchResetImpulse`).
+pub fn smart_stretch_reset_impulse(n: &Node) -> bool {
+    extra_num(n, "L.smartStretchResetImpulse").unwrap_or(0.0) != 0.0
+}
+
+/// Per-node smart-stretch multiplier (Stick Nodes `mSmartStretchMultiplier`, default 1.0).
+pub fn smart_stretch_multiplier(n: &Node) -> f32 {
+    extra_num(n, "L.smartStretchMultiplier").unwrap_or(1.0) as f32
+}
+
 /// Stretch multiplier of a "reset stretch impulse" node (None when not reset).
 pub fn stretch_reset(n: &Node) -> Option<f32> {
-    if extra_num(n, "L.smartStretchResetImpulse").unwrap_or(0.0) != 0.0 {
-        Some(extra_num(n, "L.smartStretchMultiplier").unwrap_or(1.0) as f32)
+    if smart_stretch_reset_impulse(n) {
+        Some(smart_stretch_multiplier(n))
     } else {
         None
     }

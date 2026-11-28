@@ -152,9 +152,13 @@ fn affine_smart_stretch_scales_lengths_and_angles_with_zero_drift() {
         assert!((got - want).abs() < 0.05, "{id}: got {got}, want {want}");
     }
 
-    // Opt-out (`no_smart_stretch`) branch and non-static child limb stay untouched
+    // Opt-out (`no_smart_stretch`) node keeps its own length, while its static
+    // child STILL stretches (exact Stick Nodes Pro `LR2/h;.o` + `f0` behavior),
+    // and non-static child limb stays untouched.
     assert!((node_len(p, &lid, "opt_out", 0.0) - 30.0).abs() < 1e-4);
-    assert!((node_len(p, &lid, "opt_out_child", 0.0) - 25.0).abs() < 1e-4);
+    let b_oc = (180.0 + 45.0f64).to_radians();
+    let want_oc = 25.0 * ((k * b_oc.cos()).powi(2) + b_oc.sin().powi(2)).sqrt();
+    assert!((node_len(p, &lid, "opt_out_child", 0.0) as f64 - want_oc).abs() < 0.05, "opt_out_child still smart-stretches per APK");
     assert!((node_len(p, &lid, "forearm", 0.0) - 80.0).abs() < 1e-4);
     assert!((node_len(p, &lid, "forearm_detail", 0.0) - 80.0).abs() < 1e-4);
 
@@ -250,9 +254,53 @@ fn smart_stretch_on_static_child_and_reset_impulse_multiplier() {
     let diag = (50.0f64).hypot(50.0);
     let want_d1 = diag * ((2.0 * 135.0f64.to_radians().cos()).powi(2) + 135.0f64.to_radians().sin().powi(2)).sqrt();
     assert!((node_len(s.project(), &lid, "diag1", 0.0) as f64 - want_d1).abs() < 0.05);
-    // `diag2` has stretchReset x 0.5 -> k_eff = 1 + 0.5*(2 - 1) = 1.5
-    let want_d2 = diag * ((1.5 * 225.0f64.to_radians().cos()).powi(2) + 225.0f64.to_radians().sin().powi(2)).sqrt();
+    // `diag2` has stretchReset x 0.5 -> per APK `f0`, reset impulse stretches
+    // purely along its own axis (`diffDeg = 0`): len = rest * (1 + 0.5*(2 - 1)) = rest * 1.5
+    let want_d2 = diag * 1.5;
     assert!((node_len(s.project(), &lid, "diag2", 0.0) as f64 - want_d2).abs() < 0.05);
+}
+
+#[test]
+fn apk_exact_reset_impulse_origin_and_negative_multiplier_and_studio_suppression() {
+    let (mut s, lid) = build_rig_session();
+    // Add a static child under `diag2` perpendicular to `diag2` (local 90 deg)
+    // and set `diag2` to reset impulse with multiplier -1.0 (inverts when k > 2).
+    {
+        let sym = s.project().root_symbol.clone();
+        let l = s.doc.project_mut().layer_mut(&sym, &lid).unwrap();
+        let LayerKind::Figure(f) = &mut l.kind else { unreachable!() };
+        let mut child = Node::new(&lid, "d2_perp", Some("diag2"), Shape::Line);
+        child.rotation.value = Value::F(90.0);
+        child.length.value = Value::F(40.0);
+        child.rest_length = 40.0;
+        child.is_static = true;
+        f.add(child).unwrap();
+        f.capture_base();
+    }
+    s.command(&json!({"op": "select", "layer": lid, "node": "diag2"}));
+    s.command(&json!({"op": "segment", "stretchReset": true, "stretchMultiplier": -1.0}));
+    // Enabling smart on a node clears noSmart (APK LR2/h;.B6 / f6 invariant)
+    s.command(&json!({"op": "select", "layer": lid, "node": "opt_out"}));
+    s.command(&json!({"op": "segment", "smart": true}));
+    assert!(!s.project().root().unwrap().layer(&lid).unwrap().as_figure().unwrap().node("opt_out").unwrap().no_smart_stretch);
+
+    // Stretch `arm` to 250 (k = 2.5):
+    // - `diag2` has resetImpulse=true, mult=-1.0 -> k_eff = 1 + (-1)*(2.5 - 1) = -0.5 -> len = diag * 0.5
+    // - `d2_perp` is perpendicular (90 deg) to `diag2` (its new reset origin!) -> stays len 40.0!
+    s.command(&json!({"op": "select", "layer": lid, "node": "arm"}));
+    s.command(&json!({"op": "node", "length": 250.0}));
+    let diag = (50.0f64).hypot(50.0);
+    assert!((node_len(s.project(), &lid, "diag2", 0.0) as f64 - diag * 0.5).abs() < 0.05);
+    assert!((node_len(s.project(), &lid, "d2_perp", 0.0) - 40.0).abs() < 0.05, "reset-impulse child perpendicular to new origin keeps length");
+
+    // In Figure Studio (`build`), editing `arm`'s length edits rest geometry WITHOUT smart-stretching static details
+    s.command(&json!({"op": "undo"}));
+    s.command(&json!({"op": "build", "layer": lid}));
+    s.command(&json!({"op": "select", "layer": lid, "node": "arm"}));
+    s.command(&json!({"op": "node", "length": 150.0}));
+    assert!((node_len(s.project(), &lid, "arm", 0.0) - 150.0).abs() < 1e-3);
+    assert!((node_len(s.project(), &lid, "back", 0.0) - 100.0).abs() < 1e-3, "Figure Studio length edit does not distort static details");
+    s.command(&json!({"op": "build_cancel"}));
 }
 
 #[test]

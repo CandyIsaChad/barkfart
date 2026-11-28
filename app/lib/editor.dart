@@ -9139,17 +9139,17 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       const rw.DTitle('Movement'),
       rw.DTick('Show motion path', _opts['path'] == true, onChanged: _setMotionPath),
       rw.DTick('Is stretchy', sel['stretchy'] == true, onChanged: (v) => _cmd({'op': 'node', 'stretchy': v}), changed: ch('stretchy'), reset: reset('stretchy', onOff(d['stretchy']), {'op': 'node', 'stretchy': d['stretchy']})),
-      // IK rigs (smart stretch): set up in the figure editor
-      if (_st['building'] != null) ...[
-        rw.DTick('Smart stretch', sel['smart'] == true, onChanged: (v) => seg({'smart': v})),
-        rw.DTick('Keeps its length in a smart stretch', sel['noSmart'] == true, onChanged: (v) => seg({'noSmart': v})),
-        rw.DTick('Stretches by its own amount', sel['stretchReset'] == true, onChanged: (v) => seg({'stretchReset': v})),
-        if (sel['stretchReset'] == true)
-          rw.DStep('Stretch amount', '×${((sel['stretchMultiplier'] as num?) ?? 1).toStringAsFixed(2)}',
-              onMinus: () => seg({'stretchMultiplier': ((sel['stretchMultiplier'] as num?) ?? 1) - 0.25}),
-              onPlus: () => seg({'stretchMultiplier': ((sel['stretchMultiplier'] as num?) ?? 1) + 0.25})),
-        const rw.DHint('With smart stretch, the still parts under a stretchy segment stretch along with it. A connector under it makes an IK limb: pull its end and the joint between bends. Stock › Stickfigure (IK) is built this way.'),
+      rw.DTick('Smart stretch', sel['smart'] == true, onChanged: (v) => seg({'smart': v}), changed: ch('smart'), reset: reset('smart', onOff(d['smart']), {'op': 'segment', 'smart': d['smart']})),
+      if (sel['smart'] != true)
+        rw.DTick('Do not smart-stretch', sel['noSmart'] == true, onChanged: (v) => seg({'noSmart': v})),
+      if (_st['building'] != null || sel['stretchReset'] == true || ((sel['stretchMultiplier'] as num?) ?? 1) != 1) ...[
+        rw.DTick('Reset stretch impulse', sel['stretchReset'] == true, onChanged: (v) => seg({'stretchReset': v})),
+        rw.DStep('Stretch multiplier', '×${((sel['stretchMultiplier'] as num?) ?? 1).toStringAsFixed(2)}',
+            onMinus: () => seg({'stretchMultiplier': ((sel['stretchMultiplier'] as num?) ?? 1) - 0.25}),
+            onPlus: () => seg({'stretchMultiplier': ((sel['stretchMultiplier'] as num?) ?? 1) + 0.25})),
       ],
+      if (_st['building'] != null)
+        const rw.DHint('With smart stretch, the still parts under a stretchy segment stretch along with it. A connector under it makes an IK limb: pull its end and the joint between bends. Stock › Stickfigure (IK) is built this way.'),
       rw.DTick('Lock node', sel['pinned'] == true, onChanged: (v) => _cmd({'op': 'pin', 'v': v})),
       rw.DTick('Drag lock', sel['dragLock'] == true, onChanged: (v) => _cmd({'op': 'node', 'dragLock': v})),
       rw.DSeg(const ['None', 'Absolute', 'Relative'], lock, label: 'Angle lock', onSelect: (i) => seg({'angleLock': i})),
@@ -10014,6 +10014,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         rw.DStep('Split joints', '$_splitN', onMinus: () => setState(() => _splitN = math.max(1, _splitN - 1)), onPlus: () => setState(() => _splitN = math.min(20, _splitN + 1))),
         rw.DButtons('Flip branch', () => _cmd({'op': 'flip_branch', 'h': true}), iconA: 'flipH', b: sel['pinned'] == true ? 'Unlock' : 'Lock', onB: () => _cmd({'op': 'pin', 'v': sel['pinned'] != true}), iconB: sel['pinned'] == true ? 'unlock' : 'lock'),
         rw.DTick('Static detail', sel['static'] == true, onChanged: (v) => _cmd({'op': 'segment', 'static': v})),
+        rw.DTick('Is stretchy', sel['stretchy'] == true, onChanged: (v) => _cmd({'op': 'node', 'stretchy': v})),
+        rw.DTick('Smart stretch', sel['smart'] == true, onChanged: (v) => _cmd({'op': 'segment', 'smart': v})),
         rw.DStep('Thickness', thick.round().toString(), onMinus: () => _cmd({'op': 'segment', 'thickness': math.max(0, thick - 2)}), onPlus: () => _cmd({'op': 'segment', 'thickness': thick + 2})),
         rw.DWidget(kit.PropRow('Colour', trailing: _swatches(color, (c) => _cmd({'op': 'segment', 'color': c})))),
         rw.DButtons('Colour branch', () => _cmd({'op': 'segment', 'branch': true, 'color': color}), b: 'Modify branch…', onB: _modifyBranchDialog),
