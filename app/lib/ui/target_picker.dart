@@ -49,6 +49,10 @@ class TargetOption {
     final cat = m['category'] is String && (m['category'] as String).isNotEmpty
         ? '${m['category']}'
         : _categoryForKind(inferredKind);
+    final rawKeys = m['keys'];
+    final keyCount = rawKeys is num ? rawKeys.toInt() : (rawKeys is List ? rawKeys.length : 0);
+    final rawMods = m['mods'];
+    final modCount = rawMods is num ? rawMods.toInt() : (rawMods is List ? rawMods.length : 0);
     return TargetOption(
       id: id,
       label: propLabel.isEmpty ? rawName : propLabel,
@@ -56,8 +60,8 @@ class TargetOption {
       layerKind: inferredKind,
       category: cat,
       valueText: valStr,
-      animated: m['animated'] == true || ((m['keys'] as num?)?.toInt() ?? 0) > 1,
-      modifierCount: (m['mods'] as num?)?.toInt() ?? ((m['mods'] is List) ? (m['mods'] as List).length : 0),
+      animated: m['animated'] == true || keyCount > 1,
+      modifierCount: modCount,
     );
   }
 

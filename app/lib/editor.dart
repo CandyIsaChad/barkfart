@@ -7883,10 +7883,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   List<TargetOption> _allModifierTargetOptions() {
     final seen = <String>{};
     final out = <TargetOption>[];
-    void addAll(List? raw, {bool animated = false}) {
-      if (raw == null) return;
-      for (final m in raw.cast<Map>()) {
-        final opt = TargetOption.fromMap(m);
+    void addAll(Object? raw, {bool animated = false}) {
+      if (raw is! List) return;
+      for (final item in raw) {
+        if (item is! Map) continue;
+        final opt = TargetOption.fromMap(item);
         if (opt.id.isNotEmpty && seen.add(opt.id)) {
           out.add(animated && !opt.animated
               ? TargetOption(
@@ -7904,17 +7905,21 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       }
     }
 
-    addAll(_st['modifierTargets'] as List?);
-    addAll(_st['availableTargets'] as List?);
-    final cv = _st['curves'] as Map?;
-    if (cv != null) {
+    addAll(_st['modifierTargets']);
+    addAll(_st['availableTargets']);
+    final cv = _st['curves'];
+    if (cv is Map) {
       final layerName = '${cv['name'] ?? ''}';
-      for (final ch in ((cv['channels'] as List?) ?? const []).cast<Map>()) {
-        final enriched = {...ch, if (ch['group'] == null && ch['layer'] == null) 'group': layerName, 'animated': true};
-        final opt = TargetOption.fromMap(enriched);
-        if (opt.id.isNotEmpty && seen.add(opt.id)) out.add(opt);
+      final rawChans = cv['channels'];
+      if (rawChans is List) {
+        for (final ch in rawChans) {
+          if (ch is! Map) continue;
+          final enriched = {...ch, if (ch['group'] == null && ch['layer'] == null) 'group': layerName, 'animated': true};
+          final opt = TargetOption.fromMap(enriched);
+          if (opt.id.isNotEmpty && seen.add(opt.id)) out.add(opt);
+        }
       }
-      addAll(cv['addable'] as List?);
+      addAll(cv['addable']);
     }
     return out;
   }
