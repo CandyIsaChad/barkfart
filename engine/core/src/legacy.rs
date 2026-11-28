@@ -782,6 +782,13 @@ pub fn to_legacy(layer: &Layer) -> R<LegacyFigure> {
     fig.build = ex_i("fig.build", if fig.version >= 403 { 62 } else { 0 });
     fig.little_endian = ex_b("fig.little", fig.version < 160);
     fig.compressed = ex_b("fig.compressed", fig.version < 160);
+    // Upgrade legacy version only when smart-stretch flags were added to an older figure
+    // (unmodified older files have none and round-trip byte-for-byte identically).
+    if fig.version < 252 && nodes.iter().any(|n| n.smart_stretch || n.no_smart_stretch) {
+        fig.version = 252;
+        fig.little_endian = false;
+        fig.compressed = false;
+    }
     let scale = layer.transform.scale_x.value.f();
     let old = ex_get(root, "fig.scale").and_then(|s| s.strip_prefix("f:")).and_then(parse_java_float);
     fig.scale = match old {

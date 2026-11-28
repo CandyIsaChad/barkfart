@@ -281,6 +281,7 @@ impl Session {
         doc.exact = true; // an edit that changes nothing is not an undo step
         let mut tools = CanvasTools::default();
         tools.layer_handles = true;
+        tools.smart_stretch_angles = true;
         tools.key_scope = KeyScope::Figure;
         // D34: a key on an empty track tweens as the project's tweens do
         tools.editor.default_interp = doc.project().settings.tween_interp;
@@ -1955,6 +1956,7 @@ impl Session {
                         self.selected_group = None;
                         self.selected_script = None;
                         self.multi.clear();
+                        self.frame = 0;
                         self.mode = Mode::Figure;
                         self.rev += 1;
                     }
@@ -3513,10 +3515,16 @@ impl Session {
                         if (c2["length"].is_number() || c2["angle"].is_number()) && !building {
                             crate::edit::block_ops::bake_pose_at(s, &sym, &l, fr)?;
                         }
-                        if let Some(v) = c2["length"].as_f64() {
-                            let id = s.project.root().and_then(|r| r.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.node(&n)).map(|x| x.length.id.clone());
-                            if let Some(id) = id {
-                                ed.change_in(s, &id, Value::F(v.max(0.0) as f32), t)?;
+                        if c2["stretchy"].is_boolean() || c2["dragLock"].is_boolean() {
+                            if let Some(LayerKind::Figure(fig)) = s.project.layer_mut(&sym, &l).map(|x| &mut x.kind) {
+                                if let Some(node) = fig.node_mut(&n) {
+                                    if let Some(v) = c2["stretchy"].as_bool() {
+                                        node.stretchy = v;
+                                    }
+                                    if let Some(v) = c2["dragLock"].as_bool() {
+                                        node.drag_lock = if v { crate::edit::canvas::DRAG_HORIZONTAL | crate::edit::canvas::DRAG_VERTICAL } else { 0 };
+                                    }
+                                }
                             }
                         }
                         if let Some(v) = c2["angle"].as_f64() {
@@ -3525,14 +3533,11 @@ impl Session {
                                 ed.change_in(s, &id, Value::F(v as f32), t)?;
                             }
                         }
-                        let Some(layer) = s.project.layer_mut(&sym, &l) else { return Ok(()) };
-                        let LayerKind::Figure(fig) = &mut layer.kind else { return Ok(()) };
-                        let Some(node) = fig.node_mut(&n) else { return Ok(()) };
-                        if let Some(v) = c2["stretchy"].as_bool() {
-                            node.stretchy = v;
-                        }
-                        if let Some(v) = c2["dragLock"].as_bool() {
-                            node.drag_lock = if v { crate::edit::canvas::DRAG_HORIZONTAL | crate::edit::canvas::DRAG_VERTICAL } else { 0 };
+                        if let Some(v) = c2["length"].as_f64() {
+                            let si = s.project.root().and_then(|r| r.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.index_of(&n));
+                            if let Some(si) = si {
+                                crate::edit::canvas::apply_length_with_smart_stretch(&ed, s, &l, si, v.max(0.0) as f32, t, true)?;
+                            }
                         }
                         Ok(())
                     });
@@ -3545,13 +3550,13 @@ impl Session {
                 if let Some((l, n)) = self.selected.clone() {
                     let ed = self.tools.editor.clone();
                     self.step("Reset segment", move |s| {
-                        let (base, len_id) = {
+                        let (base, si) = {
                             let Some(f) = s.project.root().and_then(|r| r.layer(&l)).and_then(|x| x.as_figure()) else { return crate::edit::fail("no figure") };
-                            let Some(node) = f.node(&n) else { return crate::edit::fail("no segment") };
+                            let Some(si) = f.index_of(&n) else { return crate::edit::fail("no segment") };
                             let Some(b) = f.base_of(&n) else { return crate::edit::fail("This figure came from an older project, so there is nothing to reset it to.") };
-                            (b.clone(), node.length.id.clone())
+                            (b.clone(), si)
                         };
-                        ed.change_in(s, &len_id, Value::F(base.length), t)?;
+                        crate::edit::canvas::apply_length_with_smart_stretch(&ed, s, &l, si, base.length, t, true)?;
                         let Some(layer) = s.project.layer_mut(&sym, &l) else { return crate::edit::fail("no figure") };
                         let LayerKind::Figure(fig) = &mut layer.kind else { return crate::edit::fail("not a figure") };
                         let fig_color = figure_ops::figure_color(fig);
@@ -6409,6 +6414,8 @@ fn merge_studio_figure_into(live: &mut Layer, edited: &Layer, orig_angles: &Hash
                     }
                     ln.length.value = Value::F((ln.length.value.f() + dl).max(0.0));
                 }
+            } else if ln.rest_length <= 0.0 && new_len > 0.0 {
+                ln.rest_length = new_len;
             }
             // Rotation: preserve animation keyframes; if rest angle was explicitly edited in studio, shift by delta
             let new_rot = en.rotation.key_value(0.0).f();
@@ -6453,7 +6460,14 @@ fn merge_studio_figure_into(live: &mut Layer, edited: &Layer, orig_angles: &Hash
     let mut base_map = indexmap::IndexMap::new();
     for en in ef.nodes() {
         if en.parent.is_some() {
-            base_map.insert(en.id.clone(), NodeBase::of(en));
+            let mut b = NodeBase::of(en);
+            let edited_len = en.length.key_value(0.0).f();
+            if let Some(old_len) = orig_lengths.get(&en.id).copied() {
+                if (edited_len - old_len).abs() > 1e-4 {
+                    b.length = edited_len;
+                }
+            }
+            base_map.insert(en.id.clone(), b);
         }
     }
     new_fig.base = Some(std::sync::Arc::new(base_map));
