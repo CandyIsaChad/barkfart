@@ -98,6 +98,8 @@ struct StudioSession {
     orig_angles: HashMap<String, f32>,
     /// Initial rest length of each node when entering studio.
     orig_lengths: HashMap<String, f32>,
+    /// Prior `show_static` toggle before entering studio (restored on exit).
+    prev_show_static: bool,
 }
 
 pub struct Session {
@@ -513,6 +515,10 @@ impl Session {
                 self.building = None;
             }
         }
+        self.tools.active_node = self
+            .building
+            .as_ref()
+            .map(|b| self.selected.clone().unwrap_or_else(|| (b.clone(), String::new())));
     }
 
     fn changed(&mut self) {
@@ -1053,11 +1059,18 @@ impl Session {
             }
             "down" => {
                 let hit = self.touch_down(f("x"), f("y"), f("r"));
+                self.sync_tools();
                 let mut s = self.state();
                 s["hit"] = json!(hit);
                 return s;
             }
-            "move" => self.touch_move(f("x"), f("y")),
+            "move" => {
+                self.touch_move(f("x"), f("y"));
+                if b("fast") {
+                    self.sync_tools();
+                    return self.drag_state();
+                }
+            }
             "up" => self.touch_up(),
             "cancel" => self.touch_cancel(),
             "undo" => {
@@ -1937,6 +1950,8 @@ impl Session {
                                 }
                             }
                         }
+                        let prev_show_static = self.tools.show_static;
+                        self.tools.show_static = true;
                         self.copy_edit = Some(StudioSession {
                             snapshot,
                             source_layer: Some(l.clone()),
@@ -1945,6 +1960,7 @@ impl Session {
                             orig_selected,
                             orig_angles,
                             orig_lengths,
+                            prev_show_static,
                         });
                         self.copy_edit_depth = self.doc.undo_depth();
                         self.building = Some(l.clone());
@@ -2004,6 +2020,8 @@ impl Session {
                         Ok(id)
                     });
                     if let Some(id) = made {
+                        let prev_show_static = self.tools.show_static;
+                        self.tools.show_static = true;
                         self.copy_edit = Some(StudioSession {
                             snapshot,
                             source_layer: None,
@@ -2012,6 +2030,7 @@ impl Session {
                             orig_selected,
                             orig_angles: HashMap::new(),
                             orig_lengths: HashMap::new(),
+                            prev_show_static,
                         });
                         self.copy_edit_depth = self.doc.undo_depth();
                         self.building = Some(id.clone());
@@ -2128,6 +2147,8 @@ impl Session {
                             Ok(c)
                         });
                         if let Some(c) = made {
+                            let prev_show_static = self.tools.show_static;
+                            self.tools.show_static = true;
                             self.copy_edit = Some(StudioSession {
                                 snapshot,
                                 source_layer: Some(l),
@@ -2136,6 +2157,7 @@ impl Session {
                                 orig_selected,
                                 orig_angles,
                                 orig_lengths,
+                                prev_show_static,
                             });
                             self.copy_edit_depth = self.doc.undo_depth();
                             self.building = Some(c.clone());
@@ -2157,6 +2179,7 @@ impl Session {
                 // first): the animation and its history as they were
                 if let Some(studio) = self.copy_edit.take() {
                     self.doc.restore(*studio.snapshot);
+                    self.tools.show_static = studio.prev_show_static;
                     self.draw = None;
                     self.building = None;
                     self.polyfill = None;
@@ -2186,6 +2209,7 @@ impl Session {
                 let had_edits = self.doc.undo_depth() > self.copy_edit_depth;
                 if let Some(studio) = self.copy_edit.take() {
                     self.doc.restore(*studio.snapshot);
+                    self.tools.show_static = studio.prev_show_static;
                     self.draw = None;
                     self.building = None;
                     self.polyfill = None;
@@ -4761,6 +4785,7 @@ impl Session {
         if !self.multi.is_empty() && self.selected.as_ref().map(|s| &s.0) != self.multi.first() {
             self.multi.clear();
         }
+        self.sync_tools();
         self.state()
     }
 
@@ -5132,48 +5157,180 @@ impl Session {
             "targets": targets, "figures": figures, "values": values, "settings": plugin_settings(def.as_ref(), &sc.props), "runs": runs, "run": run}))
     }
 
+    /// Builds the stage handle JSON list from a precomputed `all_handles` slice
+    /// without recomputing `FigurePose` / `CanvasTools::handles` a second time.
+    fn handles_json(&self, p: &Project, all_handles: &[Handle]) -> Vec<J> {
+        if self.mode != Mode::Figure {
+            return Vec::new();
+        }
+        // joints connected to the selected one (its parent and children)
+        let near: std::collections::HashSet<&str> = match &self.selected {
+            Some((l, n)) => p
+                .root()
+                .and_then(|r| r.layer(l))
+                .and_then(|fl| fl.as_figure())
+                .and_then(|f| {
+                    let sel_node = f.node(n)?;
+                    let mut set = std::collections::HashSet::new();
+                    if let Some(pid) = &sel_node.parent {
+                        set.insert(pid.as_str());
+                    }
+                    for cand in f.nodes() {
+                        if cand.parent.as_deref() == Some(n.as_str()) {
+                            set.insert(cand.id.as_str());
+                        }
+                    }
+                    Some(set)
+                })
+                .unwrap_or_default(),
+            None => Default::default(),
+        };
+        let building_fig = self.building.as_deref().and_then(|b| p.root()?.layer(b)?.as_figure());
+        let (poly_nodes, poly_anchors): (std::collections::HashSet<&str>, std::collections::HashSet<&str>) = match building_fig {
+            Some(f) => (
+                f.polyfills.iter().flat_map(|pf| pf.nodes.iter().map(String::as_str)).collect(),
+                f.polyfills.iter().map(|pf| pf.anchor.as_str()).collect(),
+            ),
+            None => Default::default(),
+        };
+        let mut handles = Vec::with_capacity(all_handles.len());
+        for h in all_handles {
+            if self.building.as_ref().is_some_and(|b| *b != h.layer) {
+                continue;
+            }
+            let sel = self.selected.as_ref().is_some_and(|(l, n)| *l == h.layer && *n == h.node);
+            let fig = self.selected.as_ref().is_some_and(|(l, _)| *l == h.layer);
+            let is_near = fig && near.contains(h.node.as_str());
+            let flags = h.root as u32 | (sel as u32) << 1 | (fig as u32) << 2 | (is_near as u32) << 3;
+            if let Some(f) = building_fig {
+                // figure editor View options: node highlight and draw order
+                // (16 polynode, 32 connector, 64 drag / angle lock, 128 polyfill
+                // anchor; then the index)
+                let (extra, idx) = f
+                    .index_of(&h.node)
+                    .map(|i| {
+                        let n = &f.nodes()[i];
+                        let poly = poly_nodes.contains(h.node.as_str());
+                        let conn = n.legacy_extras.contains_key(crate::eval::pose::CONNECT_TO)
+                            || n.legacy_extras.get("connector").is_some_and(|v| v == "b:true");
+                        let lock = n.drag_lock != 0 || n.angle_lock != 0;
+                        let anchor = poly_anchors.contains(h.node.as_str());
+                        ((poly as u32) << 4 | (conn as u32) << 5 | (lock as u32) << 6 | (anchor as u32) << 7, i)
+                    })
+                    .unwrap_or((0, 0));
+                handles.push(json!([round2(h.x), round2(h.y), flags | extra, idx]));
+                continue;
+            }
+            handles.push(json!([round2(h.x), round2(h.y), flags]));
+        }
+        handles
+    }
+
+    /// Lightweight drag-move state returned when `"move"` passes `"fast": true`.
+    /// Omits static catalogs, timeline rows, modifierTargets, and unrelated panels so
+    /// live posing stays sub-millisecond even on 250+ node rigs; full `state()` is
+    /// returned on `"up"` / `"cancel"`.
+    pub fn drag_state(&self) -> J {
+        let p = self.project();
+        let t = self.time();
+        let handles = if self.mode == Mode::Figure {
+            let all_handles = self.tools.handles(p, t);
+            self.handles_json(p, &all_handles)
+        } else {
+            Vec::new()
+        };
+        let mut out = json!({
+            "fast": true,
+            "rev": self.rev,
+            "handles": handles,
+            "message": self.message,
+        });
+        match &self.gesture {
+            Gesture::Draw { layer, from, x0, y0, x, y, .. } => {
+                let sym = self.sym();
+                let shape = self.draw.unwrap_or(Shape::Line);
+                let (len, deg, width) = draw_measure(p, &sym, layer, from, *x, *y, t).unwrap_or((0.0, 0.0, 0.0));
+                let twin = if self.mirror { mirrored(p, &sym, layer, from, *x, *y, t) } else { None };
+                out["drawLine"] = json!({
+                    "line": [x0, y0, x, y],
+                    "length": len.round(),
+                    "angle": deg.round(),
+                    "width": round2(width as f32),
+                    "shape": shape_name(shape),
+                    "mirror": twin.map(|(_, a, b, c, d)| json!([round2(a), round2(b), round2(c), round2(d)])),
+                });
+            }
+            Gesture::Camera { .. } => {
+                out["camera"] = json!(self.camera_frame());
+            }
+            Gesture::Textfield { layer, .. } => {
+                if let Some(l) = p.root().and_then(|r| r.layer(layer)) {
+                    if let LayerKind::Text(tl) = &l.kind {
+                        let mut r = Resolver::new(p);
+                        let (sx, sy) = (r.f(&l.transform.scale_x, t).abs(), r.f(&l.transform.scale_y, t).abs());
+                        let (cx, cy) = (r.f(&l.transform.x, t), r.f(&l.transform.y, t));
+                        let (w, h) = text_size(tl, &self.fonts);
+                        let (x0, y0, x1, y1) = text_rect(tl, cx, cy, w * sx, h * sy);
+                        out["textfieldPatch"] = json!({
+                            "x": round2(cx), "y": round2(cy),
+                            "x0": round2(x0), "y0": round2(y0), "x1": round2(x1), "y1": round2(y1),
+                        });
+                    }
+                }
+            }
+            Gesture::Picture { layer, .. } | Gesture::PictureScale { layer, .. } => {
+                if let Some(l) = p.root().and_then(|r| r.layer(layer)) {
+                    let mut r = Resolver::new(p);
+                    let sy = r.f(&l.transform.scale_y, t);
+                    out["picturePatch"] = json!({
+                        "scale": round2(sy.abs()),
+                        "box": self.tools.sprite_box(p, layer, t).map(|b| b.iter().map(|v| round2(*v)).collect::<Vec<_>>()),
+                    });
+                }
+            }
+            Gesture::Handle { .. } => {
+                if self.motion_path && self.mode == Mode::Figure {
+                    if let Some((l, n)) = &self.selected {
+                        if let Some(layer) = p.root().and_then(|r| r.layer(l)) {
+                            if layer.as_figure().and_then(|f| f.node(n)).is_some_and(|nd| nd.parent.is_some()) {
+                                let fps = st_fps(p);
+                                let frames = self.frame_count();
+                                let pts = self.tools.joint_path(p, l, n, frames, fps);
+                                let keys = crate::edit::block_ops::pose_frames(layer, fps);
+                                out["motionPath"] = json!({
+                                    "points": pts.iter().map(|(x, y)| json!([round2(*x), round2(*y)])).collect::<Vec<_>>(),
+                                    "keys": keys,
+                                });
+                            }
+                        }
+                    }
+                }
+                if let Some((l, n)) = &self.selected {
+                    if let Some(layer) = p.root().and_then(|r| r.layer(l)) {
+                        if let Some(node) = layer.as_figure().and_then(|f| f.node(n)) {
+                            let mut r = Resolver::new(p);
+                            out["selectedPatch"] = json!({
+                                "angle": round2(r.f(&node.rotation, t)),
+                                "length": round2(r.f(&node.length, t)),
+                                "scale": round2(r.f(&layer.transform.scale_y, t).abs()),
+                                "figAngle": round2(r.f(&layer.transform.rotation, t)),
+                            });
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        out
+    }
+
     /// Everything the app draws besides the picture.
     pub fn state(&self) -> J {
         let p = self.project();
         let t = self.time();
-        let mut handles = Vec::new();
         // every joint's place, worked out once (the handle list and the figures' main joints both need it)
         let all_handles = self.tools.handles(p, t);
-        if self.mode == Mode::Figure {
-            // joints connected to the selected one (its parent and children)
-            let near: std::collections::HashSet<String> = match &self.selected {
-                Some((l, n)) => self.tools.neighbours(p, l, n, false, t).into_iter().map(|h| h.node).collect(),
-                None => Default::default(),
-            };
-            for h in all_handles.iter() {
-                if self.building.as_ref().is_some_and(|b| *b != h.layer) {
-                    continue;
-                }
-                let sel = self.selected.as_ref().is_some_and(|(l, n)| *l == h.layer && *n == h.node);
-                let fig = self.selected.as_ref().is_some_and(|(l, _)| *l == h.layer);
-                let near = fig && near.contains(&h.node);
-                let flags = h.root as u32 | (sel as u32) << 1 | (fig as u32) << 2 | (near as u32) << 3;
-                if self.building.is_some() {
-                    // figure editor View options: node highlight and draw order
-                    // (16 polynode, 32 connector, 64 drag / angle lock, 128 polyfill
-                    // anchor; then the index)
-                    let f = p.root().and_then(|r| r.layer(&h.layer)).and_then(|l| l.as_figure());
-                    let (extra, idx) = f.and_then(|f| {
-                        let i = f.index_of(&h.node)?;
-                        let n = &f.nodes()[i];
-                        let poly = f.polyfills.iter().any(|pf| pf.nodes.iter().any(|x| *x == h.node));
-                        let conn = n.legacy_extras.contains_key(crate::eval::pose::CONNECT_TO) || n.legacy_extras.get("connector").is_some_and(|v| v == "b:true");
-                        let lock = n.drag_lock != 0 || n.angle_lock != 0;
-                        // 128: a polyfill hangs off this joint (its anchor; a triangle handle)
-                        let anchor = f.polyfills.iter().any(|pf| pf.anchor == h.node);
-                        Some(((poly as u32) << 4 | (conn as u32) << 5 | (lock as u32) << 6 | (anchor as u32) << 7, i))
-                    }).unwrap_or((0, 0));
-                    handles.push(json!([round2(h.x), round2(h.y), flags | extra, idx]));
-                    continue;
-                }
-                handles.push(json!([round2(h.x), round2(h.y), flags]));
-            }
-        }
+        let handles = self.handles_json(p, &all_handles);
         let frames = self.frame_count();
         let keyed = self.keyed_frames(frames);
         let figures: Vec<J> = p

@@ -95,6 +95,9 @@ pub struct Renderer {
     sampler: wgpu::Sampler,
     /// Free textures by (width, height, samples), reused between frames.
     pool: std::sync::Mutex<Vec<(u32, u32, u32, wgpu::Texture)>>,
+    /// Free MAP_READ readback buffers by byte size, reused between frames to avoid
+    /// per-frame multi-MB GPU buffer allocation churn during live dragging.
+    readback_pool: std::sync::Mutex<Vec<(u64, wgpu::Buffer)>>,
     /// Images by id (sprite assets, "glyphs:<page>"); missing ids draw in plain colour.
     textures: std::sync::Mutex<std::collections::HashMap<String, wgpu::TextureView>>,
     /// K2: plugin effects' pipelines by plugin id, with the plugin list's
@@ -279,6 +282,7 @@ impl Renderer {
             fx_layout,
             pipes,
             pool: std::sync::Mutex::new(Vec::new()),
+            readback_pool: std::sync::Mutex::new(Vec::new()),
             textures: std::sync::Mutex::new(std::collections::HashMap::new()),
             plugin_pipes: std::sync::Mutex::new(std::collections::HashMap::new()),
             fx_pl: fx_pl.clone(),
@@ -457,8 +461,9 @@ impl Renderer {
                 }
             }
         }
-        // all vertices in one buffer; textured batches use the white texture for now
-        let mut bytes = Vec::new();
+        // all vertices in one buffer; pre-allocate exact capacity
+        let total_verts: usize = list.batches.iter().map(|b| b.vertex_count()).sum();
+        let mut bytes = Vec::with_capacity((total_verts * 20).max(20));
         let mut starts = Vec::with_capacity(list.batches.len());
         let mut count = 0u32;
         for b in &list.batches {
@@ -499,12 +504,21 @@ impl Renderer {
         }
         let row = w * 4;
         let padded = row.div_ceil(256) * 256;
-        let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("readback"),
-            size: (padded * h) as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let rb_size = (padded * h) as u64;
+        let readback = {
+            let mut rp = self.readback_pool.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(idx) = rp.iter().position(|(sz, _)| *sz == rb_size) {
+                rp.swap_remove(idx).1
+            } else {
+                drop(rp);
+                self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("readback"),
+                    size: rb_size,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                })
+            }
+        };
         f.enc.copy_texture_to_buffer(
             root.color.as_image_copy(),
             wgpu::TexelCopyBufferInfo { buffer: &readback, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded), rows_per_image: None } },
@@ -528,6 +542,13 @@ impl Renderer {
             }
         }
         readback.unmap();
+        {
+            let mut rp = self.readback_pool.lock().unwrap_or_else(|e| e.into_inner());
+            rp.push((rb_size, readback));
+            if rp.len() > 8 {
+                rp.remove(0);
+            }
+        }
         px
     }
 }

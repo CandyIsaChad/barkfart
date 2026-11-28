@@ -104,6 +104,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   late final Ticker _ticker;
   double _dpr = 1;
   double _engineMs = 0;
+  /// Isolates stage texture + handle overlay repaints from the rest of the editor
+  /// widget tree so live joint drags, pan/zoom, and frame renders never rebuild
+  /// the timeline, rails, or Properties card.
+  final ValueNotifier<int> _stageTick = ValueNotifier<int>(0);
+  final ValueNotifier<int> _zoomTick = ValueNotifier<int>(0);
+  /// Latest stage coordinate received from high-frequency (120Hz/240Hz) touch
+  /// moves; coalesced to at most one FFI `move` + render per vsync tick.
+  Offset? _pendingDragMove;
 
   // playback
   bool _playing = false;
@@ -286,6 +294,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _stripScroll.dispose();
     _layerVScroll.dispose();
     _panelScroll.dispose();
+    _stageTick.dispose();
+    _zoomTick.dispose();
     _clearCache();
     for (final img in _thumbs.values) {
       img.dispose();
@@ -480,9 +490,47 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     });
   }
 
+  /// Merges a lightweight `{"op":"move","fast":true}` response into `_st`
+  /// without rebuilding the surrounding editor widget tree. Allocates a shallow
+  /// copy of `_st` so `_pictureSt` stays synchronized with the rendered texture
+  /// until the new frame finishes decoding.
+  void _applyDragPatch(Map<String, dynamic>? patch) {
+    if (patch == null) return;
+    final next = Map<String, dynamic>.of(_st);
+    if (patch.containsKey('rev')) next['rev'] = patch['rev'];
+    if (patch.containsKey('handles')) next['handles'] = patch['handles'];
+    if (patch.containsKey('drawLine')) next['drawLine'] = patch['drawLine'];
+    if (patch.containsKey('camera')) next['camera'] = patch['camera'];
+    if (patch.containsKey('motionPath')) next['motionPath'] = patch['motionPath'];
+    if (patch['textfieldPatch'] case final Map tp when next['textfield'] is Map) {
+      next['textfield'] = {...(next['textfield'] as Map<String, dynamic>), ...tp.cast<String, dynamic>()};
+    }
+    if (patch['picturePatch'] case final Map pp when next['picture'] is Map) {
+      next['picture'] = {...(next['picture'] as Map<String, dynamic>), ...pp.cast<String, dynamic>()};
+    }
+    if (patch['selectedPatch'] case final Map sp when next['selected'] is Map) {
+      next['selected'] = {...(next['selected'] as Map<String, dynamic>), ...sp.cast<String, dynamic>()};
+    }
+    _st = next;
+    final m = patch['message'] as String? ?? '';
+    if (m.isNotEmpty) _say(m);
+  }
+
+  /// Flushes at most one coalesced touch-move coordinate per vsync right before
+  /// the stage renders that frame.
+  void _flushDragMove() {
+    final p = _pendingDragMove;
+    final e = _engine;
+    if (p == null || e == null || _oneFinger != 1 || _busy) return;
+    _pendingDragMove = null;
+    final patch = e.command({'op': 'move', 'x': p.dx, 'y': p.dy, 'fast': true});
+    _applyDragPatch(patch);
+  }
+
   void _tick() {
     final e = _engine;
     if (e == null || _busy || _view.size.isEmpty || _st.isEmpty) return;
+    _flushDragMove();
     if (!_fitted) _fit();
     double t;
     if (_playing) {
@@ -507,7 +555,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       // one picture per frame, or more with tweening on (Animation Tools)
       final rate = (_st['rate'] as num?)?.toDouble() ?? _fps;
       t = e.wallTime(dur > 0 ? secs % dur : 0, rate);
-      if (t != _playT) setState(() => _playT = t);
+      if (t != _playT) {
+        final prevFrame = (_playT * _fps).floor();
+        final nextFrame = (t * _fps).floor();
+        if (nextFrame != prevFrame) {
+          setState(() => _playT = t);
+        } else {
+          _playT = t;
+        }
+      }
     } else {
       t = _frame / _fps;
     }
@@ -550,11 +606,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       if (cached != null) {
         _drawn = key;
         if (!identical(cached, _image)) {
-          setState(() {
-            _setImage(cached, owned: false);
-            _imageRect = Rect.fromLTRB(x0, y0, x1, y1);
-            _imageCamera = true;
-          });
+          _setImage(cached, owned: false);
+          _imageRect = Rect.fromLTRB(x0, y0, x1, y1);
+          _imageCamera = true;
+          _stageTick.value++;
         }
         return;
       }
@@ -570,19 +625,21 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final ms = e.lastMicros / 1000.0;
     final drawnFrom = _st;
     ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, (img) {
-      if (!mounted) return;
+      if (!mounted) {
+        img.dispose();
+        return;
+      }
       _pictureSt = drawnFrom;
       final keep = camera && _cacheBytes + w * h * 4 <= _cacheBudget && '${_st['rev']} $w $h' == _cacheKey;
       if (keep) {
         _frameCache[fi] = img;
         _cacheBytes += w * h * 4;
       }
-      setState(() {
-        _setImage(img, owned: !keep);
-        _imageRect = Rect.fromLTRB(x0, y0, x1, y1);
-        _imageCamera = camera;
-        _engineMs = ms;
-      });
+      _setImage(img, owned: !keep);
+      _imageRect = Rect.fromLTRB(x0, y0, x1, y1);
+      _imageCamera = camera;
+      _engineMs = ms;
+      _stageTick.value++;
       if (Platform.environment['BARKFART_TRACE'] != null) debugPrint('picture ${w}x$h engine ${ms.toStringAsFixed(1)} ms, total ${sw.elapsedMicroseconds / 1000} ms${camera ? ' (cached ${_frameCache.length})' : ''}');
       _busy = false;
     });
@@ -644,6 +701,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     } else if (_pointers.length == 2) {
       // a second finger: cancel any nascent 1-finger joint drag immediately so
       // 2-finger tap Undo / pinch never nudges a joint
+      _pendingDragMove = null;
       if (_oneFinger == 1) _cmd({'op': 'cancel'});
       _oneFinger = 0;
       final ps = _pointers.values.toList();
@@ -653,10 +711,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _pinchStartMid = _pinchMid;
       _pinchEngaged = false;
     } else if (_pointers.length == 3) {
+      _pendingDragMove = null;
       if (_oneFinger == 1) _cmd({'op': 'cancel'});
       _oneFinger = 0;
       _pinchEngaged = false;
     } else {
+      _pendingDragMove = null;
       if (_oneFinger == 1) _cmd({'op': 'cancel'});
       _oneFinger = 0;
       _tapMoved = true;
@@ -671,16 +731,16 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if ((ev.localPosition - _downAt).distance > 6) _moved = true;
     if (_pointers.length == 1) {
       if (_oneFinger == 1) {
-        final p = _view.toStage(ev.localPosition);
-        _cmd({'op': 'move', 'x': p.dx, 'y': p.dy});
+        // Coalesce 120Hz/240Hz touch moves to at most one FFI `move` per vsync tick.
+        _pendingDragMove = _view.toStage(ev.localPosition);
       } else if (_oneFinger == 2) {
         final d = ev.localPosition - _panFrom;
         _panFrom = ev.localPosition;
-        setState(() {
-          _view.cx -= d.dx / _view.s;
-          _view.cy += d.dy / _view.s;
-          _viewMoved = true;
-        });
+        _view.cx -= d.dx / _view.s;
+        _view.cy += d.dy / _view.s;
+        _viewMoved = true;
+        _stageTick.value++;
+        _zoomTick.value++;
       } else if (_tapMaxFingers >= 2 && _tapMoved) {
         // After a real pinch/pan lifts to 1 finger, resume smooth 1-finger pan
         _oneFinger = 2;
@@ -699,15 +759,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _pinchMid = mid;
         return;
       }
-      setState(() {
-        // keep the stage point under the old midpoint under the new one
-        final anchor = _view.toStage(_pinchMid);
-        if (_pinchDist > 1 && dist > 1) _view.s = (_view.s * dist / _pinchDist).clamp(0.02, 40.0);
-        final now = _view.toStage(mid);
-        _view.cx += anchor.dx - now.dx;
-        _view.cy += anchor.dy - now.dy;
-        _viewMoved = true;
-      });
+      // keep the stage point under the old midpoint under the new one
+      final anchor = _view.toStage(_pinchMid);
+      if (_pinchDist > 1 && dist > 1) _view.s = (_view.s * dist / _pinchDist).clamp(0.02, 40.0);
+      final now = _view.toStage(mid);
+      _view.cx += anchor.dx - now.dx;
+      _view.cy += anchor.dy - now.dy;
+      _viewMoved = true;
+      _stageTick.value++;
+      _zoomTick.value++;
       _pinchDist = dist;
       _pinchMid = mid;
     }
@@ -756,6 +816,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       }
 
       if (_oneFinger == 1) {
+        final pending = _pendingDragMove;
+        _pendingDragMove = null;
+        if (ev is! PointerCancelEvent && pending != null) {
+          _engine?.command({'op': 'move', 'x': pending.dx, 'y': pending.dy, 'fast': true});
+        }
         _cmd({'op': ev is PointerCancelEvent ? 'cancel' : 'up'});
         // Settings: double-tapping a figure offers to make it a movieclip
         final now = DateTime.now(), layer = _sel?['layer'];
@@ -804,14 +869,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   void _scroll(PointerSignalEvent ev) {
     if (ev is PointerScrollEvent) {
-      setState(() {
-        final anchor = _view.toStage(ev.localPosition);
-        _view.s = (_view.s * math.pow(0.998, ev.scrollDelta.dy)).clamp(0.02, 40.0);
-        final now = _view.toStage(ev.localPosition);
-        _view.cx += anchor.dx - now.dx;
-        _view.cy += anchor.dy - now.dy;
-        _viewMoved = true;
-      });
+      final anchor = _view.toStage(ev.localPosition);
+      _view.s = (_view.s * math.pow(0.998, ev.scrollDelta.dy)).clamp(0.02, 40.0);
+      final now = _view.toStage(ev.localPosition);
+      _view.cx += anchor.dx - now.dx;
+      _view.cy += anchor.dy - now.dy;
+      _viewMoved = true;
+      _stageTick.value++;
+      _zoomTick.value++;
     }
   }
 
@@ -2168,10 +2233,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _view.size = c.biggest;
         if (!_fitted || !_viewMoved) _fit();
       }
-      final fitS = _fitScale();
-      final zoomPct = fitS > 0 ? (_view.s / fitS * 100).round() : 100;
       final showZoomBtns = AppSettings.flag('zoomButtons');
-      final showZoomPill = !_playing && (_viewMoved || (zoomPct - 100).abs() >= 2 || showZoomBtns);
       final leftInset = _viewOptions ? 346.0 : (_st['building'] != null && _partsOpen && !_hidePanels ? 236.0 : 10.0);
       final rightInset = !_fsNow && _panelOpen && !_hidePanels ? (_floatingCardWidth(screen, screen.shortestSide > 600) + 16) : 10.0;
       final mode = _st['mode'] as String? ?? 'figure';
@@ -2179,14 +2241,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       final showModeBanner = !_playing && _st['building'] == null && (joining || mode == 'camera' || mode == 'all');
 
       void zoomBy(double k) {
-        setState(() {
-          final center = _view.toStage(_view.size.center(Offset.zero));
-          _view.s = (_view.s * k).clamp(0.02, 40.0);
-          final center2 = _view.toStage(_view.size.center(Offset.zero));
-          _view.cx += center.dx - center2.dx;
-          _view.cy += center.dy - center2.dy;
-          _viewMoved = true;
-        });
+        final center = _view.toStage(_view.size.center(Offset.zero));
+        _view.s = (_view.s * k).clamp(0.02, 40.0);
+        final center2 = _view.toStage(_view.size.center(Offset.zero));
+        _view.cx += center.dx - center2.dx;
+        _view.cy += center.dy - center2.dy;
+        _viewMoved = true;
+        _stageTick.value++;
+        _zoomTick.value++;
       }
 
       return Listener(
@@ -2200,8 +2262,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         onPointerSignal: _scroll,
         child: ClipRect(
           child: Stack(fit: StackFit.expand, children: [
-            if (_image != null) CustomPaint(painter: _StagePicture(_image!, _imageRect, _imageCamera, _view, Size(((_st['w'] as num?) ?? 16).toDouble(), ((_st['h'] as num?) ?? 9).toDouble()))),
-            CustomPaint(painter: _Overlay(_pictureSt ?? _st, _view, _playing, studioGrid: _studioGrid, studioCrosshair: _studioCrosshair)),
+            RepaintBoundary(
+              child: ValueListenableBuilder<int>(
+                valueListenable: _stageTick,
+                builder: (_, _, _) => Stack(fit: StackFit.expand, children: [
+                  if (_image != null) CustomPaint(painter: _StagePicture(_image!, _imageRect, _imageCamera, _view, Size(((_st['w'] as num?) ?? 16).toDouble(), ((_st['h'] as num?) ?? 9).toDouble()))),
+                  CustomPaint(painter: _Overlay(_pictureSt ?? _st, _view, _playing, studioGrid: _studioGrid, studioCrosshair: _studioCrosshair)),
+                ]),
+              ),
+            ),
             if (showModeBanner)
               Positioned(
                 left: leftInset,
@@ -2277,54 +2346,62 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                   ),
                 ),
               ),
-            if (showZoomPill)
-              Positioned(
-                left: math.min(leftInset, math.max(8.0, c.biggest.width - 170)),
-                bottom: 10,
-                child: Container(
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: cCard.withValues(alpha: 0.94),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: cLine),
-                    boxShadow: const [BoxShadow(color: Color(0x1F000000), blurRadius: 8, offset: Offset(0, 2))],
-                  ),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    if (showZoomBtns)
-                      kit.Tap(
-                        label: 'Zoom out',
-                        minSize: 34,
-                        radius: 16,
-                        onTap: () => zoomBy(1 / 1.2),
-                        child: const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Pictogram('minus', size: 15, color: cInk2b)),
-                      ),
-                    kit.Tap(
-                      label: 'Fit stage (100%)',
-                      minSize: 34,
-                      radius: 16,
-                      onTap: _animateFit,
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(horizontal: showZoomBtns ? 6 : 11),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Text('$zoomPct%', style: const TextStyle(color: cText, fontSize: 12, fontWeight: FontWeight.w700, fontFeatures: [ui.FontFeature.tabularFigures()])),
-                          if (_viewMoved || (zoomPct - 100).abs() >= 2) ...[
-                            const SizedBox(width: 5),
-                            const Text('Fit', style: TextStyle(color: cAccent, fontSize: 12, fontWeight: FontWeight.w700)),
-                          ],
-                        ]),
-                      ),
+            Positioned(
+              left: math.min(leftInset, math.max(8.0, c.biggest.width - 170)),
+              bottom: 10,
+              child: ValueListenableBuilder<int>(
+                valueListenable: _zoomTick,
+                builder: (_, _, _) {
+                  final fS = _fitScale();
+                  final zPct = fS > 0 ? (_view.s / fS * 100).round() : 100;
+                  final visible = !_playing && (_viewMoved || (zPct - 100).abs() >= 2 || showZoomBtns);
+                  if (!visible) return const SizedBox.shrink();
+                  return Container(
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: cCard.withValues(alpha: 0.94),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: cLine),
+                      boxShadow: const [BoxShadow(color: Color(0x1F000000), blurRadius: 8, offset: Offset(0, 2))],
                     ),
-                    if (showZoomBtns)
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      if (showZoomBtns)
+                        kit.Tap(
+                          label: 'Zoom out',
+                          minSize: 34,
+                          radius: 16,
+                          onTap: () => zoomBy(1 / 1.2),
+                          child: const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Pictogram('minus', size: 15, color: cInk2b)),
+                        ),
                       kit.Tap(
-                        label: 'Zoom in',
+                        label: 'Fit stage (100%)',
                         minSize: 34,
                         radius: 16,
-                        onTap: () => zoomBy(1.2),
-                        child: const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Pictogram('plus', size: 15, color: cInk2b)),
+                        onTap: _animateFit,
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(horizontal: showZoomBtns ? 6 : 11),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            Text('$zPct%', style: const TextStyle(color: cText, fontSize: 12, fontWeight: FontWeight.w700, fontFeatures: [ui.FontFeature.tabularFigures()])),
+                            if (_viewMoved || (zPct - 100).abs() >= 2) ...[
+                              const SizedBox(width: 5),
+                              const Text('Fit', style: TextStyle(color: cAccent, fontSize: 12, fontWeight: FontWeight.w700)),
+                            ],
+                          ]),
+                        ),
                       ),
-                  ]),
-                ),
+                      if (showZoomBtns)
+                        kit.Tap(
+                          label: 'Zoom in',
+                          minSize: 34,
+                          radius: 16,
+                          onTap: () => zoomBy(1.2),
+                          child: const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Pictogram('plus', size: 15, color: cInk2b)),
+                        ),
+                    ]),
+                  );
+                },
               ),
+            ),
           ]),
         ),
       );
@@ -2489,6 +2566,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   Widget _shapeShelf() {
     final tool = _st['drawTool'] as String? ?? 'none';
     final mirror = (_st['opts'] as Map?)?['mirror'] == true;
+    final showAllNodes = _opts['static'] == true;
     final hasSel = _sel != null;
     final nonRoot = hasSel && _sel!['root'] != true;
     return FigureStudioShelf(
@@ -2496,6 +2574,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       polyfillActive: _st['polyfill'] != null,
       mirrorOn: mirror,
       gridOn: _studioGrid,
+      showAllNodes: showAllNodes,
+      onToggleShowAllNodes: () => _cmd({'op': 'set', 'k': 'static', 'v': !showAllNodes}),
       hasSelectedJoint: hasSel,
       canEditNonRoot: nonRoot,
       shapePainterBuilder: (glyph, color) => ShapeGlyph(glyph, color),
@@ -2621,9 +2701,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
   /// Drains completed off-UI-thread thumbnails (<= 2 per tick) and enqueues
   /// stale preview & folded-group thumbnails nearest the playhead first.
+  /// Paused completely during active drags so thumbnail decodes never trigger
+  /// full widget-tree rebuilds while posing.
   void _thumbTick() {
     final e = _engine;
-    if (e == null || _st.isEmpty) return;
+    if (e == null || _st.isEmpty || _oneFinger == 1 || _blockDrag != null) return;
     final curRev = (_st['rev'] as num?)?.toInt() ?? 0;
     // Always drain up to 2 ready thumbnails non-blockingly per frame.
     for (var n = 0; n < 2; n++) {
@@ -9413,7 +9495,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       const rw.DTitle('Handles'),
       rw.DTick('Only main joints', _opts['mainOnly'] == true, onChanged: (v) => _cmd({'op': 'set', 'k': 'mainonly', 'v': v})),
       if (_st['building'] != null) ...[
-        rw.DTick('Static joints', _opts['static'] != false, onChanged: (v) => _cmd({'op': 'set', 'k': 'static', 'v': v})),
+        rw.DTick('Show all nodes (incl. locked)', _opts['static'] == true, onChanged: (v) => _cmd({'op': 'set', 'k': 'static', 'v': v})),
         rw.DTick('Stock size figure', _opts['sizeRef'] != false, onChanged: (v) => _cmd({'op': 'set', 'k': 'sizeref', 'v': v})),
         rw.DTick('Draw order numbers', AppSettings.flag('drawOrder'), onChanged: (v) => flag('drawOrder', v)),
         rw.DSeg(const ['None', 'Polyfills', 'Connectors', 'Locks'], AppSettings.number('nodeHighlight').clamp(0, 3), label: 'Highlight', onSelect: (i) => number('nodeHighlight', i)),
@@ -9682,10 +9764,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final mode = '${building['mode'] ?? ce?['mode'] ?? (ce != null ? 'copy' : 'edit')}';
     final name = '${ce?['name'] ?? building['name'] ?? _sel?['name'] ?? 'Stickfigure'}';
     final primaryLabel = mode == 'edit' ? 'Apply' : 'Add to Scene';
+    final showAllNodes = _opts['static'] == true;
     return FigureStudioHeader(
       pad: pad,
       name: name,
       primaryLabel: primaryLabel,
+      showAllNodes: showAllNodes,
+      onToggleShowAllNodes: (all) => _cmd({'op': 'set', 'k': 'static', 'v': all}),
       showGrid: _studioGrid,
       onToggleGrid: () => setState(() => _studioGrid = !_studioGrid),
       showCrosshair: _studioCrosshair,

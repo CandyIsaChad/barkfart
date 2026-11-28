@@ -14,7 +14,8 @@ pub const RESOLVE_BUDGET: usize = 200_000;
 
 pub struct Resolver<'p> {
     project: &'p Project,
-    index: HashMap<&'p str, &'p Property>,
+    /// Built lazily on the first Link / DelayFollow modifier lookup.
+    index: Option<HashMap<&'p str, &'p Property>>,
     memo: HashMap<(String, u64), Value>,
     visiting: HashSet<(String, u64)>,
     link_depth: usize,
@@ -57,7 +58,7 @@ impl<'p> Resolver<'p> {
             project,
             scripts: None,
             script_out: HashMap::new(),
-            index: project.property_index(),
+            index: None,
             memo: HashMap::new(),
             visiting: HashSet::new(),
             link_depth: 0,
@@ -115,6 +116,28 @@ impl<'p> Resolver<'p> {
     }
 
     pub fn resolve(&mut self, p: &Property, t: f64) -> Value {
+        // Allocation-free fast path for plain (unmodified, unscripted) properties:
+        // cannot cycle and needs neither memo nor visiting HashMap entries.
+        if p.modifiers.is_empty() {
+            let scripted = self.scripts.as_ref().is_some_and(|d| {
+                let base_id = p.id.split_once('#').map_or(p.id.as_str(), |(a, _)| a);
+                d.by_prop.contains_key(base_id)
+            });
+            if !scripted {
+                let mut v = p.key_value(t);
+                if let Some((a, e, target)) = self.wrap {
+                    if t > a && t < e {
+                        if let Ok(i) = p.track.index_of(a) {
+                            let k = &p.track.keys()[i];
+                            if k.interp != Interp::Hold && p.ty.continuous() {
+                                v = p.ty.lerp(&k.value, &p.key_value(target), ((t - a) / (e - a)) as f32);
+                            }
+                        }
+                    }
+                }
+                return self.sanitize(p, v);
+            }
+        }
         let key = (p.id.clone(), t.to_bits());
         if let Some(v) = self.memo.get(&key) {
             return *v;
@@ -236,7 +259,9 @@ impl<'p> Resolver<'p> {
     }
 
     fn follow(&mut self, p: &Property, current: Value, source: &str, t: f64, scale: f32, offset: f32) -> Value {
-        let Some(src) = self.index.get(source).copied() else {
+        let project = self.project;
+        let index = self.index.get_or_insert_with(|| project.property_index());
+        let Some(src) = index.get(source).copied() else {
             self.diag(DiagnosticKind::MissingRef, format!("{}->{}", p.id, source));
             return current;
         };

@@ -889,7 +889,9 @@ pub extern "C" fn bf_cmd(e: *mut Engine, json: *const c_char) -> *const c_char {
         Err(_) => serde_json::json!({"error": "internal error"}),
     };
     // fonts a textfield now uses: loaded, and the state measured with them
-    let v = if engine.ensure_fonts() && v.get("error").is_none() { engine.session.as_ref().map(|s| s.state()).unwrap_or(v) } else { v };
+    // (skip on live drag "move" commands, which never introduce new fonts)
+    let is_move = c["op"].as_str() == Some("move");
+    let v = if !is_move && engine.ensure_fonts() && v.get("error").is_none() { engine.session.as_ref().map(|s| s.state()).unwrap_or(v) } else { v };
     engine.answer = serde_json::to_vec(&v).unwrap_or_default();
     engine.answer.push(0);
     engine.answer.as_ptr() as *const c_char

@@ -55,6 +55,9 @@ pub struct CanvasTools {
     pub main_nodes_only: bool,
     pub hide_locked: bool,
     pub active_figure: Option<String>,
+    /// Currently selected `(layer, node)` in Figure Studio: kept visible and
+    /// editable even when `show_static == false` ("Unlocked only" mode).
+    pub active_node: Option<(String, String)>,
     /// Figure drags keep to the axis moved along most.
     pub axis_lock: bool,
     /// Joint angles snap to multiples of this (0: off).
@@ -79,6 +82,7 @@ impl Default for CanvasTools {
             main_nodes_only: false,
             hide_locked: false,
             active_figure: None,
+            active_node: None,
             axis_lock: false,
             snap_degrees: 0.0,
             layer_handles: false,
@@ -422,7 +426,12 @@ impl CanvasTools {
             let anchors = if self.main_nodes_only && self.active_figure.as_deref() != Some(&l.id) { Some(join_anchors(s, &l.id, t)) } else { None };
             for (i, n) in f.nodes().iter().enumerate() {
                 if n.is_static && !self.show_static {
-                    continue;
+                    let keep_studio = self.active_node.as_ref().is_some_and(|(al, an)| {
+                        *al == l.id && (n.parent.is_none() || *an == n.id)
+                    });
+                    if !keep_studio {
+                        continue;
+                    }
                 }
                 if let Some(a) = &anchors {
                     if n.parent.is_some() && !a.contains(&n.id) {
@@ -464,7 +473,60 @@ impl CanvasTools {
         let LayerKind::Figure(f) = &l.kind else { return Vec::new() };
         let Some(i) = f.index_of(node) else { return Vec::new() };
         let mut r = Resolver::new(p);
-        (0..frames.clamp(0, 2000))
+        let count = frames.clamp(0, 2000);
+        // Fast path when the figure has no connectors: evaluate ONLY the ancestor chain of `node`
+        // (typically 3-6 bones instead of all 250+ detail nodes!).
+        if crate::eval::pose::connector_links(f).is_empty() {
+            let nodes = f.nodes();
+            let mut chain = Vec::new();
+            let mut cur = Some(i);
+            let mut guard = nodes.len();
+            while let Some(idx) = cur {
+                chain.push(idx);
+                if guard == 0 {
+                    break;
+                }
+                guard -= 1;
+                cur = nodes[idx].parent.as_deref().and_then(|pid| f.index_of(pid));
+            }
+            chain.reverse();
+            return (0..count)
+                .map(|fr| {
+                    let t = fr as f64 / fps;
+                    let v = self.view_with(p, l, t, &mut r);
+                    let mut x = 0.0f64;
+                    let mut y = 0.0f64;
+                    let mut angles: Vec<f64> = Vec::with_capacity(chain.len());
+                    for (ci, &ni) in chain.iter().enumerate() {
+                        let nd = &nodes[ni];
+                        let rot = r.f(&nd.rotation, t) as f64;
+                        if ci == 0 {
+                            angles.push(rot);
+                            continue;
+                        }
+                        let base_ang = match nd.angle_lock {
+                            LOCK_ABSOLUTE => 0.0,
+                            LOCK_RELATIVE => {
+                                let mut a = ci - 1;
+                                while a > 0 && nodes[chain[a]].is_static {
+                                    a -= 1;
+                                }
+                                angles[a]
+                            }
+                            _ => angles[ci - 1],
+                        };
+                        let ang = base_ang + rot;
+                        angles.push(ang);
+                        let len = (r.f(&nd.length, t) * r.f(&nd.scale, t)) as f64;
+                        let rad = ang.to_radians();
+                        x += len * rad.cos();
+                        y += len * rad.sin();
+                    }
+                    (v.map_x(x, y) as f32, v.map_y(x, y) as f32)
+                })
+                .collect();
+        }
+        (0..count)
             .map(|fr| {
                 let t = fr as f64 / fps;
                 let v = self.view_with(p, l, t, &mut r);

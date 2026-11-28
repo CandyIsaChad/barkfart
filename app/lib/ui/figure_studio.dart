@@ -19,6 +19,8 @@ class FigureStudioHeader extends StatelessWidget {
     required this.onRename,
     required this.onSaveLibrary,
     required this.onPrimary,
+    this.showAllNodes = true,
+    this.onToggleShowAllNodes,
     this.showGrid = true,
     this.onToggleGrid,
     this.showCrosshair = true,
@@ -33,11 +35,56 @@ class FigureStudioHeader extends StatelessWidget {
   final VoidCallback onRename;
   final VoidCallback onSaveLibrary;
   final VoidCallback onPrimary;
+  final bool showAllNodes;
+  final ValueChanged<bool>? onToggleShowAllNodes;
   final bool showGrid;
   final VoidCallback? onToggleGrid;
   final bool showCrosshair;
   final VoidCallback? onToggleCrosshair;
   final bool compact;
+
+  Widget _nodeVisibilitySwitch() {
+    Widget seg(String label, bool active, {String? icon, required VoidCallback onTap}) {
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          height: 26,
+          padding: const EdgeInsets.symmetric(horizontal: 9),
+          decoration: active
+              ? BoxDecoration(
+                  color: cCard,
+                  borderRadius: BorderRadius.circular(7),
+                  boxShadow: const [BoxShadow(color: Color(0x1E000000), blurRadius: 2, offset: Offset(0, 1))],
+                )
+              : null,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (icon != null) ...[
+              Pictogram(icon, size: 12.5, color: active ? cAccent : cSecondary, stroke: 2),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              maxLines: 1,
+              style: kit.ink(12, active ? FontWeight.w700 : FontWeight.w500, active ? cAccent : cSecondary),
+            ),
+          ]),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: cControl,
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        seg('All nodes', showAllNodes, onTap: () => onToggleShowAllNodes?.call(true)),
+        seg('Unlocked only', !showAllNodes, icon: 'unlock', onTap: () => onToggleShowAllNodes?.call(false)),
+      ]),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -85,6 +132,10 @@ class FigureStudioHeader extends StatelessWidget {
             ),
           ),
         ),
+        if (wide && onToggleShowAllNodes != null) ...[
+          _nodeVisibilitySwitch(),
+          const SizedBox(width: 6),
+        ],
         if (wide && onToggleGrid != null)
           kit.IconTool('grid', label: 'Studio grid', on: showGrid, size: 18, onTap: onToggleGrid),
         if (wide && onToggleCrosshair != null)
@@ -113,6 +164,8 @@ class FigureStudioShelf extends StatelessWidget {
     required this.polyfillActive,
     required this.mirrorOn,
     required this.gridOn,
+    this.showAllNodes = true,
+    this.onToggleShowAllNodes,
     required this.hasSelectedJoint,
     required this.canEditNonRoot,
     required this.shapePainterBuilder,
@@ -130,6 +183,8 @@ class FigureStudioShelf extends StatelessWidget {
   final bool polyfillActive;
   final bool mirrorOn;
   final bool gridOn;
+  final bool showAllNodes;
+  final VoidCallback? onToggleShowAllNodes;
   final bool hasSelectedJoint;
   final bool canEditNonRoot;
   final CustomPainter Function(String glyph, Color color) shapePainterBuilder;
@@ -238,6 +293,13 @@ class FigureStudioShelf extends StatelessWidget {
             for (final (id, label, glyph) in _tools)
               Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: shapeTile(id, label, glyph)),
             Container(width: 1, height: compact ? 34 : 40, margin: const EdgeInsets.symmetric(horizontal: 8), color: cLine),
+            if (onToggleShowAllNodes != null)
+              actionTile(
+                showAllNodes ? 'eye' : 'unlock',
+                showAllNodes ? 'All nodes' : 'Unlocked',
+                onToggleShowAllNodes,
+                active: !showAllNodes,
+              ),
             actionTile('mirror', 'Mirror', onToggleMirror, active: mirrorOn),
             actionTile('grid', 'Grid', onToggleGrid, active: gridOn),
             Container(width: 1, height: compact ? 34 : 40, margin: const EdgeInsets.symmetric(horizontal: 6), color: cLine),

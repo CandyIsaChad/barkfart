@@ -1920,6 +1920,272 @@ impl Layer {
         out
     }
 
+    /// Allocation-free O(1) lookup for a property on this layer (fast-pathing
+    /// `{layer_id}/{node_id}/{field}` for figures before falling back to a scan).
+    pub fn property(&self, id: &str) -> Option<&Property> {
+        if let Some(rest) = id.strip_prefix(&self.id).and_then(|s| s.strip_prefix('/')) {
+            match rest {
+                "shown" if self.shown.id == id => return Some(&self.shown),
+                "opacity" if self.opacity.id == id => return Some(&self.opacity),
+                "x" if self.transform.x.id == id => return Some(&self.transform.x),
+                "y" if self.transform.y.id == id => return Some(&self.transform.y),
+                "rotation" if self.transform.rotation.id == id => return Some(&self.transform.rotation),
+                "scaleX" if self.transform.scale_x.id == id => return Some(&self.transform.scale_x),
+                "scaleY" if self.transform.scale_y.id == id => return Some(&self.transform.scale_y),
+                "anchorX" if self.transform.anchor_x.id == id => return Some(&self.transform.anchor_x),
+                "anchorY" if self.transform.anchor_y.id == id => return Some(&self.transform.anchor_y),
+                _ => {}
+            }
+            if let LayerKind::Figure(f) = &self.kind {
+                if let Some((nid, field)) = rest.split_once('/') {
+                    if let Some(n) = f.node(nid) {
+                        let cand = match field {
+                            "rotation" => Some(&n.rotation),
+                            "length" => Some(&n.length),
+                            "thickness" => Some(&n.thickness),
+                            "scale" => Some(&n.scale),
+                            "color" => Some(&n.color),
+                            "shown" => Some(&n.shown),
+                            "gradientColor" => Some(&n.gradient_color),
+                            "outlineColor" => Some(&n.outline_color),
+                            _ => None,
+                        };
+                        if let Some(p) = cand.filter(|p| p.id == id) {
+                            return Some(p);
+                        }
+                    }
+                }
+            }
+        }
+        if self.shown.id == id {
+            return Some(&self.shown);
+        }
+        if self.opacity.id == id {
+            return Some(&self.opacity);
+        }
+        for p in self.transform.all() {
+            if p.id == id {
+                return Some(p);
+            }
+        }
+        for e in self.effects.nodes.values() {
+            if e.mix.id == id {
+                return Some(&e.mix);
+            }
+            for p in e.params.values() {
+                if p.id == id {
+                    return Some(p);
+                }
+            }
+        }
+        match &self.kind {
+            LayerKind::Figure(f) => {
+                for n in f.nodes() {
+                    for p in n.properties() {
+                        if p.id == id {
+                            return Some(p);
+                        }
+                    }
+                }
+                for pf in &f.polyfills {
+                    if pf.color.id == id {
+                        return Some(&pf.color);
+                    }
+                }
+            }
+            LayerKind::Sprite(s) => {
+                if s.tint.id == id {
+                    return Some(&s.tint);
+                }
+                for p in &s.distort {
+                    if p.id == id {
+                        return Some(p);
+                    }
+                }
+            }
+            LayerKind::Text(t) => {
+                if t.color.id == id {
+                    return Some(&t.color);
+                }
+            }
+            LayerKind::Symbol(s) => {
+                if s.time_offset.id == id {
+                    return Some(&s.time_offset);
+                }
+                if s.speed.id == id {
+                    return Some(&s.speed);
+                }
+            }
+            LayerKind::Adjustment => {}
+            LayerKind::Audio(clips) => {
+                for c in clips {
+                    if c.volume.id == id {
+                        return Some(&c.volume);
+                    }
+                    if c.pan.id == id {
+                        return Some(&c.pan);
+                    }
+                }
+            }
+            LayerKind::Camera(c) => {
+                for p in [&c.x, &c.y, &c.zoom, &c.rotation, &c.background, &c.background2, &c.delay, &c.repeat_back, &c.repeat_times, &c.silence, &c.slow_motion, &c.bg_expand, &c.widescreen, &c.wobble_xy, &c.wobble_rot, &c.wobble_speed, &c.wobble_no_zoom, &c.auto_cam, &c.auto_cam_end, &c.repeat_tween] {
+                    if p.id == id {
+                        return Some(p);
+                    }
+                }
+            }
+            LayerKind::Script(sc) => {
+                for r in &sc.runs {
+                    if r.mix.id == id {
+                        return Some(&r.mix);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Allocation-free O(1) mutable lookup for a property on this layer.
+    pub fn property_mut(&mut self, id: &str) -> Option<&mut Property> {
+        let rest_opt = id.strip_prefix(&self.id).and_then(|s| s.strip_prefix('/'));
+        if let Some(rest) = rest_opt {
+            match rest {
+                "shown" if self.shown.id == id => return Some(&mut self.shown),
+                "opacity" if self.opacity.id == id => return Some(&mut self.opacity),
+                "x" if self.transform.x.id == id => return Some(&mut self.transform.x),
+                "y" if self.transform.y.id == id => return Some(&mut self.transform.y),
+                "rotation" if self.transform.rotation.id == id => return Some(&mut self.transform.rotation),
+                "scaleX" if self.transform.scale_x.id == id => return Some(&mut self.transform.scale_x),
+                "scaleY" if self.transform.scale_y.id == id => return Some(&mut self.transform.scale_y),
+                "anchorX" if self.transform.anchor_x.id == id => return Some(&mut self.transform.anchor_x),
+                "anchorY" if self.transform.anchor_y.id == id => return Some(&mut self.transform.anchor_y),
+                _ => {}
+            }
+        }
+        // Fast O(1) lookup for figure node properties `{layer_id}/{node_id}/{field}`
+        let fig_hit = if let (Some(rest), LayerKind::Figure(f)) = (rest_opt, &self.kind) {
+            rest.split_once('/').and_then(|(nid, field)| {
+                let idx = f.index_of(nid)?;
+                let n = &f.nodes()[idx];
+                let slot = match field {
+                    "rotation" if n.rotation.id == id => 0u8,
+                    "length" if n.length.id == id => 1,
+                    "thickness" if n.thickness.id == id => 2,
+                    "scale" if n.scale.id == id => 3,
+                    "color" if n.color.id == id => 4,
+                    "shown" if n.shown.id == id => 5,
+                    "gradientColor" if n.gradient_color.id == id => 6,
+                    "outlineColor" if n.outline_color.id == id => 7,
+                    _ => return None,
+                };
+                Some((idx, slot))
+            })
+        } else {
+            None
+        };
+        if self.shown.id == id {
+            return Some(&mut self.shown);
+        }
+        if self.opacity.id == id {
+            return Some(&mut self.opacity);
+        }
+        let t = &mut self.transform;
+        for p in [&mut t.x, &mut t.y, &mut t.rotation, &mut t.scale_x, &mut t.scale_y, &mut t.anchor_x, &mut t.anchor_y] {
+            if p.id == id {
+                return Some(p);
+            }
+        }
+        for e in self.effects.nodes.values_mut() {
+            if e.mix.id == id {
+                return Some(&mut e.mix);
+            }
+            for p in e.params.values_mut() {
+                if p.id == id {
+                    return Some(p);
+                }
+            }
+        }
+        match &mut self.kind {
+            LayerKind::Figure(f) => {
+                if let Some((idx, slot)) = fig_hit {
+                    let n = &mut f.parts_mut().0[idx];
+                    return Some(match slot {
+                        0 => &mut n.rotation,
+                        1 => &mut n.length,
+                        2 => &mut n.thickness,
+                        3 => &mut n.scale,
+                        4 => &mut n.color,
+                        5 => &mut n.shown,
+                        6 => &mut n.gradient_color,
+                        _ => &mut n.outline_color,
+                    });
+                }
+                let (nodes, fills) = f.parts_mut();
+                for n in nodes {
+                    for p in [&mut n.rotation, &mut n.length, &mut n.thickness, &mut n.scale, &mut n.color, &mut n.shown, &mut n.gradient_color, &mut n.outline_color] {
+                        if p.id == id {
+                            return Some(p);
+                        }
+                    }
+                }
+                for pf in fills {
+                    if pf.color.id == id {
+                        return Some(&mut pf.color);
+                    }
+                }
+            }
+            LayerKind::Sprite(s) => {
+                if s.tint.id == id {
+                    return Some(&mut s.tint);
+                }
+                for p in &mut s.distort {
+                    if p.id == id {
+                        return Some(p);
+                    }
+                }
+            }
+            LayerKind::Text(t) => {
+                if t.color.id == id {
+                    return Some(&mut t.color);
+                }
+            }
+            LayerKind::Symbol(s) => {
+                if s.time_offset.id == id {
+                    return Some(&mut s.time_offset);
+                }
+                if s.speed.id == id {
+                    return Some(&mut s.speed);
+                }
+            }
+            LayerKind::Adjustment => {}
+            LayerKind::Audio(clips) => {
+                for c in clips {
+                    if c.volume.id == id {
+                        return Some(&mut c.volume);
+                    }
+                    if c.pan.id == id {
+                        return Some(&mut c.pan);
+                    }
+                }
+            }
+            LayerKind::Camera(c) => {
+                for p in [&mut c.x, &mut c.y, &mut c.zoom, &mut c.rotation, &mut c.background, &mut c.background2, &mut c.delay, &mut c.repeat_back, &mut c.repeat_times, &mut c.silence, &mut c.slow_motion, &mut c.bg_expand, &mut c.widescreen, &mut c.wobble_xy, &mut c.wobble_rot, &mut c.wobble_speed, &mut c.wobble_no_zoom, &mut c.auto_cam, &mut c.auto_cam_end, &mut c.repeat_tween] {
+                    if p.id == id {
+                        return Some(p);
+                    }
+                }
+            }
+            LayerKind::Script(sc) => {
+                for r in &mut sc.runs {
+                    if r.mix.id == id {
+                        return Some(&mut r.mix);
+                    }
+                }
+            }
+        }
+        None
+    }
+
     pub fn as_figure(&self) -> Option<&Figure> {
         match &self.kind {
             LayerKind::Figure(f) => Some(f),
@@ -2165,9 +2431,19 @@ impl Project {
 
     /// Where a property lives: (symbol id, layer id), or (symbol id, "") for scoped effects.
     pub fn locate_property(&self, id: &str) -> Option<(String, String)> {
+        // Fast path: check prefix layer id first (almost all ids start with `{layer_id}/`).
+        if let Some((lid, _)) = id.split_once('/') {
+            for s in self.library.values() {
+                if let Some(l) = s.layer(lid) {
+                    if l.property(id).is_some() {
+                        return Some((s.id.clone(), l.id.clone()));
+                    }
+                }
+            }
+        }
         for s in self.library.values() {
             for l in &s.layers {
-                if l.properties().iter().any(|p| p.id == id) {
+                if l.property(id).is_some() {
                     return Some((s.id.clone(), l.id.clone()));
                 }
             }
@@ -2177,13 +2453,13 @@ impl Project {
 
     pub fn property(&self, id: &str) -> Option<&Property> {
         let (s, l) = self.locate_property(id)?;
-        self.symbol(&s)?.layer(&l)?.properties().into_iter().find(|p| p.id == id)
+        self.symbol(&s)?.layer(&l)?.property(id)
     }
 
     /// A property to change (its layer is copied first if a snapshot shares it).
     pub fn property_mut(&mut self, id: &str) -> Option<&mut Property> {
         let (s, l) = self.locate_property(id)?;
-        self.layer_mut(&s, &l)?.properties_mut().into_iter().find(|p| p.id == id)
+        self.layer_mut(&s, &l)?.property_mut(id)
     }
 
     /// Every property in the project by id (for modifiers that link).
