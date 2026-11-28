@@ -332,6 +332,7 @@ fn node_base(m: &Obj) -> R<NodeBase> {
         trapezoid_round_end: b(m, "roundEnd", false)?,
         right_triangle: i(m, "rightTriangle", 0)?,
         triangle_upside_down: b(m, "upsideDown", false)?,
+        rotation: if has(m, "rotation") { Some(parse_f(m.get("rotation"), "rotation")?) } else { None },
     })
 }
 
@@ -1014,6 +1015,9 @@ fn node_base_json(id: &str, nb: &NodeBase) -> Json {
         .put("roundEnd", Json::Bool(nb.trapezoid_round_end))
         .put("rightTriangle", json::int(nb.right_triangle as i64))
         .put("upsideDown", Json::Bool(nb.triangle_upside_down));
+    if let Some(rot) = nb.rotation {
+        m.put("rotation", json::f32(rot));
+    }
     m.done()
 }
 

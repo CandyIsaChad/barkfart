@@ -177,8 +177,7 @@ fn frame_of(project: &Project, t: f64) -> (f64, i32) {
 }
 
 fn widescreen_at(project: &Project, sym: &Symbol, t: f64, r: &mut Resolver) -> bool {
-    let (fps, k) = frame_of(project, t);
-    sym.id == project.root_symbol && active_camera(sym, t, r).is_some_and(|c| crate::timing::setting(&c.widescreen, fps, k) > 0.5)
+    sym.id == project.root_symbol && active_camera(sym, t, r).is_some_and(|c| r.f(&c.widescreen, t) > 0.5)
 }
 
 /// Camera Tools "Wobble camera": a shake in screen space (playback and

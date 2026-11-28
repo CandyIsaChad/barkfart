@@ -180,7 +180,17 @@ impl<'p> Resolver<'p> {
                         _ => continue,
                     };
                     let fps = self.fps;
-                    let sample = |frame: f64| p.key_value(frame / fps).f() as f64;
+                    let loop_spec = match mods.first() {
+                        Some(Modifier { enabled: true, kind: ModifierKind::Loop { mode, start: s, end } }) => Some((*mode, *s, *end)),
+                        _ => None,
+                    };
+                    let sample = |frame: f64| {
+                        let st = match loop_spec {
+                            Some((mode, s, e)) => loop_remap(mode, s, e, frame / fps),
+                            None => frame / fps,
+                        };
+                        ValueType::to_scalar(&p.key_value(st))
+                    };
                     let time = barkfart_script::Time { frame: t * fps, seconds: t, fps };
                     match crate::plugins::modify(id, &p.id, n, props, time, &sample) {
                         Some(x) => {
@@ -200,7 +210,8 @@ impl<'p> Resolver<'p> {
         }
         // K2: script layers, on top of keys and modifiers
         if let Some(d) = &self.scripts {
-            if let Some(ls) = d.by_prop.get(&p.id) {
+            let base_id = p.id.split_once('#').map_or(p.id.as_str(), |(a, _)| a);
+            if let Some(ls) = d.by_prop.get(base_id) {
                 let d = d.clone();
                 let mut x = ValueType::to_scalar(&v);
                 for &li in ls.clone().iter() {
@@ -216,7 +227,7 @@ impl<'p> Resolver<'p> {
                             o
                         }
                     };
-                    x = out.apply(&p.id, x, t * self.fps);
+                    x = out.apply(base_id, x, t * self.fps);
                 }
                 v = p.ty.from_scalar(x, &v);
             }

@@ -11,40 +11,32 @@ use crate::model::*;
 /// figure) or the view (the camera). The whole-figure rule keys these together.
 pub fn pose_props(l: &mut Layer) -> Vec<&mut Property> {
     let tr = &mut l.transform;
-    let mut ps: Vec<&mut Property> = vec![&mut tr.x, &mut tr.y, &mut tr.rotation, &mut tr.scale_x, &mut tr.scale_y];
     match &mut l.kind {
+        LayerKind::Camera(c) => vec![&mut c.x, &mut c.y, &mut c.zoom, &mut c.rotation],
         LayerKind::Figure(f) => {
+            let mut ps: Vec<&mut Property> = vec![&mut tr.x, &mut tr.y, &mut tr.rotation, &mut tr.scale_x, &mut tr.scale_y];
             for nd in f.nodes_mut() {
                 ps.push(&mut nd.rotation);
                 ps.push(&mut nd.length);
             }
+            ps
         }
-        LayerKind::Camera(c) => {
-            ps.push(&mut c.x);
-            ps.push(&mut c.y);
-            ps.push(&mut c.zoom);
-            ps.push(&mut c.rotation);
-        }
-        _ => {}
+        _ => vec![&mut tr.x, &mut tr.y, &mut tr.rotation, &mut tr.scale_x, &mut tr.scale_y],
     }
-    ps
 }
 
 /// The same, to read.
 pub fn pose_props_of(l: &Layer) -> Vec<&Property> {
+    if let LayerKind::Camera(c) = &l.kind {
+        return vec![&c.x, &c.y, &c.zoom, &c.rotation];
+    }
     let tr = &l.transform;
     let mut ps: Vec<&Property> = vec![&tr.x, &tr.y, &tr.rotation, &tr.scale_x, &tr.scale_y];
-    match &l.kind {
-        LayerKind::Figure(f) => {
-            for nd in f.nodes() {
-                ps.push(&nd.rotation);
-                ps.push(&nd.length);
-            }
+    if let LayerKind::Figure(f) = &l.kind {
+        for nd in f.nodes() {
+            ps.push(&nd.rotation);
+            ps.push(&nd.length);
         }
-        LayerKind::Camera(c) => {
-            ps.extend([&c.x, &c.y, &c.zoom, &c.rotation]);
-        }
-        _ => {}
     }
     ps
 }
@@ -65,8 +57,8 @@ fn frame_count(st: &State) -> i32 {
 
 fn layer<'a>(st: &'a mut State, sym: &str, id: &str) -> EditResult<&'a mut Layer> {
     match st.project.layer_mut(sym, id) {
-        Some(l) if !matches!(l.kind, LayerKind::Camera(_)) => Ok(l),
-        Some(_) => fail("The camera is set frame by frame."),
+        Some(l) if !matches!(l.kind, LayerKind::Audio(_) | LayerKind::Script(_)) => Ok(l),
+        Some(_) => fail("This layer does not have pose keyframes."),
         None => fail(format!("no layer {id}")),
     }
 }
@@ -105,11 +97,11 @@ pub fn pose_frames(l: &Layer, fps: f64) -> Vec<i32> {
     v
 }
 
-/// Distinct pose start frames for block layout: `Camera` and `Text` are keyed on
+/// Distinct pose start frames for block layout: `Text` is keyed on
 /// every frame by `anchor_poses`, so equal consecutive frames merge into one span.
 pub fn effective_pose_starts(l: &Layer, fps: f64) -> Vec<i32> {
     let starts = pose_frames(l, fps);
-    if matches!(l.kind, LayerKind::Camera(_) | LayerKind::Text(_)) {
+    if matches!(l.kind, LayerKind::Text(_)) {
         let props = pose_props_of(l);
         let at = |f: i32| props.iter().map(|q| q.key_value(f as f64 / fps)).collect::<Vec<_>>();
         let mut kept: Vec<i32> = Vec::new();
@@ -296,14 +288,14 @@ pub fn bake_pose_at(st: &mut State, sym: &str, id: &str, frame: i32) -> EditResu
     // Pre-sample join-interval local transform if this layer has timed joins.
     let join_local: Option<[f32; 5]> = {
         let Some(l) = st.project.symbol(sym).and_then(|s| s.layer(id)) else { return Ok(()) };
-        if matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_) | LayerKind::Script(_) | LayerKind::Adjustment) {
+        if matches!(l.kind, LayerKind::Audio(_) | LayerKind::Script(_) | LayerKind::Adjustment) {
             return Ok(());
         }
         let all_keyed = pose_props_of(l).iter().all(|q| q.track.keys().iter().any(|k| (k.time - t).abs() < eps));
         if all_keyed {
             return Ok(());
         }
-        if !l.joins.is_empty() {
+        if !matches!(l.kind, LayerKind::Camera(_)) && !l.joins.is_empty() {
             let m = crate::eval::local_transform(&st.project, l, t);
             let ax = l.transform.anchor_x.value.f() as f64;
             let ay = l.transform.anchor_y.value.f() as f64;
@@ -323,6 +315,11 @@ pub fn bake_pose_at(st: &mut State, sym: &str, id: &str, frame: i32) -> EditResu
     for (i, q) in pose_props(l).into_iter().enumerate() {
         if q.track.keys().iter().any(|k| (k.time - t).abs() < eps) {
             continue;
+        }
+        // When creating the very first key on a frame > 0 (e.g. an untouched Camera),
+        // anchor frame 0 with the property's current static value first so frame 0 stays put.
+        if frame > 0 && q.track.is_empty() {
+            q.track.put(Key::new(0.0, q.value, tw));
         }
         let v = if i < 5 {
             if let Some(jl) = join_local { Value::F(jl[i]) } else { q.key_value(t) }
@@ -825,7 +822,7 @@ pub fn shift_keys_ex(
     for (lid, mut sel) in by_layer {
         sel.sort_unstable();
         let Some(l) = st.project.symbol(sym).and_then(|s| s.layer(lid)) else { continue };
-        if matches!(l.kind, LayerKind::Camera(_) | LayerKind::Audio(_) | LayerKind::Script(_)) {
+        if matches!(l.kind, LayerKind::Audio(_) | LayerKind::Script(_)) {
             continue;
         }
         let existing_keys = pose_frames(l, fps);
@@ -1063,7 +1060,7 @@ pub fn scale_keys(
     for (lid, mut sel) in by_layer {
         sel.sort_unstable();
         let Some(l_ro) = st.project.symbol(sym).and_then(|s| s.layer(lid)) else { continue };
-        if matches!(l_ro.kind, LayerKind::Camera(_) | LayerKind::Audio(_) | LayerKind::Script(_)) {
+        if matches!(l_ro.kind, LayerKind::Audio(_) | LayerKind::Script(_)) {
             continue;
         }
         let existing_keys = pose_frames(l_ro, fps);

@@ -307,7 +307,7 @@ fn isolate_trees_match_the_java_layered_tessellator() {
         for tag in ["0.0", "0.37", "1.1"] {
             let r = read_gz(&dir.join(format!("t{tag}.json.gz")));
             let s = eval::evaluate_with(&p, &p.root_symbol, tag.parse().unwrap(), false, true);
-            let d = barkfart_core::tess::layered(&s, Some(&RefGlyphs));
+            let d = barkfart_core::tess::layered_legacy(&s, Some(&RefGlyphs));
             let mut got = draw_json(&d);
             got["root"] = isolate_json(&d, 0);
             let mut out = Vec::new();
@@ -342,9 +342,9 @@ fn cpu_renders_match_the_java_compositor() {
             let (w, h) = (num("w") as usize, num("h") as usize);
             let want = read_gz_bytes(&dir.join(format!("t{tag}.cpu.rgba.gz")));
             let s = eval::evaluate_with(&p, &p.root_symbol, tag.parse().unwrap(), false, true);
-            let d = barkfart_core::tess::layered(&s, Some(&RefGlyphs));
+            let d = barkfart_core::tess::layered_legacy(&s, Some(&RefGlyphs));
             let mut im = barkfart_core::fx::Image::new(w, h, num("x0") as f32, num("y0") as f32, num("scale") as f32);
-            barkfart_core::fx::render(&d, &mut im);
+            barkfart_core::fx::render_legacy(&d, &mut im);
             let got = im.to_premultiplied_u8();
             let (mut worst, mut off) = (0u8, 0usize);
             for (a, b) in want.iter().zip(&got) {

@@ -855,11 +855,35 @@ pub extern "C" fn bf_cmd(e: *mut Engine, json: *const c_char) -> *const c_char {
     // SAFETY: live handle
     let engine = unsafe { &mut *e };
     let Some(text) = cstr(json) else { return std::ptr::null() };
+    let c: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+    if engine.session.is_none() {
+        // K2 / Round 4: plugins live in the process-wide registry, so installing or
+        // uninstalling them before a project is opened must succeed cleanly.
+        let v = match c["op"].as_str() {
+            Some("plugin_install") => {
+                let name = c["name"].as_str().unwrap_or("plugin.luau");
+                match c["source"].as_str() {
+                    Some(src) => match barkfart_core::plugins::install(src, name) {
+                        Ok(def) => serde_json::json!({"installed": def.id, "message": format!("{} {} is ready.", def.name, def.version)}),
+                        Err(err) => serde_json::json!({"message": err}),
+                    },
+                    None => serde_json::json!({"message": "There is no plugin in that file."}),
+                }
+            }
+            Some("plugin_uninstall") => {
+                if let Some(id) = c["id"].as_str() {
+                    barkfart_core::plugins::uninstall(id);
+                }
+                serde_json::json!({"ok": true})
+            }
+            _ => return std::ptr::null(),
+        };
+        engine.answer = serde_json::to_vec(&v).unwrap_or_default();
+        engine.answer.push(0);
+        return engine.answer.as_ptr() as *const c_char;
+    }
     let Some(s) = engine.session.as_mut() else { return std::ptr::null() };
-    let out = catch_unwind(AssertUnwindSafe(|| {
-        let c: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
-        s.command(&c)
-    }));
+    let out = catch_unwind(AssertUnwindSafe(|| s.command(&c)));
     let v = match out {
         Ok(v) => v,
         Err(_) => serde_json::json!({"error": "internal error"}),
@@ -885,18 +909,34 @@ pub extern "C" fn bf_render_view(e: *const Engine, t: f64, w: u32, h: u32, x0: f
     let Some(p) = engine.project() else { return 2 };
     let r = catch_unwind(AssertUnwindSafe(|| {
         let start = std::time::Instant::now();
-        let camera = flags & 1 != 0;
+        let building_layer = engine.session.as_ref().and_then(|s| s.building.clone());
+        let in_studio = building_layer.is_some();
+        let camera = !in_studio && (flags & 1 != 0);
         let redirect = engine.redirect.filter(|(rt, _)| camera && *rt == t).map(|(_, r)| r);
-        let mut scene = eval::evaluate_redirected(p, &p.root_symbol, t, false, camera, redirect);
+        let studio_proj = building_layer.as_deref().and_then(|bid| {
+            let mut sp = p.clone();
+            if let Some(root) = sp.root_mut() {
+                root.layers.retain(|l| l.id == bid);
+                if let Some(l) = root.layers.first_mut() {
+                    let lm = Arc::make_mut(l);
+                    lm.visible = true;
+                    lm.shown.track.clear();
+                    lm.shown.value = barkfart_core::model::Value::B(true);
+                }
+            }
+            Some(sp)
+        });
+        let eval_proj = studio_proj.as_ref().unwrap_or(p);
+        let mut scene = eval::evaluate_redirected(eval_proj, &eval_proj.root_symbol, t, false, camera, redirect);
         // the frame background goes under the onion skin, not over it
-        let background = if flags & 2 != 0 {
+        let background = if !in_studio && (flags & 2 != 0) {
             scene.root.children.iter().position(|i| matches!(i, eval::Item::Group(g) if g.source == "background")).map(|i| scene.root.children.remove(i))
         } else {
             None
         };
         let glyphs = engine.glyphs.read().expect("glyphs");
         let mut list = tess::layered(&scene, Some(&*glyphs));
-        if flags & 2 != 0 {
+        if !in_studio && (flags & 2 != 0) {
             let v = &p.view;
             // ghosts only of frames that exist (none before the first, none after the last)
             let fps = p.settings.fps.max(1.0) as f64;
@@ -913,7 +953,7 @@ pub extern "C" fn bf_render_view(e: *const Engine, t: f64, w: u32, h: u32, x0: f
             list = list.with_underlay(tess::layered(&bg_scene, None));
         }
         // Figure editor "Load BG image": the picture fitted into the stage, faint
-        if let (Some((iw, ih)), true) = (engine.editor_image, engine.session.as_ref().is_some_and(|s| s.building.is_some())) {
+        if let (Some((iw, ih)), true) = (engine.editor_image, in_studio) {
             let (sw, sh) = (p.settings.width as f32, p.settings.height as f32);
             let k = (sw / iw.max(1) as f32).min(sh / ih.max(1) as f32);
             let (hw, hh) = (iw as f32 * k / 2.0, ih as f32 * k / 2.0);
@@ -934,11 +974,12 @@ pub extern "C" fn bf_render_view(e: *const Engine, t: f64, w: u32, h: u32, x0: f
             let sc = eval::evaluate_with(&sp, &sp.root_symbol, 0.0, false, false);
             list = list.with_underlay(tess::trace_ghost(&sc, None, 0x222428, 0.1));
         }
-        // Figure editor "Trace": a frame or a figure faintly behind
+        // Figure editor "Trace": a frame or a figure faintly behind (from the full scene snapshot)
         if let Some((fr, ly)) = engine.session.as_ref().filter(|s| s.building.is_some()).and_then(|s| s.trace.clone()) {
-            let fps = p.settings.fps.max(1.0) as f64;
+            let trace_p = engine.session.as_ref().map(|s| s.scene_project()).unwrap_or(p);
+            let fps = trace_p.settings.fps.max(1.0) as f64;
             let at = fr.map_or(t, |f| f as f64 / fps);
-            let ghost_scene = eval::evaluate_with(p, &p.root_symbol, at, false, camera);
+            let ghost_scene = eval::evaluate_with(trace_p, &trace_p.root_symbol, at, false, camera);
             list = list.with_underlay(tess::trace_ghost(&ghost_scene, ly.as_deref(), 0x5a6270, 0.35));
         }
         // View options "Show filters": 8 = none, 16 = no blur
@@ -948,15 +989,19 @@ pub extern "C" fn bf_render_view(e: *const Engine, t: f64, w: u32, h: u32, x0: f
             list = list.without_effects(|ty| ty != barkfart_core::fx::BLUR && ty != barkfart_core::fx::MOTION);
         }
         // View options "Outline selection": a thin magenta band around the selected figure
-        if flags & 4 != 0 {
+        if !in_studio && (flags & 4 != 0) {
             if let Some((layer, _)) = engine.session.as_ref().and_then(|s| s.selected.as_ref()) {
                 let pad = 2.0 * (x1 - x0) / w as f32;
                 list = list.with_overlay(tess::selection_outline(&scene, layer, pad, 0xff2d92));
             }
         }
         let cpu = start.elapsed();
-        // Figure editor "Background color" (view only)
-        let bg = engine.session.as_ref().filter(|s| s.building.is_some()).and_then(|s| s.editor_bg).map(barkfart_core::model::Color::rgba8888).unwrap_or(p.settings.background);
+        // Figure editor "Background color" (view only; default clean studio #F5F6F8)
+        let bg = if in_studio {
+            engine.session.as_ref().and_then(|s| s.editor_bg).map(barkfart_core::model::Color::rgba8888).unwrap_or_else(|| barkfart_core::model::Color::rgba8888(0xf5f6f8ff))
+        } else {
+            p.settings.background
+        };
         let view = View { x0, y0, x1, y1, background: [bg.r, bg.g, bg.b, bg.a] };
         let px = engine.renderer.render(&list, w, h, view);
         if std::env::var_os("BARKFART_TRACE").is_some() {

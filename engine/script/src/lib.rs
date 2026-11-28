@@ -214,7 +214,7 @@ pub enum PropValue {
 }
 
 const LOAD_BUDGET: Duration = Duration::from_millis(200);
-const CALL_BUDGET: Duration = Duration::from_millis(5);
+const CALL_BUDGET: Duration = Duration::from_millis(50);
 /// A whole script run, every frame of it.
 const RUN_BUDGET: Duration = Duration::from_millis(2000);
 /// The memory one runtime may hold.
@@ -318,9 +318,11 @@ impl Host {
                 v.set("at", scope.create_function(|_, (_this, frame): (Value, f64)| Ok(sample(frame)))?)?;
                 let p = props_table(&self.lua, props)?;
                 let tt = self.lua.create_table()?;
+                let fps = if t.fps > 0.0 { t.fps } else { 30.0 };
                 tt.set("frame", t.frame)?;
                 tt.set("seconds", t.seconds)?;
-                tt.set("fps", t.fps)?;
+                tt.set("fps", fps)?;
+                tt.set("dt", 1.0 / fps)?;
                 // t.random(): the same numbers for the same plugin, value and
                 // frame, in whatever order frames are drawn
                 let state = Cell::new(seed(&plugin.def.id, seed_key, t.frame));

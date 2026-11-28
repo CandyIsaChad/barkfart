@@ -1035,6 +1035,8 @@ pub struct NodeBase {
     pub trapezoid_round_end: bool,
     pub right_triangle: i32,
     pub triangle_upside_down: bool,
+    /// The made-with rest angle on entry (optional for older files).
+    pub rotation: Option<f32>,
 }
 
 impl NodeBase {
@@ -1067,6 +1069,7 @@ impl NodeBase {
             trapezoid_round_end: n.trapezoid_round_end,
             right_triangle: n.right_triangle,
             triangle_upside_down: n.triangle_upside_down,
+            rotation: Some(n.rotation.key_value(0.0).f()),
         }
     }
 }
@@ -1270,23 +1273,113 @@ impl Figure {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Blend {
     Normal,
-    Add,
+    Darken,
     Multiply,
+    ColorBurn,
+    Lighten,
     Screen,
+    ColorDodge,
+    Add,
+    Overlay,
+    SoftLight,
+    HardLight,
+    Difference,
+    Exclusion,
 }
 
 impl Blend {
+    pub const ALL: [Blend; 13] = [
+        Blend::Normal,
+        Blend::Darken,
+        Blend::Multiply,
+        Blend::ColorBurn,
+        Blend::Lighten,
+        Blend::Screen,
+        Blend::ColorDodge,
+        Blend::Add,
+        Blend::Overlay,
+        Blend::SoftLight,
+        Blend::HardLight,
+        Blend::Difference,
+        Blend::Exclusion,
+    ];
+
+    pub fn index(self) -> u32 {
+        match self {
+            Blend::Normal => 0,
+            Blend::Darken => 1,
+            Blend::Multiply => 2,
+            Blend::ColorBurn => 3,
+            Blend::Lighten => 4,
+            Blend::Screen => 5,
+            Blend::ColorDodge => 6,
+            Blend::Add => 7,
+            Blend::Overlay => 8,
+            Blend::SoftLight => 9,
+            Blend::HardLight => 10,
+            Blend::Difference => 11,
+            Blend::Exclusion => 12,
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Blend::Normal => "NORMAL",
-            Blend::Add => "ADD",
+            Blend::Darken => "DARKEN",
             Blend::Multiply => "MULTIPLY",
+            Blend::ColorBurn => "COLOR_BURN",
+            Blend::Lighten => "LIGHTEN",
             Blend::Screen => "SCREEN",
+            Blend::ColorDodge => "COLOR_DODGE",
+            Blend::Add => "ADD",
+            Blend::Overlay => "OVERLAY",
+            Blend::SoftLight => "SOFT_LIGHT",
+            Blend::HardLight => "HARD_LIGHT",
+            Blend::Difference => "DIFFERENCE",
+            Blend::Exclusion => "EXCLUSION",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Blend::Normal => "Normal",
+            Blend::Darken => "Darken",
+            Blend::Multiply => "Multiply",
+            Blend::ColorBurn => "Color Burn",
+            Blend::Lighten => "Lighten",
+            Blend::Screen => "Screen",
+            Blend::ColorDodge => "Color Dodge",
+            Blend::Add => "Add",
+            Blend::Overlay => "Overlay",
+            Blend::SoftLight => "Soft Light",
+            Blend::HardLight => "Hard Light",
+            Blend::Difference => "Difference",
+            Blend::Exclusion => "Exclusion",
+        }
+    }
+
+    pub fn group(self) -> &'static str {
+        match self {
+            Blend::Normal => "Normal",
+            Blend::Darken | Blend::Multiply | Blend::ColorBurn => "Darken",
+            Blend::Lighten | Blend::Screen | Blend::ColorDodge | Blend::Add => "Lighten",
+            Blend::Overlay | Blend::SoftLight | Blend::HardLight => "Contrast",
+            Blend::Difference | Blend::Exclusion => "Invert",
         }
     }
 
     pub fn from_name(s: &str) -> Option<Blend> {
-        [Blend::Normal, Blend::Add, Blend::Multiply, Blend::Screen].into_iter().find(|b| b.name() == s)
+        let k = s.trim();
+        Blend::ALL.into_iter().find(|b| b.name().eq_ignore_ascii_case(k))
+    }
+
+    pub fn catalog_json() -> serde_json::Value {
+        serde_json::Value::Array(
+            Blend::ALL
+                .into_iter()
+                .map(|b| serde_json::json!({"id": b.name(), "index": b.index(), "label": b.label(), "group": b.group()}))
+                .collect(),
+        )
     }
 }
 

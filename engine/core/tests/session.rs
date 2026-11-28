@@ -1538,13 +1538,17 @@ fn widescreen_and_wobble_are_per_frame_playback_effects() {
     let st = s.command(&json!({"op": "camera_fx", "widescreen": true}));
     assert_eq!(st["undo"], "Camera effects");
     assert_eq!(st["camFx"]["widescreen"], true);
-    assert!(shot(&s, 0.0).len() > a0.len(), "bars drawn");
+    assert!(shot(&s, 0.0).len() > a0.len(), "bars drawn on frame 0");
     assert_eq!(stage(&s, 0.0), e0, "not in the editing view");
-    assert_eq!(shot(&s, 1.0 / fps), {
+    // Round 4: Widescreen applies globally across the whole animation (all frames) unless keyed/perFrame.
+    assert!(shot(&s, 1.0 / fps).len() > {
         let mut s2 = Session::new(Document::new(p0.clone()));
         s2.command(&json!({"op": "frame", "i": 1}));
-        shot(&s2, 1.0 / fps)
-    }, "only this frame");
+        shot(&s2, 1.0 / fps).len()
+    }, "bars drawn across later frames globally");
+    s.command(&json!({"op": "frame", "i": 1}));
+    assert_eq!(s.state()["camFx"]["widescreen"], true);
+    s.command(&json!({"op": "frame", "i": 0}));
     s.command(&json!({"op": "camera_fx", "widescreen": false}));
     let calm = shot(&s, 0.3 / fps);
     s.command(&json!({"op": "camera_fx", "wobbleXY": 20.0, "wobbleRot": 2.0}));
@@ -1554,7 +1558,10 @@ fn widescreen_and_wobble_are_per_frame_playback_effects() {
     assert_ne!(shot(&s, 0.3 / fps), calm, "it shakes");
     assert_eq!(stage(&s, 0.0), e0);
     let text = codec::encode(s.project());
-    assert!(text.contains("wobbleXY") && text.contains("widescreen"));
+    assert!(text.contains("wobbleXY"));
+    s.command(&json!({"op": "camera_fx", "widescreen": true}));
+    let text2 = codec::encode(s.project());
+    assert!(text2.contains("widescreen"));
 }
 
 /// Camera Tools "Auto-camera": the camera tweens from the start frame's to
@@ -1719,17 +1726,17 @@ fn textfield_locks_to_the_camera() {
 fn trace_ghost_of_a_frame_or_a_figure() {
     let mut s = two_poses();
     s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
+    let before = codec::encode(s.project());
     s.command(&json!({"op": "build", "layer": "L2"}));
     let st = s.command(&json!({"op": "trace", "frame": 1}));
     assert_eq!(st["trace"]["frame"], 1);
-    let p = s.project();
+    let p = s.scene_project();
     let scene = barkfart_core::eval::evaluate_with(p, &p.root_symbol, 1.0 / p.settings.fps as f64, false, false);
     let all = barkfart_core::tess::trace_ghost(&scene, None, 0x5a6270, 0.35);
     let one = barkfart_core::tess::trace_ghost(&scene, Some("L2"), 0x5a6270, 0.35);
     assert!(all.triangle_count() >= one.triangle_count() && one.triangle_count() > 0);
     assert!(all.batches.iter().flat_map(|b| b.rgba.iter()).all(|c| c >> 8 == 0x5a6270), "all grey");
     assert_eq!(barkfart_core::tess::trace_ghost(&scene, Some("nope"), 0, 0.3).triangle_count(), 0);
-    let before = codec::encode(s.project());
     let st = s.command(&json!({"op": "build_done"}));
     assert!(st["trace"].is_null());
     assert_eq!(codec::encode(s.project()), before, "nothing saved");
@@ -2822,7 +2829,7 @@ fn copying_and_looking_never_touch_the_project() {
         json!({"op": "select", "layer": "L2"}), json!({"op": "select", "layer": "L2", "node": "armR2"}), json!({"op": "select"}),
         json!({"op": "cycle_figure", "dir": 1}), json!({"op": "cycle_figure", "dir": -1}), json!({"op": "cycle_joint", "dir": 1}), json!({"op": "cycle_joint", "dir": -1}),
         json!({"op": "mode", "v": "all"}), json!({"op": "mode", "v": "camera"}), json!({"op": "mode", "v": "figure"}),
-        json!({"op": "join"}), json!({"op": "join_cancel"}), json!({"op": "build", "layer": "L2"}), json!({"op": "connect_start"}), json!({"op": "connect_cancel"}),
+        json!({"op": "join"}), json!({"op": "join_cancel"}), json!({"op": "connect_start"}), json!({"op": "connect_cancel"}),
         json!({"op": "polyfill_edit", "id": "pf1"}), json!({"op": "polyfill_edit"}), json!({"op": "draw_tool", "shape": "circle"}), json!({"op": "draw_tool", "shape": "none"}),
         json!({"op": "build_done"}), json!({"op": "frame", "i": 0}), json!({"op": "frame", "i": 1}),
         json!({"op": "set", "k": "stretch", "v": true}), json!({"op": "set", "k": "scope", "v": "joint"}), json!({"op": "set", "k": "snap", "v": 15}),
@@ -2853,6 +2860,24 @@ fn copying_and_looking_never_touch_the_project() {
         if after != before {
             let what = if after.0 != before.0 { "the project" } else if after.5 != before.5 { "the unsaved marker" } else { "the undo steps" };
             failures.push(format!("{c}: changed {what}"));
+        }
+    }
+    // Round 4: entering isolated figure studio (`build`) and exiting without edits (`build_cancel`
+    // or `build_done`) must also leave the saved project, undo stack, and dirty marker untouched.
+    for exit_op in ["build_cancel", "build_done"] {
+        let mut s = two_poses();
+        pick_arm(&mut s, 1);
+        s.doc.mark_saved();
+        let key = |s: &Session| {
+            let st = s.state();
+            (saved_text(s.project()), st["undo"].clone(), st["redo"].clone(), st["canUndo"].clone(), st["canRedo"].clone(), st["dirty"].clone())
+        };
+        let before = key(&s);
+        s.command(&json!({"op": "build", "layer": "L2"}));
+        s.command(&json!({"op": exit_op}));
+        let after = key(&s);
+        if after != before {
+            failures.push(format!("build + {exit_op}: changed project/undo/dirty"));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
@@ -3128,7 +3153,7 @@ const EFFECT_ROWS: [&str; 12] = ["invert", "motion blur", "blur", "pixelate", "h
 #[test]
 fn a_per_frame_control_on_the_middle_frame_leaves_the_other_frames_alone() {
     let per_frame = [
-        "use gradient", "expand gradient", "widescreen", "wobble", "wobble rotation", "do not tween", "pause", "slow motion", "invert", "motion blur",
+        "use gradient", "expand gradient", "wobble", "wobble rotation", "do not tween", "pause", "slow motion", "invert", "motion blur",
         "nudge", "turn figure", "silence frame", "gradient colours kept while off", "pause kept while off", "motion blur distance kept while off",
         "blur", "pixelate", "hue shift", "saturation", "tint amount", "glow amount", "shadow opacity", "outline amount", "opacity",
     ];
@@ -3993,6 +4018,12 @@ fn random_frame_editing_keeps_camera_and_filter_values_with_their_frames() {
             s.command(&json!({"op": "filter", "invert": false, "blur": 0}));
         }
         s.command(&json!({"op": "add_camera"}));
+        // Round 4: camera is sparse by default (no forced per-frame baking); seed per-frame
+        // camera keys here to test frame insert/delete/copy/paste/fps with keyed camera frames.
+        for i in 0..s.state()["frames"].as_i64().unwrap() {
+            s.command(&json!({"op": "frame", "i": i}));
+            s.command(&json!({"op": "camera", "zoom": 1.0}));
+        }
         let read = |s: &mut Session, i: usize| -> (f64, bool, f64) {
             s.command(&json!({"op": "frame", "i": i as i64}));
             s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
@@ -4000,11 +4031,24 @@ fn random_frame_editing_keeps_camera_and_filter_values_with_their_frames() {
             (st["cam"]["zoom"].as_f64().unwrap(), st["selected"]["filters"]["invert"].as_bool().unwrap_or(false), st["selected"]["filters"]["blur"].as_f64().unwrap_or(0.0))
         };
         let n0 = s.state()["frames"].as_i64().unwrap() as usize;
-        let mut model: Vec<(f64, bool, f64)> = (0..n0).map(|i| read(&mut s, i)).collect();
-        let mut clip: Option<(f64, bool, f64)> = None;
+        // Round 4: camera keyframes are sparse (insert_frame does not bake camera keys onto
+        // new frames; interpolated frames tween smoothly between surrounding camera keys),
+        // while per-frame filters stay keyed per frame.
+        let mut cam_keys: Vec<Option<f64>> = (0..n0).map(|i| Some(read(&mut s, i).0)).collect();
+        let mut filters: Vec<(bool, f64)> = (0..n0).map(|i| { let (_, inv, b) = read(&mut s, i); (inv, b) }).collect();
+        let mut clip: Option<(Option<f64>, bool, f64)> = None;
+        let eval_cam = |keys: &[Option<f64>], interp: barkfart_core::model::Interp, i: usize| -> f64 {
+            let mut p = barkfart_core::model::Property::new("", barkfart_core::model::ValueType::Float, barkfart_core::model::Value::F(1.0));
+            for (j, v) in keys.iter().enumerate() {
+                if let Some(val) = *v {
+                    p.track.put(barkfart_core::model::Key::new(j as f64, barkfart_core::model::Value::F(val as f32), interp));
+                }
+            }
+            p.key_value(i as f64).f() as f64
+        };
         let mut log: Vec<String> = Vec::new();
         for step in 0..24 {
-            let n = model.len();
+            let n = filters.len();
             let f = next(n);
             s.command(&json!({"op": "frame", "i": f as i64}));
             s.command(&json!({"op": "select", "layer": "L2", "node": "armR1"}));
@@ -4013,43 +4057,46 @@ fn random_frame_editing_keeps_camera_and_filter_values_with_their_frames() {
                     let z = zooms[next(3)];
                     log.push(format!("zoom {z} on {f}"));
                     s.command(&json!({"op": "camera", "zoom": z}));
-                    model[f].0 = z;
+                    cam_keys[f] = Some(z);
                 }
                 1 => {
                     let on = next(2) == 0;
                     log.push(format!("invert {on} on {f}"));
                     s.command(&json!({"op": "filter", "invert": on}));
-                    model[f].1 = on;
+                    filters[f].0 = on;
                 }
                 2 => {
                     let b = (next(4) * 2) as f64;
                     log.push(format!("blur {b} on {f}"));
                     s.command(&json!({"op": "filter", "blur": b}));
-                    model[f].2 = b;
+                    filters[f].1 = b;
                 }
                 3 | 4 => {
                     log.push(format!("insert after {f}"));
                     s.command(&json!({"op": "insert_frame"}));
-                    let v = model[f];
-                    model.insert(f + 1, v);
+                    cam_keys.insert(f + 1, None);
+                    let v = filters[f];
+                    filters.insert(f + 1, v);
                 }
                 5 => {
                     log.push(format!("delete {f}"));
                     if n > 1 {
                         s.command(&json!({"op": "delete_frame"}));
-                        model.remove(f);
+                        cam_keys.remove(f);
+                        filters.remove(f);
                     }
                 }
                 6 => {
                     log.push(format!("copy {f}"));
                     s.command(&json!({"op": "copy_frame", "n": 0}));
-                    clip = Some(model[f]);
+                    clip = Some((cam_keys[f], filters[f].0, filters[f].1));
                 }
                 7 => {
-                    if let Some(c) = clip {
+                    if let Some((cz, ci, cb)) = clip {
                         log.push(format!("paste after {f}"));
                         s.command(&json!({"op": "paste_frame"}));
-                        model.insert(f + 1, c);
+                        cam_keys.insert(f + 1, cz);
+                        filters.insert(f + 1, (ci, cb));
                     }
                 }
                 _ => {
@@ -4060,10 +4107,15 @@ fn random_frame_editing_keeps_camera_and_filter_values_with_their_frames() {
             }
             let frames = s.state()["frames"].as_i64().unwrap() as usize;
             let mut bad = Vec::new();
-            if frames != model.len() {
-                bad.push(format!("{frames} frames, the model has {}", model.len()));
+            if frames != filters.len() {
+                bad.push(format!("{frames} frames, the model has {}", filters.len()));
             } else {
-                for (i, want) in model.clone().iter().enumerate() {
+                let cam_interp = s.project().root().and_then(|r| r.layers.iter().find_map(|l| match &l.kind {
+                    barkfart_core::model::LayerKind::Camera(c) => c.zoom.track.keys().first().map(|k| k.interp),
+                    _ => None,
+                })).unwrap_or(barkfart_core::model::Interp::Linear);
+                for i in 0..filters.len() {
+                    let want = (eval_cam(&cam_keys, cam_interp, i), filters[i].0, filters[i].1);
                     let got = read(&mut s, i);
                     if (got.0 - want.0).abs() > 0.02 || got.1 != want.1 || (got.2 - want.2).abs() > 0.02 {
                         bad.push(format!("frame {i}: want {want:?} got {got:?}"));

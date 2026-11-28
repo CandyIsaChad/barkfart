@@ -259,29 +259,46 @@ pub fn tessellate(scene: &Scene, glyphs: Option<&dyn GlyphSource>) -> DrawList {
     out
 }
 
-/// Triangles plus the isolate tree: groups with effects, adjustment groups
-/// and groups below full opacity are drawn offscreen and composited once.
+/// Triangles plus the isolate tree: groups with effects, adjustment groups,
+/// non-normal blend modes and groups below full opacity are drawn offscreen and
+/// composited once (preventing internal joint overlap seams and preserving
+/// blend modes at any opacity).
 pub fn layered(scene: &Scene, glyphs: Option<&dyn GlyphSource>) -> DrawList {
     let mut out = DrawList::default();
     out.open(&scene.root.source, 1.0, Blend::Normal, false, Vec::new());
-    layered_walk(&scene.root, 1.0, Blend::Normal, &mut out, true, glyphs);
+    layered_walk_with(&scene.root, 1.0, Blend::Normal, &mut out, true, glyphs, true);
+    out.close();
+    out
+}
+
+/// Java reference compatibility layered tessellator: single-layer blends at full
+/// opacity stay flat per-shape (used only by `reference.rs` against frozen Java dumps).
+pub fn layered_legacy(scene: &Scene, glyphs: Option<&dyn GlyphSource>) -> DrawList {
+    let mut out = DrawList::default();
+    out.open(&scene.root.source, 1.0, Blend::Normal, false, Vec::new());
+    layered_walk_with(&scene.root, 1.0, Blend::Normal, &mut out, true, glyphs, false);
     out.close();
     out
 }
 
 pub fn isolates(g: &Group) -> bool {
-    // a layer group with a blend blends as one picture, at any opacity
+    g.adjustment || g.whole || g.blend != Blend::Normal || g.opacity < 1.0 || g.effects.iter().any(|e| e.mix > 0.0)
+}
+
+fn isolates_legacy(g: &Group) -> bool {
     g.adjustment || g.whole || g.opacity < 1.0 || g.effects.iter().any(|e| e.mix > 0.0)
 }
 
-fn layered_walk(g: &Group, opacity: f32, blend: Blend, out: &mut DrawList, is_root: bool, glyphs: Option<&dyn GlyphSource>) {
-    if !is_root && isolates(g) {
+fn layered_walk_with(g: &Group, opacity: f32, blend: Blend, out: &mut DrawList, is_root: bool, glyphs: Option<&dyn GlyphSource>, whole_blends: bool) {
+    let iso = if whole_blends { isolates(g) } else { isolates_legacy(g) };
+    if !is_root && iso {
         let gop = g.opacity;
         if !(gop > 0.0) {
             return;
         }
         let fx: Vec<ResolvedEffect> = g.effects.iter().filter(|e| e.mix > 0.0).cloned().collect();
-        out.open(&g.source, (gop * opacity).min(1.0), g.blend, g.adjustment, fx);
+        let b = if g.blend != Blend::Normal { g.blend } else { blend };
+        out.open(&g.source, (gop * opacity).min(1.0), b, g.adjustment, fx);
         if let Some([x0, y0, x1, y1]) = g.bounds {
             if let Some(c) = out.current {
                 out.isolates[c].include(x0, y0, x1, y1);
@@ -289,7 +306,7 @@ fn layered_walk(g: &Group, opacity: f32, blend: Blend, out: &mut DrawList, is_ro
         }
         for o in &g.children {
             match o {
-                Item::Group(c) => layered_walk(c, 1.0, Blend::Normal, out, false, glyphs),
+                Item::Group(c) => layered_walk_with(c, 1.0, Blend::Normal, out, false, glyphs, whole_blends),
                 Item::Shape(s) => emit(s, 1.0, Blend::Normal, None, out, glyphs),
             }
         }
@@ -303,7 +320,7 @@ fn layered_walk(g: &Group, opacity: f32, blend: Blend, out: &mut DrawList, is_ro
     let b = if g.blend != Blend::Normal { g.blend } else { blend };
     for o in &g.children {
         match o {
-            Item::Group(c) => layered_walk(c, op, b, out, false, glyphs),
+            Item::Group(c) => layered_walk_with(c, op, b, out, false, glyphs, whole_blends),
             Item::Shape(s) => emit(s, op, b, None, out, glyphs),
         }
     }

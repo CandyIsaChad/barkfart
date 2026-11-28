@@ -85,6 +85,21 @@ enum Gesture {
     Camera { xi: String, yi: String, x: f32, y: f32, cx: f32, cy: f32 },
 }
 
+#[derive(Clone)]
+struct StudioSession {
+    snapshot: Box<Document>,
+    /// Original layer id when editing or copying an existing figure (`None` for `create_figure`).
+    source_layer: Option<String>,
+    /// `"edit"`, `"copy"`, or `"create"`.
+    mode: &'static str,
+    orig_frame: i32,
+    orig_selected: Option<(String, String)>,
+    /// Initial rest angle of each node when entering studio.
+    orig_angles: HashMap<String, f32>,
+    /// Initial rest length of each node when entering studio.
+    orig_lengths: HashMap<String, f32>,
+}
+
 pub struct Session {
     pub doc: Document,
     pub tools: CanvasTools,
@@ -147,6 +162,8 @@ pub struct Session {
     pose_clip: Option<(IndexMap<String, f32>, IndexMap<String, f32>)>,
     /// Optional layer transform copied alongside `pose_clip` when `withTransform: true`.
     pose_clip_xf: Option<[f32; 5]>,
+    /// Copied camera keyframe `[x, y, zoom, rotation]`.
+    camera_pose_clip: Option<[f32; 4]>,
     /// Copied single property key (`copy_prop_key` / `paste_prop_key`).
     prop_key_clip: Option<(ValueType, Key)>,
     /// "Copy poses" with several figures selected: each figure's pose, by
@@ -157,10 +174,8 @@ pub struct Session {
     multi: Vec<String>,
     /// M5: each sound's length in seconds, by asset path (decoded once).
     sound_seconds: std::cell::RefCell<HashMap<String, f64>>,
-    /// D12 / J1: editing makes a new figure. While a copy is edited, the
-    /// document as it was (restored at the end, Cancel or Save), the
-    /// original layer, and the frame.
-    copy_edit: Option<(Box<Document>, String, i32)>,
+    /// D12 / J1 / Round 4: isolated Figure Studio state (create, edit, or edit copy).
+    copy_edit: Option<StudioSession>,
     /// The history's depth just after "Edit a copy": an Undo there would undo
     /// the copy itself, so it ends the editor as Cancel does instead.
     copy_edit_depth: usize,
@@ -274,13 +289,19 @@ impl Session {
         // repair keys that drifted off their frames (older Barkfart builds)
         snap_keys(&mut doc.state);
         let main_root = doc.project().root_symbol.clone();
-        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, selected_group: None, selected_script: None, drag_t: None, onion: true, stretch_all: false, joining: None, joining_absolute: false, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, stock: None, size_ref: true, mirror: false, curves: false, curve_shown: Default::default(), draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, pose_clip_xf: None, prop_key_clip: None, poses_clip: Vec::new(), multi: Vec::new(), copy_edit: None, copy_edit_depth: 0, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
+        let mut s = Session { main_root, fonts: HashMap::new(), doc, tools, frame, mode: Mode::Figure, selected: None, selected_text: None, selected_group: None, selected_script: None, drag_t: None, onion: true, stretch_all: false, joining: None, joining_absolute: false, building: None, polyfill: None, connecting: false, trace: None, editor_bg: None, stock: None, size_ref: true, mirror: false, curves: false, curve_shown: Default::default(), draw: None, gesture: Gesture::None, last_tap: None, pose_clip: None, pose_clip_xf: None, camera_pose_clip: None, prop_key_clip: None, poses_clip: Vec::new(), multi: Vec::new(), copy_edit: None, copy_edit_depth: 0, motion_path: false, keying: false, sound_seconds: Default::default(), frame_clip: None, frame_looks: Vec::new(), frame_filters: Vec::new(), figure_clip: None, props_clip: None, props_nodes: None, textfield_clip: None, filter_clip: None, sound_clip: None, branch_clip: None, rev: 1, message: String::new() };
         s.validate();
         s
     }
 
     pub fn project(&self) -> &Project {
         self.doc.project()
+    }
+
+    /// The full animation project (returns the pre-studio snapshot while inside
+    /// isolated Figure Studio, e.g. for Trace ghosts).
+    pub fn scene_project(&self) -> &Project {
+        self.copy_edit.as_ref().map(|s| s.snapshot.project()).unwrap_or_else(|| self.doc.project())
     }
 
     pub fn rev(&self) -> u64 {
@@ -760,15 +781,20 @@ impl Session {
                 let p = self.project();
                 let Some(s) = p.root() else { return false };
                 let mut r = Resolver::new(p);
-                let Some(cam) = eval::active_camera(s, t, &mut r) else {
+                let Some(cam_layer) = s.layers.iter().rev().find(|l| matches!(l.kind, LayerKind::Camera(_)) && l.visible && r.b(&l.shown, t)) else {
                     self.message = "There is no camera. Add one first.".into();
                     self.rev += 1;
                     return false;
                 };
+                let LayerKind::Camera(cam) = &cam_layer.kind else { return false };
+                let cam_id = cam_layer.id.clone();
                 let (cx, cy) = (r.f(&cam.x, t), r.f(&cam.y, t));
                 let (xi, yi) = (cam.x.id.clone(), cam.y.id.clone());
+                let sym = self.sym();
+                let fr = self.frame;
                 self.doc.begin("Move camera");
                 anchor_poses(&mut self.doc.state);
+                let _ = crate::edit::block_ops::bake_pose_at(&mut self.doc.state, &sym, &cam_id, fr);
                 self.gesture = Gesture::Camera { xi, yi, x, y, cx, cy };
                 true
             }
@@ -1044,6 +1070,24 @@ impl Session {
                         anchor_poses(s);
                         frame_ops::key_pose(s, None, frame_ops::time(s, fr + 1))?;
                     }
+                    // Round 4: never auto-bake keys onto the Camera layer when inserting a frame;
+                    // existing later camera keys stay shifted cleanly, while fr + 1 stays sparse.
+                    let t_new = frame_ops::time(s, fr + 1);
+                    let eps = 0.25 / st_fps(&s.project);
+                    let cam_ids: Vec<String> = s
+                        .project
+                        .root()
+                        .map(|r| r.layers.iter().filter(|l| matches!(l.kind, LayerKind::Camera(_))).map(|l| l.id.clone()).collect())
+                        .unwrap_or_default();
+                    for cid in cam_ids {
+                        if let Some(l) = s.project.layer_mut(&sym, &cid) {
+                            for q in crate::edit::block_ops::pose_props(l) {
+                                if let Some(idx) = q.track.keys().iter().position(|k| (k.time - t_new).abs() < eps) {
+                                    q.track.remove_at(idx);
+                                }
+                            }
+                        }
+                    }
                     Ok(())
                 });
                 if made.is_some() {
@@ -1133,8 +1177,28 @@ impl Session {
                             frame_ops::insert_after(s, fr + k, true)?;
                             shift_joins_insert(s, fr + k, 1);
                         }
-                        let at = frame_ops::time(s, fr + 1);
+                        // Round 4: keep pasted slots sparse for camera pose properties unless the
+                        // copied clip itself carries camera pose keys on those frames.
                         let fps = st_fps(&s.project);
+                        let eps = 0.25 / fps;
+                        let cam_ids: Vec<String> = s
+                            .project
+                            .root()
+                            .map(|r| r.layers.iter().filter(|l| matches!(l.kind, LayerKind::Camera(_))).map(|l| l.id.clone()).collect())
+                            .unwrap_or_default();
+                        for cid in cam_ids {
+                            if let Some(l) = s.project.layer_mut(&sym, &cid) {
+                                for q in crate::edit::block_ops::pose_props(l) {
+                                    for k in 0..count {
+                                        let tk = frame_ops::time_of(fps, fr + 1 + k);
+                                        if let Some(idx) = q.track.keys().iter().position(|key| (key.time - tk).abs() < eps) {
+                                            q.track.remove_at(idx);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        let at = frame_ops::time(s, fr + 1);
                         for (id, keys) in &clip.keys {
                             // an auto-camera's markers belong to its span, not to a copy
                             if id.ends_with("/cam/autoCam") || id.ends_with("/cam/autoCamEnd") {
@@ -1825,13 +1889,106 @@ impl Session {
             }
             "build" => {
                 let l = c["layer"].as_str().map(str::to_string).or(self.sel_layer());
-                if let Some(l) = l {
+                if let (Some(l), None) = (l, self.copy_edit.as_ref()) {
                     if self.project().root().and_then(|s| s.layer(&l)).and_then(|x| x.as_figure()).is_some() {
+                        let snapshot = Box::new(self.doc.clone());
+                        let orig_frame = self.frame;
+                        let orig_selected = self.selected.clone();
+                        let mut orig_angles = HashMap::new();
+                        let mut orig_lengths = HashMap::new();
+                        if let Some(root) = self.doc.project_mut().symbol_mut(&sym) {
+                            for layer in &mut root.layers {
+                                let lx = std::sync::Arc::make_mut(layer);
+                                if lx.id == l {
+                                    reset_layer_to_base_pose(lx, false, &mut orig_angles, &mut orig_lengths);
+                                } else {
+                                    lx.visible = false;
+                                }
+                            }
+                        }
+                        self.copy_edit = Some(StudioSession {
+                            snapshot,
+                            source_layer: Some(l.clone()),
+                            mode: "edit",
+                            orig_frame,
+                            orig_selected,
+                            orig_angles,
+                            orig_lengths,
+                        });
+                        self.copy_edit_depth = self.doc.undo_depth();
                         self.building = Some(l.clone());
                         if self.sel_layer().as_deref() != Some(&l) {
                             let root = self.project().root().and_then(|s| s.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
                             self.selected = root.map(|r| (l, r));
                         }
+                        self.selected_text = None;
+                        self.selected_group = None;
+                        self.selected_script = None;
+                        self.multi.clear();
+                        self.mode = Mode::Figure;
+                        self.rev += 1;
+                    }
+                }
+            }
+            "create_figure" | "new_figure" => {
+                if self.copy_edit.is_none() {
+                    let snapshot = Box::new(self.doc.clone());
+                    let orig_frame = self.frame;
+                    let orig_selected = self.selected.clone();
+                    let n = self.figure_ids().len() + 1;
+                    let fig_name = c["name"]
+                        .as_str()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string)
+                        .unwrap_or_else(|| format!("Figure {n}"));
+                    let made = self.step("Create stickfigure", |s| {
+                        let id = s.project.new_id("L");
+                        let mut l = Layer::figure(&id, Some(&fig_name));
+                        if let LayerKind::Figure(f) = &mut l.kind {
+                            f.color = Some(Color::rgba8888(0x222428ff));
+                            let root = Node::new(&id, "n0", None, Shape::None);
+                            let mut seg = Node::new(&id, "n1", Some("n0"), Shape::Line);
+                            seg.rotation.value = Value::F(90.0);
+                            seg.length.value = Value::F(100.0);
+                            seg.rest_length = 100.0;
+                            seg.thickness.value = Value::F(18.0);
+                            seg.color.value = Value::C(Color::rgba8888(0x222428ff));
+                            seg.draw_order = 0;
+                            let _ = f.add(root);
+                            let _ = f.add(seg);
+                            f.capture_base();
+                        }
+                        let at = s.project.root().map(|r| r.layers.len()).unwrap_or(0);
+                        structure::add_layer(s, &sym, l, at)?;
+                        if let Some(root) = s.project.symbol_mut(&sym) {
+                            for layer in &mut root.layers {
+                                let lx = std::sync::Arc::make_mut(layer);
+                                if lx.id != id {
+                                    lx.visible = false;
+                                }
+                            }
+                        }
+                        Ok(id)
+                    });
+                    if let Some(id) = made {
+                        self.copy_edit = Some(StudioSession {
+                            snapshot,
+                            source_layer: None,
+                            mode: "create",
+                            orig_frame,
+                            orig_selected,
+                            orig_angles: HashMap::new(),
+                            orig_lengths: HashMap::new(),
+                        });
+                        self.copy_edit_depth = self.doc.undo_depth();
+                        self.building = Some(id.clone());
+                        self.selected = Some((id, "n1".into()));
+                        self.selected_text = None;
+                        self.selected_group = None;
+                        self.selected_script = None;
+                        self.multi.clear();
+                        self.frame = 0;
                         self.mode = Mode::Figure;
                         self.rev += 1;
                     }
@@ -1910,61 +2067,156 @@ impl Session {
                 self.rev += 1;
             }
             "edit_copy" => {
-                // D12 / J1: the figure editor works on a copy; the animated
-                // figure never changes. Ends with edit_copy_end.
-                if let (Some(l), None) = (self.sel_layer(), self.copy_edit.as_ref()) {
+                // D12 / J1 / Round 4: isolated studio copy reset to its clean rest/base pose.
+                let target_l = c["layer"].as_str().map(str::to_string).or_else(|| self.sel_layer());
+                if let (Some(l), None) = (target_l, self.copy_edit.as_ref()) {
                     if self.project().root().and_then(|s| s.layer(&l)).and_then(|x| x.as_figure()).is_some() {
                         let snapshot = Box::new(self.doc.clone());
                         let fr = self.frame;
+                        let orig_selected = self.selected.clone();
+                        let mut orig_angles = HashMap::new();
+                        let mut orig_lengths = HashMap::new();
                         let made = self.step("Edit a copy", |s| {
                             let ids = layer_ops::duplicate(s, &sym, &l, false, 0.0, 0.0)?;
                             let c = ids.first().cloned().ok_or_else(|| crate::edit::EditError("no copy".into()))?;
                             let name = s.project.root().and_then(|r| r.layer(&l)).and_then(|x| x.name.clone()).unwrap_or_else(|| "Figure".into());
                             if let Some(x) = s.project.layer_mut(&sym, &c) {
                                 x.name = Some(format!("{name} (copy)"));
+                                reset_layer_to_base_pose(x, false, &mut orig_angles, &mut orig_lengths);
                             }
-                            // the original stays as it is, out of the way while editing
-                            if let Some(x) = s.project.layer_mut(&sym, &l) {
-                                x.visible = false;
+                            // hide all other scene layers in the temporary studio canvas
+                            if let Some(root) = s.project.symbol_mut(&sym) {
+                                for layer in &mut root.layers {
+                                    let lx = std::sync::Arc::make_mut(layer);
+                                    if lx.id != c {
+                                        lx.visible = false;
+                                    }
+                                }
                             }
                             Ok(c)
                         });
                         if let Some(c) = made {
-                            self.copy_edit = Some((snapshot, l, fr));
+                            self.copy_edit = Some(StudioSession {
+                                snapshot,
+                                source_layer: Some(l),
+                                mode: "copy",
+                                orig_frame: fr,
+                                orig_selected,
+                                orig_angles,
+                                orig_lengths,
+                            });
                             self.copy_edit_depth = self.doc.undo_depth();
                             self.building = Some(c.clone());
                             let root = self.project().root().and_then(|s| s.layer(&c)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
                             self.selected = root.map(|r| (c, r));
+                            self.selected_text = None;
+                            self.selected_group = None;
+                            self.selected_script = None;
+                            self.multi.clear();
+                            self.frame = 0;
                             self.mode = Mode::Figure;
                             self.rev += 1;
                         }
                     }
                 }
             }
-            "edit_copy_end" => {
+            "edit_copy_end" | "build_cancel" => {
                 // Cancel or Save as new figure (the app saves the copy's file
                 // first): the animation and its history as they were
-                if let Some((snapshot, l, fr)) = self.copy_edit.take() {
-                    self.doc.restore(*snapshot);
+                if let Some(studio) = self.copy_edit.take() {
+                    self.doc.restore(*studio.snapshot);
                     self.draw = None;
                     self.building = None;
                     self.polyfill = None;
                     self.connecting = false;
                     self.trace = None;
-                    self.frame = fr;
-                    let root = self.project().root().and_then(|s| s.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
-                    self.selected = root.map(|r| (l, r));
+                    self.frame = studio.orig_frame;
+                    if let Some(l) = studio.source_layer {
+                        let root = self.project().root().and_then(|s| s.layer(&l)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
+                        self.selected = root.map(|r| (l, r));
+                    } else {
+                        self.selected = studio.orig_selected;
+                    }
                     self.changed();
                     self.validate();
+                } else if self.building.is_some() {
+                    self.draw = None;
+                    self.building = None;
+                    self.polyfill = None;
+                    self.connecting = false;
+                    self.trace = None;
+                    self.rev += 1;
                 }
             }
-            "build_done" => {
-                self.draw = None;
-                self.building = None;
-                self.polyfill = None;
-                self.connecting = false;
-                self.trace = None;
-                self.rev += 1;
+            "build_done" | "build_apply" | "edit_copy_apply" => {
+                let as_new = c["asNew"].as_bool() == Some(true);
+                let edited_layer = self.building.as_deref().and_then(|b| self.project().root()?.layer(b).cloned());
+                let had_edits = self.doc.undo_depth() > self.copy_edit_depth;
+                if let Some(studio) = self.copy_edit.take() {
+                    self.doc.restore(*studio.snapshot);
+                    self.draw = None;
+                    self.building = None;
+                    self.polyfill = None;
+                    self.connecting = false;
+                    self.trace = None;
+                    self.frame = studio.orig_frame;
+                    if let Some(edited) = edited_layer {
+                        if as_new || studio.source_layer.is_none() {
+                            let fr_now = self.frame;
+                            let mut new_fig = edited.clone();
+                            let added = self.step(
+                                if studio.source_layer.is_none() { "Create stickfigure" } else { "Add stickfigure" },
+                                move |s| {
+                                    let id = s.project.new_id("L");
+                                    rewrite_layer_ids(&mut new_fig, &id);
+                                    new_fig.visible = true;
+                                    new_fig.parent = None;
+                                    new_fig.parent_node = None;
+                                    new_fig.joins.clear();
+                                    new_fig.shown.track.clear();
+                                    new_fig.shown.value = Value::B(true);
+                                    if let LayerKind::Figure(f) = &mut new_fig.kind {
+                                        f.base = None;
+                                        f.capture_base();
+                                    }
+                                    if s.project.settings.tween_interp == Interp::Smooth {
+                                        smooth_tweens(&mut new_fig);
+                                    }
+                                    let at = s.project.root().map(|r| r.layers.len()).unwrap_or(0);
+                                    structure::add_layer(s, &sym, new_fig, at)?;
+                                    only_on_frame(s, &sym, &id, fr_now);
+                                    Ok(id)
+                                },
+                            );
+                            if let Some(id) = added {
+                                let root = self.project().root().and_then(|s| s.layer(&id)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
+                                self.selected = root.map(|r| (id, r));
+                            }
+                        } else if let Some(orig_id) = studio.source_layer {
+                            if had_edits {
+                                let orig_angles = studio.orig_angles;
+                                let orig_lengths = studio.orig_lengths;
+                                let oid = orig_id.clone();
+                                self.step("Edit stickfigure", move |s| {
+                                    let Some(live) = s.project.layer_mut(&sym, &oid) else { return crate::edit::fail("no figure") };
+                                    merge_studio_figure_into(live, &edited, &orig_angles, &orig_lengths);
+                                    Ok(())
+                                });
+                            }
+                            let root = self.project().root().and_then(|s| s.layer(&orig_id)).and_then(|x| x.as_figure()).and_then(|f| f.nodes().first().map(|n| n.id.clone()));
+                            self.selected = studio.orig_selected.filter(|(l, n)| l == &orig_id && self.project().root().and_then(|r| r.layer(l)).and_then(|x| x.as_figure()).and_then(|f| f.node(n)).is_some()).or_else(|| root.map(|r| (orig_id, r)));
+                        }
+                    }
+                    self.changed();
+                    self.validate();
+                } else {
+                    self.draw = None;
+                    self.building = None;
+                    self.polyfill = None;
+                    self.connecting = false;
+                    self.trace = None;
+                    self.rev += 1;
+                }
             }
             "polyfill_new" => {
                 // Add polyfill...: drawn right before the selected joint (its anchor)
@@ -2523,14 +2775,26 @@ impl Session {
                     self.step("Flip branch", |s| figure_ops::flip_branch(s, &sym, &l, &n, h, t));
                 }
             }
-            // F4: blocks. A block is one figure's pose key, lasting until its
-            // next one; these change the selected figure's row only.
-            "delete_pose" => {
-                // the Pose page's pinned button: the pose under the playhead goes,
-                // the one before it lasts until the next (one step)
-                if let Some(l) = c["layer"].as_str().map(str::to_string).or_else(|| self.sel_layer()) {
+            // F4 / Round 4: blocks & camera keys.
+            "delete_pose" | "delete_camera_key" => {
+                let cam_fallback = || {
+                    self.project()
+                        .root()
+                        .and_then(|r| r.layers.iter().find(|l| matches!(l.kind, LayerKind::Camera(_))).map(|l| l.id.clone()))
+                };
+                let target = if op == "delete_camera_key" {
+                    c["layer"].as_str().map(str::to_string).or_else(cam_fallback)
+                } else {
+                    c["layer"]
+                        .as_str()
+                        .map(str::to_string)
+                        .or_else(|| if self.mode == Mode::Camera { cam_fallback() } else { None })
+                        .or_else(|| self.sel_layer())
+                };
+                if let Some(l) = target {
                     let fr = c["frame"].as_i64().map(|v| v as i32).unwrap_or(self.frame);
-                    self.step("Delete pose", |s| crate::edit::block_ops::delete_pose(s, &sym, &l, fr));
+                    let label = if op == "delete_camera_key" { "Delete camera key" } else { "Delete pose" };
+                    self.step(label, |s| crate::edit::block_ops::delete_pose(s, &sym, &l, fr));
                 }
             }
             "add_time" => {
@@ -2544,7 +2808,8 @@ impl Session {
                 });
             }
             "blend" => {
-                if let Some(l) = self.sel_layer().or_else(|| self.selected_text.clone()) {
+                let target = c["layer"].as_str().map(str::to_string).or_else(|| self.sel_layer()).or_else(|| self.selected_text.clone());
+                if let Some(l) = target {
                     let v = c["v"].as_str().and_then(Blend::from_name).unwrap_or(Blend::Normal);
                     self.step("Blend", |s| {
                         let Some(x) = s.project.layer_mut(&sym, &l) else { return crate::edit::fail("no layer") };
@@ -3303,7 +3568,10 @@ impl Session {
                 if let Some(id) = cam {
                     let c2 = c.clone();
                     let ed = self.tools.editor.clone();
+                    let fr = self.frame;
                     self.step("Camera", move |s| {
+                        // Round 4: key all 4 camera props cleanly at the edited frame without baking other frames.
+                        let _ = crate::edit::block_ops::bake_pose_at(s, &sym, &id, fr);
                         let ids = {
                             let l = s.project.root().and_then(|r| r.layer(&id)).expect("camera");
                             let LayerKind::Camera(cm) = &l.kind else { return Ok(()) };
@@ -3530,40 +3798,70 @@ impl Session {
                 }
             }
             "copy_pose" => {
-                if let Some(l) = c["layer"].as_str().map(str::to_string).or_else(|| self.sel_layer()) {
+                let target_layer = c["layer"]
+                    .as_str()
+                    .map(str::to_string)
+                    .or_else(|| self.sel_layer())
+                    .or_else(|| {
+                        (self.mode == Mode::Camera).then(|| {
+                            self.project()
+                                .root()
+                                .and_then(|r| r.layers.iter().find(|x| matches!(x.kind, LayerKind::Camera(_))).map(|x| x.id.clone()))
+                        }).flatten()
+                    });
+                if let Some(l) = target_layer {
                     let with_xf = b("withTransform");
-                    let copied = {
+                    let cam_vals = {
                         let p = self.project();
                         let fps = st_fps(p);
                         let at = c["frame"].as_i64().map(|f| f as f64 / fps).unwrap_or(t);
                         p.root().and_then(|s| s.layer(&l)).and_then(|layer| {
-                            let mut r = Resolver::new(p);
-                            if let Some(fig) = layer.as_figure() {
-                                let rot: IndexMap<String, f32> = fig.nodes().iter().filter(|n| n.parent.is_some()).map(|n| (n.id.clone(), r.f(&n.rotation, at))).collect();
-                                let len: IndexMap<String, f32> = fig.nodes().iter().filter(|n| n.parent.is_some()).map(|n| (n.id.clone(), r.f(&n.length, at))).collect();
-                                let xf = with_xf.then(|| {
-                                    let tr = &layer.transform;
-                                    [r.f(&tr.x, at), r.f(&tr.y, at), r.f(&tr.rotation, at), r.f(&tr.scale_x, at), r.f(&tr.scale_y, at)]
-                                });
-                                Some((rot, len, xf))
-                            } else if with_xf {
-                                let tr = &layer.transform;
-                                Some((
-                                    IndexMap::new(),
-                                    IndexMap::new(),
-                                    Some([r.f(&tr.x, at), r.f(&tr.y, at), r.f(&tr.rotation, at), r.f(&tr.scale_x, at), r.f(&tr.scale_y, at)]),
-                                ))
+                            if let LayerKind::Camera(cm) = &layer.kind {
+                                let mut r = Resolver::new(p);
+                                Some([r.f(&cm.x, at), r.f(&cm.y, at), r.f(&cm.zoom, at), r.f(&cm.rotation, at)])
                             } else {
                                 None
                             }
                         })
                     };
-                    if let Some((rot, len, xf)) = copied {
-                        self.pose_clip = Some((rot, len));
-                        self.pose_clip_xf = xf;
-                        self.message = "Pose copied.".into();
+                    if let Some(cv) = cam_vals {
+                        self.camera_pose_clip = Some(cv);
+                        self.message = "Camera key copied.".into();
+                        self.rev += 1;
+                    } else {
+                        let copied = {
+                            let p = self.project();
+                            let fps = st_fps(p);
+                            let at = c["frame"].as_i64().map(|f| f as f64 / fps).unwrap_or(t);
+                            p.root().and_then(|s| s.layer(&l)).and_then(|layer| {
+                                let mut r = Resolver::new(p);
+                                if let Some(fig) = layer.as_figure() {
+                                    let rot: IndexMap<String, f32> = fig.nodes().iter().filter(|n| n.parent.is_some()).map(|n| (n.id.clone(), r.f(&n.rotation, at))).collect();
+                                    let len: IndexMap<String, f32> = fig.nodes().iter().filter(|n| n.parent.is_some()).map(|n| (n.id.clone(), r.f(&n.length, at))).collect();
+                                    let xf = with_xf.then(|| {
+                                        let tr = &layer.transform;
+                                        [r.f(&tr.x, at), r.f(&tr.y, at), r.f(&tr.rotation, at), r.f(&tr.scale_x, at), r.f(&tr.scale_y, at)]
+                                    });
+                                    Some((rot, len, xf))
+                                } else if with_xf {
+                                    let tr = &layer.transform;
+                                    Some((
+                                        IndexMap::new(),
+                                        IndexMap::new(),
+                                        Some([r.f(&tr.x, at), r.f(&tr.y, at), r.f(&tr.rotation, at), r.f(&tr.scale_x, at), r.f(&tr.scale_y, at)]),
+                                    ))
+                                } else {
+                                    None
+                                }
+                            })
+                        };
+                        if let Some((rot, len, xf)) = copied {
+                            self.pose_clip = Some((rot, len));
+                            self.pose_clip_xf = xf;
+                            self.message = "Pose copied.".into();
+                        }
+                        self.rev += 1;
                     }
-                    self.rev += 1;
                 }
             }
             "group" => {
@@ -3671,8 +3969,48 @@ impl Session {
                 }
             }
             "paste_pose" => {
-                let target_layer = c["layer"].as_str().map(str::to_string).or_else(|| self.sel_layer());
-                if let (Some(l), Some((rot, len))) = (target_layer, self.pose_clip.clone()) {
+                let target_layer = c["layer"]
+                    .as_str()
+                    .map(str::to_string)
+                    .or_else(|| self.sel_layer())
+                    .or_else(|| {
+                        (self.mode == Mode::Camera).then(|| {
+                            self.project()
+                                .root()
+                                .and_then(|r| r.layers.iter().find(|x| matches!(x.kind, LayerKind::Camera(_))).map(|x| x.id.clone()))
+                        }).flatten()
+                    });
+                let is_cam = target_layer
+                    .as_deref()
+                    .and_then(|l| self.project().root()?.layer(l))
+                    .is_some_and(|x| matches!(x.kind, LayerKind::Camera(_)));
+                if is_cam {
+                    if let (Some(l), Some(cv)) = (target_layer, self.camera_pose_clip) {
+                        let fps = st_fps(self.project());
+                        let fr = c["frame"].as_i64().map(|v| (v as i32).max(0));
+                        let at = fr.map(|f| f as f64 / fps).unwrap_or(t);
+                        let ed = self.tools.editor.clone();
+                        self.step("Paste camera key", |s| {
+                            let ids = {
+                                let layer = s.project.root().and_then(|r| r.layer(&l)).ok_or_else(|| crate::edit::EditError("no camera".into()))?;
+                                let LayerKind::Camera(cm) = &layer.kind else { return crate::edit::fail("not a camera") };
+                                [cm.x.id.clone(), cm.y.id.clone(), cm.zoom.id.clone(), cm.rotation.id.clone()]
+                            };
+                            for (pid, val) in ids.iter().zip(cv) {
+                                ed.change_in(s, pid, Value::F(val), at)?;
+                            }
+                            if let Some(f) = fr {
+                                let n = frame_ops::frame_count(s);
+                                if f + 1 > n {
+                                    if let Some(r) = s.project.root_mut() {
+                                        r.duration = (f + 1) as f64 / fps;
+                                    }
+                                }
+                            }
+                            Ok(())
+                        });
+                    }
+                } else if let (Some(l), Some((rot, len))) = (target_layer, self.pose_clip.clone()) {
                     let fps = st_fps(self.project());
                     let fr = c["frame"].as_i64().map(|v| (v as i32).max(0));
                     let at = fr.map(|f| f as f64 / fps).unwrap_or(t);
@@ -3969,6 +4307,7 @@ impl Session {
             }
             "frame_delay" | "frame_repeat" | "frame_silence" | "frame_slow" | "camera_fx" | "auto_camera" => {
                 let c2 = c.clone();
+                let keying = self.keying;
                 let delay = op == "frame_delay";
                 let label = match op { "frame_delay" => "Frame delay", "frame_repeat" => "Repeat frames", "frame_slow" => "Slow motion", "camera_fx" => "Camera effects", "auto_camera" => "Auto-camera", _ => "Silence sounds" };
                 self.step(label, move |s| {
@@ -4020,9 +4359,20 @@ impl Session {
                         return Ok(());
                     }
                     if c2["op"] == "camera_fx" {
-                        // Camera Tools: widescreen and wobble of this frame
+                        // Camera Tools: Widescreen applies globally across the whole animation by default
+                        // (unless keying or explicit perFrame: true), while wobble stays per-frame.
                         if let Some(v) = c2["widescreen"].as_bool() {
-                            set(&mut cm.widescreen, if v { 1.0 } else { 0.0 });
+                            let val = Value::F(if v { 1.0 } else { 0.0 });
+                            if keying || c2["perFrame"].as_bool() == Some(true) {
+                                if cm.widescreen.track.is_empty() && t > 1e-9 {
+                                    let old = cm.widescreen.value;
+                                    cm.widescreen.track.put(Key::new(0.0, old, Interp::Hold));
+                                }
+                                cm.widescreen.track.put(Key::new(t, val, Interp::Hold));
+                            } else {
+                                cm.widescreen.track.clear();
+                                cm.widescreen.value = val;
+                            }
                         }
                         if let Some(v) = c2["wobbleXY"].as_f64() {
                             set(&mut cm.wobble_xy, v.clamp(0.0, 500.0) as f32);
@@ -4549,7 +4899,15 @@ impl Session {
         if !self.curves {
             return None;
         }
-        let lid = self.sel_layer().or_else(|| self.selected_text.clone())?;
+        let lid = if self.mode == Mode::Camera {
+            p.root()?
+                .layers
+                .iter()
+                .find(|l| matches!(l.kind, LayerKind::Camera(_)))
+                .map(|l| l.id.clone())?
+        } else {
+            self.sel_layer().or_else(|| self.selected_text.clone())?
+        };
         let l = p.root()?.layer(&lid)?;
         let fps = st_fps(p);
         let sel_node = self.selected.as_ref().map(|(_, n)| n.clone()).unwrap_or_default();
@@ -4557,22 +4915,49 @@ impl Session {
         let fig = l.name.clone().unwrap_or_else(|| l.id.clone());
         // (value, name, group, unit, the joint it belongs to)
         let mut cands: Vec<(&Property, String, String, &str, String)> = Vec::new();
-        if let Some(f) = l.as_figure() {
-            let tr = &l.transform;
-            for (q, name, unit) in [(&tr.x, "Main joint x", "size"), (&tr.y, "Main joint y", "size"), (&tr.rotation, "Figure turn", "deg"), (&tr.scale_x, "Figure scale x", "ratio"), (&tr.scale_y, "Figure scale y", "ratio")] {
-                cands.push((q, name.into(), "Main joint".into(), unit, root.clone()));
-            }
-            for (i, n) in f.nodes().iter().enumerate() {
-                if n.parent.is_none() {
-                    continue;
-                }
-                let part = part_label(n, i);
-                for (q, what, unit) in [(&n.rotation, "angle", "deg"), (&n.length, "length", "size"), (&n.thickness, "thickness", "size"), (&n.scale, "scale", "ratio"), (&n.color, "colour", "colour"), (&n.outline_color, "outline colour", "colour"), (&n.gradient_color, "gradient colour", "colour")] {
-                    cands.push((q, format!("{part} {what}"), part.clone(), unit, n.id.clone()));
+        match &l.kind {
+            LayerKind::Camera(cm) => {
+                for (q, name, unit) in [(&cm.x, "Camera X", "size"), (&cm.y, "Camera Y", "size"), (&cm.zoom, "Camera Zoom", "ratio"), (&cm.rotation, "Camera Rotation", "deg")] {
+                    cands.push((q, name.into(), "Camera".into(), unit, String::new()));
                 }
             }
+            LayerKind::Figure(f) => {
+                let tr = &l.transform;
+                for (q, name, unit) in [(&tr.x, "Main joint x", "size"), (&tr.y, "Main joint y", "size"), (&tr.rotation, "Figure turn", "deg"), (&tr.scale_x, "Figure scale x", "ratio"), (&tr.scale_y, "Figure scale y", "ratio")] {
+                    cands.push((q, name.into(), "Main joint".into(), unit, root.clone()));
+                }
+                for (i, n) in f.nodes().iter().enumerate() {
+                    if n.parent.is_none() {
+                        continue;
+                    }
+                    let part = part_label(n, i);
+                    for (q, what, unit) in [(&n.rotation, "angle", "deg"), (&n.length, "length", "size"), (&n.thickness, "thickness", "size"), (&n.scale, "scale", "ratio"), (&n.color, "colour", "colour"), (&n.outline_color, "outline colour", "colour"), (&n.gradient_color, "gradient colour", "colour")] {
+                        cands.push((q, format!("{part} {what}"), part.clone(), unit, n.id.clone()));
+                    }
+                }
+                cands.push((&l.opacity, "Opacity".into(), fig.clone(), "ratio", String::new()));
+            }
+            LayerKind::Adjustment => {
+                cands.push((&l.opacity, "Opacity".into(), fig.clone(), "ratio", String::new()));
+            }
+            LayerKind::Symbol(sl) => {
+                let tr = &l.transform;
+                for (q, name, unit) in [(&tr.x, "Position x", "size"), (&tr.y, "Position y", "size"), (&tr.rotation, "Turn", "deg"), (&tr.scale_x, "Scale x", "ratio"), (&tr.scale_y, "Scale y", "ratio")] {
+                    cands.push((q, name.into(), fig.clone(), unit, String::new()));
+                }
+                cands.push((&sl.speed, "Speed".into(), fig.clone(), "ratio", String::new()));
+                cands.push((&sl.time_offset, "Time offset".into(), fig.clone(), "size", String::new()));
+                cands.push((&l.opacity, "Opacity".into(), fig.clone(), "ratio", String::new()));
+            }
+            LayerKind::Sprite(_) | LayerKind::Text(_) => {
+                let tr = &l.transform;
+                for (q, name, unit) in [(&tr.x, "Position x", "size"), (&tr.y, "Position y", "size"), (&tr.rotation, "Turn", "deg"), (&tr.scale_x, "Scale x", "ratio"), (&tr.scale_y, "Scale y", "ratio")] {
+                    cands.push((q, name.into(), fig.clone(), unit, String::new()));
+                }
+                cands.push((&l.opacity, "Opacity".into(), fig.clone(), "ratio", String::new()));
+            }
+            _ => {}
         }
-        cands.push((&l.opacity, "Opacity".into(), fig.clone(), "ratio", String::new()));
         for e in l.effects.chain() {
             for q in std::iter::once(&e.mix).chain(e.params.values()) {
                 let unit = if matches!(q.value, Value::C(_)) { "colour" } else { "ratio" };
@@ -4666,35 +5051,23 @@ impl Session {
         let out = crate::eval::scripts::layer_out(p, &r.id, lid);
         let fps = st_fps(p);
         let name_of = |x: &Layer| x.name.clone().unwrap_or_else(|| x.id.clone());
-        let figures: Vec<J> = r.layers.iter().rev().filter(|x| x.as_figure().is_some()).map(|x| json!({"id": x.id, "name": name_of(x)})).collect();
-        // the numbers a value target can be: each layer's, front first
-        let mut values: Vec<J> = Vec::new();
-        for x in r.layers.iter().rev() {
-            if matches!(x.kind, LayerKind::Script(_) | LayerKind::Audio(_)) {
-                continue;
-            }
-            let group = name_of(x);
-            let tr = &x.transform;
-            let mut cands: Vec<(&Property, String)> = vec![(&tr.x, "Position x".into()), (&tr.y, "Position y".into()), (&tr.rotation, "Turn".into()), (&tr.scale_x, "Scale x".into()), (&tr.scale_y, "Scale y".into()), (&x.opacity, "Opacity".into())];
-            if let Some(f) = x.as_figure() {
-                for (i, n) in f.nodes().iter().enumerate().skip(1) {
-                    let part = part_label(n, i);
-                    for (q, what) in [(&n.rotation, "angle"), (&n.length, "length"), (&n.thickness, "thickness"), (&n.scale, "scale")] {
-                        cands.push((q, format!("{part} {what}")));
-                    }
-                }
-            }
-            for e in x.effects.nodes.values() {
-                for q in std::iter::once(&e.mix).chain(e.params.values()) {
-                    cands.push((q, prop_label(x, &q.id)));
-                }
-            }
-            for (q, label) in cands {
-                if crate::eval::scripts::drivable(q) {
-                    values.push(json!({"id": q.id, "name": label, "group": group}));
-                }
-            }
-        }
+        let figures: Vec<J> = r
+            .layers
+            .iter()
+            .rev()
+            .filter_map(|x| {
+                let f = x.as_figure()?;
+                Some(json!({
+                    "id": x.id,
+                    "name": name_of(x),
+                    "label": name_of(x),
+                    "layerKind": "figure",
+                    "nodes": f.nodes().len(),
+                    "animated": !crate::edit::block_ops::pose_frames(x, fps).is_empty(),
+                }))
+            })
+            .collect();
+        let values = all_drivable_values(p, self.time());
         let label_of = |kind: TargetKind, to: &str| -> Option<String> {
             match kind {
                 TargetKind::Figure => r.layer(to).map(name_of),
@@ -4780,8 +5153,10 @@ impl Session {
             let layer = p.root()?.layer(l)?;
             let f = layer.as_figure()?;
             let node = f.node(n)?;
-            // F4: the pose (block) under the playhead
-            let pose = {
+            // F4: the pose (block) under the playhead (omitted in Figure Studio)
+            let pose = if self.building.is_some() {
+                None
+            } else {
                 let fps = st_fps(p);
                 let fr = (t * fps).round() as i32;
                 let n = (p.root().map(|r| r.duration).unwrap_or(0.0) * fps).round().max(1.0) as i32;
@@ -4869,6 +5244,7 @@ impl Session {
                 "color": color_of(&mut r, &tl.color, t),
                 "scale": round2(sy),
                 "align": align_name(tl.align, tl.corner),
+                "blend": layer.blend.name(),
                 "locked": layer.locked,
                 "x": round2(cx), "y": round2(cy),
                 "x0": round2(x0), "y0": round2(y0), "x1": round2(x1), "y1": round2(y1),
@@ -4881,12 +5257,13 @@ impl Session {
             let t0 = self.frame as f64 / fps;
             crate::eval::auto_camera_at(c, t0).filter(|(a, _, _)| (a - t0).abs() < 0.25 / fps).map(|(_, b, code)| json!({"end": (b * fps).round() as i64, "ease": code}))
         });
-        // Camera Tools: this frame's widescreen and wobble
+        // Camera Tools: widescreen (global or keyed) and this frame's wobble
         let cam_fx = p.root().and_then(|r| r.layers.iter().find_map(|l| if let LayerKind::Camera(c) = &l.kind { Some(c) } else { None })).map(|c| {
             let fps = st_fps(p);
+            let mut r = Resolver::new(p);
             let g = |q: &Property| crate::timing::setting(q, fps, self.frame);
             let speed = g(&c.wobble_speed);
-            json!({"widescreen": g(&c.widescreen) > 0.5, "wobbleXY": g(&c.wobble_xy), "wobbleRot": g(&c.wobble_rot), "wobbleSpeed": if speed > 0.0 { speed } else { 3.0 }, "wobbleZoom": g(&c.wobble_no_zoom) < 0.5})
+            json!({"widescreen": r.f(&c.widescreen, t) > 0.5, "wobbleXY": g(&c.wobble_xy), "wobbleRot": g(&c.wobble_rot), "wobbleSpeed": if speed > 0.0 { speed } else { 3.0 }, "wobbleZoom": g(&c.wobble_no_zoom) < 0.5})
         });
         // Movieclip Tools: the selected movieclip's playback
         let movieclip = self.selected.as_ref().and_then(|(l, _)| {
@@ -4895,6 +5272,7 @@ impl Session {
             let mut r = Resolver::new(p);
             let mode = match sl.loop_mode { SymbolLoop::Once => "once", SymbolLoop::Loop => "loop", SymbolLoop::PingPong => "pingpong" };
             Some(json!({"layer": l, "name": layer.name.clone().unwrap_or_else(|| l.clone()), "loop": mode, "speed": round2(r.d(&sl.speed, t) as f32), "offset": round2(r.d(&sl.time_offset, t) as f32), "frames": p.symbol(&sl.symbol).map(|s| (s.duration * st_fps(p)).round() as i64).unwrap_or(0),
+                "blend": layer.blend.name(),
                 "effectStack": crate::edit::filters::stack_state(p, &layer.effects, t, st_fps(p), self.frame)}))
         });
         // the motion path: the selected joint's place on every frame, and the
@@ -5085,33 +5463,16 @@ impl Session {
                             return json!({"id": l.id, "name": l.name.clone().unwrap_or_else(|| "Script".into()), "kind": "script", "visible": l.visible, "locked": l.locked, "sub": sub, "runs": runs,
                                 "missing": out.missing, "error": out.error, "clips": [], "blocks": [], "on": [], "props": [], "group": null});
                         }
-                        let mut starts = crate::edit::block_ops::pose_frames(l, fps);
-                        // M5: the camera is keyed on every frame; its row shows where
-                        // the view changes, so equal neighbours read as one block
-                        if matches!(l.kind, LayerKind::Camera(_)) {
-                            let props = crate::edit::block_ops::pose_props_of(l);
-                            let at = |f: i32| props.iter().map(|q| q.key_value(f as f64 / fps)).collect::<Vec<_>>();
-                            let mut kept: Vec<i32> = Vec::new();
-                            for f in starts {
-                                if kept.last().is_none_or(|&prev| at(prev) != at(f)) {
-                                    kept.push(f);
-                                }
-                            }
-                            starts = kept;
-                        }
                         let props = crate::edit::block_ops::pose_props_of(l);
                         let on: Vec<bool> = (0..n.min(2000)).map(|f| r.b(&l.shown, f as f64 / fps)).collect();
-                        let is_cam = matches!(l.kind, LayerKind::Camera(_));
                         let vbs = crate::edit::block_ops::visible_blocks(l, fps, n);
                         let mut blocks: Vec<J> = Vec::with_capacity(vbs.len());
-                        let mut block_eases: Vec<&'static str> = Vec::with_capacity(if is_cam { 0 } else { vbs.len() });
+                        let mut block_eases: Vec<&'static str> = Vec::with_capacity(vbs.len());
                         for (raw_st, vis_start, vis_len) in vbs {
                             let key = props.iter().find_map(|q| q.track.keys().iter().find(|k| ((k.time * fps).round() as i32) == raw_st));
                             let hold = key.is_some_and(|k| k.interp == Interp::Hold);
                             blocks.push(json!([vis_start, vis_len, hold]));
-                            if !is_cam {
-                                block_eases.push(key.map(key_ease_name).unwrap_or("auto"));
-                            }
+                            block_eases.push(key.map(key_ease_name).unwrap_or("auto"));
                         }
                         let kind = match &l.kind {
                             LayerKind::Figure(_) => "figure",
@@ -5190,7 +5551,11 @@ impl Session {
             out
         };
         let no_tween = {
-            let k = self.keys_at(t, None);
+            let k: Vec<_> = self
+                .keys_at(t, None)
+                .into_iter()
+                .filter(|r| p.property(&r.property).is_some_and(|q| q.ty.continuous()))
+                .collect();
             !k.is_empty() && k.iter().all(|r| p.property(&r.property).and_then(|q| q.track.keys().iter().find(|x| x.time == r.time)).is_some_and(|x| x.interp == Interp::Hold))
         };
         let mut out = json!({
@@ -5222,11 +5587,18 @@ impl Session {
                 }
                 json!({"list": out, "nodes": f.nodes().len()})
             }),
-            // J1: the copy being edited, and the figure it came from
-            "copyEdit": self.copy_edit.as_ref().and_then(|(_, l, _)| {
+            // J1 / Round 4: isolated studio copy/create info
+            "copyEdit": self.copy_edit.as_ref().filter(|st| st.mode != "edit").and_then(|st| {
                 let copy = self.building.as_ref().and_then(|b| p.root()?.layer(b)).and_then(|x| x.name.clone());
-                let of = self.doc.state.project.root().and_then(|r| r.layer(l)).and_then(|x| x.name.clone());
-                Some(json!({"name": copy?, "of": of.unwrap_or_else(|| "The figure".into())}))
+                let of = st.source_layer.as_deref().and_then(|l| st.snapshot.project().root()?.layer(l)).and_then(|x| x.name.clone());
+                Some(json!({
+                    "name": copy?,
+                    "of": if st.source_layer.is_some() { json!(of.unwrap_or_else(|| "The figure".into())) } else { J::Null },
+                    "mode": st.mode,
+                    "isNew": st.source_layer.is_none(),
+                    "canApply": true,
+                    "isolated": true,
+                }))
             }), "editingClip": (p.root_symbol != self.main_root).then(|| p.root().and_then(|r| r.name.clone()).unwrap_or_else(|| "Movieclip".into())),
             "branchCopied": self.branch_clip.is_some(),
             "watermark": p.settings.watermark.as_ref().map(|(t, c)| json!({"text": t, "color": c.to_rgba8888()})),
@@ -5284,12 +5656,20 @@ impl Session {
                 Some(json!({"id": pf.id, "anchor": pf.anchor, "count": pf.nodes.len(), "own": pf.use_own_color, "color": pf.color.value.color().to_rgba8888()}))
             }),
             "polyfills": self.building.as_ref().and_then(|b| p.root()?.layer(b)?.as_figure()).map(|f| f.polyfills.iter().map(|x| json!({"id": x.id, "anchor": x.anchor, "count": x.nodes.len()})).collect::<Vec<_>>()),
-            "building": self.building.as_ref().and_then(|b| p.root()?.layer(b)).map(|l| json!({"layer": l.id, "name": l.name.clone().unwrap_or_else(|| l.id.clone())})),
+            "building": self.building.as_ref().and_then(|b| p.root()?.layer(b)).map(|l| json!({
+                "layer": l.id,
+                "name": l.name.clone().unwrap_or_else(|| l.id.clone()),
+                "mode": self.copy_edit.as_ref().map(|s| s.mode).unwrap_or("edit"),
+                "nodeCount": l.as_figure().map(|f| f.nodes().len()).unwrap_or(0),
+            })),
             "builtins": crate::figures::ALL.iter().map(|(id, name)| json!({"id": id, "name": name})).collect::<Vec<_>>(),
             "message": self.message,
         });
         out["adjustment"] = json!(adjustment);
         out["effectCatalog"] = crate::edit::filters::catalog_json();
+        out["blendCatalog"] = Blend::catalog_json();
+        out["modifierTargets"] = json!(all_drivable_values(p, t));
+        out["cameraPose"] = json!(self.camera_pose_clip.is_some());
         out["joiningMode"] = json!(if self.joining_absolute { "absolute" } else { "relative" });
         out
     }
@@ -5304,6 +5684,9 @@ impl Session {
         let mut r = Resolver::new(p);
         for l in &s.layers {
             for q in l.properties() {
+                if frame_ops::is_frame_setting(&q.id) || q.id.ends_with("/cam/bg") || q.id.ends_with("/cam/bg2") {
+                    continue;
+                }
                 for k in q.track.keys() {
                     let i = (k.time * fps).round();
                     if i < 0.0 || i as usize >= n || out[i as usize] {
@@ -5627,12 +6010,14 @@ pub fn anchor_poses(st: &mut crate::edit::State) {
     let ids: Vec<String> = st.project.root().map(|s| s.layers.iter().map(|l| l.id.clone()).collect()).unwrap_or_default();
     for id in ids {
         let Some(l) = st.project.layer_mut(&sym, &id) else { continue };
-        key_every_frame(&mut l.shown, n, fps);
-        let camera = matches!(l.kind, LayerKind::Camera(_) | LayerKind::Text(_));
+        let is_cam = matches!(l.kind, LayerKind::Camera(_));
+        if !is_cam {
+            key_every_frame(&mut l.shown, n, fps);
+        }
+        let text_frame_by_frame = matches!(l.kind, LayerKind::Text(_));
         let ps = crate::edit::block_ops::pose_props(l);
-        if camera {
-            // the camera and textfields stay frame-by-frame things, as in
-            // Stick Nodes (a textfield sits on one frame)
+        if text_frame_by_frame {
+            // textfields stay frame-by-frame things (a textfield sits on one frame)
             for q in ps {
                 key_every_frame(q, n, fps);
             }
@@ -5640,8 +6025,12 @@ pub fn anchor_poses(st: &mut crate::edit::State) {
         }
         // every moment any of them is keyed (on the frame grid), and the first
         // frame: a pose is never left unkeyed, so frame commands (which copy
-        // and move keys) always have keys to work with
+        // and move keys) always have keys to work with.
+        // Round 4: Camera stays sparse too (only frame 0 + explicit keys; untouched camera stays unkeyed).
         let mut frames: Vec<i64> = ps.iter().flat_map(|q| q.track.keys().iter().map(|k| (k.time * fps).round() as i64)).collect();
+        if is_cam && frames.is_empty() {
+            continue;
+        }
         frames.push(0);
         frames.sort_unstable();
         frames.dedup();
@@ -5719,8 +6108,23 @@ fn script_trace(r: &crate::eval::scripts::RunOut) -> Vec<J> {
     (0..vals.len().min(240)).map(|i| vals[((i as f64 * step) as usize).min(vals.len() - 1)]).map(|v| if v.is_finite() { json!(round2(v as f32)) } else { J::Null }).collect()
 }
 
-/// A value's name on the Script page (a segment's, an effect setting's).
+/// A value's name on the Script page (a segment's, camera's, or an effect setting's).
 fn value_label(l: &Layer, id: &str) -> String {
+    if let LayerKind::Camera(cm) = &l.kind {
+        for (q, n) in [(&cm.x, "Camera X"), (&cm.y, "Camera Y"), (&cm.zoom, "Camera Zoom"), (&cm.rotation, "Camera Rotation")] {
+            if q.id == id {
+                return n.into();
+            }
+        }
+    }
+    if let LayerKind::Symbol(sl) = &l.kind {
+        if sl.speed.id == id {
+            return "Speed".into();
+        }
+        if sl.time_offset.id == id {
+            return "Time offset".into();
+        }
+    }
     let tr = &l.transform;
     for (q, n) in [(&tr.x, "Position x"), (&tr.y, "Position y"), (&tr.rotation, "Turn"), (&tr.scale_x, "Scale x"), (&tr.scale_y, "Scale y"), (&l.opacity, "Opacity")] {
         if q.id == id {
@@ -5737,6 +6141,293 @@ fn value_label(l: &Layer, id: &str) -> String {
         }
     }
     prop_label(l, id)
+}
+
+/// Round 4: structured list of every drivable numeric target across all layers
+/// (for both Script targets and the searchable/filterable Modifier target picker).
+fn all_drivable_values(p: &Project, t: f64) -> Vec<J> {
+    let Some(r) = p.root() else { return Vec::new() };
+    let mut res = Resolver::new(p);
+    let name_of = |x: &Layer| x.name.clone().unwrap_or_else(|| x.id.clone());
+    let mut values: Vec<J> = Vec::new();
+    let ordered: Vec<&Layer> = r
+        .layers
+        .iter()
+        .rev()
+        .filter(|x| matches!(x.kind, LayerKind::Camera(_)))
+        .chain(r.layers.iter().rev().filter(|x| !matches!(x.kind, LayerKind::Camera(_))))
+        .map(|x| x.as_ref())
+        .collect();
+    for x in ordered {
+        if matches!(x.kind, LayerKind::Script(_) | LayerKind::Audio(_)) {
+            continue;
+        }
+        let group = name_of(x);
+        let layer_kind = match &x.kind {
+            LayerKind::Camera(_) => "camera",
+            LayerKind::Figure(_) => "figure",
+            LayerKind::Sprite(_) => "picture",
+            LayerKind::Text(_) => "text",
+            LayerKind::Symbol(_) => "movieclip",
+            LayerKind::Adjustment => "adjustment",
+            _ => "other",
+        };
+        let mut cands: Vec<(&Property, String, &'static str, &'static str)> = Vec::new();
+        match &x.kind {
+            LayerKind::Camera(cm) => {
+                cands.extend([
+                    (&cm.x, "Camera X".into(), "Camera", "size"),
+                    (&cm.y, "Camera Y".into(), "Camera", "size"),
+                    (&cm.zoom, "Camera Zoom".into(), "Camera", "ratio"),
+                    (&cm.rotation, "Camera Rotation".into(), "Camera", "deg"),
+                ]);
+            }
+            LayerKind::Adjustment => {
+                cands.push((&x.opacity, "Opacity".into(), "Appearance", "ratio"));
+            }
+            _ => {
+                let tr = &x.transform;
+                cands.extend([
+                    (&tr.x, "Position x".into(), "Transform", "size"),
+                    (&tr.y, "Position y".into(), "Transform", "size"),
+                    (&tr.rotation, "Turn".into(), "Transform", "deg"),
+                    (&tr.scale_x, "Scale x".into(), "Transform", "ratio"),
+                    (&tr.scale_y, "Scale y".into(), "Transform", "ratio"),
+                    (&x.opacity, "Opacity".into(), "Appearance", "ratio"),
+                ]);
+                if let LayerKind::Symbol(sl) = &x.kind {
+                    cands.push((&sl.speed, "Speed".into(), "Playback", "ratio"));
+                    cands.push((&sl.time_offset, "Time offset".into(), "Playback", "size"));
+                }
+                if let Some(f) = x.as_figure() {
+                    for (i, n) in f.nodes().iter().enumerate().skip(1) {
+                        let part = part_label(n, i);
+                        for (q, what, unit) in [(&n.rotation, "angle", "deg"), (&n.length, "length", "size"), (&n.thickness, "thickness", "size"), (&n.scale, "scale", "ratio")] {
+                            cands.push((q, format!("{part} {what}"), "Joint", unit));
+                        }
+                    }
+                }
+            }
+        }
+        for e in x.effects.chain() {
+            let has_mod = !e.mix.modifiers.is_empty() || e.params.values().any(|q| !q.modifiers.is_empty());
+            if !crate::edit::filters::node_active(e) && !has_mod {
+                continue;
+            }
+            for q in std::iter::once(&e.mix).chain(e.params.values()) {
+                cands.push((q, prop_label(x, &q.id), "Effect", "ratio"));
+            }
+        }
+        for (q, label, cat, unit) in cands {
+            if crate::eval::scripts::drivable(q) {
+                let cur = ValueType::to_scalar(&res.resolve(q, t)) as f32;
+                let animated = q.track.keys().windows(2).any(|w| w[0].value != w[1].value) || !q.modifiers.is_empty();
+                values.push(json!({
+                    "id": q.id,
+                    "name": label,
+                    "label": label,
+                    "group": group,
+                    "layer": group,
+                    "layerId": x.id,
+                    "layerKind": layer_kind,
+                    "category": cat,
+                    "unit": unit,
+                    "value": round2(cur),
+                    "animated": animated,
+                    "hasModifiers": !q.modifiers.is_empty(),
+                    "modCount": q.modifiers.len(),
+                }));
+            }
+        }
+    }
+    values
+}
+
+/// Round 4: prepares a figure layer for isolated studio editing in its clean rest/base pose.
+fn reset_layer_to_base_pose(l: &mut Layer, force_unit_scale: bool, orig_angles: &mut HashMap<String, f32>, orig_lengths: &mut HashMap<String, f32>) {
+    l.visible = true;
+    l.parent = None;
+    l.parent_node = None;
+    l.joins.clear();
+    l.shown.track.clear();
+    l.shown.value = Value::B(true);
+    let sx = if force_unit_scale { 1.0 } else { l.transform.scale_x.key_value(0.0).f().abs().max(0.01) };
+    let sy = if force_unit_scale { 1.0 } else { l.transform.scale_y.key_value(0.0).f().abs().max(0.01) };
+    l.transform.x.track.clear();
+    l.transform.x.value = Value::F(0.0);
+    l.transform.y.track.clear();
+    l.transform.y.value = Value::F(0.0);
+    l.transform.rotation.track.clear();
+    l.transform.rotation.value = Value::F(0.0);
+    l.transform.scale_x.track.clear();
+    l.transform.scale_x.value = Value::F(sx);
+    l.transform.scale_y.track.clear();
+    l.transform.scale_y.value = Value::F(sy);
+    if let LayerKind::Figure(f) = &mut l.kind {
+        let base = f.base.clone();
+        for n in f.nodes_mut() {
+            let nb = base.as_ref().and_then(|b| b.get(&n.id));
+            let rest_rot = nb.and_then(|b| b.rotation).unwrap_or_else(|| n.rotation.key_value(0.0).f());
+            let rest_len = if n.rest_length > 0.0 {
+                n.rest_length
+            } else if let Some(b) = nb {
+                b.length
+            } else {
+                n.length.key_value(0.0).f()
+            };
+            let thick = n.thickness.key_value(0.0).f();
+            let scale = n.scale.key_value(0.0).f();
+            let col = n.color.key_value(0.0).color();
+            let gcol = n.gradient_color.key_value(0.0).color();
+            let ocol = n.outline_color.key_value(0.0).color();
+            n.rotation.track.clear();
+            n.rotation.value = Value::F(rest_rot);
+            n.length.track.clear();
+            n.length.value = Value::F(rest_len);
+            n.thickness.track.clear();
+            n.thickness.value = Value::F(thick);
+            n.scale.track.clear();
+            n.scale.value = Value::F(scale);
+            n.color.track.clear();
+            n.color.value = Value::C(col);
+            n.gradient_color.track.clear();
+            n.gradient_color.value = Value::C(gcol);
+            n.outline_color.track.clear();
+            n.outline_color.value = Value::C(ocol);
+            n.shown.track.clear();
+            n.shown.value = Value::B(true);
+            orig_angles.insert(n.id.clone(), rest_rot);
+            orig_lengths.insert(n.id.clone(), rest_len);
+        }
+    }
+}
+
+fn rewrite_prop_prefix(q: &mut Property, old_prefix: &str, new_prefix: &str) {
+    if let Some(rest) = q.id.strip_prefix(old_prefix) {
+        q.id = format!("{new_prefix}{rest}");
+    }
+}
+
+fn rewrite_layer_ids(l: &mut Layer, new_id: &str) {
+    let old_prefix = format!("{}/", l.id);
+    let new_prefix = format!("{new_id}/");
+    l.id = new_id.to_string();
+    for q in l.properties_mut() {
+        rewrite_prop_prefix(q, &old_prefix, &new_prefix);
+    }
+}
+
+/// Round 4: merges structural & style edits from a studio figure back into the
+/// live animated figure while preserving existing pose keyframes on untouched joints.
+fn merge_studio_figure_into(live: &mut Layer, edited: &Layer, orig_angles: &HashMap<String, f32>, orig_lengths: &HashMap<String, f32>) {
+    live.name = edited.name.clone();
+    let old_prefix = format!("{}/", edited.id);
+    let new_prefix = format!("{}/", live.id);
+    let (LayerKind::Figure(lf), LayerKind::Figure(ef)) = (&mut live.kind, &edited.kind) else { return };
+    lf.color = ef.color;
+    let mut existing: HashMap<String, Node> = lf.nodes().iter().cloned().map(|n| (n.id.clone(), n)).collect();
+    let mut new_fig = Figure::default();
+    new_fig.color = ef.color;
+    for en in ef.nodes() {
+        if let Some(mut ln) = existing.remove(&en.id) {
+            ln.parent = en.parent.clone();
+            ln.name = en.name.clone();
+            ln.shape = en.shape;
+            ln.draw_order = en.draw_order;
+            ln.curve = en.curve;
+            ln.is_static = en.is_static;
+            ln.stretchy = en.stretchy;
+            ln.own_color = en.own_color;
+            ln.smart_stretch = en.smart_stretch;
+            ln.no_smart_stretch = en.no_smart_stretch;
+            ln.drag_lock = en.drag_lock;
+            ln.angle_lock = en.angle_lock;
+            ln.gradient = en.gradient;
+            ln.gradient_reverse = en.gradient_reverse;
+            ln.gradient_sideways = en.gradient_sideways;
+            ln.gradient_linear = en.gradient_linear;
+            ln.circle_outline = en.circle_outline;
+            ln.circle_hollow = en.circle_hollow;
+            ln.half_arc = en.half_arc;
+            ln.polygon_sides = en.polygon_sides;
+            ln.trapezoid_ratio = en.trapezoid_ratio;
+            ln.trapezoid_round_start = en.trapezoid_round_start;
+            ln.trapezoid_round_end = en.trapezoid_round_end;
+            ln.right_triangle = en.right_triangle;
+            ln.triangle_upside_down = en.triangle_upside_down;
+            ln.pinned = en.pinned;
+            ln.legacy_extras = en.legacy_extras.clone();
+            // Style properties apply cleanly
+            set_static(&mut ln.thickness, en.thickness.value);
+            set_static(&mut ln.scale, en.scale.value);
+            set_static(&mut ln.color, en.color.value);
+            set_static(&mut ln.gradient_color, en.gradient_color.value);
+            set_static(&mut ln.outline_color, en.outline_color.value);
+            // Length: if changed in studio, update rest_length and adjust live length
+            let new_len = en.length.key_value(0.0).f();
+            let old_len = orig_lengths.get(&en.id).copied().unwrap_or(new_len);
+            if (new_len - old_len).abs() > 1e-4 {
+                ln.rest_length = new_len;
+                let dl = new_len - old_len;
+                if ln.length.track.is_empty() {
+                    ln.length.value = Value::F(new_len);
+                } else {
+                    let ks: Vec<Key> = ln.length.track.keys().iter().map(|k| Key { value: Value::F((k.value.f() + dl).max(0.0)), ..*k }).collect();
+                    ln.length.track.clear();
+                    for k in ks {
+                        ln.length.track.put(k);
+                    }
+                    ln.length.value = Value::F((ln.length.value.f() + dl).max(0.0));
+                }
+            }
+            // Rotation: preserve animation keyframes; if rest angle was explicitly edited in studio, shift by delta
+            let new_rot = en.rotation.key_value(0.0).f();
+            let old_rot = orig_angles.get(&en.id).copied().unwrap_or(new_rot);
+            if (new_rot - old_rot).abs() > 1e-4 {
+                let dr = new_rot - old_rot;
+                if ln.rotation.track.is_empty() {
+                    ln.rotation.value = Value::F(new_rot);
+                } else {
+                    let ks: Vec<Key> = ln.rotation.track.keys().iter().map(|k| Key { value: Value::F(k.value.f() + dr), ..*k }).collect();
+                    ln.rotation.track.clear();
+                    for k in ks {
+                        ln.rotation.track.put(k);
+                    }
+                    ln.rotation.value = Value::F(ln.rotation.value.f() + dr);
+                }
+            }
+            let _ = new_fig.add(ln);
+        } else {
+            let mut nn = en.clone();
+            for q in [
+                &mut nn.rotation,
+                &mut nn.length,
+                &mut nn.thickness,
+                &mut nn.scale,
+                &mut nn.color,
+                &mut nn.gradient_color,
+                &mut nn.outline_color,
+                &mut nn.shown,
+            ] {
+                rewrite_prop_prefix(q, &old_prefix, &new_prefix);
+            }
+            let _ = new_fig.add(nn);
+        }
+    }
+    for pf in &ef.polyfills {
+        let mut np = pf.clone();
+        rewrite_prop_prefix(&mut np.color, &old_prefix, &new_prefix);
+        new_fig.polyfills.push(np);
+    }
+    // Preserve fresh rest base from the edited studio figure
+    let mut base_map = indexmap::IndexMap::new();
+    for en in ef.nodes() {
+        if en.parent.is_some() {
+            base_map.insert(en.id.clone(), NodeBase::of(en));
+        }
+    }
+    new_fig.base = Some(std::sync::Arc::new(base_map));
+    *lf = new_fig;
 }
 
 /// "cape" → "Cape", "left_arm" → "Left arm".
@@ -5988,7 +6679,12 @@ pub fn key_whole_frame(st: &mut crate::edit::State, frame: i32) {
     let ids: Vec<String> = st.project.root().map(|s| s.layers.iter().map(|l| l.id.clone()).collect()).unwrap_or_default();
     for id in ids {
         let Some(l) = st.project.layer_mut(&sym, &id) else { continue };
-        for q in crate::edit::block_ops::pose_props(l) {
+        let is_cam = matches!(l.kind, LayerKind::Camera(_));
+        let ps = crate::edit::block_ops::pose_props(l);
+        if is_cam && ps.iter().all(|q| q.track.is_empty()) {
+            continue;
+        }
+        for q in ps {
             key_at(q, &[frame as i64], fps, tw);
         }
     }

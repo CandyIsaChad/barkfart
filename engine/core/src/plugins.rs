@@ -101,6 +101,7 @@ fn switch_off(id: &str, why: String) {
     let mut r = registry();
     if let Some(x) = r.list.iter_mut().find(|x| x.def.id == id) {
         x.off = Some(why);
+        r.generation += 1;
     }
 }
 
