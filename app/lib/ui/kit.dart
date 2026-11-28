@@ -104,22 +104,30 @@ class RenderHitPad extends RenderProxyBox {
 /// Blue words that do something. `filled`: a field-grey button; `primary`:
 /// the one blue button of a sheet; `danger`: red words.
 class WordButton extends StatelessWidget {
-  const WordButton(this.text, {super.key, this.onTap, this.filled = false, this.primary = false, this.danger = false, this.strong = false, this.height = 36, this.expand = false, this.size = 15});
+  const WordButton(this.text, {super.key, this.onTap, this.filled = false, this.primary = false, this.danger = false, this.strong = false, this.height = 36, this.expand = false, this.size = 15, this.icon});
   final String text;
   final VoidCallback? onTap;
   final bool filled, primary, danger, strong, expand;
   final double height, size;
+  final String? icon;
   @override
   Widget build(BuildContext context) {
     final enabled = onTap != null;
     final fg = !enabled ? cTag : primary ? cCard : danger ? cDanger : cAccent;
     final bg = primary ? (enabled ? cAccent : cControl) : filled ? (danger ? const Color(0xFFFDECEE) : cControl) : null;
+    final label = Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: ink(size, strong || filled || primary ? FontWeight.w700 : FontWeight.w600, fg));
     final box = Container(
       height: height,
       alignment: Alignment.center,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: EdgeInsets.symmetric(horizontal: icon != null ? 10 : 12),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10)),
-      child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: ink(size, strong || filled || primary ? FontWeight.w700 : FontWeight.w600, fg)),
+      child: icon == null
+          ? label
+          : Row(mainAxisSize: MainAxisSize.min, children: [
+              Pictogram(icon!, size: size + 1.5, color: fg, stroke: 2.0),
+              const SizedBox(width: 6),
+              Flexible(child: label),
+            ]),
     );
     return Tap(onTap: onTap, minSize: expand ? 0 : 44, child: expand ? SizedBox(width: double.infinity, child: box) : Row(mainAxisSize: MainAxisSize.min, children: [box]));
   }
@@ -500,12 +508,13 @@ class Hint extends StatelessWidget {
 
 /// Two word buttons side by side (or one, full width).
 class ButtonPair extends StatelessWidget {
-  const ButtonPair(this.a, this.onA, [this.b, this.onB, this.primaryB = false]) : super(key: null);
+  const ButtonPair(this.a, this.onA, [this.b, this.onB, this.primaryB = false, this.iconA, this.iconB]) : super(key: null);
   final String a;
   final VoidCallback? onA;
   final String? b;
   final VoidCallback? onB;
   final bool primaryB;
+  final String? iconA, iconB;
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(top: 2, bottom: 6),
@@ -514,8 +523,8 @@ class ButtonPair extends StatelessWidget {
           dy: 6,
           child: Row(children: [
             // the boards' word buttons: 36 tall, 14 pt
-            Expanded(child: WordButton(a, onTap: onA, filled: true, expand: true, height: 36, size: 14)),
-            if (b != null) ...[const SizedBox(width: 8), Expanded(child: WordButton(b!, onTap: onB, filled: !primaryB, primary: primaryB, expand: true, height: 36, size: 14))],
+            Expanded(child: WordButton(a, onTap: onA, filled: true, expand: true, height: 36, size: 14, icon: iconA)),
+            if (b != null) ...[const SizedBox(width: 8), Expanded(child: WordButton(b!, onTap: onB, filled: !primaryB, primary: primaryB, expand: true, height: 36, size: 14, icon: iconB))],
           ]),
         ),
       );
@@ -563,21 +572,64 @@ class Anchored extends StatelessWidget {
     return box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
   }
 
+  /// Converts a global pointer position (e.g. from `onLongPressStart`) into a
+  /// small anchor rect in the root overlay's coordinate space (respecting UI
+  /// scale so popovers never drift off-anchor or off-screen).
+  static Rect rectFromGlobal(BuildContext context, Offset globalPos, {double size = 24}) {
+    final overlay = Overlay.maybeOf(context, rootOverlay: true)?.context.findRenderObject() as RenderBox?;
+    final local = overlay != null && overlay.hasSize ? overlay.globalToLocal(globalPos) : globalPos;
+    return Rect.fromCenter(center: local, width: size, height: size);
+  }
+
   @override
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
     final screen = mq.size, pad = mq.padding;
     const margin = 8.0;
-    final top = math.max(pad.top + margin, topMin);
-    final bottom = screen.height - pad.bottom - margin;
-    final roomAbove = anchor.top - gap - top, roomBelow = bottom - anchor.bottom - gap;
-    final tightBoth = roomAbove < 235 && roomBelow < 200 && bottom - top > math.max(roomAbove, roomBelow) + 50;
-    final goAbove = below ? roomBelow < 160 && roomAbove > roomBelow : roomAbove >= 120 || roomAbove >= roomBelow;
-    final room = math.max(96.0, tightBoth ? bottom - top : (goAbove ? roomAbove : roomBelow));
-    final w = math.min(width, screen.width - pad.left - pad.right - 2 * margin);
-    final left = (alignRight ? anchor.right - w : anchor.left).clamp(pad.left + margin, math.max(pad.left + margin, screen.width - pad.right - margin - w)).toDouble();
+    final minTop = math.max(pad.top + margin, topMin);
+    final maxBottom = math.max(minTop + 96.0, screen.height - pad.bottom - mq.viewInsets.bottom - margin);
+    final availH = maxBottom - minTop;
+
+    // Strictly clamp the anchor into the safe vertical band so touches near
+    // the very bottom/top edges (or home indicator) never push popovers off-screen.
+    final anchorTop = anchor.top.clamp(minTop, maxBottom).toDouble();
+    final anchorBottom = anchor.bottom.clamp(minTop, maxBottom).toDouble();
+    final roomAbove = math.max(0.0, anchorTop - gap - minTop);
+    final roomBelow = math.max(0.0, maxBottom - (anchorBottom + gap));
+
+    // When both sides are cramped and the full safe height offers meaningfully
+    // more space, anchor inside [minTop, maxBottom] with internal scrolling.
+    final tightBoth = roomAbove < 235 && roomBelow < 200 && availH > math.max(roomAbove, roomBelow) + 50;
+    final goAbove = below
+        ? (roomBelow < 180 && roomAbove > roomBelow)
+        : (roomAbove >= 140 || roomAbove >= roomBelow);
+
+    final double? posTop;
+    final double? posBottom;
+    final double maxH;
+    final double minSpan = math.min(96.0, availH);
+    if (tightBoth) {
+      posTop = minTop;
+      posBottom = null;
+      maxH = availH;
+    } else if (goAbove) {
+      final edgeY = (anchorTop - gap).clamp(minTop + minSpan, maxBottom).toDouble();
+      posTop = null;
+      posBottom = screen.height - edgeY;
+      maxH = math.max(minSpan, edgeY - minTop);
+    } else {
+      final edgeY = (anchorBottom + gap).clamp(minTop, maxBottom - minSpan).toDouble();
+      posTop = edgeY;
+      posBottom = null;
+      maxH = math.max(minSpan, maxBottom - edgeY);
+    }
+
+    final w = math.min(width, math.max(120.0, screen.width - pad.left - pad.right - 2 * margin));
+    final left = (alignRight ? anchor.right - w : anchor.left)
+        .clamp(pad.left + margin, math.max(pad.left + margin, screen.width - pad.right - margin - w))
+        .toDouble();
     Widget body = ConstrainedBox(
-      constraints: BoxConstraints(maxHeight: room, maxWidth: w),
+      constraints: BoxConstraints(maxHeight: maxH, maxWidth: w),
       child: _AnchoredScroll(child: card(w)),
     );
     // it grows out of what opened it (the popover's route animates it)
@@ -592,8 +644,8 @@ class Anchored extends StatelessWidget {
     }
     return Positioned(
       left: left,
-      top: tightBoth ? top : (goAbove ? null : math.min(anchor.bottom + gap, bottom - 96)),
-      bottom: tightBoth ? null : (goAbove ? screen.height - math.max(anchor.top - gap, top + 96) : null),
+      top: posTop,
+      bottom: posBottom,
       child: body,
     );
   }
@@ -721,64 +773,98 @@ Future<T?> showSheet<T>(BuildContext context, {required String title, required L
   );
 }
 
-/// A short message at the bottom of the screen. Dark for errors and
-/// warnings, light for undoable events (D19).
+/// A quiet, sleek toast pill at the bottom of the screen. Dark for errors and
+/// warnings, light for undoable/info events (D19). Passes pointers through when
+/// there is no action button so it never interrupts rapid editing.
 VoidCallback? _closeToast;
+Timer? _toastTimer;
 
-void showToast(BuildContext context, String text, {String? action, VoidCallback? onAction, bool light = false, String? icon, Color? iconColor, Duration duration = const Duration(seconds: 4)}) {
+void showToast(BuildContext context, String text, {String? action, VoidCallback? onAction, bool light = false, String? icon, Color? iconColor, Duration? duration}) {
   final overlay = Overlay.maybeOf(context, rootOverlay: true);
   if (overlay == null) return;
+  _toastTimer?.cancel();
+  _toastTimer = null;
   _closeToast?.call(); // one toast at a time: the newest replaces the last
   late OverlayEntry entry;
   var gone = false;
   void close() {
     if (gone) return;
     gone = true;
+    _toastTimer?.cancel();
+    _toastTimer = null;
     entry.remove();
     if (_closeToast == close) _closeToast = null;
   }
 
   _closeToast = close;
+  final effectiveDuration = duration ?? (action != null ? const Duration(milliseconds: 3000) : const Duration(milliseconds: 1900));
 
   entry = OverlayEntry(
-    builder: (c) => Positioned(
-      left: 0,
-      right: 0,
-      bottom: 24 + MediaQuery.paddingOf(c).bottom,
-      child: Center(
-        // it rises into place
-        child: TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0, end: 1),
-          duration: motion(c, 200),
-          curve: kEase,
-          builder: (c, t, child) => Opacity(opacity: t, child: Transform.translate(offset: Offset(0, 14 * (1 - t)), child: child)),
-          child: Container(
-          constraints: const BoxConstraints(maxWidth: 560),
-          padding: EdgeInsets.fromLTRB(16, 6, action == null ? 16 : 6, 6),
-          decoration: BoxDecoration(
-            color: light ? cCard : const Color(0xFF2A2D33),
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: const [BoxShadow(color: Color(0x40000000), blurRadius: 18, offset: Offset(0, 6))],
-          ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            if (icon != null) Padding(padding: const EdgeInsets.only(right: 8), child: Pictogram(icon, size: 16, color: iconColor ?? (light ? cInk2b : cCard))),
-            Flexible(child: Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text(text, style: ink(14, FontWeight.w400, light ? cText : cCard)))),
-            if (action != null)
-              Tap(
-                onTap: () {
-                  close();
-                  onAction?.call();
-                },
-                child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), child: Text(action, style: ink(14, FontWeight.w700, light ? cAccent : const Color(0xFF9CC8F5)))),
+    builder: (c) {
+      final pill = Container(
+        constraints: const BoxConstraints(maxWidth: 420),
+        padding: EdgeInsets.fromLTRB(12, 5, action == null ? 12 : 4, 5),
+        decoration: BoxDecoration(
+          color: light ? cCard.withValues(alpha: 0.96) : const Color(0xEC26292E),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: light ? const Color(0x22000000) : const Color(0x1FFFFFFF)),
+          boxShadow: const [BoxShadow(color: Color(0x26000000), blurRadius: 12, offset: Offset(0, 4))],
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          if (icon != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 7),
+              child: Pictogram(icon, size: 14.5, color: iconColor ?? (light ? cInk2b : cCard)),
+            ),
+          Flexible(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Text(
+                text,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: ink(12.5, FontWeight.w500, light ? cText : cCard),
               ),
-          ]),
+            ),
+          ),
+          if (action != null) ...[
+            const SizedBox(width: 4),
+            Tap(
+              minSize: 32,
+              radius: 14,
+              onTap: () {
+                close();
+                onAction?.call();
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                child: Text(action, style: ink(12.5, FontWeight.w700, light ? cAccent : const Color(0xFF9CC8F5))),
+              ),
+            ),
+          ],
+        ]),
+      );
+      return Positioned(
+        left: 16,
+        right: 16,
+        bottom: 14 + MediaQuery.paddingOf(c).bottom,
+        child: IgnorePointer(
+          ignoring: action == null,
+          child: Center(
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: 1),
+              duration: motion(c, 160),
+              curve: kEase,
+              builder: (c, t, child) => Opacity(opacity: t, child: Transform.translate(offset: Offset(0, 8 * (1 - t)), child: child)),
+              child: pill,
+            ),
+          ),
         ),
-        ),
-      ),
-    ),
+      );
+    },
   );
   overlay.insert(entry);
-  Timer(duration, close);
+  _toastTimer = Timer(effectiveDuration, close);
 }
 
 /// The checkerboard drawn around the stage.

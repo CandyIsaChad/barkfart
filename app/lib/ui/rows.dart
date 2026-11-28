@@ -62,11 +62,12 @@ class DSeg extends Desc {
 
 /// One or two word buttons.
 class DButtons extends Desc {
-  const DButtons(this.a, this.onA, {this.b, this.onB});
+  const DButtons(this.a, this.onA, {this.b, this.onB, this.iconA, this.iconB});
   final String a;
   final VoidCallback? onA;
   final String? b;
   final VoidCallback? onB;
+  final String? iconA, iconB;
 }
 
 /// A row of swatches. `mixed` shows "Mixed" next to the label.
@@ -171,7 +172,7 @@ Widget renderDesc(Desc d) {
           Segmented(d.options, d.selected, onSelect: d.onSelect),
         ]),
         d.reset),
-    DButtons() => ButtonPair(d.a, d.onA, d.b, d.onB),
+    DButtons() => ButtonPair(d.a, d.onA, d.b, d.onB, false, d.iconA, d.iconB),
     DSwatch() => swipe(
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),

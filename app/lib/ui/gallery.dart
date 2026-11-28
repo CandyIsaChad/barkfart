@@ -66,7 +66,7 @@ class _GalleryState extends State<Gallery> {
 
 /// Every pictogram with its name.
 Widget pictogramSheet() {
-  const names = ['pose', 'all', 'camera', 'undo', 'redo', 'props', 'bin', 'full', 'figure', 'headonly', 'hat', 'sound', 'picture', 'text', 'clip', 'folder', 'eye', 'chevron', 'back', 'next', 'plus', 'x', 'key', 'onion', 'loop', 'search', 'wiggle', 'swing', 'loopmod', 'follow', 'link', 'chain', 'broken', 'parts', 'handles', 'stepBack', 'stepFwd', 'toStart', 'play', 'pause', 'stop', 'toEnd'];
+  const names = ['pose', 'all', 'camera', 'undo', 'redo', 'props', 'bin', 'full', 'figure', 'createFigure', 'headonly', 'hat', 'sound', 'picture', 'text', 'clip', 'folder', 'eye', 'chevron', 'back', 'next', 'plus', 'x', 'key', 'onion', 'loop', 'search', 'filter', 'wiggle', 'swing', 'loopmod', 'follow', 'link', 'chain', 'broken', 'attach', 'separate', 'blend', 'check', 'modifier', 'grid', 'mirror', 'split', 'flipH', 'flipV', 'widescreen', 'save', 'layers', 'parts', 'handles', 'stepBack', 'stepFwd', 'toStart', 'play', 'pause', 'stop', 'toEnd'];
   return Wrap(spacing: 10, runSpacing: 10, children: [
     for (final n in names)
       SizedBox(

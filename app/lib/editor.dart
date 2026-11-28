@@ -18,9 +18,12 @@ import 'package:share_plus/share_plus.dart';
 import 'engine.dart';
 import 'files.dart';
 import 'workshop.dart';
+import 'ui/blend_picker.dart';
+import 'ui/figure_studio.dart';
 import 'ui/kit.dart' as kit;
 import 'ui/pictograms.dart';
 import 'ui/rows.dart' as rw;
+import 'ui/target_picker.dart';
 import 'ui/tokens.dart';
 
 export 'ui/tokens.dart';
@@ -134,14 +137,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   Future<void> _start() async {
-    // K2: the plugins installed before (quietly: a broken one is listed off)
-    try {
-      final dir = await pluginsDir();
-      for (final f in dir.listSync().whereType<File>().where((f) => f.path.endsWith('.luau') || f.path.endsWith('.lua'))) {
-        final st = _engine?.command({'op': 'plugin_install', 'name': f.uri.pathSegments.last, 'source': await f.readAsString()});
-        if (st?['installed'] case final String id) _pluginFiles[id] = f.path;
-      }
-    } catch (_) {}
     // the default stickfigure, for the figure editor's "Stock size" reference
     try {
       final bytes = (await rootBundle.load('assets/stock/figures/Stickfigure.nodes')).buffer.asUint8List();
@@ -169,6 +164,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         firstRun = true;
       }
     }
+    // K2: load saved plugins AFTER session exists so every plugin/modifier registers cleanly
+    try {
+      final dir = await pluginsDir();
+      for (final f in dir.listSync().whereType<File>().where((f) => f.path.endsWith('.luau') || f.path.endsWith('.lua'))) {
+        final st = e.command({'op': 'plugin_install', 'name': f.uri.pathSegments.last, 'source': await f.readAsString()});
+        if (st?['installed'] case final String id) _pluginFiles[id] = f.path;
+      }
+    } catch (_) {}
     await AppSettings.load();
     final savedTh = AppSettings.values['timelineHeight'];
     if (savedTh is num && savedTh > 0) _timelineHeight = savedTh.toDouble();
@@ -1970,7 +1973,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         key: _shot,
         child: Stack(children: [
         Column(children: [
-        if (!_fsNow) (_st['copyEdit'] is Map ? _copyHeader(pad, _st['copyEdit'] as Map) : _appBar(pad)),
+        if (!_fsNow) (_st['building'] != null ? _studioHeader(pad) : _appBar(pad)),
         Expanded(child: Row(textDirection: leftHand ? TextDirection.rtl : TextDirection.ltr, children: [
           if (!_fsNow) _leftRail(pad, leftHand),
           Expanded(
@@ -2105,7 +2108,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             width: w,
             padding: const EdgeInsets.all(6),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-              for (final (i, label) in const [(0, 'New animation'), (1, 'Your animations…'), (2, 'Save'), (3, 'Save as…'), (5, 'Workshop'), (4, 'Settings')])
+              for (final (i, label) in const [(0, 'New animation'), (6, 'Create stick figure'), (1, 'Your animations…'), (2, 'Save'), (3, 'Save as…'), (5, 'Workshop'), (4, 'Settings')])
                 kit.Tap(
                   onTap: () => Navigator.pop(c, i),
                   minSize: 0,
@@ -2129,6 +2132,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         await _settingsDialog();
       case 5:
         await _openWorkshop();
+      case 6:
+        _createNewFigure();
     }
   }
 
@@ -2178,7 +2183,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         child: ClipRect(
           child: Stack(fit: StackFit.expand, children: [
             if (_image != null) CustomPaint(painter: _StagePicture(_image!, _imageRect, _imageCamera, _view, Size(((_st['w'] as num?) ?? 16).toDouble(), ((_st['h'] as num?) ?? 9).toDouble()))),
-            CustomPaint(painter: _Overlay(_pictureSt ?? _st, _view, _playing)),
+            CustomPaint(painter: _Overlay(_pictureSt ?? _st, _view, _playing, studioGrid: _studioGrid, studioCrosshair: _studioCrosshair)),
             if (showModeBanner)
               Positioned(
                 left: leftInset,
@@ -2187,23 +2192,23 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 child: Align(
                   alignment: Alignment.topCenter,
                   child: Container(
-                    padding: const EdgeInsets.fromLTRB(12, 4, 6, 4),
+                    padding: const EdgeInsets.fromLTRB(11, 3, 5, 3),
                     decoration: BoxDecoration(
-                      color: joining ? cHint : cCard.withValues(alpha: 0.95),
+                      color: joining ? cHint : cCard.withValues(alpha: 0.94),
                       borderRadius: BorderRadius.circular(18),
                       border: Border.all(color: joining ? const Color(0xFFE5B84B) : cLine),
-                      boxShadow: const [BoxShadow(color: Color(0x1F000000), blurRadius: 10, offset: Offset(0, 3))],
+                      boxShadow: const [BoxShadow(color: Color(0x1A000000), blurRadius: 8, offset: Offset(0, 2))],
                     ),
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Pictogram(joining ? 'chain' : mode == 'camera' ? 'camera' : 'all', size: 16, color: joining ? cText : cTitle),
-                      const SizedBox(width: 7),
+                      Pictogram(joining ? 'attach' : mode == 'camera' ? 'camera' : 'all', size: 15, color: joining ? cText : cTitle),
+                      const SizedBox(width: 6),
                       Flexible(
                         child: Text(
                           joining
-                              ? (_st['joiningMode'] == 'absolute' ? 'Tap a joint to snap onto' : 'Tap a joint to join (keep offset)')
+                              ? (_st['joiningMode'] == 'absolute' ? 'Snap to joint' : 'Attach')
                               : mode == 'camera'
-                                  ? 'Camera mode · Drag stage to frame'
-                                  : 'Move everything',
+                                  ? 'Camera'
+                                  : 'Move all',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(color: cText, fontSize: 12.5, fontWeight: FontWeight.w600),
@@ -2221,13 +2226,36 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                       ],
                       const SizedBox(width: 4),
                       kit.WordButton(
-                        joining ? 'Cancel' : 'Pose figures',
+                        joining ? 'Cancel' : 'Done',
                         size: 12.5,
-                        height: 28,
+                        height: 26,
                         filled: !joining,
                         onTap: () => joining ? _cmd({'op': 'join_cancel'}) : _setMode('figure'),
                       ),
                     ]),
+                  ),
+                ),
+              ),
+            if (_playing)
+              Positioned(
+                right: 12,
+                bottom: 10,
+                child: IgnorePointer(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0x9E1E2025),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '${(_playT * _fps).floor().clamp(0, math.max(0, _frames - 1)) + 1} / $_frames',
+                      style: const TextStyle(
+                        color: Color(0xF0FFFFFF),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        fontFeatures: [ui.FontFeature.tabularFigures()],
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -2397,9 +2425,22 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     return kit.PanelCard(
       padding: EdgeInsets.zero,
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        const Padding(padding: EdgeInsets.only(top: 12), child: Text('Parts', textAlign: TextAlign.center, style: TextStyle(color: cTitle, fontSize: 15, fontWeight: FontWeight.w600))),
-        const Text('Front at the top', textAlign: TextAlign.center, style: TextStyle(color: cSecondary, fontSize: 12)),
-        const SizedBox(height: 6),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 6, 4),
+          child: Row(children: [
+            const Pictogram('layers', size: 16, color: cAccent),
+            const SizedBox(width: 6),
+            const Expanded(child: Text('Parts', style: TextStyle(color: cTitle, fontSize: 14.5, fontWeight: FontWeight.w700))),
+            kit.Tap(
+              label: 'Close parts',
+              minSize: 30,
+              onTap: () => setState(() => _partsOpen = false),
+              child: const Pictogram('x', size: 14, color: cSecondary),
+            ),
+          ]),
+        ),
+        const Divider(height: 1, color: Color(0xFFE6E8EB)),
+        const SizedBox(height: 4),
         Expanded(
           child: ReorderableListView.builder(
             buildDefaultDragHandles: false,
@@ -2426,77 +2467,28 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     );
   }
 
-  /// The figure editor's shape shelf (J2, FigureEditor board): what a drag
-  /// from a joint draws, one picked at a time; Select draws nothing.
+  /// The figure studio's bottom Shape & Node Tool Shelf.
   Widget _shapeShelf() {
     final tool = _st['drawTool'] as String? ?? 'none';
     final mirror = (_st['opts'] as Map?)?['mirror'] == true;
-    const tools = [
-      ('none', 'Select', 'select'),
-      ('square', 'Segment', 'segment'),
-      ('line', 'Rounded', 'rounded'),
-      ('circle', 'Circle', 'circle'),
-      ('ellipse', 'Ellipse', 'ellipse'),
-      ('triangle', 'Triangle', 'triangle'),
-      ('trapezoid', 'Trapezoid', 'trapezoid'),
-      ('polygon', 'Polygon', 'polygon'),
-      ('polyfill', 'Polyfill', 'polyfill'),
-    ];
-    Widget tile(String id, String label, String glyph) {
-      final on = id == 'polyfill' ? _st['polyfill'] != null : tool == id && _st['polyfill'] == null;
-      return kit.Tap(
-        label: label,
-        minSize: 0,
-        onTap: () => id == 'polyfill'
-            ? (_sel == null ? _say('Tap a joint first: the polyfill is drawn right before it.') : _cmd({'op': 'polyfill_new'}))
-            : _cmd({'op': 'draw_tool', 'shape': id}),
-        child: Container(
-          width: 74,
-          height: 64,
-          decoration: BoxDecoration(color: on ? const Color(0xFFE8F0FA) : null, borderRadius: BorderRadius.circular(12)),
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            CustomPaint(size: const Size(40, 26), painter: ShapeGlyph(glyph, on ? cAccent : cInk2b)),
-            const SizedBox(height: 4),
-            Text(label, style: TextStyle(color: on ? cAccent : cSecondary, fontSize: 12, fontWeight: on ? FontWeight.w600 : FontWeight.w400)),
-          ]),
-        ),
-      );
-    }
-
-    return Container(
-      height: 76,
-      decoration: const BoxDecoration(color: cCard, border: Border(top: BorderSide(color: cLine))),
-      child: Row(children: [
-        Expanded(
-          child: Center(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                for (final (id, label, glyph) in tools) Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: tile(id, label, glyph)),
-                // a quiet Mirror toggle after a divider (D13: drawing only, nothing stored)
-                Container(width: 1, height: 40, margin: const EdgeInsets.symmetric(horizontal: 10), color: cLine),
-                kit.Tap(
-                  label: mirror ? 'Mirror, on' : 'Mirror, off',
-                  minSize: 0,
-                  onTap: () => _cmd({'op': 'set', 'k': 'mirror', 'v': !mirror}),
-                  child: Container(
-                    width: 74,
-                    height: 64,
-                    decoration: BoxDecoration(color: mirror ? const Color(0xFFE8F0FA) : null, borderRadius: BorderRadius.circular(12)),
-                    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      CustomPaint(size: const Size(40, 26), painter: ShapeGlyph('mirror', mirror ? cAccent : cInk2b)),
-                      const SizedBox(height: 4),
-                      Text('Mirror', style: TextStyle(color: mirror ? cAccent : cSecondary, fontSize: 12, fontWeight: mirror ? FontWeight.w600 : FontWeight.w400)),
-                    ]),
-                  ),
-                ),
-              ]),
-            ),
-          ),
-        ),
-        // editing in place (scripts and tests) ends with Done; a copy ends in the header
-        if (_st['copyEdit'] == null) Padding(padding: const EdgeInsets.only(right: 10), child: kit.WordButton('Done', strong: true, onTap: () => _cmd({'op': 'build_done'}))),
-      ]),
+    final hasSel = _sel != null;
+    final nonRoot = hasSel && _sel!['root'] != true;
+    return FigureStudioShelf(
+      drawTool: tool,
+      polyfillActive: _st['polyfill'] != null,
+      mirrorOn: mirror,
+      gridOn: _studioGrid,
+      hasSelectedJoint: hasSel,
+      canEditNonRoot: nonRoot,
+      shapePainterBuilder: (glyph, color) => ShapeGlyph(glyph, color),
+      onPickTool: (id) => _cmd({'op': 'draw_tool', 'shape': id}),
+      onPickPolyfill: () => hasSel ? _cmd({'op': 'polyfill_new'}) : _say('Select a joint first.', light: true),
+      onToggleMirror: () => _cmd({'op': 'set', 'k': 'mirror', 'v': !mirror}),
+      onToggleGrid: () => setState(() => _studioGrid = !_studioGrid),
+      onSplit: () => _cmd({'op': 'split', 'n': _splitN + 1}),
+      onDuplicateBranch: () => _cmd({'op': 'duplicate_branch'}),
+      onFlipBranch: () => _cmd({'op': 'flip_branch', 'h': true}),
+      onDeleteJoint: () => _cmd({'op': 'delete_segment'}),
     );
   }
 
@@ -3253,7 +3245,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ]),
     );
 
-    final lockScroll = _boxPath != null || _blockDrag != null || _tlPinch.length >= 2;
+    final lockScroll = _boxPath != null || _blockDrag != null || _scrubbingPlayhead || _tlPinch.length >= 2;
 
     return Container(
       color: cCard,
@@ -3356,22 +3348,71 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               ),
             Positioned(left: left + cur * cell + cell / 2 - 0.75, top: rulerH - 2, width: 1.5, height: headerH - rulerH + 2, child: const IgnorePointer(child: ColoredBox(color: Color(0xFF8DB8E8)))),
             Positioned(
-              left: left + cur * cell + cell / 2 - 18,
+              left: left + cur * cell + cell / 2 - 22,
               top: 0,
-              child: kit.Tap(
-                key: _playheadKey,
-                label: 'Frame ${cur + 1} of $_frames (tap to jump)',
-                minSize: 22,
-                radius: 9,
-                onTap: _playing ? null : _frameJumpPopover,
-                child: Container(
-                  constraints: const BoxConstraints(minWidth: 36),
-                  height: 19,
-                  margin: const EdgeInsets.only(top: 1.5),
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(color: const Color(0xFFDCEAF9), borderRadius: BorderRadius.circular(9)),
-                  child: Text('${cur + 1}', style: const TextStyle(color: cAccent, fontSize: 11, fontWeight: FontWeight.w700)),
+              child: Semantics(
+                button: true,
+                label: 'Frame ${cur + 1} of $_frames',
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.grab,
+                  child: GestureDetector(
+                    key: _playheadKey,
+                    behavior: HitTestBehavior.opaque,
+                    dragStartBehavior: DragStartBehavior.down,
+                    onTap: _playing ? null : _frameJumpPopover,
+                    onHorizontalDragStart: (d) {
+                      if (_boxActive || _boxPath != null || _tlPinch.length >= 2) return;
+                      if (_playing) _togglePlay();
+                      setState(() => _scrubbingPlayhead = true);
+                      _dragPointerGlobal = d.globalPosition;
+                      final box = _timelineTrackKey.currentContext?.findRenderObject() as RenderBox?;
+                      if (box != null && box.hasSize) {
+                        final scrollX = _stripScroll.hasClients ? _stripScroll.offset : 0.0;
+                        _scrubTo(frameAt(box.globalToLocal(d.globalPosition).dx + scrollX));
+                      }
+                    },
+                    onHorizontalDragUpdate: (d) {
+                      if (_boxActive || _boxPath != null || _tlPinch.length >= 2) return;
+                      _dragPointerGlobal = d.globalPosition;
+                      final box = _timelineTrackKey.currentContext?.findRenderObject() as RenderBox?;
+                      if (box != null && box.hasSize) {
+                        final scrollX = _stripScroll.hasClients ? _stripScroll.offset : 0.0;
+                        _scrubTo(frameAt(box.globalToLocal(d.globalPosition).dx + scrollX));
+                      }
+                    },
+                    onHorizontalDragEnd: (_) {
+                      setState(() => _scrubbingPlayhead = false);
+                      _dragPointerGlobal = null;
+                    },
+                    onHorizontalDragCancel: () {
+                      setState(() => _scrubbingPlayhead = false);
+                      _dragPointerGlobal = null;
+                    },
+                    child: Container(
+                      width: 44,
+                      height: 22,
+                      alignment: Alignment.center,
+                      child: Container(
+                        constraints: const BoxConstraints(minWidth: 36),
+                        height: 19,
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: _scrubbingPlayhead ? cAccent : const Color(0xFFDCEAF9),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: Text(
+                          '${cur + 1}',
+                          style: TextStyle(
+                            color: _scrubbingPlayhead ? cCard : cAccent,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            fontFeatures: const [ui.FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -3540,7 +3581,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                               onLongPressStart: (d) {
                                 if (_boxActive || _boxPath != null) return;
                                 if (AppSettings.flag('haptics')) unawaited(HapticFeedback.selectionClick());
-                                final rect = Rect.fromCenter(center: d.globalPosition, width: 20, height: 20);
+                                final rect = kit.Anchored.rectFromGlobal(context, d.globalPosition, size: 20);
                                 final totalSel = _selPoseKeys.length + _selPropKeys.length;
                                 if (totalSel > 1 && isBoxSel) {
                                   _multiKeyPopover(rect);
@@ -3549,7 +3590,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                                 }
                               },
                               onSecondaryTapUp: (d) {
-                                final rect = Rect.fromCenter(center: d.globalPosition, width: 20, height: 20);
+                                final rect = kit.Anchored.rectFromGlobal(context, d.globalPosition, size: 20);
                                 final totalSel = _selPoseKeys.length + _selPropKeys.length;
                                 if (totalSel > 1 && isBoxSel) {
                                   _multiKeyPopover(rect);
@@ -3934,7 +3975,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               ],
               if (kind != 'camera') ...[
                 Container(height: 1, margin: EdgeInsets.symmetric(horizontal: 8, vertical: compact ? 2 : 4), color: const Color(0xFFE6E8EB)),
-                item(isGroup ? 'Delete group' : 'Delete everywhere', 'bin', () => Navigator.pop(c, 'del'), danger: true),
+                item(isGroup ? 'Delete group' : 'Delete', 'bin', () => Navigator.pop(c, 'del'), danger: true),
               ],
             ]),
           ),
@@ -3998,6 +4039,35 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         _cmd({'op': 'frame', 'i': f});
         _setMode('camera');
       }
+      if (!menu) return;
+      final pick = await showGeneralDialog<String>(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: 'Camera frame action',
+        barrierColor: const Color(0x00000000),
+        transitionDuration: kit.motion(context, 140),
+        pageBuilder: (c, a1, a2) => Stack(children: [
+          kit.Anchored(
+            anchor: kit.Anchored.rectFromGlobal(context, globalPos),
+            width: 248,
+            topMin: 44 + MediaQuery.paddingOf(c).top,
+            card: (w) => kit.PanelCard(
+              width: w,
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Text('Camera · Frame ${f + 1}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cTitle, fontSize: 13.5, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                kit.WordButton('Add camera key', icon: 'key', primary: true, expand: true, height: 36, size: 13.5, onTap: () => Navigator.pop(c, 'pose')),
+              ]),
+            ),
+          ),
+        ]),
+      );
+      if (pick == 'pose' && mounted) {
+        _cmd({'op': 'new_pose', 'layer': id, 'frame': f});
+        _cmd({'op': 'frame', 'i': f.clamp(0, _frames - 1)});
+        _thumbsChanged('new_pose', force: true);
+      }
       return;
     }
     if (kind != 'figure' && kind != 'picture' && kind != 'movieclip' && kind != 'text' && kind != 'adjustment') return;
@@ -4037,8 +4107,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       transitionDuration: kit.motion(context, 140),
       pageBuilder: (c, a1, a2) => Stack(children: [
         kit.Anchored(
-          anchor: Rect.fromCenter(center: globalPos, width: 24, height: 24),
+          anchor: kit.Anchored.rectFromGlobal(context, globalPos),
           width: 264,
+          topMin: 44 + MediaQuery.paddingOf(c).top,
           card: (w) => kit.PanelCard(
             width: w,
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -4046,14 +4117,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               Text('$name · Frame ${f + 1}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cTitle, fontSize: 13.5, fontWeight: FontWeight.w700)),
               const SizedBox(height: 8),
               if (canExtend) ...[
-                kit.WordButton('Extend to frame ${f + 1}', primary: true, expand: true, height: 36, size: 13.5, onTap: () => Navigator.pop(c, 'extend')),
+                kit.WordButton('Extend to frame ${f + 1}', icon: 'extend', primary: true, expand: true, height: 36, size: 13.5, onTap: () => Navigator.pop(c, 'extend')),
                 const SizedBox(height: 6),
               ],
               if (isFigure) ...[
-                kit.WordButton('New pose at frame ${f + 1}', primary: !canExtend, filled: canExtend, expand: true, height: 36, size: 13.5, onTap: () => Navigator.pop(c, 'pose')),
+                kit.WordButton('New pose at frame ${f + 1}', icon: 'key', primary: !canExtend, filled: canExtend, expand: true, height: 36, size: 13.5, onTap: () => Navigator.pop(c, 'pose')),
                 if (_st['pose'] == true) ...[
                   const SizedBox(height: 6),
-                  kit.WordButton('Paste pose here', filled: true, expand: true, height: 34, size: 13, onTap: () => Navigator.pop(c, 'paste')),
+                  kit.WordButton('Paste pose', icon: 'paste', filled: true, expand: true, height: 34, size: 13, onTap: () => Navigator.pop(c, 'paste')),
                 ],
               ],
             ]),
@@ -4326,7 +4397,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       }
 
       final figure = r['kind'] == 'figure';
-      final extensible = figure || r['kind'] == 'picture' || r['kind'] == 'movieclip' || r['kind'] == 'text' || r['kind'] == 'adjustment';
+      final isCam = r['kind'] == 'camera';
+      final extensible = figure || isCam || r['kind'] == 'picture' || r['kind'] == 'movieclip' || r['kind'] == 'text' || r['kind'] == 'adjustment';
       final multiSelectedHere = boxSel && (_selPoseKeys.length + _selPropKeys.length) >= 2;
       // a grip being dragged stays put even when the playhead leaves its pose
       final gripDrag = drag != null && drag.block == bi && (drag.kind == 'block_start' || drag.kind == 'block_end');
@@ -4340,7 +4412,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       void tapBlock(Offset globalPos, double localDx) {
         if (_boxActive || _boxPath != null || DateTime.now().difference(_boxEndedAt) < const Duration(milliseconds: 80)) return;
         select(localDx);
-        if (figure) {
+        if (figure || isCam) {
           setState(() {
             _selPoseKeys
               ..clear()
@@ -4352,12 +4424,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
 
       void openBlockMenu(Offset globalPos) {
         if (_boxActive || _boxPath != null) return;
-        final rect = Rect.fromCenter(center: globalPos, width: 24, height: 24);
+        final rect = kit.Anchored.rectFromGlobal(context, globalPos);
         final totalSel = _selPoseKeys.length + _selPropKeys.length;
         if (totalSel > 1 && boxSel) {
           _multiKeyPopover(rect);
         } else if (figure) {
           _poseKeyPopover(r, b, bi, rect);
+        } else if (r['kind'] == 'camera') {
+          _cameraKeyPopover(r, b, bi, rect);
         }
       }
 
@@ -4440,7 +4514,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 _cmd({'op': 'select', 'layer': r['id']});
                 setState(() => _panelOpen = true);
                 _jumpTo('Stickfigure Tools');
-                _say('${r['name']} is joined to ${r['joinedTo']}. Let go on its Stickfigure page.', light: true);
+                _say('${r['name']} is attached to ${r['joinedTo']}.', light: true);
               },
               child: const Pictogram('chain', size: 13, color: Color(0xFF5D636B), stroke: 2.2),
             ),
@@ -4456,33 +4530,38 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 opacity: dragged ? 0 : 1,
                 child: GestureDetector(
                   onTapUp: (d) => tapBlock(d.globalPosition, d.localPosition.dx),
-                  onLongPressStart: figure || multiSelectedHere
+                  onLongPressStart: figure || isCam || multiSelectedHere
                       ? (d) {
                           if (_boxActive || _boxPath != null) return;
                           if (AppSettings.flag('haptics')) unawaited(HapticFeedback.selectionClick());
                           openBlockMenu(d.globalPosition);
                         }
                       : null,
-                  onSecondaryTapUp: figure || multiSelectedHere ? (d) => openBlockMenu(d.globalPosition) : null,
+                  onSecondaryTapUp: figure || isCam || multiSelectedHere ? (d) => openBlockMenu(d.globalPosition) : null,
                   onHorizontalDragStart: multiSelectedHere
                       ? (d) {
                           _dragPointerGlobal = d.globalPosition;
                           _startMultiKeyDrag(kind: 'multi_shift', cell: cell, rawStartX: d.globalPosition.dx);
                         }
-                      : null,
-                  onHorizontalDragUpdate: multiSelectedHere
+                      : (isCam && st > 0)
+                          ? (d) {
+                              _dragPointerGlobal = d.globalPosition;
+                              _startTimelineDrag(_BlockDrag(layerId, a, visLen, cell, edge: 1, kind: 'block_start', block: bi, minStart: math.max(1, prevStart + 1)), rawStartX: d.globalPosition.dx);
+                            }
+                          : null,
+                  onHorizontalDragUpdate: (multiSelectedHere || (isCam && st > 0))
                       ? (d) {
                           _dragPointerGlobal = d.globalPosition;
                           _updateTimelineDragFromPointer(d.globalPosition);
                         }
                       : null,
-                  onHorizontalDragEnd: multiSelectedHere
+                  onHorizontalDragEnd: (multiSelectedHere || (isCam && st > 0))
                       ? (_) {
                           _dragPointerGlobal = null;
                           _endBlockDrag();
                         }
                       : null,
-                  onHorizontalDragCancel: multiSelectedHere
+                  onHorizontalDragCancel: (multiSelectedHere || (isCam && st > 0))
                       ? () {
                           _dragPointerGlobal = null;
                           _endBlockDrag(cancel: true);
@@ -4668,15 +4747,16 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         kit.Anchored(
           anchor: anchor,
           width: 280,
+          topMin: 44 + MediaQuery.paddingOf(c).top,
           card: (w) => kit.PanelCard(
             width: w,
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Text(to != null ? '$name is joined to $to from frame ${f + 1}.' : '$name lets go of ${from ?? 'its figure'} at frame ${f + 1}.', style: const TextStyle(color: cText, fontSize: 14)),
+              Text(to != null ? '$name attached to $to at frame ${f + 1}' : '$name detached from ${from ?? 'figure'} at frame ${f + 1}', style: const TextStyle(color: cText, fontSize: 13.5, fontWeight: FontWeight.w500)),
               const SizedBox(height: 8),
               if (to != null)
-                kit.ButtonPair('Let go', () => Navigator.pop(c, 1), 'Join elsewhere', () => Navigator.pop(c, 2))
+                kit.ButtonPair('Detach', () => Navigator.pop(c, 1), 'Reattach', () => Navigator.pop(c, 2), false, 'broken', 'attach')
               else
-                kit.ButtonPair('Join again', from == null ? null : () => Navigator.pop(c, 3), 'Close', () => Navigator.pop(c)),
+                kit.ButtonPair('Reattach', from == null ? null : () => Navigator.pop(c, 3), 'Close', () => Navigator.pop(c), false, 'attach'),
             ]),
           ),
         ),
@@ -4691,12 +4771,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _cmd({'op': 'select', 'layer': r['id']});
       _cmd({'op': 'unjoin'});
       if (!mounted) return;
-      kit.showToast(context, '$name lets go of $to at frame ${at + 1}', light: true, icon: 'broken', iconColor: cDanger, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
+      kit.showToast(context, 'Detached $name from $to at frame ${at + 1}', light: true, icon: 'broken', iconColor: cDanger, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
     } else if (pick == 2) {
       _cmd({'op': 'frame', 'i': f});
       _cmd({'op': 'select', 'layer': r['id']});
       _cmd({'op': 'join'});
-      _say('Tap a joint on another figure: $name joins it from frame ${f + 1}.', light: true);
     } else if (pick == 3) {
       final target = ((_st['rows'] as List?) ?? const []).cast<Map>().where((x) => x['name'] == from).firstOrNull;
       if (target == null) return;
@@ -4704,7 +4783,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       _cmd({'op': 'select', 'layer': r['id']});
       _cmd({'op': 'join_here', 'layer': target['id']});
       if (!mounted) return;
-      kit.showToast(context, '$name joins $from again at frame ${f + 1}', light: true, icon: 'chain', action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
+      kit.showToast(context, 'Reattached $name to $from at frame ${f + 1}', light: true, icon: 'chain', action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
     }
   }
 
@@ -5000,6 +5079,93 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     }
   }
 
+  /// Anchored popover for a Camera keyframe (Copy, Paste, Duplicate, Ease, Shift, Delete).
+  Future<void> _cameraKeyPopover(Map r, List b, int blockIndex, Rect anchor) async {
+    final layerId = '${r['id']}';
+    final st = (b[0] as num).toInt();
+    final isHold = b[2] == true;
+    final blockEases = (r['blockEases'] as List?) ?? const [];
+    final rawEase = blockIndex < blockEases.length ? blockEases[blockIndex] : (b.length > 3 ? b[3] : null);
+    var ease = rawEase is String ? rawEase : (isHold ? 'hold' : 'auto');
+    const eases = ['auto', 'linear', 'out', 'smooth', 'bounce'];
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Camera keyframe',
+      barrierColor: const Color(0x00000000),
+      transitionDuration: kit.motion(context, 150),
+      pageBuilder: (c, a1, a2) => StatefulBuilder(builder: (c, set) {
+        final hold = ease == 'hold';
+        void setEase(String v) {
+          _cmd({'op': 'easing', 'layer': layerId, 'frame': st, 'v': v});
+          set(() => ease = v);
+        }
+        return Stack(children: [
+          kit.Anchored(
+            anchor: anchor,
+            width: 300,
+            topMin: 44 + MediaQuery.paddingOf(c).top,
+            card: (w) => kit.PanelCard(
+              width: w,
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                rw.renderDesc(rw.DTitle('Camera · Frame ${st + 1}')),
+                rw.renderDesc(rw.DSeg(const ['Hold', 'Tween'], hold ? 0 : 1, onSelect: (i) => setEase(i == 0 ? 'hold' : 'auto'))),
+                rw.renderDesc(rw.DEase(math.max(0, eases.indexOf(ease == 'in' ? 'linear' : ease)), enabled: !hold, onSelect: (i) => setEase(eases[i]))),
+                rw.renderDesc(rw.DButtons(
+                  'Copy',
+                  () {
+                    _cmd({'op': 'copy_pose', 'layer': layerId, 'frame': st, 'withTransform': true});
+                    Navigator.pop(c);
+                  },
+                  iconA: 'copy',
+                  b: 'Paste',
+                  onB: _st['cameraPose'] == true
+                      ? () {
+                          _cmd({'op': 'paste_pose', 'layer': layerId, 'frame': st, 'withTransform': true});
+                          Navigator.pop(c);
+                        }
+                      : null,
+                  iconB: 'paste',
+                )),
+                if (st > 0)
+                  rw.renderDesc(rw.DButtons(
+                    'Earlier',
+                    () {
+                      _cmd({'op': 'shift_keys', 'poses': [[layerId, st]], 'props': const [], 'by': -1, 'overwrite': true});
+                      Navigator.pop(c);
+                    },
+                    iconA: 'nudgeLeft',
+                    b: 'Later',
+                    onB: () {
+                      _cmd({'op': 'shift_keys', 'poses': [[layerId, st]], 'props': const [], 'by': 1, 'overwrite': true});
+                      Navigator.pop(c);
+                    },
+                    iconB: 'nudgeRight',
+                  )),
+                kit.ButtonPair(
+                  'Duplicate',
+                  () {
+                    _cmd({'op': 'duplicate_pose_key', 'layer': layerId, 'from': st});
+                    Navigator.pop(c);
+                  },
+                  null,
+                  null,
+                  false,
+                  'duplicate',
+                ),
+                if (st > 0)
+                  rw.renderDesc(rw.DDanger('Delete keyframe', () {
+                    _cmd({'op': 'delete_pose', 'layer': layerId, 'frame': st});
+                    Navigator.pop(c);
+                  })),
+              ]),
+            ),
+          ),
+        ]);
+      }),
+    );
+  }
+
   /// User list #3: anchored popover for a pose keyframe (copy, paste, duplicate, easing, delete).
   Future<void> _poseKeyPopover(Map r, List b, int blockIndex, Rect anchor) async {
     final layerId = '${r['id']}';
@@ -5049,16 +5215,18 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 )),
                 if (st > 0)
                   rw.renderDesc(rw.DButtons(
-                    'Shift −1',
+                    'Earlier',
                     () {
                       _cmd({'op': 'shift_keys', 'poses': [[layerId, st]], 'props': const [], 'by': -1, 'overwrite': true});
                       Navigator.pop(c);
                     },
-                    b: 'Shift +1',
+                    iconA: 'nudgeLeft',
+                    b: 'Later',
                     onB: () {
                       _cmd({'op': 'shift_keys', 'poses': [[layerId, st]], 'props': const [], 'by': 1, 'overwrite': true});
                       Navigator.pop(c);
                     },
+                    iconB: 'nudgeRight',
                   )),
                 kit.ButtonPair(
                   'Duplicate',
@@ -5066,6 +5234,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                     _cmd({'op': 'duplicate_pose_key', 'layer': layerId, 'from': st});
                     Navigator.pop(c);
                   },
+                  null,
+                  null,
+                  false,
+                  'duplicate',
                 ),
                 if (st > 0)
                   rw.renderDesc(rw.DDanger('Delete pose', () {
@@ -5154,13 +5326,14 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       transitionDuration: kit.motion(context, 150),
       pageBuilder: (c, a1, a2) => Stack(children: [
         kit.Anchored(
-          anchor: Rect.fromCenter(center: at, width: 20, height: 20),
+          anchor: kit.Anchored.rectFromGlobal(context, at),
           width: 240,
+          topMin: 44 + MediaQuery.paddingOf(c).top,
           card: (w) => kit.PanelCard(
             width: w,
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              rw.renderDesc(rw.DHint('$pname at frame ${f + 1}')),
-              kit.WordButton('Paste key here', primary: true, expand: true, height: 36, onTap: () {
+              rw.renderDesc(rw.DTitle('$pname · Frame ${f + 1}')),
+              kit.WordButton('Paste key', icon: 'paste', primary: true, expand: true, height: 36, onTap: () {
                 _cmd({'op': 'paste_prop_key', 'property': pid, 'frame': f});
                 Navigator.pop(c);
               }),
@@ -5212,6 +5385,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           kit.Anchored(
             anchor: anchor,
             width: 280,
+            topMin: 44 + MediaQuery.paddingOf(c).top,
             card: (w) => kit.PanelCard(
               width: w,
               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -5264,29 +5438,33 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 rw.renderDesc(rw.DTitle('$curTotal key${curTotal == 1 ? '' : 's'} selected')),
                 rw.renderDesc(rw.DButtons(
-                  'Shift −1',
+                  'Earlier',
                   () {
                     _shiftSelectedKeys(-1);
                     set(() {});
                   },
-                  b: 'Shift +1',
+                  iconA: 'nudgeLeft',
+                  b: 'Later',
                   onB: () {
                     _shiftSelectedKeys(1);
                     set(() {});
                   },
+                  iconB: 'nudgeRight',
                 )),
                 if (canRange) ...[
                   rw.renderDesc(rw.DButtons(
-                    'Compress 0.75×',
+                    '0.75×',
                     () {
                       _scaleSelectedKeys(minF, 0.75);
                       set(() {});
                     },
-                    b: 'Stretch 1.5×',
+                    iconA: 'compress',
+                    b: '1.5×',
                     onB: () {
                       _scaleSelectedKeys(minF, 1.5);
                       set(() {});
                     },
+                    iconB: 'stretch',
                   )),
                   rw.renderDesc(rw.DButtons(
                     'Reverse',
@@ -5294,11 +5472,13 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                       _reverseSelectedRange(pingPong: false);
                       Navigator.pop(c);
                     },
+                    iconA: 'reverse',
                     b: 'Ping-pong',
                     onB: () {
                       _reverseSelectedRange(pingPong: true);
                       Navigator.pop(c);
                     },
+                    iconB: 'pingpong',
                   )),
                 ],
                 const Padding(padding: EdgeInsets.only(top: 6, bottom: 4), child: Text('Ease all', style: TextStyle(color: cSecondary, fontSize: 12.5, fontWeight: FontWeight.w600))),
@@ -5556,6 +5736,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         setState(() => _libType = 0);
         _figurePicker();
       }),
+      ('createFigure', 'Create stick figure', _createNewFigure),
       ('picture', 'Picture', _importImages),
       ('text', 'Text', () => _cmd({'op': 'add_textfield'})),
       ('sound', 'Sound', _importSounds),
@@ -5570,7 +5751,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         if (_st['multi'] != null || _sel != null || _st['picture'] != null || _st['movieclip'] != null || _st['textfield'] != null || _st['adjustment'] != null) {
           _cmd({'op': 'group'});
         } else {
-          _say('Select one or more layers first, then tap + › Group.', light: true);
+          _say('Select layers first to group.', light: true);
         }
       }),
     ];
@@ -5590,7 +5771,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             padding: const EdgeInsets.all(6),
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               for (var i = 0; i < items.length; i++) ...[
-                if (i == 6) Container(height: 1, margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), color: const Color(0xFFE6E8EB)),
+                if (i == 7) Container(height: 1, margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), color: const Color(0xFFE6E8EB)),
                 kit.Tap(
                   onTap: items[i].$3 == null ? null : () => Navigator.pop(c, i),
                   minSize: 0,
@@ -5687,7 +5868,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
             const SizedBox(width: 8),
             Expanded(child: Text('${c['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: picked ? cAccent : on ? cText : cSecondary, fontWeight: picked ? FontWeight.w600 : FontWeight.w400))),
             // D36: a value with modifiers
-            if (((c['mods'] as List?) ?? const []).isNotEmpty) const Padding(padding: EdgeInsets.only(left: 2), child: Icon(Icons.waves, size: 14, color: cAccent)),
+            if (((c['mods'] as List?) ?? const []).isNotEmpty) const Padding(padding: EdgeInsets.only(left: 2), child: Pictogram('modifier', size: 14, color: cAccent)),
             kit.Tap(
               label: on ? 'Hide ${c['name']}' : 'Show ${c['name']}',
               minSize: 26,
@@ -5720,7 +5901,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           child: ListView(padding: EdgeInsets.zero, children: [
             for (var i = 0; i < chans.length; i++) nameRow(i, chans[i]),
             kit.Tap(
-              label: 'Add a value',
+              label: 'Add property',
               minSize: 0,
               onTap: addable.isEmpty ? null : () => _addCurveValue(addable),
               child: Container(
@@ -5730,7 +5911,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                 child: Row(children: [
                   Pictogram('plus', size: 15, color: addable.isEmpty ? cSecondary : cAccent),
                   const SizedBox(width: 6),
-                  Text('Add a value…', style: TextStyle(color: addable.isEmpty ? cSecondary : cAccent, fontSize: 13, fontWeight: FontWeight.w600)),
+                  Text('Add property…', style: TextStyle(color: addable.isEmpty ? cSecondary : cAccent, fontSize: 13, fontWeight: FontWeight.w600)),
                 ]),
               ),
             ),
@@ -5817,7 +5998,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                   ),
                   if (addable.isNotEmpty) ...[
                     const SizedBox(height: 6),
-                    kit.WordButton('+ Add a value…', filled: true, height: 32, size: 13, onTap: () => _addCurveValue(addable)),
+                    kit.WordButton('Add property…', icon: 'plus', filled: true, height: 32, size: 13, onTap: () => _addCurveValue(addable)),
                   ],
                 ]),
               ),
@@ -5833,45 +6014,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   }
 
   Future<void> _addCurveValue(List<Map> addable) async {
-    final groups = <String, List<Map>>{};
-    for (final a in addable) {
-      groups.putIfAbsent('${a['group']}', () => []).add(a);
-    }
-    final picked = await showDialog<String>(
-      context: context,
-      builder: (c) => AlertDialog(
-        backgroundColor: cCard,
-        title: const Text('Add a value', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-        contentPadding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-        content: SizedBox(
-          width: 300,
-          child: ListView(shrinkWrap: true, children: [
-            for (final g in groups.entries) ...[
-              Padding(padding: const EdgeInsets.fromLTRB(12, 10, 12, 2), child: Text(g.key, style: const TextStyle(color: cTitle, fontSize: 12, fontWeight: FontWeight.w700))),
-              for (final a in g.value)
-                kit.Tap(
-                  label: '${a['name']}',
-                  minSize: 0,
-                  onTap: () => Navigator.pop(c, '${a['id']}'),
-                  child: Container(
-                    height: 38,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Row(children: [
-                      Expanded(child: Text('${a['name']}'.replaceFirst('${g.key} ', ''), style: const TextStyle(fontSize: 14))),
-                      Text(a['value'] is num ? (a['value'] as num).toStringAsFixed(2) : '', style: const TextStyle(color: cSecondary, fontSize: 12)),
-                    ]),
-                  ),
-                ),
-            ],
-            const Padding(
-              padding: EdgeInsets.fromLTRB(12, 8, 12, 4),
-              child: Text('Keyed on this frame, so its curve starts here. Choices like shape or blend stay on their pages.', style: TextStyle(color: cSecondary, fontSize: 12)),
-            ),
-          ]),
-        ),
-      ),
+    final options = [for (final a in addable) TargetOption.fromMap(a)];
+    final picked = await showTargetPickerSheet(
+      context,
+      title: 'Add property',
+      options: options,
+      emptyText: 'No properties available.',
+      searchHint: 'Search properties…',
     );
-    if (picked == null) return;
+    if (picked == null || picked.isEmpty) return;
     _cmd({'op': 'curve_add', 'property': picked});
     setState(() {
       _curveVis[picked] = true;
@@ -6070,7 +6221,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
                   _cmd({'op': 'new_pose'});
                   WidgetsBinding.instance.addPostFrameCallback((_) => _ensureFrameVisible(_frame));
                 }),
-                kit.WordButton('Hold +1', size: 14, onTap: _playing || activeLayer == null ? null : () {
+                kit.WordButton('+1 frame', size: 14, onTap: _playing || activeLayer == null ? null : () {
                   _cmd({'op': 'hold_longer', if (!hasSel) 'layer': activeLayer});
                   final nextP = _sel?['pose'] as Map?;
                   final endF = nextP != null ? ((nextP['start'] as num).toInt() + (nextP['length'] as num).toInt() - 1) : _frame;
@@ -7212,8 +7363,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       // more than the board: their poses and the usual figure actions
       const rw.DTitle('Poses'),
       rw.DSeg(const ['Hold until the next pose', 'Tween into it'], hold == null ? -1 : (hold ? 0 : 1), onSelect: (i) => each(i == 0 ? 'Hold' : 'Tween', {'op': 'easing', 'v': i == 0 ? 'hold' : 'linear', 'block': true})),
-      rw.DButtons('New pose here', () => each('New pose', {'op': 'new_pose'}), b: 'Hold longer', onB: () => each('Hold longer', {'op': 'hold_longer'})),
-      rw.DButtons('Flip sideways', () => each('Flip figures', {'op': 'flip_figure', 'h': true}), b: 'Flip over', onB: () => each('Flip figures', {'op': 'flip_figure', 'h': false})),
+      rw.DButtons('New pose', () => each('New pose', {'op': 'new_pose'}), b: '+1 frame', onB: () => each('+1 frame', {'op': 'hold_longer'})),
+      rw.DButtons('Flip sideways', () => each('Flip figures', {'op': 'flip_figure', 'h': true}), iconA: 'flipH', b: 'Flip over', onB: () => each('Flip figures', {'op': 'flip_figure', 'h': false}), iconB: 'flipV'),
       rw.DTick('Visible in onion skin', same('onion'), onChanged: (v) => each('Onion skin', {'op': 'figure', 'onion': v})),
       rw.DButtons('Group', () => _cmd({'op': 'group'})),
       rw.DButtons('Copy poses', () => _cmd({'op': 'copy_poses'}), b: 'Paste poses', onB: ((_st['posesCopied'] as num?) ?? 0) > 0 ? () => _cmd({'op': 'paste_poses'}) : null),
@@ -7222,8 +7373,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         if (ok == 'Make movieclip') _cmd({'op': 'to_movieclip'});
       }),
       rw.DButtons('Duplicate', () => each('Duplicate figures', {'op': 'duplicate_figure'}), b: 'Pick one', onB: () => _cmd({'op': 'select', 'layer': multi.first['id']})),
-      rw.DDanger('Delete from this frame', () => each('Delete figures', {'op': 'delete_here'})),
-      const rw.DHint('Double-tap the timeline and drag for a box; triple-tap and drag to draw a lasso.'),
+      rw.DDanger('Hide here', () => each('Hide figures', {'op': 'delete_here'})),
     ];
     return [for (final d in rows) rw.renderDesc(d)];
   }
@@ -7236,19 +7386,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final gid = g['id'];
     final members = ((g['members'] as List?) ?? const []).cast<Map>();
     final opacity = ((g['opacity'] as num?) ?? 1).toDouble();
-    const blends = ['NORMAL', 'MULTIPLY', 'SCREEN', 'ADD'];
-    const blendNames = ['Normal', 'Multiply', 'Screen', 'Add'];
-    final blend = math.max(0, blends.indexOf('${g['blend'] ?? 'NORMAL'}'));
     final rows = <rw.Desc>[
       rw.DName('${g['name']}', link: 'Rename', onLink: () async {
         final n = await _askName('Rename group', '${g['name']}');
         if (n != null && n.trim().isNotEmpty) _cmd({'op': 'group_set', 'group': gid, 'name': n.trim()});
       }),
-      const rw.DHint('A group keeps layers together in the list. Moving it moves everything in it.'),
       ..._effectRows({'filters': g['filters'], 'effectStack': g['effectStack'], 'layer': gid}, group: true, showBlending: false),
       const rw.DTitle('Blending'),
       rw.DSlider('Opacity', '${(opacity * 100).round()}%', opacity, onChanged: (x) => _cmd({'op': 'group_set', 'group': gid, 'opacity': (x * 100).round() / 100})),
-      rw.DLink('Blend', blendNames[blend], onTap: () => _cmd({'op': 'group_set', 'group': gid, 'blend': blends[(blend + 1) % blends.length]})),
+      rw.DWidget(BlendModeRow(current: '${g['blend'] ?? 'NORMAL'}', onChanged: (v) => _cmd({'op': 'group_set', 'group': gid, 'blend': v}))),
       const rw.DTitle('Group'),
       rw.DButtons('Send back', () => _cmd({'op': 'group_order', 'group': gid, 'forward': false}), b: 'Bring forward', onB: () => _cmd({'op': 'group_order', 'group': gid, 'forward': true})),
       rw.DButtons('Ungroup', () => _cmd({'op': 'ungroup', 'group': gid}), b: 'Make movieclip…', onB: members.isEmpty
@@ -7348,35 +7494,21 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     return [for (final d in rows) rw.renderDesc(d)];
   }
 
-  /// What a script target moves: a figure, or a value (grouped by layer).
+  /// What a script target moves: a figure, or a value (grouped by layer) with
+  /// instant search and category filtering.
   Future<void> _pickTarget(Map sc, Map t) async {
     final figure = t['kind'] == 'figure';
     final list = ((figure ? sc['figures'] : sc['values']) as List? ?? const []).cast<Map>();
-    final pick = await kit.showSheet<String>(context, title: figure ? 'Which figure?' : 'Which value?', width: 380, children: (c) {
-      Widget item(Map v) => kit.Tap(
-            minSize: 0,
-            onTap: () => Navigator.pop(c, '${v['id']}'),
-            child: Container(
-              height: 40,
-              alignment: Alignment.centerLeft,
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              decoration: BoxDecoration(color: v['id'] == t['to'] ? cSelected : null, borderRadius: BorderRadius.circular(8)),
-              child: Text('${v['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: kit.ink(15, v['id'] == t['to'] ? FontWeight.w700 : FontWeight.w400, v['id'] == t['to'] ? cAccent : cText)),
-            ),
-          );
-      final out = <Widget>[];
-      if (list.isEmpty) out.add(kit.Hint(figure ? 'There are no stick figures in this animation yet.' : 'Nothing here can be changed by a script.'));
-      String? group;
-      for (final v in list) {
-        if (!figure && v['group'] != group) {
-          group = '${v['group']}';
-          out.add(Padding(padding: const EdgeInsets.only(top: 8, bottom: 2), child: Text(group, style: kit.ink(13, FontWeight.w700, cTitle))));
-        }
-        out.add(item(v));
-      }
-      if (t['to'] != null) out.add(Padding(padding: const EdgeInsets.only(top: 8), child: kit.WordButton('Nothing', onTap: () => Navigator.pop(c, ''), filled: true, expand: true, height: 38)));
-      return out;
-    });
+    final options = [for (final v in list) TargetOption.fromMap(v, isFigure: figure)];
+    final pick = await showTargetPickerSheet(
+      context,
+      title: figure ? 'Target figure' : 'Target property',
+      options: options,
+      currentId: t['to'] as String?,
+      allowClear: t['to'] != null,
+      emptyText: figure ? 'No stick figures in this animation.' : 'No target properties available.',
+      searchHint: figure ? 'Search figures…' : 'Search layers or properties…',
+    );
     if (pick == null) return;
     _cmd({'op': 'script_set', 'layer': sc['id'], 'target': {'name': t['name'], 'to': pick.isEmpty ? null : pick}});
   }
@@ -7472,8 +7604,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final keys = ((c['keys'] as List?) ?? const []).length;
     final rows = <rw.Desc>[
       rw.DInfo('${c['name']}', keys == 1 ? '1 key' : '$keys keys'),
-      rw.DTitle('Modifiers', onAdd: () => setState(() => _modBrowser = true), addLabel: 'Add a modifier'),
-      if (mods.isEmpty) const rw.DHint('A modifier changes this value on top of its keys: a wiggle, a swing, a loop, or a plugin of yours.'),
+      rw.DTitle('Modifiers', onAdd: () => setState(() => _modBrowser = true), addLabel: 'Add modifier'),
+      if (mods.isEmpty) const rw.DHint('No modifiers.'),
       for (final m in mods) ...[
         rw.DFx(
           m['missing'] == true ? 'Missing: ${m['name']} ${m['version'] ?? ''}'.trim() : '${m['name']}',
@@ -7487,8 +7619,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         ),
         if (_modOpen == m['index'] && m['missing'] != true) ...settings(m),
       ],
-      if (mods.any((m) => m['missing'] == true)) const rw.DHint('A missing plugin does nothing until it is imported again; its settings are kept.'),
-      if (mods.isNotEmpty) const rw.DHint('Applied top to bottom, after the keys. Swipe one to remove it.'),
+      if (mods.any((m) => m['missing'] == true)) const rw.DHint('Missing plugin — import it again to restore.'),
     ];
     return [for (final d in rows) rw.renderDesc(d)];
   }
@@ -7527,11 +7658,11 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final yours = [
       for (final p in plugins)
         if (match('${p['name']}'))
-          tile('${p['name']}', const Icon(Icons.functions, size: 28, color: cAccent), p['off'] != null ? null : () => pick({'kind': 'plugin', 'id': p['id']}), sub: p['author'] != null ? 'by ${p['author']}' : null),
+          tile('${p['name']}', const Pictogram('modifier', size: 26, color: cAccent), p['off'] != null ? null : () => pick({'kind': 'plugin', 'id': p['id']}), sub: p['author'] != null ? 'by ${p['author']}' : null),
     ];
     final built = [
       for (final (k, l, icon) in _fxMovement)
-        if (match(l)) tile(l, Pictogram(icon, size: 30, color: cAccent, stroke: 1.8), k == 'wiggle' || k == 'swing' || k == 'loop' ? () => pick({'kind': k}) : null),
+        if (match(l)) tile(l, Pictogram(icon, size: 28, color: cAccent, stroke: 1.8), k == 'wiggle' || k == 'swing' || k == 'loop' ? () => pick({'kind': k}) : null),
     ];
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Padding(
@@ -7544,17 +7675,27 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       ),
       Padding(
         padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
-        child: TextField(
-          style: const TextStyle(color: cText, fontSize: 14),
-          decoration: InputDecoration(isDense: true, filled: true, fillColor: cControl, hintText: 'Search modifiers', prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF8A9099)), contentPadding: const EdgeInsets.symmetric(vertical: 10), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none)),
-          onChanged: (v) => setState(() => _modSearch = v),
+        child: Container(
+          height: 36,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(color: cControl, borderRadius: BorderRadius.circular(10)),
+          child: Row(children: [
+            const Pictogram('search', size: 16, color: cSecondary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                style: const TextStyle(color: cText, fontSize: 13.5),
+                decoration: const InputDecoration(isDense: true, border: InputBorder.none, hintText: 'Search modifiers…', hintStyle: TextStyle(color: cSecondary, fontSize: 13)),
+                onChanged: (v) => setState(() => _modSearch = v),
+              ),
+            ),
+          ]),
         ),
       ),
       Expanded(
         child: ListView(padding: const EdgeInsets.fromLTRB(14, 0, 14, 16), children: [
-          if (yours.isNotEmpty) ...[title('Yours'), grid(yours)],
-          if (built.isNotEmpty) ...[title('Built in'), grid(built), if (q.isEmpty) const kit.Hint('Follow and Link come later.')],
-          const Padding(padding: EdgeInsets.only(top: 10), child: Text('A modifier changes this value on top of its keys. Plugins come in as files: Import… takes a .luau file.', style: TextStyle(color: cSecondary, fontSize: 12))),
+          if (yours.isNotEmpty) ...[title('Plugins'), grid(yours)],
+          if (built.isNotEmpty) ...[title('Built-in'), grid(built)],
         ]),
       ),
     ]);
@@ -7634,9 +7775,37 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           });
           _jumpTo('Stickfigure Tools');
         } else {
+          // Modifier plugin: pick target property via searchable Target Picker and attach directly
           _cmd({'op': 'set', 'k': 'curves', 'v': true});
-          setState(() => _layersOpen = true);
-          _say('Pick a value in the graph, then + under Modifiers on its page.', light: true);
+          final targetOptions = _allModifierTargetOptions();
+          final pickedProp = targetOptions.isNotEmpty
+              ? await showTargetPickerSheet(
+                  context,
+                  title: 'Apply modifier to…',
+                  options: targetOptions,
+                  currentId: _curveSel,
+                  searchHint: 'Search layers or properties…',
+                )
+              : _curveSel;
+          if (!mounted) return;
+          if (pickedProp != null && pickedProp.isNotEmpty) {
+            _cmd({'op': 'modifier_add', 'property': pickedProp, 'kind': 'plugin', 'id': id});
+            setState(() {
+              _layersOpen = true;
+              _curveSel = pickedProp;
+              _curveVis[pickedProp] = true;
+              _panelOpen = true;
+              _hidePanels = false;
+              _modBrowser = false;
+              _modOpen = ((((_curveValue?['mods'] as List?) ?? const []).length) - 1);
+            });
+          } else {
+            setState(() {
+              _layersOpen = true;
+              _panelOpen = true;
+              _hidePanels = false;
+            });
+          }
         }
       case WorkshopShow(:final use):
         if (use['kind'] == 'script') {
@@ -7709,24 +7878,61 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _cmd({'op': 'rename_part', 'node': node, 'name': n.trim()});
   }
 
+  /// Collects all animatable target properties from engine state (`availableTargets`,
+  /// `curves['channels']`, and `curves['addable']`) for the searchable Target Picker.
+  List<TargetOption> _allModifierTargetOptions() {
+    final seen = <String>{};
+    final out = <TargetOption>[];
+    void addAll(List? raw, {bool animated = false}) {
+      if (raw == null) return;
+      for (final m in raw.cast<Map>()) {
+        final opt = TargetOption.fromMap(m);
+        if (opt.id.isNotEmpty && seen.add(opt.id)) {
+          out.add(animated && !opt.animated
+              ? TargetOption(
+                  id: opt.id,
+                  label: opt.label,
+                  group: opt.group,
+                  layerKind: opt.layerKind,
+                  category: opt.category,
+                  valueText: opt.valueText,
+                  animated: true,
+                  modifierCount: opt.modifierCount,
+                )
+              : opt);
+        }
+      }
+    }
+
+    addAll(_st['modifierTargets'] as List?);
+    addAll(_st['availableTargets'] as List?);
+    final cv = _st['curves'] as Map?;
+    if (cv != null) {
+      final layerName = '${cv['name'] ?? ''}';
+      for (final ch in ((cv['channels'] as List?) ?? const []).cast<Map>()) {
+        final enriched = {...ch, if (ch['group'] == null && ch['layer'] == null) 'group': layerName, 'animated': true};
+        final opt = TargetOption.fromMap(enriched);
+        if (opt.id.isNotEmpty && seen.add(opt.id)) out.add(opt);
+      }
+      addAll(cv['addable'] as List?);
+    }
+    return out;
+  }
+
   /// The Picture page (round 10 Picture board).
   List<Widget> _pictureTools(Map pic) {
     void set(Map<String, Object?> m) => _cmd({'op': 'picture', ...m});
     final scale = ((pic['scale'] as num?) ?? 1).toDouble(), opacity = ((pic['opacity'] as num?) ?? 1).toDouble();
-    const blends = ['NORMAL', 'MULTIPLY', 'SCREEN', 'ADD'];
-    const blendNames = ['Normal', 'Multiply', 'Screen', 'Add'];
-    final blend = math.max(0, blends.indexOf('${pic['blend'] ?? 'NORMAL'}'));
     final rows = <rw.Desc>[
       rw.DInfo('Picture', '${pic['file'] ?? pic['name']}'),
       rw.DStep('Scale', scale.toStringAsFixed(2), onMinus: scale > 0.05 ? () => set({'scale': math.max(0.05, scale - 0.05)}) : null, onPlus: () => set({'scale': scale + 0.05})),
-      rw.DButtons('Flip sideways', () => set({'flipH': true}), b: 'Flip over', onB: () => set({'flipV': true})),
+      rw.DButtons('Flip sideways', () => set({'flipH': true}), iconA: 'flipH', b: 'Flip over', onB: () => set({'flipV': true}), iconB: 'flipV'),
       ..._effectRows(pic.cast<String, dynamic>(), showBlending: false),
       const rw.DTitle('Blending'),
       rw.DSlider('Opacity', '${(opacity * 100).round()}%', opacity, onChanged: (x) => set({'opacity': (x * 100).round() / 100})),
-      rw.DLink('Blend', blendNames[blend], onTap: () => _cmd({'op': 'blend', 'v': blends[(blend + 1) % blends.length]})),
+      rw.DWidget(BlendModeRow(current: '${pic['blend'] ?? 'NORMAL'}', onChanged: (v) => _cmd({'op': 'blend', 'v': v}))),
       rw.DTick('Locked', pic['locked'] == true, onChanged: (v) => set({'locked': v})),
       rw.DTick('Locked to camera', pic['cameraLocked'] == true, onChanged: (v) => _cmd({'op': 'camera_lock', 'layer': pic['layer'], 'on': v})),
-      const rw.DHint('Drag inside the dashed box to move the picture, or a corner to resize it. Lock it to the camera for a backdrop.'),
     ];
     return [for (final d in rows) rw.renderDesc(d)];
   }
@@ -7815,19 +8021,15 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final id = '${adj['layer']}';
     final name = '${adj['name'] ?? 'Effect layer'}';
     final opacity = ((adj['opacity'] as num?) ?? 1).toDouble();
-    const blends = ['NORMAL', 'MULTIPLY', 'SCREEN', 'ADD'];
-    const blendNames = ['Normal', 'Multiply', 'Screen', 'Add'];
-    final blend = math.max(0, blends.indexOf('${adj['blend'] ?? 'NORMAL'}'));
     final rows = <rw.Desc>[
       rw.DName(name, link: 'Rename', onLink: () async {
         final n = await _askName('Rename effect layer', name);
         if (n != null && n.trim().isNotEmpty) _cmd({'op': 'rename', 'layer': id, 'name': n.trim()});
       }),
-      const rw.DHint('Applies its stacked effects to every layer below it inside the camera shot.'),
       ..._effectRows(adj, adjustment: true, showBlending: false),
       const rw.DTitle('Blending'),
       rw.DSlider('Opacity', '${(opacity * 100).round()}%', opacity, onChanged: (x) => _cmd({'op': 'filter', 'opacity': (x * 100).round() / 100})),
-      rw.DLink('Blend', blendNames[blend], onTap: () => _cmd({'op': 'blend', 'v': blends[(blend + 1) % blends.length]})),
+      rw.DWidget(BlendModeRow(current: '${adj['blend'] ?? 'NORMAL'}', onChanged: (v) => _cmd({'op': 'blend', 'v': v}))),
       const rw.DTitle('Layer'),
       rw.DButtons('Send back', () => _cmd({'op': 'layer_order', 'forward': false}), b: 'Bring forward', onB: () => _cmd({'op': 'layer_order', 'forward': true})),
       rw.DTick('Locked', adj['locked'] == true, onChanged: (v) => _cmd({'op': 'layer_lock', 'layer': id, 'v': v})),
@@ -8223,13 +8425,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     }
 
     return [
-      rw.DTitle('Effects', onAdd: _openFxBrowser, addLabel: 'Add an effect'),
-      if (stack.isEmpty && moveList.isEmpty && plugins.isEmpty)
-        rw.DHint(adjustment
-            ? 'Tap + above to stack effects (Chromatic aberration, Vignette, Wave distort, Glow, Film grain, Scanlines…).'
-            : group
-                ? 'No effects yet. Tap + to stack effects on everything in this group.'
-                : 'No effects yet. Tap + to add blur, glow, distortion, colour grade, or grain. Tap the diamond next to any slider to keyframe it.'),
+      rw.DTitle('Effects', onAdd: _openFxBrowser, addLabel: 'Add effect'),
+      if (stack.isEmpty && moveList.isEmpty && plugins.isEmpty) const rw.DHint('No effects.'),
       for (var i = 0; i < stack.length; i++) rw.DWidget(_effectStackCard(stack[i], i, stack.length, target)),
       for (final (k, label, shown, remove) in moveList) ...[
         rw.DFx(label,
@@ -8466,82 +8663,82 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final angle = (sel['figAngle'] as num?)?.toDouble() ?? 0;
     final stretch = _opts['stretch'] == true;
     final joining = _st['joining'] == true;
-    const blends = ['NORMAL', 'MULTIPLY', 'SCREEN', 'ADD'];
-    const blendNames = ['Normal', 'Multiply', 'Screen', 'Add'];
-    final blend = math.max(0, blends.indexOf('${sel['blend'] ?? 'NORMAL'}'));
     final rows = <rw.Desc>[
-      rw.DName(sel['name'] as String? ?? 'Figure', link: 'Edit as a new figure…', onLink: () => _editCopySheet(sel['name'] as String? ?? 'The figure')),
+      rw.DName(sel['name'] as String? ?? 'Figure', link: 'Duplicate & edit…', onLink: () => _editCopySheet(sel['name'] as String? ?? 'Figure')),
       rw.DButtons(
-        'Edit stickfigure',
+        'Edit figure',
         () => _cmd({'op': 'build'}),
+        iconA: 'edit',
         b: 'Separate joint',
         onB: sel['root'] != true ? _separateJoint : null,
+        iconB: 'separate',
       ),
       rw.DWidget(kit.PropRow('Colour', trailing: _swatches((sel['figColor'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'figure', 'color': c})))),
       ..._effectRows(sel),
-      rw.DLink('Blend', blendNames[blend], onTap: () => _cmd({'op': 'blend', 'v': blends[(blend + 1) % blends.length]})),
-      const rw.DTitle('Stickfigure Tools'),
-      rw.DButtons('Flip sideways', () => _cmd({'op': 'flip_figure', 'h': true}), b: 'Flip over', onB: () => _cmd({'op': 'flip_figure', 'h': false})),
+      rw.DWidget(BlendModeRow(current: '${sel['blend'] ?? 'NORMAL'}', onChanged: (v) => _cmd({'op': 'blend', 'v': v}))),
+      const rw.DTitle('Transform'),
+      rw.DButtons('Flip sideways', () => _cmd({'op': 'flip_figure', 'h': true}), iconA: 'flipH', b: 'Flip over', onB: () => _cmd({'op': 'flip_figure', 'h': false}), iconB: 'flipV'),
       rw.DButtons('Send back', () => _cmd({'op': 'layer_order', 'forward': false}), b: 'Bring forward', onB: () => _cmd({'op': 'layer_order', 'forward': true})),
       rw.DStep('Scale', scale.toStringAsFixed(2), onMinus: scale > 0.05 ? () => _cmd({'op': 'figure', 'scale': math.max(0.05, scale - 0.05)}) : null, onPlus: () => _cmd({'op': 'figure', 'scale': scale + 0.05})),
-      rw.DButtons(angle.round() == 0 ? 'Turn 45°' : 'Turn 45° (now ${angle.round()}°)', () => _cmd({'op': 'figure', 'turn': 45}), b: 'Center on stage', onB: () => _cmd({'op': 'figure', 'center': true})),
-      rw.DSeg(const ['Rotates', 'Stretches'], stretch ? 1 : 0, label: 'Dragging a joint', onSelect: (i) => _cmd({'op': 'set', 'k': 'stretch', 'v': i == 1})),
+      rw.DButtons(angle.round() == 0 ? 'Turn 45°' : 'Turn 45° (${angle.round()}°)', () => _cmd({'op': 'figure', 'turn': 45}), b: 'Center', onB: () => _cmd({'op': 'figure', 'center': true})),
+      rw.DSeg(const ['Rotates', 'Stretches'], stretch ? 1 : 0, label: 'Joint drag', onSelect: (i) => _cmd({'op': 'set', 'k': 'stretch', 'v': i == 1})),
       if (joining) ...[
         rw.DSeg(
           const ['Keep offset', 'Snap to joint'],
           _st['joiningMode'] == 'absolute' ? 1 : 0,
-          label: 'Join mode',
+          label: 'Attach mode',
           onSelect: (i) => _cmd({'op': 'join', 'mode': i == 1 ? 'absolute' : 'relative'}),
         ),
-        const rw.DHint('Tap a joint on another figure to join this one to it.'),
-        rw.DButtons('Cancel joining', () => _cmd({'op': 'join_cancel'})),
+        rw.DButtons('Cancel', () => _cmd({'op': 'join_cancel'})),
       ] else if (sel['joinedTo'] != null) ...[
-        rw.DWidget(kit.PropRow('Joined to', trailing: Text('${sel['joinedTo']}', style: const TextStyle(color: cText, fontSize: 14, fontWeight: FontWeight.w600)))),
+        rw.DWidget(kit.PropRow('Attached to', trailing: Text('${sel['joinedTo']}', style: const TextStyle(color: cText, fontSize: 14, fontWeight: FontWeight.w600)))),
         rw.DButtons(
-          'Unjoin',
+          'Detach',
           () {
             final from = sel['joinedTo'];
             _cmd({'op': 'unjoin', 'all': true});
-            kit.showToast(context, '${sel['name']} unjoined from $from.', light: true, icon: 'broken', iconColor: cDanger, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
+            kit.showToast(context, 'Detached ${sel['name']} from $from', light: true, icon: 'broken', iconColor: cDanger, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
           },
-          b: _frame > 0 ? 'Let go here' : null,
+          iconA: 'broken',
+          b: _frame > 0 ? 'Detach from here' : null,
           onB: _frame > 0
               ? () {
                   final from = sel['joinedTo'];
                   _cmd({'op': 'let_go_here'});
-                  kit.showToast(context, '${sel['name']} lets go of $from at frame ${_frame + 1}', light: true, icon: 'broken', iconColor: cDanger, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
+                  kit.showToast(context, 'Detached ${sel['name']} from $from at frame ${_frame + 1}', light: true, icon: 'broken', iconColor: cDanger, action: 'Undo', onAction: () => _cmd({'op': 'undo'}));
                 }
               : null,
         ),
       ] else ...[
-        const rw.DTitle('Join'),
+        const rw.DTitle('Attach'),
         rw.DButtons(
-          'Join (keep offset)',
+          'Keep offset',
           () => _cmd({'op': 'join', 'mode': 'relative'}),
+          iconA: 'chain',
           b: 'Snap to joint',
           onB: () => _cmd({'op': 'join', 'mode': 'absolute'}),
+          iconB: 'attach',
         ),
       ],
       rw.DTick('Locked', sel['locked'] == true, onChanged: (v) => _cmd({'op': 'figure', 'locked': v})),
-      rw.DTick('Visible in onion skin', sel['onion'] != false, onChanged: (v) => _cmd({'op': 'figure', 'onion': v})),
+      rw.DTick('Onion skin', sel['onion'] != false, onChanged: (v) => _cmd({'op': 'figure', 'onion': v})),
       const rw.DTitle('Tweening'),
-      rw.DTick('Stay on stage between poses', sel['keepInTween'] != false, onChanged: (v) => _cmd({'op': 'figure', 'keepInTween': v})),
-      rw.DTick('Blend colours between poses', sel['tweenColors'] != false, onChanged: (v) => _cmd({'op': 'figure', 'tweenColors': v})),
-      const rw.DTitle('Copy and paste'),
+      rw.DTick('Keep in tween', sel['keepInTween'] != false, onChanged: (v) => _cmd({'op': 'figure', 'keepInTween': v})),
+      rw.DTick('Blend colours', sel['tweenColors'] != false, onChanged: (v) => _cmd({'op': 'figure', 'tweenColors': v})),
+      const rw.DTitle('Actions'),
       rw.DWidget(GestureDetector(
         onLongPress: _pasteLayeringPopup,
-        child: rw.renderDesc(rw.DButtons('Copy figure', () => _cmd({'op': 'copy_figure', 'joined': true}), b: 'Paste figure', onB: _st['figureCopied'] == true ? _pasteFigure : null)),
+        child: rw.renderDesc(rw.DButtons('Copy figure', () => _cmd({'op': 'copy_figure', 'joined': true}), iconA: 'copy', b: 'Paste figure', onB: _st['figureCopied'] == true ? _pasteFigure : null, iconB: 'paste')),
       )),
-      rw.DButtons('Copy properties', () => _cmd({'op': 'copy_props'}), b: 'Paste properties', onB: _st['propsCopied'] == true ? _pastePropsDialog : null),
+      rw.DButtons('Copy style', () => _cmd({'op': 'copy_props'}), b: 'Paste style', onB: _st['propsCopied'] == true ? _pastePropsDialog : null),
       rw.DButtons('Convert to movieclip…', () async {
-        final ok = await _ask('Convert to movieclip?', 'This figure and the figures joined to it become a movieclip that plays their animation in a loop, in their place. It can be broken apart again.', ['Cancel', 'Convert']);
+        final ok = await _ask('Convert to movieclip?', 'This figure and attached figures become a looping movieclip. You can break it apart later.', ['Cancel', 'Convert']);
         if (ok == 'Convert') _cmd({'op': 'to_movieclip'});
       }),
       rw.DWidget(GestureDetector(
         onLongPress: () => _cmd({'op': 'delete_here', 'joined': true}),
-        child: rw.renderDesc(rw.DButtons('Hide on this frame', () => _cmd({'op': 'delete_here'}))),
+        child: rw.renderDesc(rw.DButtons('Hide here', () => _cmd({'op': 'delete_here'}), iconA: 'eye')),
       )),
-      const rw.DHint('Delete stickfigure (below) removes it from every frame. Hold "Hide on this frame" to hide joined figures too.'),
     ];
     return [for (final d in rows) rw.renderDesc(d)];
   }
@@ -8553,13 +8750,12 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final List<rw.Desc> rows;
     if (tf == null) {
       rows = [
-        rw.DButtons('Add textfield', () => _cmd({'op': 'add_textfield'}), b: 'Paste', onB: _st['textfieldCopied'] == true ? () => _cmd({'op': 'paste_textfield'}) : null),
-        const rw.DHint('A textfield sits on this frame only. Tap its box to select it, then drag to move it.'),
+        rw.DButtons('Add text', () => _cmd({'op': 'add_textfield'}), b: 'Paste', onB: _st['textfieldCopied'] == true ? () => _cmd({'op': 'paste_textfield'}) : null),
       ];
     } else {
       final align = {'left': 0, 'center': 1, 'right': 2}[tf['align'] as String?] ?? 1;
       final scale = (tf['scale'] as num?)?.toDouble() ?? 1;
-      // the Text board's order; fonts and copying the words alone follow
+      final opacity = ((tf['opacity'] as num?) ?? ((tf['filters'] as Map?)?['opacity'] as num?) ?? 1).toDouble();
       rows = [
         rw.DWidget(_TextFieldBox(text: tf['text'] as String? ?? '', onChanged: (v) => _cmd({'op': 'textfield', 'text': v}))),
         const rw.DWidget(SizedBox(height: 6)),
@@ -8567,8 +8763,10 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
         rw.DWidget(kit.PropRow('Colour', trailing: _swatches((tf['color'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'textfield', 'color': c})))),
         rw.DStep('Scale', scale.toStringAsFixed(2), onMinus: scale > 0.05 ? () => _cmd({'op': 'textfield', 'scale': math.max(0.05, scale - 0.05)}) : null, onPlus: () => _cmd({'op': 'textfield', 'scale': scale + 0.05})),
         ..._effectRows(tf, showBlending: false),
+        const rw.DTitle('Blending'),
+        rw.DSlider('Opacity', '${(opacity * 100).round()}%', opacity, onChanged: (x) => _cmd({'op': 'filter', 'opacity': (x * 100).round() / 100})),
+        rw.DWidget(BlendModeRow(current: '${tf['blend'] ?? 'NORMAL'}', onChanged: (v) => _cmd({'op': 'blend', 'v': v}))),
         rw.DTick('Locked', tf['locked'] == true, onChanged: (v) {
-          // the two locks exclude each other
           if (v && tf['cameraLocked'] == true) _cmd({'op': 'camera_lock', 'layer': tf['layer'], 'on': false});
           _cmd({'op': 'textfield', 'locked': v});
         }),
@@ -8576,11 +8774,9 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           if (v && tf['locked'] == true) _cmd({'op': 'textfield', 'locked': false});
           _cmd({'op': 'camera_lock', 'layer': tf['layer'], 'on': v});
         }),
-        const rw.DHint('Locked to camera: it stays put in the shot however the camera moves, for titles and captions.'),
-        rw.DButtons('Copy text', () => _cmd({'op': 'copy_textfield'}), b: 'Paste text', onB: _st['textfieldCopied'] == true ? () => _cmd({'op': 'paste_textfield'}) : null),
+        rw.DButtons('Copy text', () => _cmd({'op': 'copy_textfield'}), iconA: 'copy', b: 'Paste text', onB: _st['textfieldCopied'] == true ? () => _cmd({'op': 'paste_textfield'}) : null, iconB: 'paste'),
         const rw.DTitle('Font'),
         for (final w in _fontChoice(tf)) rw.DWidget(w),
-        // the words alone, between textfields
         rw.DButtons('Copy words', () => setState(() => _textClip = tf['text'] as String? ?? ''), b: 'Paste words', onB: _textClip != null ? () => _cmd({'op': 'textfield', 'text': _textClip}) : null),
       ];
     }
@@ -8691,7 +8887,6 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (root) {
       return [
         for (final d in <rw.Desc>[
-          const rw.DHint('The main node moves the whole figure. Tap a joint for its segment.'),
           rw.DTick('Drag lock', sel['dragLock'] == true, onChanged: (v) => _cmd({'op': 'node', 'dragLock': v})),
         ])
           rw.renderDesc(d),
@@ -8722,7 +8917,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     final rows = <rw.Desc>[
       // D35: the part's own name (the Parts list and the graph show it)
       rw.DName('${sel['partName'] ?? 'Segment'}', link: 'Rename', onLink: () => _renamePart('${sel['node']}', '${sel['partName'] ?? ''}', named: sel['partNamed'] == true)),
-      rw.DButtons('Flip sideways', () => _cmd({'op': 'flip_branch', 'h': true}), b: 'Flip over', onB: () => _cmd({'op': 'flip_branch', 'h': false})),
+      rw.DButtons('Flip sideways', () => _cmd({'op': 'flip_branch', 'h': true}), iconA: 'flipH', b: 'Flip over', onB: () => _cmd({'op': 'flip_branch', 'h': false}), iconB: 'flipV'),
       const rw.DTitle('Size'),
       rw.DStep('Thickness', thick.round().toString(),
           onMinus: () => seg({'thickness': math.max(0, thick - 2)}), onPlus: () => seg({'thickness': thick + 2}), changed: ch('thickness'), reset: reset('thickness', '${(d['thickness'] as num?)?.round()}', {'op': 'segment', 'thickness': d['thickness']})),
@@ -8799,8 +8994,7 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       rw.DTick('Drag lock', sel['dragLock'] == true, onChanged: (v) => _cmd({'op': 'node', 'dragLock': v})),
       rw.DSeg(const ['None', 'Absolute', 'Relative'], lock, label: 'Angle lock', onSelect: (i) => seg({'angleLock': i})),
       // Separate joint: extracts this limb into its own figure, snapped to its parent
-      rw.DButtons('Separate joint', _separateJoint),
-      if (_segAnyChanged(sel)) const rw.DHint('A dot marks a value that differs from how the figure came. Swipe its row (or right-click it) to reset it.'),
+      rw.DButtons('Separate joint', _separateJoint, iconA: 'separate'),
     ];
     return [for (final r in rows) rw.renderDesc(r)];
   }
@@ -8820,35 +9014,47 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
           unawaited(AppSettings.save());
         });
     final auto = _st['autoCam'] as Map?;
+    final camRow = ((_st['rows'] as List?) ?? const []).cast<Map>().where((r) => r['kind'] == 'camera').firstOrNull;
+    final camLayerId = camRow?['id'] as String?;
+    final camBlocks = ((camRow?['blocks'] as List?) ?? const []).cast<List>();
+    final hasKeyHere = camBlocks.any((b) => (b[0] as num).toInt() == _frame);
     final rows = <rw.Desc>[
-      const rw.DHint('Drag on the stage to move the camera on this frame.'),
-      // this frame's zoom and rotation onto another frame
-      rw.DButtons('Copy camera', () => setState(() => _camClip = (zoom, rot)), b: 'Paste camera', onB: _camClip == null ? null : () => _cmd({'op': 'camera', 'zoom': _camClip!.$1, 'rotation': _camClip!.$2})),
+      if (camLayerId != null)
+        rw.DButtons(
+          'Add key',
+          hasKeyHere ? null : () => _cmd({'op': 'new_pose', 'layer': camLayerId, 'frame': _frame}),
+          iconA: 'key',
+          b: 'Delete key',
+          onB: hasKeyHere && _frame > 0 ? () => _cmd({'op': 'delete_pose', 'layer': camLayerId, 'frame': _frame}) : null,
+          iconB: 'bin',
+        ),
+      rw.DButtons('Copy', () => setState(() => _camClip = (zoom, rot)), iconA: 'copy', b: 'Paste', onB: _camClip == null ? null : () => _cmd({'op': 'camera', 'zoom': _camClip!.$1, 'rotation': _camClip!.$2}), iconB: 'paste'),
       rw.DStep('Zoom', zoom.toStringAsFixed(2), onMinus: zoom > 0.05 ? () => _cmd({'op': 'camera', 'zoom': math.max(0.05, zoom - 0.05)}) : null, onPlus: () => _cmd({'op': 'camera', 'zoom': zoom + 0.05})),
       rw.DStep('Rotation', '${rot.round()}°', onMinus: () => _cmd({'op': 'camera', 'rotation': rot - 5}), onPlus: () => _cmd({'op': 'camera', 'rotation': rot + 5})),
-      rw.DButtons('Center camera', () => _cmd({'op': 'camera', 'center': true}), b: 'Reset', onB: () => _cmd({'op': 'reset_camera'})),
+      rw.DButtons('Center', () => _cmd({'op': 'camera', 'center': true}), b: 'Reset', onB: () => _cmd({'op': 'reset_camera'})),
       rw.DLink('Auto-camera', auto != null ? 'To frame ${(auto['end'] as num) + 1}' : 'Off', onTap: _autoCameraDialog),
-      const rw.DHint("Auto-camera tweens this frame's camera across several frames."),
-      rw.DLink('Lock a figure to the camera', switch (((_st['cameraLocks'] as List?) ?? const []).length) { 0 => 'None', 1 => '1 figure', final n => '$n figures' }, onTap: _cameraLockDialog),
+      rw.DLink('Camera lock', switch (((_st['cameraLocks'] as List?) ?? const []).length) { 0 => 'None', 1 => '1 layer', final n => '$n layers' }, onTap: _cameraLockDialog),
       rw.DSeg(const ['None', 'Thirds', 'Phi', 'Spiral'], guide < 3 ? guide : 3, label: guide >= 3 ? 'Guide (spiral ${guide - 2} of 4)' : 'Guide', onSelect: setGuide),
     ];
-    return [for (final d in rows) rw.renderDesc(d), rw.renderDesc(const rw.DTitle('Effects on this frame')), ..._cameraFx()];
+    return [for (final d in rows) rw.renderDesc(d), rw.renderDesc(const rw.DTitle('Framing & Shake')), ..._cameraFx()];
   }
 
-  /// Movieclip Tools: the selected movieclip's playback.
   /// Movieclip Tools as rows (D15; REDESIGN §8 Movieclip page).
   List<Widget> _movieclipTools(Map mc) {
     final speed = (mc['speed'] as num?)?.toDouble() ?? 1, off = (mc['offset'] as num?)?.toDouble() ?? 0;
+    final opacity = ((mc['opacity'] as num?) ?? ((mc['filters'] as Map?)?['opacity'] as num?) ?? 1).toDouble();
     const modes = ['once', 'loop', 'pingpong'];
     final frames = (mc['frames'] as num?)?.toInt() ?? 0;
     final rows = <rw.Desc>[
-      rw.DInfo('${mc['name']}', '$frames frame${frames == 1 ? '' : 's'} long'),
-      rw.DSeg(const ['Once', 'Loop', 'Ping-pong'], modes.indexOf('${mc['loop']}').clamp(0, 2), label: 'Plays', onSelect: (i) => _cmd({'op': 'movieclip', 'loop': modes[i]})),
+      rw.DInfo('${mc['name']}', '$frames frame${frames == 1 ? '' : 's'}'),
+      rw.DSeg(const ['Once', 'Loop', 'Ping-pong'], modes.indexOf('${mc['loop']}').clamp(0, 2), label: 'Playback', onSelect: (i) => _cmd({'op': 'movieclip', 'loop': modes[i]})),
       rw.DStep('Speed', speed.toStringAsFixed(2), onMinus: speed > 0 ? () => _cmd({'op': 'movieclip', 'speed': math.max(0, speed - 0.1)}) : null, onPlus: () => _cmd({'op': 'movieclip', 'speed': speed + 0.1})),
       rw.DStep('Start offset', '${off.toStringAsFixed(2)} s', onMinus: () => _cmd({'op': 'movieclip', 'offset': off - 0.1}), onPlus: () => _cmd({'op': 'movieclip', 'offset': off + 0.1})),
       ..._effectRows(mc.cast<String, dynamic>(), showBlending: false),
-      const rw.DHint('Drag the box on the stage to move it.'),
-      rw.DButtons('Edit movieclip', () => _cmd({'op': 'edit_movieclip'}), b: 'Break apart', onB: () => _cmd({'op': 'break_apart', 'layer': mc['layer']})),
+      const rw.DTitle('Blending'),
+      rw.DSlider('Opacity', '${(opacity * 100).round()}%', opacity, onChanged: (x) => _cmd({'op': 'filter', 'opacity': (x * 100).round() / 100})),
+      rw.DWidget(BlendModeRow(current: '${mc['blend'] ?? 'NORMAL'}', onChanged: (v) => _cmd({'op': 'blend', 'v': v}))),
+      rw.DButtons('Edit movieclip', () => _cmd({'op': 'edit_movieclip'}), iconA: 'edit', b: 'Break apart', onB: () => _cmd({'op': 'break_apart', 'layer': mc['layer']})),
     ];
     return [for (final d in rows) rw.renderDesc(d)];
   }
@@ -8856,26 +9062,23 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// Copied wobble: XY, rotation, speed, scale with zoom.
   (double, double, double, bool)? _wobbleClip;
 
-  /// Camera Tools: this frame's widescreen bars and wobble (playback and
-  /// export only).
+  /// Camera Tools: global widescreen framing and camera shake.
   List<Widget> _cameraFx() {
     final fx = (_st['camFx'] as Map?) ?? const {};
     final xy = (fx['wobbleXY'] as num?)?.toDouble() ?? 0, rot = (fx['wobbleRot'] as num?)?.toDouble() ?? 0;
     final speed = (fx['wobbleSpeed'] as num?)?.toDouble() ?? 3, zoom = fx['wobbleZoom'] != false;
     final any = xy > 0 || rot > 0;
     void fxCmd(Map<String, Object?> m) => _cmd({'op': 'camera_fx', ...m});
-    // the Camera board's words; the amounts show under a wobble that is on
     final rows = <rw.Desc>[
       rw.DTick('Widescreen', fx['widescreen'] == true, onChanged: (v) => fxCmd({'widescreen': v})),
-      rw.DTick('Wobble position', xy > 0, onChanged: (v) => fxCmd({'wobbleXY': v ? 8 : 0})),
+      rw.DTick('Shake position', xy > 0, onChanged: (v) => fxCmd({'wobbleXY': v ? 8 : 0})),
       if (xy > 0) rw.DStep('Distance', xy.round().toString(), onMinus: () => fxCmd({'wobbleXY': math.max(1, xy - 1)}), onPlus: () => fxCmd({'wobbleXY': xy + 1})),
-      rw.DTick('Wobble rotation', rot > 0, onChanged: (v) => fxCmd({'wobbleRot': v ? 0.5 : 0})),
+      rw.DTick('Shake rotation', rot > 0, onChanged: (v) => fxCmd({'wobbleRot': v ? 0.5 : 0})),
       if (rot > 0) rw.DStep('Degrees', rot.toStringAsFixed(2), onMinus: () => fxCmd({'wobbleRot': math.max(0.1, rot - 0.1)}), onPlus: () => fxCmd({'wobbleRot': rot + 0.1})),
-      rw.DStep('Wobble speed', speed.toStringAsFixed(1), onMinus: any ? () => fxCmd({'wobbleSpeed': math.max(0.1, speed - 0.5)}) : null, onPlus: any ? () => fxCmd({'wobbleSpeed': speed + 0.5}) : null),
-      rw.DTick('Scale wobble with zoom', zoom, onChanged: any ? (v) => fxCmd({'wobbleZoom': v}) : null),
-      rw.DButtons('Copy wobble', () => setState(() => _wobbleClip = (xy, rot, speed, zoom)),
-          b: 'Paste wobble', onB: _wobbleClip == null ? null : () => fxCmd({'wobbleXY': _wobbleClip!.$1, 'wobbleRot': _wobbleClip!.$2, 'wobbleSpeed': _wobbleClip!.$3, 'wobbleZoom': _wobbleClip!.$4})),
-      const rw.DHint('Widescreen and wobble belong to this frame and show when playing and in exports, not while editing.'),
+      rw.DStep('Shake speed', speed.toStringAsFixed(1), onMinus: any ? () => fxCmd({'wobbleSpeed': math.max(0.1, speed - 0.5)}) : null, onPlus: any ? () => fxCmd({'wobbleSpeed': speed + 0.5}) : null),
+      rw.DTick('Scale with zoom', zoom, onChanged: any ? (v) => fxCmd({'wobbleZoom': v}) : null),
+      rw.DButtons('Copy shake', () => setState(() => _wobbleClip = (xy, rot, speed, zoom)),
+          b: 'Paste shake', onB: _wobbleClip == null ? null : () => fxCmd({'wobbleXY': _wobbleClip!.$1, 'wobbleRot': _wobbleClip!.$2, 'wobbleSpeed': _wobbleClip!.$3, 'wobbleZoom': _wobbleClip!.$4})),
     ];
     return [for (final d in rows) rw.renderDesc(d)];
   }
@@ -9226,6 +9429,8 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
       // library, a new movieclip
       if (k == '#import') {
         await _importFromFiles();
+      } else if (k == '#create') {
+        _createNewFigure();
       } else if (k == '#paste') {
         _pasteFigure();
       } else if (k == '#library') {
@@ -9376,26 +9581,54 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     }
   }
 
-  /// The figure editor's header (EditCopy / FigureEditor boards): Cancel, the
-  /// copy's name over "… stays as it is", Save as new figure.
-  Widget _copyHeader(EdgeInsets pad, Map ce) {
-    return Container(
-      height: 44 + pad.top,
-      padding: EdgeInsets.only(top: pad.top, left: pad.left + 8, right: pad.right + 8),
-      decoration: const BoxDecoration(color: cCard, border: Border(bottom: BorderSide(color: cLine))),
-      child: Row(children: [
-        kit.WordButton('Cancel', onTap: () => _cmd({'op': 'edit_copy_end'})),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Text('${ce['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cText, fontSize: 14.5, fontWeight: FontWeight.w700)),
-              Text('${ce['of']} in your animation stays as it is', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: cSecondary, fontSize: 11.5)),
-            ]),
-          ),
-        ),
-        kit.WordButton('Save as new figure', primary: true, height: 34, size: 13.5, onTap: _saveCopy),
-      ]),
+  bool _studioGrid = true;
+  bool _studioCrosshair = true;
+
+  /// Enters the isolated Stick Figure Creator Studio with a fresh starter figure.
+  void _createNewFigure() {
+    final sz = MediaQuery.maybeSizeOf(context);
+    if (sz != null && (sz.width < 900 || sz.height < 500)) {
+      setState(() => _partsOpen = false);
+    }
+    _cmd({'op': 'create_figure'});
+    setState(() {
+      _panelOpen = false;
+      _viewOptions = false;
+    });
+  }
+
+  /// Studio top bar when creating, editing, or duplicating a stick figure.
+  Widget _studioHeader(EdgeInsets pad) {
+    final building = (_st['building'] as Map?) ?? const {};
+    final ce = _st['copyEdit'] as Map?;
+    final mode = '${building['mode'] ?? ce?['mode'] ?? (ce != null ? 'copy' : 'edit')}';
+    final name = '${ce?['name'] ?? building['name'] ?? _sel?['name'] ?? 'Stickfigure'}';
+    final primaryLabel = mode == 'edit' ? 'Apply' : 'Add to Scene';
+    return FigureStudioHeader(
+      pad: pad,
+      name: name,
+      primaryLabel: primaryLabel,
+      showGrid: _studioGrid,
+      onToggleGrid: () => setState(() => _studioGrid = !_studioGrid),
+      showCrosshair: _studioCrosshair,
+      onToggleCrosshair: () => setState(() => _studioCrosshair = !_studioCrosshair),
+      onCancel: () {
+        if (mode == 'copy') {
+          _cmd({'op': 'edit_copy_end'});
+        } else {
+          _cmd({'op': 'build_cancel'});
+        }
+      },
+      onRename: () async {
+        final next = await _askName('Figure name', name);
+        if (next == null || next.trim().isEmpty || !mounted) return;
+        final layerId = building['layer'];
+        if (layerId != null) {
+          _cmd({'op': 'rename', 'layer': layerId, 'name': next.trim()});
+        }
+      },
+      onSaveLibrary: mode == 'copy' ? () => unawaited(_saveCopy()) : _saveFigureFile,
+      onPrimary: () => _cmd({'op': 'build_apply'}),
     );
   }
 
@@ -9445,28 +9678,29 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     _say('Saved ${f.path.split(Platform.pathSeparator).last} in Barkfart Figures.', light: true);
   }
 
-  /// Figure editor: trace over another frame or figure (shown faintly behind).
+  /// Figure studio: reference tracing & studio canvas background.
   List<Widget> _traceTools() {
     final tr = _st['trace'] as Map?;
-    return [
-      _hint('Load a stickfigure or frame to be the background, and trace over the top of it.'),
-      _pair(_Btn('Trace stickfigure…', small: true, onTap: _traceFigureDialog), _Btn('Trace frame…', small: true, onTap: _traceFrameDialog)),
-      if (tr != null) ...[
-        const SizedBox(height: 4),
-        _Btn(tr['frame'] != null ? 'Clear trace (frame ${(tr['frame'] as num) + 1})' : 'Clear trace', small: true, onTap: () => _cmd({'op': 'trace'})),
-      ],
-      _hint('Load a background image to trace from.'),
-      _pair(_Btn('Load BG image…', small: true, onTap: _loadEditorImage), _Btn('Clear BG image', small: true, enabled: _editorImage, onTap: () {
+    final rows = <rw.Desc>[
+      const rw.DTitle('Reference'),
+      rw.DButtons('Trace figure…', _traceFigureDialog, b: 'Trace frame…', onB: _traceFrameDialog),
+      if (tr != null)
+        rw.DButtons(tr['frame'] != null ? 'Clear trace (f${(tr['frame'] as num) + 1})' : 'Clear trace', () => _cmd({'op': 'trace'})),
+      rw.DButtons('BG image…', _loadEditorImage, b: 'Clear BG', onB: _editorImage ? () {
         _engine?.editorImage(null);
         setState(() {
           _editorImage = false;
           _drawn = '';
         });
-      })),
-      _gap,
-      _label('Background colour (while editing)'),
-      _swatches((_st['editorBg'] as num?)?.toInt() ?? 0xffffffff, (c) => _cmd({'op': 'editor_bg', 'color': c})),
+      } : null),
+      const rw.DTitle('Studio Canvas'),
+      rw.DTick('Grid', _studioGrid, onChanged: (v) => setState(() => _studioGrid = v)),
+      rw.DTick('Origin crosshair', _studioCrosshair, onChanged: (v) => setState(() => _studioCrosshair = v)),
+      rw.DTick('Mirror axis', _opts['mirror'] == true, onChanged: (v) => _cmd({'op': 'set', 'k': 'mirror', 'v': v})),
+      rw.DTick('Stock size reference', _opts['sizeRef'] != false, onChanged: (v) => _cmd({'op': 'set', 'k': 'sizeref', 'v': v})),
+      rw.DWidget(kit.PropRow('Canvas', trailing: _swatches((_st['editorBg'] as num?)?.toInt() ?? 0xf5f6f8ff, (c) => _cmd({'op': 'editor_bg', 'color': c})))),
     ];
+    return [for (final d in rows) rw.renderDesc(d)];
   }
 
   bool _editorImage = false;
@@ -9556,21 +9790,16 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
   /// Polyfill Tools: while a polyfill is edited, taps on joints add polynodes.
   List<Widget> _polyfillTools(Map pf) {
     final own = pf['own'] == true;
-    return [
-      _title('Polyfill Tools'),
-      _hint('Use polyfills to fill a large area by connecting joints. Tap joints of this figure one after another, in either direction, to add polynodes; the fill appears as you go. A polyfill is drawn right before its anchor joint: move that joint back or forward in the draw order to move the fill.'),
-      _gap,
-      Text('Polynode count: ${pf['count']}', style: const TextStyle(color: cText, fontSize: 13)),
-      _gap,
-      _Btn('Finish polyfill', accent: true, onTap: () => _cmd({'op': 'polyfill_edit', 'id': null})),
-      _gap,
-      _Toggle('Use polyfill colour', own, (v) => _cmd({'op': 'polyfill_color', 'own': v})),
-      Opacity(opacity: own ? 1 : 0.4, child: _swatches((pf['color'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'polyfill_color', 'color': c, 'own': true}))),
-      _gap,
-      _Btn('Remove last polynode', enabled: (pf['count'] as num) > 0, onTap: () => _cmd({'op': 'polyfill_undo'})),
-      _gap,
-      _Btn('Delete polyfill', danger: true, onTap: () => _cmd({'op': 'polyfill_delete'})),
+    final rows = <rw.Desc>[
+      const rw.DTitle('Polyfill'),
+      rw.DInfo('Polynodes', '${pf['count']}'),
+      rw.DWidget(kit.WordButton('Finish polyfill', primary: true, expand: true, height: 36, size: 14, onTap: () => _cmd({'op': 'polyfill_edit', 'id': null}))),
+      rw.DTick('Own colour', own, onChanged: (v) => _cmd({'op': 'polyfill_color', 'own': v})),
+      rw.DWidget(Opacity(opacity: own ? 1 : 0.4, child: _swatches((pf['color'] as num?)?.toInt() ?? 0xff, (c) => _cmd({'op': 'polyfill_color', 'color': c, 'own': true})))),
+      rw.DButtons('Undo point', (pf['count'] as num) > 0 ? () => _cmd({'op': 'polyfill_undo'}) : null, iconA: 'undo'),
+      rw.DDanger('Delete polyfill', () => _cmd({'op': 'polyfill_delete'})),
     ];
+    return [for (final d in rows) rw.renderDesc(d)];
   }
 
   List<Widget> _builder(Map<String, dynamic>? sel) {
@@ -9578,103 +9807,71 @@ class _EditorPageState extends State<EditorPage> with SingleTickerProviderStateM
     if (pf != null) return _polyfillTools(pf);
     if (_st['connecting'] == true) {
       return [
-        _title('Add connector'),
-        _hint('Tap the joint this connector ends on. The connector is a new joint on the straight line from the selected joint to it, and stays on that line however the two move.'),
-        _gap,
-        _Btn('Cancel', onTap: () => _cmd({'op': 'connect_cancel'})),
+        for (final d in <rw.Desc>[
+          const rw.DTitle('Connector'),
+          const rw.DHint('Tap target joint.'),
+          rw.DButtons('Cancel', () => _cmd({'op': 'connect_cancel'})),
+        ])
+          rw.renderDesc(d),
       ];
     }
     final con = sel?['connector'] as Map?;
-    final connectorTools = con == null
-        ? const <Widget>[]
-        : <Widget>[
-            _title('Connector Tools'),
-            Text('Ends on joint ${con['to']}', style: const TextStyle(color: cSecondary, fontSize: 12)),
-            _stepper('Percent', ((con['percent'] as num).toDouble()).toStringAsFixed(2), () => _cmd({'op': 'connector_set', 'percent': math.max(0, (con['percent'] as num) - 0.05)}), () => _cmd({'op': 'connector_set', 'percent': math.min(1, (con['percent'] as num) + 0.05)})),
-            _Toggle('Reversed', con['reversed'] == true, (v) => _cmd({'op': 'connector_set', 'reversed': v})),
-            _Btn('Delete connector', danger: true, onTap: () => _cmd({'op': 'delete_joint'})),
-            _gap,
+    final connectorRows = con == null
+        ? const <rw.Desc>[]
+        : <rw.Desc>[
+            const rw.DTitle('Connector'),
+            rw.DInfo('Target joint', '${con['to']}'),
+            rw.DStep('Position', '${(((con['percent'] as num).toDouble()) * 100).round()}%',
+                onMinus: () => _cmd({'op': 'connector_set', 'percent': math.max(0, (con['percent'] as num) - 0.05)}),
+                onPlus: () => _cmd({'op': 'connector_set', 'percent': math.min(1, (con['percent'] as num) + 0.05)})),
+            rw.DTick('Reversed', con['reversed'] == true, onChanged: (v) => _cmd({'op': 'connector_set', 'reversed': v})),
+            rw.DDanger('Delete connector', () => _cmd({'op': 'delete_joint'})),
           ];
-    if (sel == null) return [_title('Figure editor'), const Text('Tap a joint of this figure.', style: TextStyle(color: cSecondary, fontSize: 13)), _gap, ..._traceTools()];
+    if (sel == null) {
+      return [
+        ..._traceTools(),
+        rw.renderDesc(const rw.DTitle('Library')),
+        rw.renderDesc(rw.DButtons('Save .nodes…', _saveFigureFile, iconA: 'save')),
+      ];
+    }
     final root = sel['root'] == true;
-    final shape = sel['shape'] as String? ?? 'line';
     final thick = (sel['thickness'] as num?)?.toDouble() ?? 0;
     final color = (sel['color'] as num?)?.toInt() ?? 0xff;
     final stretch = _opts['stretch'] == true;
-    return [
-      ...connectorTools,
-      _title(root ? 'Main node' : 'Segment'),
-      _pair(_Btn('Previous joint', onTap: () => _cmd({'op': 'cycle_joint', 'dir': -1})), _Btn('Next joint', onTap: () => _cmd({'op': 'cycle_joint', 'dir': 1}))),
-      _gap,
-      if (!root) Text('Angle ${sel['angle']}° · length ${sel['length']}', style: const TextStyle(color: cSecondary, fontSize: 11)),
-      if (!root) _gap,
-      _label('Drag'),
-      _Segmented(const ['Rotate', 'Stretch'], stretch ? 1 : 0, (i) => _cmd({'op': 'set', 'k': 'stretch', 'v': i == 1})),
-      _gap,
-      _pair(_Btn('Add segment', onTap: () => _cmd({'op': 'add_segment'})), _Btn('Delete branch', danger: true, enabled: !root, onTap: () => _cmd({'op': 'delete_segment'}))),
-      _gap,
-      // paste a copied segment / branch onto this joint (the main node too)
-      if (!root) _Btn('Delete segment (keep what hangs off it)', danger: true, small: true, onTap: () => _cmd({'op': 'delete_joint'})),
-      if (!root) _gap,
-      _Btn('Paste segment here', enabled: _st['branchCopied'] == true, onTap: () => _cmd({'op': 'paste_branch'})),
-      _gap,
+    final rows = <rw.Desc>[
+      ...connectorRows,
+      rw.DTitle(root ? 'Root Node' : 'Joint & Branch'),
+      rw.DButtons('Prev joint', () => _cmd({'op': 'cycle_joint', 'dir': -1}), iconA: 'back', b: 'Next joint', onB: () => _cmd({'op': 'cycle_joint', 'dir': 1}), iconB: 'next'),
+      if (!root) rw.DInfo('Angle / Length', '${sel['angle']}° · ${sel['length']}'),
+      rw.DSeg(const ['Rotate', 'Stretch'], stretch ? 1 : 0, label: 'Drag mode', onSelect: (i) => _cmd({'op': 'set', 'k': 'stretch', 'v': i == 1})),
+      rw.DButtons('Add segment', () => _cmd({'op': 'add_segment'}), iconA: 'plus', b: 'Paste branch', onB: _st['branchCopied'] == true ? () => _cmd({'op': 'paste_branch'}) : null, iconB: 'paste'),
       if (!root) ...[
-        _pair(_Btn('Copy segment', onTap: () => _cmd({'op': 'copy_branch', 'branch': false})), _Btn('Copy branch', onTap: () => _cmd({'op': 'copy_branch', 'branch': true}))),
-        _gap,
-        _pair(_Btn('Split ($_splitN)', onTap: () => _cmd({'op': 'split', 'n': _splitN + 1})), _Btn('Duplicate branch', onTap: () => _cmd({'op': 'duplicate_branch'}))),
-        _stepper('New joints', '$_splitN', () => setState(() => _splitN = math.max(1, _splitN - 1)), () => setState(() => _splitN = math.min(20, _splitN + 1))),
-        _gap,
-        _label('Draw order'),
-        _Segmented(const ['Segment', 'Branch'], _reorderBranch ? 1 : 0, (i) => setState(() => _reorderBranch = i == 1)),
-        const SizedBox(height: 4),
-        Row(children: [
-          for (final (icon, to, tip) in const [(Icons.first_page, -2, 'To the back'), (Icons.chevron_left, -1, 'One back'), (Icons.chevron_right, 1, 'One forward'), (Icons.last_page, 2, 'To the front')])
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                child: Tooltip(message: tip, child: _Btn('', onTap: () => _cmd({'op': 'reorder', 'branch': _reorderBranch, 'to': to}), icon: icon)),
-              ),
-            ),
-        ]),
-        _gap,
-        _pair(_Btn('Flip branch', onTap: () => _cmd({'op': 'flip_branch', 'h': true})), _Btn(sel['pinned'] == true ? 'Unlock' : 'Lock', onTap: () => _cmd({'op': 'pin', 'v': sel['pinned'] != true}))),
-        _gap,
-        _Toggle('Static (detail)', sel['static'] == true, (v) => _cmd({'op': 'segment', 'static': v})),
-        _gap,
-        _label('Shape'),
-        Wrap(spacing: 4, runSpacing: 4, children: [
-          for (final s in const ['line', 'circle', 'square', 'ellipse', 'triangle', 'trapezoid', 'polygon'])
-            _Chip(s[0].toUpperCase() + s.substring(1), s == shape, () => _cmd({'op': 'segment', 'shape': s})),
-        ]),
-        _gap,
-        _stepper('Thickness', thick.round().toString(), () => _cmd({'op': 'segment', 'thickness': math.max(0, thick - 2)}), () => _cmd({'op': 'segment', 'thickness': thick + 2})),
-        _gap,
-        _label('Colour'),
-        _swatches(color, (c) => _cmd({'op': 'segment', 'color': c})),
-        _gap,
-        _Btn('Colour whole branch', onTap: () => _cmd({'op': 'segment', 'branch': true, 'color': color})),
+        rw.DButtons('Copy segment', () => _cmd({'op': 'copy_branch', 'branch': false}), iconA: 'copy', b: 'Copy branch', onB: () => _cmd({'op': 'copy_branch', 'branch': true}), iconB: 'copy'),
+        rw.DButtons('Split ($_splitN)', () => _cmd({'op': 'split', 'n': _splitN + 1}), iconA: 'split', b: 'Duplicate', onB: () => _cmd({'op': 'duplicate_branch'}), iconB: 'duplicate'),
+        rw.DStep('Split joints', '$_splitN', onMinus: () => setState(() => _splitN = math.max(1, _splitN - 1)), onPlus: () => setState(() => _splitN = math.min(20, _splitN + 1))),
+        rw.DButtons('Flip branch', () => _cmd({'op': 'flip_branch', 'h': true}), iconA: 'flipH', b: sel['pinned'] == true ? 'Unlock' : 'Lock', onB: () => _cmd({'op': 'pin', 'v': sel['pinned'] != true}), iconB: sel['pinned'] == true ? 'unlock' : 'lock'),
+        rw.DTick('Static detail', sel['static'] == true, onChanged: (v) => _cmd({'op': 'segment', 'static': v})),
+        rw.DStep('Thickness', thick.round().toString(), onMinus: () => _cmd({'op': 'segment', 'thickness': math.max(0, thick - 2)}), onPlus: () => _cmd({'op': 'segment', 'thickness': thick + 2})),
+        rw.DWidget(kit.PropRow('Colour', trailing: _swatches(color, (c) => _cmd({'op': 'segment', 'color': c})))),
+        rw.DButtons('Colour branch', () => _cmd({'op': 'segment', 'branch': true, 'color': color}), b: 'Modify branch…', onB: _modifyBranchDialog),
+        const rw.DTitle('Draw Order'),
+        rw.DSeg(const ['Segment', 'Branch'], _reorderBranch ? 1 : 0, onSelect: (i) => setState(() => _reorderBranch = i == 1)),
+        rw.DButtons('Back', () => _cmd({'op': 'reorder', 'branch': _reorderBranch, 'to': -1}), iconA: 'back', b: 'Forward', onB: () => _cmd({'op': 'reorder', 'branch': _reorderBranch, 'to': 1}), iconB: 'next'),
+        rw.DButtons('To back', () => _cmd({'op': 'reorder', 'branch': _reorderBranch, 'to': -2}), b: 'To front', onB: () => _cmd({'op': 'reorder', 'branch': _reorderBranch, 'to': 2})),
+        rw.DButtons('Delete joint', () => _cmd({'op': 'delete_joint'}), b: 'Delete branch', onB: () => _cmd({'op': 'delete_segment'})),
+      ] else ...[
+        rw.DButtons('Modify branch…', _modifyBranchDialog),
       ],
-      _gap,
-      _Btn('Modify branch…', onTap: _modifyBranchDialog),
-      _gap,
-      ..._traceTools(),
-      _gap,
-      _Btn('Save stickfigure…', onTap: _saveFigureFile),
-      _gap,
-      _Btn('Add connector…', onTap: () => _cmd({'op': 'connect_start'})),
-      _gap,
-      _Btn('Add polyfill…', onTap: () => _cmd({'op': 'polyfill_new'})),
+      const rw.DTitle('Connectors & Polyfills'),
+      rw.DButtons('Add connector', () => _cmd({'op': 'connect_start'}), iconA: 'chain', b: 'Add polyfill', onB: () => _cmd({'op': 'polyfill_new'}), iconB: 'plus'),
       for (final f in ((_st['polyfills'] as List?) ?? const []).cast<Map>())
-        Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: _Btn('Edit polyfill ${f['id']} (${f['count']} polynodes)', small: true, onTap: () => _cmd({'op': 'polyfill_edit', 'id': f['id']})),
-        ),
-      _gap,
-      if (_st['copyEdit'] is Map) ...[
-        _hint('Save as new figure adds this copy to your library and leaves the animation unchanged.'),
-        _pair(_Btn('Discard copy', onTap: () => _cmd({'op': 'edit_copy_end'})), _Btn('Save as new figure', accent: true, onTap: _saveCopy)),
-      ] else
-        _Btn('Apply to figure', accent: true, onTap: () => _cmd({'op': 'build_done'})),
+        rw.DLink('Polyfill ${f['id']}', '${f['count']} pts', onTap: () => _cmd({'op': 'polyfill_edit', 'id': f['id']})),
+    ];
+    return [
+      for (final d in rows) rw.renderDesc(d),
+      ..._traceTools(),
+      rw.renderDesc(const rw.DTitle('Library')),
+      rw.renderDesc(rw.DButtons('Save .nodes…', _saveFigureFile, iconA: 'save')),
     ];
   }
 
@@ -9808,7 +10005,9 @@ class _Overlay extends CustomPainter {
   final Map<String, dynamic> st;
   final StageView v;
   final bool playing;
-  _Overlay(this.st, this.v, this.playing);
+  final bool studioGrid;
+  final bool studioCrosshair;
+  _Overlay(this.st, this.v, this.playing, {this.studioGrid = true, this.studioCrosshair = true});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -9822,9 +10021,22 @@ class _Overlay extends CustomPainter {
       canvas.drawPath(bars, Paint()..color = cSurround);
       return;
     }
+    final isStudio = st['building'] != null;
+    if (isStudio) {
+      final mirrorOn = (st['opts'] as Map?)?['mirror'] == true;
+      paintFigureStudioGuides(
+        canvas,
+        size,
+        toScreen: v.toScreen,
+        scale: v.s,
+        showGrid: studioGrid,
+        showCrosshair: studioCrosshair,
+        showMirrorAxis: mirrorOn,
+      );
+    }
     final cam = (st['camera'] as List?)?.map((x) => (x as num).toDouble()).toList();
     final cameraMode = st['mode'] == 'camera';
-    if (cam != null && cam.length == 8 && AppSettings.flag('stageBox')) {
+    if (!isStudio && cam != null && cam.length == 8 && AppSettings.flag('stageBox')) {
       // the stage: the shot itself, or in camera mode the stage at rest (the
       // camera's frame is drawn over it, Camera board)
       final Path frame;
@@ -10287,16 +10499,6 @@ class _Btn extends StatelessWidget {
       ),
     );
   }
-}
-
-class _Segmented extends StatelessWidget {
-  final List<String> labels;
-  final int selected;
-  final ValueChanged<int> onTap;
-  const _Segmented(this.labels, this.selected, this.onTap);
-
-  @override
-  Widget build(BuildContext context) => kit.Segmented(labels, selected, onSelect: onTap);
 }
 
 /// A setting that is on or off: the big square tick box (REDESIGN §3).
@@ -10862,10 +11064,17 @@ class _FigurePicker extends StatefulWidget {
 }
 
 class _FigurePickerState extends State<_FigurePicker> {
+  final TextEditingController _searchCtrl = TextEditingController();
   final List<String> _picked = [];
   String _filter = '';
   int _tab = 0; // Stock (figures, then effect figures), Yours
   int _cat = 0; // 0 All, 1 Figures, 2 Effects
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   Widget _tile(_PickEntry f) {
     final on = _picked.contains(f.id);
@@ -10930,10 +11139,10 @@ class _FigurePickerState extends State<_FigurePicker> {
               height: compact ? 32 : 36,
               child: Stack(alignment: Alignment.center, children: [
                 Text(widget.movieclip ? 'Add a movieclip' : 'Add a stick figure', textAlign: TextAlign.center, style: TextStyle(color: cTitle, fontSize: compact ? 15.5 : 17, fontWeight: FontWeight.w700)),
-                if (!compact)
+                if (!compact && _picked.isNotEmpty)
                   Positioned(
                     left: 0,
-                    child: Text(_picked.isEmpty ? 'Tap to add · Hold to pick several' : '${_picked.length} selected', style: TextStyle(color: _picked.isEmpty ? cSecondary : cAccent, fontSize: 12, fontWeight: _picked.isEmpty ? FontWeight.w400 : FontWeight.w600)),
+                    child: Text('${_picked.length} selected', style: const TextStyle(color: cAccent, fontSize: 12, fontWeight: FontWeight.w600)),
                   ),
                 Positioned(
                   right: -6,
@@ -10952,21 +11161,37 @@ class _FigurePickerState extends State<_FigurePicker> {
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.only(bottom: 6),
-                  child: TextField(
-                    style: const TextStyle(color: cText, fontSize: 14),
-                    decoration: InputDecoration(
-                      isDense: true,
-                      filled: true,
-                      fillColor: cControl,
-                      hintText: widget.movieclip ? 'Search movieclips' : 'Search figures',
-                      prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF8A9099)),
-                      suffixIcon: _filter.isEmpty
-                          ? null
-                          : GestureDetector(onTap: () => setState(() => _filter = ''), child: const Icon(Icons.close, size: 16, color: Color(0xFF8A9099))),
-                      contentPadding: EdgeInsets.symmetric(vertical: compact ? 7 : 10),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                    ),
-                    onChanged: (v) => setState(() => _filter = v),
+                  child: Container(
+                    height: compact ? 32 : 36,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(color: cControl, borderRadius: BorderRadius.circular(10)),
+                    child: Row(children: [
+                      const Pictogram('search', size: 16, color: cSecondary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _searchCtrl,
+                          style: const TextStyle(color: cText, fontSize: 13.5),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            border: InputBorder.none,
+                            hintText: widget.movieclip ? 'Search movieclips…' : 'Search figures…',
+                            hintStyle: const TextStyle(color: cSecondary, fontSize: 13),
+                          ),
+                          onChanged: (v) => setState(() => _filter = v),
+                        ),
+                      ),
+                      if (_filter.isNotEmpty)
+                        kit.Tap(
+                          label: 'Clear search',
+                          minSize: 28,
+                          onTap: () {
+                            _searchCtrl.clear();
+                            setState(() => _filter = '');
+                          },
+                          child: const Pictogram('x', size: 14, color: cSecondary),
+                        ),
+                    ]),
                   ),
                 ),
               ),
@@ -11023,8 +11248,13 @@ class _FigurePickerState extends State<_FigurePicker> {
                   kit.WordButton('Add ${_picked.length}', size: 14, height: compact ? 32 : 36, primary: true, onTap: () => Navigator.pop(context, List<String>.from(_picked))),
                 ] else if (widget.movieclip)
                   kit.WordButton('New movieclip', size: 14, height: compact ? 32 : 36, primary: true, onTap: widget.editing ? null : () => Navigator.pop(context, ['#newclip']))
-                else
-                  kit.WordButton('Paste figure', size: 14, height: compact ? 32 : 36, onTap: widget.canPaste ? () => Navigator.pop(context, ['#paste']) : null),
+                else ...[
+                  if (widget.canPaste) ...[
+                    kit.WordButton('Paste', icon: 'paste', size: 13.5, height: compact ? 32 : 36, onTap: () => Navigator.pop(context, ['#paste'])),
+                    const SizedBox(width: 6),
+                  ],
+                  kit.WordButton('Create stick figure', icon: 'createFigure', size: 13.5, height: compact ? 32 : 36, primary: true, onTap: () => Navigator.pop(context, ['#create'])),
+                ],
               ]),
             ),
           ]),

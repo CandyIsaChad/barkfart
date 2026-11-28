@@ -314,13 +314,6 @@ class _WorkshopPageState extends State<WorkshopPage> {
           for (final (k, label, icon) in _kinds) _kindRow(k, label, icon),
           const Divider(height: 16, color: cLine),
           _kindRow('off', 'Switched off', 'x'),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(6, 14, 6, 0),
-            child: Text(
-              'Built-in presets and .luau plugins run 100% offline inside Barkfart: no network access, safe sandbox.',
-              style: kit.ink(12, FontWeight.w400, cSecondary),
-            ),
-          ),
         ]),
       );
 
@@ -412,21 +405,21 @@ class _WorkshopPageState extends State<WorkshopPage> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           _searchBar(),
           if (presets.isNotEmpty) ...[
-            _sectionHeading('EFFECT PRESETS', '1-tap stacked effect combos'),
+            _sectionHeading('EFFECT PRESETS', ''),
             Wrap(spacing: gap, runSpacing: gap, children: [
               for (final p in presets) SizedBox(width: w, child: _presetCard(p)),
             ]),
             const SizedBox(height: 16),
           ],
           if (installed.isNotEmpty) ...[
-            _sectionHeading('INSTALLED PLUGINS', 'Ready in this animation'),
+            _sectionHeading('INSTALLED', ''),
             Wrap(spacing: gap, runSpacing: gap, children: [
               for (final p in installed) SizedBox(width: w, child: _installedCard(p)),
             ]),
             const SizedBox(height: 16),
           ],
           if (stock.isNotEmpty) ...[
-            _sectionHeading('STOCK LIBRARY', 'Built-in Luau scripts, shaders & modifiers — 1-tap offline install'),
+            _sectionHeading('BUILT-IN LIBRARY', ''),
             Wrap(spacing: gap, runSpacing: gap, children: [
               for (final s in stock) SizedBox(width: w, child: _stockCard(s)),
             ]),
@@ -604,7 +597,7 @@ class _WorkshopPageState extends State<WorkshopPage> {
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: Text(
-            'Pick an Effect Preset to apply a stacked look in one tap, or pick any stock script, shader, or modifier to inspect its code and install it offline.',
+            'Select a preset or plugin to inspect.',
             style: kit.ink(13, FontWeight.w400, cSecondary),
           ),
         ),
@@ -682,7 +675,7 @@ class _WorkshopPageState extends State<WorkshopPage> {
     final canAddDirectly = s.kind != 'effect' || widget.figureSelected;
     final addLabel = switch (s.kind) {
       'effect' => 'Install & add to figure',
-      'modifier' => 'Install & open graph',
+      'modifier' => 'Install & apply',
       _ => 'Install & add to animation',
     };
     return kit.PanelCard(
@@ -783,7 +776,7 @@ class _WorkshopPageState extends State<WorkshopPage> {
       for (final u in uses) rw.DLink('${u['label']}', 'Show', onTap: () => Navigator.pop(context, WorkshopShow(u))),
       const rw.DTitle('The code'),
     ];
-    final addLabel = switch (kind) { 'effect' => 'Add to figure', 'modifier' => 'Open the graph', _ => 'Add to animation' };
+    final addLabel = switch (kind) { 'effect' => 'Add to figure', 'modifier' => 'Apply to property', _ => 'Add to animation' };
     final canAdd = off == null && (kind != 'effect' || widget.figureSelected);
     return kit.PanelCard(
       padding: EdgeInsets.zero,
